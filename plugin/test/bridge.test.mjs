@@ -54,7 +54,7 @@ function writeFakeCli(dir, name, { exit = 0, stdout = '', stderr = '', sleepMs =
     `    HERDR_WORKSPACE_ID: process.env.HERDR_WORKSPACE_ID ?? null,`,
     `    HERDR_TAB_ID: process.env.HERDR_TAB_ID ?? null,`,
     `    HERDR_PANE_ID: process.env.HERDR_PANE_ID ?? null,`,
-    `    HERDR_AGENTS_NOWRITE: process.env.HERDR_AGENTS_NOWRITE ?? null,`,
+    `    HERDR_SOHO_NOWRITE: process.env.HERDR_SOHO_NOWRITE ?? null,`,
     `  },`,
     `  pathPrefix: (process.env.PATH ?? '').slice(0, 4096),`,
     `}));`,
@@ -73,7 +73,7 @@ function writeFakeCli(dir, name, { exit = 0, stdout = '', stderr = '', sleepMs =
 function makeTmp(t) {
   // realpath base: /var is a symlink on macOS and the child's
   // process.cwd() reports the resolved path.
-  const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'herdr-agents-bridge-'));
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'herdr-soho-bridge-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -161,7 +161,7 @@ test('doctor: valid context invokes the CLI in the pane cwd with the context ids
 
   assert.equal(r.code, 0);
   assert.equal(r.err, '');
-  assert.match(r.out, new RegExp(`herdr-agents plugin: target workspace=wJ pane=wJ:p24 cwd=${escapeRegExp(dir)}`));
+  assert.match(r.out, new RegExp(`herdr-soho plugin: target workspace=wJ pane=wJ:p24 cwd=${escapeRegExp(dir)}`));
   assert.match(r.out, /CLI-DOCTOR-OK/);
   const rec = JSON.parse(fs.readFileSync(marker, 'utf8'));
   assert.equal(rec.argv[rec.argv.length - 2], cli);
@@ -172,7 +172,7 @@ test('doctor: valid context invokes the CLI in the pane cwd with the context ids
   assert.equal(rec.env.HERDR_PANE_ID, 'wJ:p24');
   assert.equal(rec.env.HERDR_TAB_ID, 'wJ:t1');
   // Read-only: the CLI runs in no-write mode (no .gitignore, no state tree).
-  assert.equal(rec.env.HERDR_AGENTS_NOWRITE, '1');
+  assert.equal(rec.env.HERDR_SOHO_NOWRITE, '1');
   // The herdr binary dir is prepended to the CLI's PATH.
   assert.equal(rec.pathPrefix.split(path.delimiter)[0], dir, rec.pathPrefix);
 });
@@ -470,7 +470,7 @@ each(
 //
 // The plugin's actions inspect the focused project without writing anything
 // to it (P2 from the Cursor/Grok review: the CLI used to append
-// .herdr-agents/ to .gitignore and create the state tree). These tests run
+// .herdr-soho/ to .gitignore and create the state tree). These tests run
 // the REAL skill CLI (node stays executable, so both actions really run)
 // against a fresh `git init` project with a fake `herdr` on PATH.
 
@@ -515,13 +515,13 @@ test('real CLI: doctor and roster leave a fresh git project untouched (no .gitig
     const before = fs.readdirSync(project).sort();
     const r = run(sub, { env, timeouts: { paneGetMs: 15_000, cliMs: 60_000 } });
     assert.equal(r.code, 0, `${sub}: exit ${r.code}: ${r.out}${r.err}`);
-    assert.match(r.out, new RegExp(`herdr-agents plugin: target workspace=wJ pane=wJ:p24 cwd=${escapeRegExp(project)}`));
+    assert.match(r.out, new RegExp(`herdr-soho plugin: target workspace=wJ pane=wJ:p24 cwd=${escapeRegExp(project)}`));
     // No new file or directory of any kind in the project (no .gitignore,
-    // no .herdr-agents/, nothing else).
+    // no .herdr-soho/, nothing else).
     const after = fs.readdirSync(project).sort();
     assert.deepEqual(after, before, `${sub}: the project gained entries: ${after.filter((e) => !before.includes(e)).join(', ')}`);
     assert.ok(!fs.existsSync(path.join(project, '.gitignore')), `${sub}: no .gitignore`);
-    assert.ok(!fs.existsSync(path.join(project, '.herdr-agents')), `${sub}: no state dir`);
+    assert.ok(!fs.existsSync(path.join(project, '.herdr-soho')), `${sub}: no state dir`);
   }
   // Mutation captured: a CLI write in either action (a .gitignore append or
   // a state tree) changes the project's entries and fails the asserts.
