@@ -1081,6 +1081,75 @@ test('cmdDoctor: --fix --session rewrites the session.conf and re-runs the check
   cleanLayers();
 });
 
+// ---------- nowrite: the state-dir line of doctor ----------
+
+// doctorCheck against an arbitrary cwd with the host herdr faked (the
+// doctorOut pattern, parameterized cwd).
+function runDoctorAt(cwd, env) {
+  writeFakeCli(FAKES, 'herdr', 'process.exit(0)\n'); // no host herdr may be called
+  const e = { ...env, PATH: FAKES };
+  const keep = process.stdout.write.bind(process.stdout);
+  let out = '';
+  process.stdout.write = (s) => { out += s; return true; };
+  try { doctorCheck(loadConfig(e, cwd), e, cwd); }
+  finally { process.stdout.write = keep; }
+  return out;
+}
+
+test('nowrite: doctor reports an absent state dir as absent, never creates it, and keeps the warning for unwritable or inaccessible state', { timeout: 60000 }, (t) => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-doctor-nowrite-')));
+  try {
+    const project = path.join(root, 'proj');
+    fs.mkdirSync(project, { recursive: true });
+    const envBase = { ...ENV, HERDR_AGENTS_DIR: '' };
+    const d = path.join(project, '.herdr-agents');
+    const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+    // A fresh project (no state dir): reported absent — and not created.
+    let out = runDoctorAt(project, { ...envBase, HERDR_AGENTS_NOWRITE: '1' });
+    assert.ok(out.includes(`state dir absent (no-write mode, not created): ${d}`), out);
+    assert.ok(!out.includes('state dir not writable'), out);
+    assert.ok(!fs.existsSync(d), 'no-write mode never creates the state dir');
+    assert.ok(!fs.existsSync(path.join(project, '.gitignore')));
+    if (isRoot) {
+      // root bypasses permission checks: the two permission cases below
+      // cannot be exercised honestly.
+      t.skip('root: permission-denied cases are not reachable');
+      return;
+    }
+    // An existing but unwritable dir keeps the genuine warning.
+    fs.mkdirSync(d, { recursive: true });
+    fs.chmodSync(d, 0o555);
+    try {
+      out = runDoctorAt(project, { ...envBase, HERDR_AGENTS_NOWRITE: '1' });
+      assert.ok(out.includes(`state dir not writable: ${d}`), out);
+      assert.ok(!out.includes('state dir absent (no-write mode'), out);
+    } finally {
+      fs.chmodSync(d, 0o755);
+    }
+    // A permission error resolving the path (no traverse on the parent)
+    // keeps the warning too — absence is reported only for ENOENT.
+    const outer = path.join(root, 'outer');
+    const project2 = path.join(outer, 'inner');
+    fs.mkdirSync(project2, { recursive: true });
+    fs.chmodSync(outer, 0o600);
+    try {
+      out = runDoctorAt(project2, { ...envBase, HERDR_AGENTS_NOWRITE: '1' });
+      assert.ok(out.includes('state dir not writable:'), out);
+      assert.ok(!out.includes('state dir absent (no-write mode'), out);
+    } finally {
+      fs.chmodSync(outer, 0o755);
+    }
+    // Control: without the env the CLI creates the dir and reports it
+    // writable (normal behavior unchanged).
+    out = runDoctorAt(project, envBase);
+    assert.ok(out.includes(`state dir writable: ${d}`), out);
+    assert.ok(fs.statSync(d).isDirectory());
+    // Mutation captured: a stat error other than ENOENT reported as
+    // absent, a created state dir, or a normal-mode behavior change fails
+    // one of the asserts above.
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 // ---------- cmdDoctor (in-process + the entry) ----------
 
 test('cmdDoctor: unknown option dies 2; doctor --fix --user re-runs the check in-process', () => {

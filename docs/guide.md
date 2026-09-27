@@ -56,7 +56,11 @@ roles/<role>.md  ──▶  spawn (pane split + agent start)  ──▶  dispatc
   Workers never commit or push.
 - **Reports** are files under the state dir, per-item with three states
   (`[done]` / `[partial]` / `[skipped]` + reason), so collection never depends on
-  scraping a TUI.
+  scraping a TUI. The report path in the dispatch's composed prompt is
+  authoritative: a brief's `# Report` section can name a different literal
+  path (hand-written or reused), but the worker writes to the dispatch's
+  path anyway, and the dispatch's routing (JSON, `last-report`, wait
+  marker) never follows the brief's.
 
 ## The team: panels and lanes
 
@@ -171,6 +175,14 @@ amendment gets a new report that `wait` watches, and the pane keeps its
 task. A busy worker reads it when its CLI delivers a message sent
 mid-task (most queue it). Never send an amendment with `herdr agent
 prompt` by hand: `wait` would keep watching the old report.
+
+`HERDR_AGENTS_NOWRITE=1` is a read-only inspection mode. The optional
+plugin runs `doctor` and `roster` with it: the CLI still inspects the
+focused project, but only the exact `doctor` and `roster` invocations
+run — no extra arguments, so `doctor --fix` cannot write — and the CLI
+never writes to the project (no `.gitignore` entry, no state directory,
+no friction log); every other invocation exits 2 with a message. Without
+the env, the CLI behaves exactly as before.
 
 ## Good to know
 

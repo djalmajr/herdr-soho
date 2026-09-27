@@ -546,6 +546,7 @@ test('compose: role header, brief verbatim, the report contract in order', { tim
     const body = roleBody(roleFile);
     const contract = [
       '- Write your report as Markdown to `' + report + '` (create parent directories if needed) following the `<report>` section of your role. Give every item its state as `[done]`, `[partial]` or `[skipped]`, followed by the reason.\n',
+      "- This report path is authoritative: if the brief names a different report path, ignore it and write to this path; a brief can be hand-written or reused with a stale path, and the dispatch's report path never follows the brief's.\n",
       '- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion.\n',
       '- Only you write this report, once all of the brief is done, including any part you handed to subagents or background tasks; a subagent never writes it. Report every item as it stands in the files, not as a subagent summarized it.\n',
       '- Report only the current brief and its explicit amendments; do not import unrelated work from earlier briefs retained in a reused session. Mention prior work only when it directly affects this brief, stating the relationship.\n',
@@ -557,6 +558,37 @@ test('compose: role header, brief verbatim, the report contract in order', { tim
     ].join('');
     assert.equal(text, header + body + '\n\n# Brief\n\n' + brief + '\n\n# Report contract\n\n' + contract);
     assert.equal(body, '\nAlpha body line one.\nAlpha body line two.\n');
+  } finally { fix.cleanup(); }
+});
+
+// A raw brief whose `# Report` section names a literal path different from
+// the dispatch's generated one (a hand-written or reused brief): the report
+// path of the composed prompt is the generated one, the contract names its
+// authority, and the routing (JSON, last-report, the sent pointer) never
+// follows the brief's path.
+test('dispatch: a brief naming a different report path — the composed prompt keeps the generated path authoritative', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-dispatch-stale-report-');
+  try {
+    fix.writeRoster(undefined, ROW12('build', 'p1', 'grok', 'implementer', 'xai', fix.repo, 'grok-4.7', 'build'));
+    const stale = '/state/ws/reports/build-20260101T000000.md';
+    const brief = fix.brief('brief.md', FULL_BRIEF.replace('# Report\n\nDone.', `# Report\n\nWrite your report to \`${stale}\` when finished.\n`));
+    const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait']);
+    assert.equal(r.status, 0, r.stderr);
+    const j = parsePretty(r.stdout);
+    assert.notEqual(j.report, stale, "the report is the dispatch's generated path");
+    const composedText = fs.readFileSync(j.composed_prompt, 'utf8');
+    assert.ok(composedText.includes(`- Write your report as Markdown to \`${j.report}\``), 'the contract names the generated path');
+    assert.ok(composedText.includes("- This report path is authoritative: if the brief names a different report path, ignore it and write to this path"),
+      'the authority line is present');
+    assert.equal(composedText.split(stale).length - 1, 1, 'the stale path survives only inside the brief verbatim');
+    // The routing keeps the generated path: last-report and the pointer
+    // sent to the worker both name it.
+    assert.equal(fs.readFileSync(path.join(fix.ws, 'last-report-build'), 'utf8'), j.report + '\n');
+    assert.ok(fix.log().includes(`write your report to ${j.report} and reply`));
+    assert.ok(!/warning/.test(r.stderr), 'no stderr noise: ' + r.stderr);
+    // Mutation captured: a composed prompt that follows the brief's
+    // literal path (or drops the authority line), or a last-report that
+    // points at the brief's path, fails one of the asserts above.
   } finally { fix.cleanup(); }
 });
 
@@ -1919,6 +1951,7 @@ test('dispatch --amend: new report, wait markers cleared, title keeps the task w
     const contract = [
       '- This amendment overrides your current brief where they differ; the rest of that brief still holds.\n',
       `- Write your report as Markdown to \`${j.report}\` (create parent directories if needed). If you have not written the report of your current brief yet, write one report there that covers the brief and this amendment; otherwise report only on the amendment.\n`,
+      "- This report path is authoritative: if your current brief names a different report path, ignore it and write to this path; a brief can be hand-written or reused with a stale path, and the dispatch's report path never follows the brief's.\n",
       '- Give every item its state as `[done]`, `[partial]` or `[skipped]`, followed by the reason.\n',
       '- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion.\n',
       '- Only you write this report, once all of the brief is done, including any part you handed to subagents or background tasks; a subagent never writes it. Report every item as it stands in the files, not as a subagent summarized it.\n',
@@ -1999,6 +2032,7 @@ test('composeAmendment: the report_language line, in order, only when set', { ti
       '\n\n# Report contract\n\n',
       '- This amendment overrides your current brief where they differ; the rest of that brief still holds.\n',
       `- Write your report as Markdown to \`${report}\` (create parent directories if needed). If you have not written the report of your current brief yet, write one report there that covers the brief and this amendment; otherwise report only on the amendment.\n`,
+      "- This report path is authoritative: if your current brief names a different report path, ignore it and write to this path; a brief can be hand-written or reused with a stale path, and the dispatch's report path never follows the brief's.\n",
       '- Give every item its state as `[done]`, `[partial]` or `[skipped]`, followed by the reason.\n',
       '- Write the report in pt-BR.\n',
       '- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion.\n',

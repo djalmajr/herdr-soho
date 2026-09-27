@@ -1,7 +1,11 @@
-# herdr-agents
+# herdr-soho
 
 This repository contains the distributable skill in `skills/herdr-agents/`
 and an optional Herdr plugin in `plugin/`.
+
+- Keep the published skill, CLI command, and plugin identifier named
+  `herdr-agents` for compatibility with existing project installations.
+  The repository and local checkout are named `herdr-soho`.
 
 - Keep the CLI's report, dispatch, model-family, and configuration rules as
   the shared implementation. Plugin entrypoints call those rules; they must
