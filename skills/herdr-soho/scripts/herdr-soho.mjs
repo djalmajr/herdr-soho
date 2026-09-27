@@ -25,6 +25,7 @@
 // through and exits with herdr's code).
 import path from 'node:path';
 import { loadConfig, cmdConfig, cmdConfigSet, nowrite, DieError } from './lib/config.mjs';
+import { applyLegacyEnv } from './lib/legacy.mjs';
 import { cmdSession } from './lib/session.mjs';
 import { cmdRoles, cmdRole } from './lib/roles.mjs';
 import { cmdKinds } from './lib/kinds.mjs';
@@ -63,6 +64,9 @@ const argv = process.argv.slice(2);
 const cmd = argv[0] ?? '';
 
 const env = process.env;
+// The legacy (herdr-agents) HERDR_AGENTS_* variables are read as
+// HERDR_SOHO_* before the config layers load (the old variables stay).
+applyLegacyEnv(env);
 const ctx = loadConfig();
 
 try {

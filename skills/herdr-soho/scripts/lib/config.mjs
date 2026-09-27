@@ -9,6 +9,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { die, readTextFile, projectRoot, userConfigPath, atomicWrite } from './platform.mjs';
+import {
+  defaultStateDirName, effectiveConfigFile, legacyProjectConfigPath, legacyUserConfigPath,
+  migrateLegacyConfigFile,
+} from './legacy.mjs';
 import { roleFile, roleDirs } from './roles.mjs';
 import { sessionConfPath } from './session.mjs';
 // Function-level use only (dottedKeyName), so the config<->lanes cycle is
@@ -81,13 +85,16 @@ function loadConfigFile(file, label, ctx) {
 }
 
 // load_config() port: defaults -> user -> project -> session (only when a
-// workspace is resolvable). Returns { entries: Map<key,{value,source}>,
+// workspace is resolvable). The user and project layers read the effective
+// file (the legacy herdr-agents file when the new one is absent) but keep
+// the 'user'/'project' labels. Returns { entries: Map<key,{value,source}>,
 // sources: string[] }.
 export function loadConfig(env = process.env, cwd = process.cwd()) {
   const ctx = { entries: new Map(), sources: [] };
+  const root = projectRoot(env, cwd);
   loadConfigFile(path.join(skillDir(), 'config.defaults'), 'defaults', ctx);
-  loadConfigFile(userConfigPath(process.platform, env), 'user', ctx);
-  loadConfigFile(path.join(projectRoot(env, cwd), '.agents', 'herdr-soho.conf'), 'project', ctx);
+  loadConfigFile(effectiveConfigFile(userConfigPath(process.platform, env), legacyUserConfigPath(process.platform, env)), 'user', ctx);
+  loadConfigFile(effectiveConfigFile(path.join(root, '.agents', 'herdr-soho.conf'), legacyProjectConfigPath(root)), 'project', ctx);
   const sf = sessionConfPath(ctx, env, cwd);
   if (sf) loadConfigFile(sf, 'session', ctx);
   return ctx;
@@ -158,11 +165,27 @@ export function configFileFor(where, env = process.env, cwd = process.cwd()) {
 }
 
 // state_root() path, no side effects: $HERDR_SOHO_DIR (non-empty) else
-// cfg state_dir .herdr-soho; relative paths are under the project root.
+// $HERDR_SOHO_STATE_DIR (non-empty) else a state_dir a user layer holds
+// (the defaults file names the new dir but is not a choice: while the
+// project has only the legacy state dir, .herdr-agents stays the
+// effective default, defaultStateDirName); relative paths are under the
+// project root.
 export function stateRootPath(ctx, env = process.env, cwd = process.cwd()) {
-  let d = env.HERDR_SOHO_DIR || cfg(ctx, 'state_dir', '.herdr-soho', env);
-  if (!path.isAbsolute(d)) d = projectRoot(env, cwd) + '/' + d;
+  const root = projectRoot(env, cwd);
+  let d = env.HERDR_SOHO_DIR || stateDirSetting(ctx, env, cwd);
+  if (!path.isAbsolute(d)) d = root + '/' + d;
   return d;
+}
+
+// The state_dir setting as written (relative or absolute), without the
+// HERDR_SOHO_DIR override: HERDR_SOHO_STATE_DIR, else a value from a layer
+// above the defaults, else the legacy-aware default (.herdr-agents while a
+// project only has that one, .herdr-soho otherwise).
+export function stateDirSetting(ctx, env = process.env, cwd = process.cwd()) {
+  if (env.HERDR_SOHO_STATE_DIR) return env.HERDR_SOHO_STATE_DIR;
+  const e = ctx.entries.get('state_dir');
+  if (e && e.source !== 'defaults' && e.value !== '') return e.value;
+  return defaultStateDirName(projectRoot(env, cwd));
 }
 
 // HERDR_SOHO_NOWRITE=1: read-only inspection mode (the optional plugin
@@ -220,6 +243,9 @@ export function gitignoreAfter(text, rel) {
 // missing keys are appended. The destination is replaced only after the
 // rewrite still contains `key=` (die 4, file untouched otherwise).
 export function configWritePair(dest, key, value, env = process.env) {
+  // First write on a legacy-only machine: the legacy file is copied onto
+  // `dest` (with its content) before the rewrite; a no-op otherwise.
+  migrateLegacyConfigFile(dest, env);
   // A missing file reads as empty; atomicWrite creates it 0600 (as bash's
   // mktemp + mv ends up).
   let raw = '';
@@ -402,8 +428,13 @@ export function cmdConfig(ctx, env = process.env, cwd = process.cwd()) {
     lines.push(row(name, cfg(ctx, k, '', env), cfgSource(ctx, k, env)));
   }
   lines.push(`\nlayers read:${ctx.sources.length ? ' ' + ctx.sources.join(' ') : ' (none)'}`);
-  lines.push(`user file:    ${userConfigPath(process.platform, env)}`);
-  lines.push(`project file: ${path.join(projectRoot(env, cwd), '.agents', 'herdr-soho.conf')}`);
+  // The effective files (the legacy ones when the new path is absent),
+  // flagged as such so the user knows which file a set will copy.
+  const userFile = effectiveConfigFile(userConfigPath(process.platform, env), legacyUserConfigPath(process.platform, env));
+  lines.push(`user file:    ${userFile}${userFile === legacyUserConfigPath(process.platform, env) ? ' (legacy)' : ''}`);
+  const root = projectRoot(env, cwd);
+  const projectFile = effectiveConfigFile(path.join(root, '.agents', 'herdr-soho.conf'), legacyProjectConfigPath(root));
+  lines.push(`project file: ${projectFile}${projectFile === legacyProjectConfigPath(root) ? ' (legacy)' : ''}`);
   const sf = sessionConfPath(ctx, env, cwd);
   lines.push(`session file: ${sf || '(no workspace here)'}`);
   process.stdout.write(lines.join('\n') + '\n');

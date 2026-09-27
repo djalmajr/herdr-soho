@@ -161,11 +161,13 @@ else
   done
 fi
 
-# Every HERDR_SOHO_* variable present in the parent environment, by name.
+# Every HERDR_SOHO_* and HERDR_AGENTS_* variable present in the parent
+# environment, by name (the legacy prefix goes too, so a caller's
+# HERDR_AGENTS_* cannot leak into a run).
 HERDR_VARS=()
 while IFS= read -r line; do
   case $line in
-    HERDR_SOHO_*=*) HERDR_VARS+=("${line%%=*}") ;;
+    HERDR_SOHO_*=*|HERDR_AGENTS_*=*) HERDR_VARS+=("${line%%=*}") ;;
   esac
 done < <(env)
 

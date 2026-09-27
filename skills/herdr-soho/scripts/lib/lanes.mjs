@@ -38,6 +38,7 @@ import { stateDir, rosterRows, lastReport, warn } from './state.mjs';
 import { agentState, liveAgents } from './herdr.mjs';
 import { roleFile, fmGet, isReviewRole, roleIsEdit, historyHasEdit } from './roles.mjs';
 import { readTextFile, atomicWrite } from './platform.mjs';
+import { migrateLegacyConfigFile } from './legacy.mjs';
 
 // Lines of a normalized text (awk-style trailing-newline semantics).
 function splitLines(text) {
@@ -831,6 +832,9 @@ function dropPresetFileExtras(dest, panes, lines, env, mode = 'strict') {
 // `set …` / `moved …` / `removed …` lines, in order); the warnings go
 // through warn (friction log).
 export function applyLaneFile(dest, panes, env = process.env, cwd = process.cwd()) {
+  // First write on a legacy-only machine: the legacy file is copied onto
+  // `dest` (with its content) before any rewrite; a no-op otherwise.
+  migrateLegacyConfigFile(dest, env, cwd);
   if (!fs.existsSync(dest)) {
     try { fs.writeFileSync(dest, '', { flag: 'a' }); } catch {
       throw new DieError(`config set: could not rewrite ${dest} (file left untouched)`, 4);

@@ -34,7 +34,7 @@ import { resolveModel } from '../models.mjs';
 import { sessionConfPath } from '../session.mjs';
 import { splitCap, splitMin } from '../layout.mjs';
 import { herdLabelMax } from '../herdtabs.mjs';
-import { SETUP_START, setupHookDoctor } from '../setuptext.mjs';
+import { LEGACY_SETUP_START, SETUP_START, legacyHookDoctor, setupHookDoctor } from '../setuptext.mjs';
 import { LOCAL_INSTRUCTION_FILE } from '../setuplocal.mjs';
 import { kindExe } from '../kinds.mjs';
 import { ownProviderDoctorLines } from '../ownproviders.mjs';
@@ -42,6 +42,7 @@ import { sandboxNotes } from '../dispatch.mjs';
 import { configNativeArgs } from '../spawn.mjs';
 import { setupTargetExisting, projectNeedsConfigPrompt } from './setup.mjs';
 import { unifiedDiff } from './setup-plan.mjs';
+import { effectiveConfigFile, legacyDoctorWarnings, legacyProjectConfigPath, legacyUserConfigPath } from '../legacy.mjs';
 
 // Where the user runs the program from — the launcher (switch-to-JS
 // decision 4), where the bash prints `$0` (decision 2b): scripts/herdr-soho
@@ -607,9 +608,10 @@ export function projectHasRoster(ctx, env = process.env, cwd = process.cwd()) {
 }
 
 // project_is_first_run port (:1696): no team choice yet (the setup prompt
-// test) and no roster row.
+// test) and no roster row. The prompt test reads the effective project
+// file (the legacy herdr-agents file when the new one is absent).
 export function projectIsFirstRun(ctx, env = process.env, cwd = process.cwd()) {
-  const conf = configFileFor('project', env, cwd);
+  const conf = effectiveConfigFile(configFileFor('project', env, cwd), legacyProjectConfigPath(projectRoot(env, cwd)));
   if (!projectNeedsConfigPrompt(conf)) return false;
   return !projectHasRoster(ctx, env, cwd);
 }
@@ -633,7 +635,13 @@ export function doctorFix(where, flag, ctx, env = process.env, cwd = process.cwd
   if (flag === '' || flag === undefined) { /* panes from the file below */ }
   else if (flag === '2' || flag === '3' || flag === '4') panes = flag;
   else throw new DieError('doctor --fix: --panes must be 2, 3 or 4', 2);
-  if (panes === '') panes = fileKeyValue(dest, 'panes');
+  // A user or project file that does not exist yet is read from its legacy
+  // herdr-agents name (applyLaneFile copies it there on the first write).
+  if (panes === '') {
+    const legacy = where === 'user' ? legacyUserConfigPath(process.platform, env)
+      : where === 'session' ? dest : legacyProjectConfigPath(projectRoot(env, cwd));
+    panes = fileKeyValue(effectiveConfigFile(dest, legacy), 'panes');
+  }
   if (panes === '2' || panes === '3' || panes === '4') { /* ok */ }
   else if (panes === '') {
     throw new DieError(`doctor --fix: panes is not set in ${dest}. Orchestrator: ask the user whether to run 2, 3 or 4 panes, then re-run 'doctor --fix --panes <n>'.`, 2);
@@ -656,20 +664,26 @@ export function doctorFix(where, flag, ctx, env = process.env, cwd = process.cwd
   }
 }
 
-// The SessionStart doctor check accepts only the command setup currently writes.
+// The SessionStart doctor check (new/legacy/none): 'new' when the command
+// setup currently writes is present, 'legacy' when the pre-rename
+// herdr-agents command is present (the migration warning below), else null
+// (absent, unreadable or no doctor hook at all).
 function settingsHasDoctorHook(file) {
   let j;
-  try { j = JSON.parse(readTextFile(file)); } catch { return false; }
-  if (!j || typeof j !== 'object') return false;
+  try { j = JSON.parse(readTextFile(file)); } catch { return null; }
+  if (!j || typeof j !== 'object') return null;
   const events = j.hooks?.SessionStart;
-  if (!Array.isArray(events)) return false;
+  if (!Array.isArray(events)) return null;
+  let legacy = false;
   for (const entry of events) {
     if (!entry || typeof entry !== 'object' || !Array.isArray(entry.hooks)) continue;
     for (const hook of entry.hooks) {
-      if (hook && typeof hook === 'object' && hook.command === setupHookDoctor()) return true;
+      if (!hook || typeof hook !== 'object') continue;
+      if (hook.command === setupHookDoctor()) return 'new';
+      if (hook.command === legacyHookDoctor()) legacy = true;
     }
   }
-  return false;
+  return legacy ? 'legacy' : null;
 }
 
 // The advisory checks (bash cmd_doctor, :1768-1824). Never blocks; always
@@ -763,6 +777,10 @@ export function doctorCheck(ctx, env = process.env, cwd = process.cwd()) {
       s.warn(`state dir not writable: ${d}`);
     }
   }
+  // The legacy (herdr-agents) lines: the copied env variables, the legacy
+  // user/project config files and the legacy state dir — nothing when
+  // the environment has only the new names.
+  for (const w of legacyDoctorWarnings({ env, cwd, platform: process.platform })) s.warn(w);
   const layout = cfg(ctx, 'layout', 'split', env);
   if (layout === 'split' || layout === 'tab') {
     s.ok(`config: layout=${layout} approvals=${cfg(ctx, 'approvals', '', env)} auto_approve=${cfg(ctx, 'auto_approve', '', env)} reuse_workers=${cfg(ctx, 'reuse_workers', '', env)} multi_role=${cfg(ctx, 'multi_role', 'on', env)} worker_context=${cfg(ctx, 'worker_context', '', env)}`);
@@ -802,15 +820,44 @@ export function doctorCheck(ctx, env = process.env, cwd = process.cwd()) {
   // from AGENTS.md/CLAUDE.md alone and never silently switches to local.
   const root = projectRoot(env, cwd);
   const t = setupTargetExisting(root);
+  // setupTargetExisting now also reports the pre-rename legacy block; the
+  // ok lines need the CURRENT markers, the legacy block gets its own warn.
+  let tNew = false;
+  let tLegacy = false;
+  if (t !== null) {
+    try {
+      const tText = readTextFile(t);
+      tNew = tText.includes(SETUP_START);
+      tLegacy = tText.includes(LEGACY_SETUP_START);
+    } catch { /* unreadable */ }
+  }
   let localHas = false;
-  try { localHas = readTextFile(path.join(root, LOCAL_INSTRUCTION_FILE)).includes(SETUP_START); } catch { /* absent */ }
-  if (t) s.ok(`instruction block present in ${path.basename(t)}`);
+  let localLegacy = false;
+  try {
+    const localText = readTextFile(path.join(root, LOCAL_INSTRUCTION_FILE));
+    localHas = localText.includes(SETUP_START);
+    localLegacy = localText.includes(LEGACY_SETUP_START);
+  } catch { /* absent */ }
+  const setupLocal = cfg(ctx, 'setup_target', 'canonical', env) === 'local';
+  if (tNew) s.ok(`instruction block present in ${path.basename(t)}`);
   else if (localHas) s.ok(`instruction block present in ${LOCAL_INSTRUCTION_FILE}`);
-  else if (cfg(ctx, 'setup_target', 'canonical', env) === 'local') s.warn(`no herdr-soho block in ${LOCAL_INSTRUCTION_FILE}: run '${ENTRY_SCRIPT} setup --local' (writes the delegation rules between <!-- herdr-soho:start/end --> markers, kept unversioned)`);
+  else if (tLegacy || localLegacy) {
+    // Pre-rename block: `setup` (or `setup --local`, when the local target
+    // is in force — a legacy block in CLAUDE.local.md or setup_target=local)
+    // replaces it in place; no other doctor text changes.
+    if (localLegacy || setupLocal) s.warn(`legacy herdr-agents instruction block in ${LOCAL_INSTRUCTION_FILE}: run '${ENTRY_SCRIPT} setup --local' to replace it in place`);
+    else s.warn(`legacy herdr-agents instruction block in ${path.basename(t)}: run '${ENTRY_SCRIPT} setup' to replace it in place`);
+  }
+  else if (setupLocal) s.warn(`no herdr-soho block in ${LOCAL_INSTRUCTION_FILE}: run '${ENTRY_SCRIPT} setup --local' (writes the delegation rules between <!-- herdr-soho:start/end --> markers, kept unversioned)`);
   else s.warn(`no herdr-soho block in AGENTS.md/CLAUDE.md: run '${ENTRY_SCRIPT} setup' (writes the delegation rules between <!-- herdr-soho:start/end --> markers)`);
-  if (isFile(path.join(root, '.claude', 'settings.json')) && settingsHasDoctorHook(path.join(root, '.claude', 'settings.json'))) {
+  const settingsJson = path.join(root, '.claude', 'settings.json');
+  const doctorHook = isFile(settingsJson) ? settingsHasDoctorHook(settingsJson) : null;
+  if (doctorHook === 'new') {
     s.ok('Claude hooks present in .claude/settings.json');
-  } else if (localHas || cfg(ctx, 'setup_target', 'canonical', env) === 'local') {
+  } else if (doctorHook === 'legacy') {
+    if (localLegacy || setupLocal) s.warn(`legacy herdr-agents hooks in .claude/settings.json: run '${ENTRY_SCRIPT} setup --local' to replace them`);
+    else s.warn(`legacy herdr-agents hooks in .claude/settings.json: run '${ENTRY_SCRIPT} setup' to replace them`);
+  } else if (localHas || setupLocal) {
     // A fork on the local target must never be sent to canonical `setup`
     // (it would write the upstream's tracked instruction file): the
     // missing-hooks warning keeps the local target, whether the local

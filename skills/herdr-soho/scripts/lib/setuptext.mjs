@@ -11,6 +11,10 @@
 // commands in lib/commands/setup.mjs own the disk and the die messages.
 export const SETUP_START = '<!-- herdr-soho:start -->';
 export const SETUP_END = '<!-- herdr-soho:end -->';
+// The pre-rename `herdr-agents` markers: old projects still carry a block
+// between these; setup replaces it in place (same merge rules below).
+export const LEGACY_SETUP_START = '<!-- herdr-agents:start -->';
+export const LEGACY_SETUP_END = '<!-- herdr-agents:end -->';
 
 // setup_block: the marked instruction block. Ends with a newline, like the
 // bash heredoc; the block itself never names a script path.
@@ -31,13 +35,31 @@ export function setupHookDoctor() {
   return "sh -c '[ \"${HERDR_ENV:-}\" = 1 ] || exit 0; for script in \"${CLAUDE_PROJECT_DIR:-$PWD}/.agents/skills/herdr-soho/scripts/herdr-soho\" \"${CLAUDE_PROJECT_DIR:-$PWD}/.claude/skills/herdr-soho/scripts/herdr-soho\" \"$HOME/.agents/skills/herdr-soho/scripts/herdr-soho\" \"$HOME/.claude/skills/herdr-soho/scripts/herdr-soho\"; do [ -f \"$script\" ] || continue; sh \"$script\" doctor 2>/dev/null | grep -E \"^warn\" | sed \"s/^warn */herdr-soho doctor: /\"; exit 0; done; echo \"herdr-soho doctor: skill script not found\"; true'";
 }
 
+// legacy_hook_reminder / legacy_hook_doctor: the exact commands the
+// pre-rename `herdr-agents` setup wrote into .claude/settings.json
+// (setupHookReminder / setupHookDoctor with every `herdr-soho` replaced by
+// `herdr-agents`). Kept as literals — never derived at run time — so the
+// migration cannot drift from what old projects actually carry; the test
+// pins both by sha256 (220 and 526 characters).
+export function legacyHookReminder() {
+  return "sh -c '[ \"${HERDR_ENV:-}\" = 1 ] && echo \"herdr-agents: this project routes non-trivial work through /herdr-agents — surveys go to a scouter, slices to workers; the orchestrator keeps only one-or-two-file changes.\"; true'";
+}
+
+export function legacyHookDoctor() {
+  return "sh -c '[ \"${HERDR_ENV:-}\" = 1 ] || exit 0; for script in \"${CLAUDE_PROJECT_DIR:-$PWD}/.agents/skills/herdr-agents/scripts/herdr-agents\" \"${CLAUDE_PROJECT_DIR:-$PWD}/.claude/skills/herdr-agents/scripts/herdr-agents\" \"$HOME/.agents/skills/herdr-agents/scripts/herdr-agents\" \"$HOME/.claude/skills/herdr-agents/scripts/herdr-agents\"; do [ -f \"$script\" ] || continue; sh \"$script\" doctor 2>/dev/null | grep -E \"^warn\" | sed \"s/^warn */herdr-agents doctor: /\"; exit 0; done; echo \"herdr-agents doctor: skill script not found\"; true'";
+}
+
 // setup_block_result <content|null> — the instruction file content after
 // setup_write_block:
 //   - with the block already in it: replace the range between the markers,
-//     bash awk semantics (the line holding SETUP_START and the line holding
-//     SETUP_END are consumed; a second start repeats the block; a line
-//     holding both counts as a start; everything after the last consumed
-//     start line that is not an end line is dropped);
+//     bash awk semantics (the line holding SETUP_START or
+//     LEGACY_SETUP_START and the line holding SETUP_END or
+//     LEGACY_SETUP_END are consumed; a second start repeats the block; a
+//     line holding both counts as a start; everything after the last
+//     consumed start line that is not an end line is dropped); the legacy
+//     markers read exactly like the current ones, so a pre-rename block is
+//     replaced by the current block in the same position, and a file with
+//     no legacy markers is byte-identical to the pre-migration result;
 //   - without it: append the block, guaranteeing the missing final newline
 //     first and a blank line before the block (an absent or empty file just
 //     gains the block, possibly after a blank line when the file exists).
@@ -51,14 +73,14 @@ export function setupBlockResult(content) {
   // newline; `print block` adds exactly one. setupBlock() keeps the heredoc's
   // trailing newline, so drop it here and let the join/append restore it.
   const blockNoNL = block.slice(0, -1);
-  if (content !== null && content.includes(SETUP_START)) {
+  if (content !== null && (content.includes(SETUP_START) || content.includes(LEGACY_SETUP_START))) {
     const lines = content.split('\n');
     if (content.endsWith('\n')) lines.pop(); // the trailing '' is not a line
     const out = [];
     let skip = false;
     for (const line of lines) {
-      if (line.includes(SETUP_START)) { out.push(blockNoNL); skip = true; continue; }
-      if (line.includes(SETUP_END)) { skip = false; continue; }
+      if (line.includes(SETUP_START) || line.includes(LEGACY_SETUP_START)) { out.push(blockNoNL); skip = true; continue; }
+      if (line.includes(SETUP_END) || line.includes(LEGACY_SETUP_END)) { skip = false; continue; }
       if (!skip) out.push(line);
     }
     const result = out.length ? out.join('\n') + '\n' : '';
@@ -76,8 +98,10 @@ export function setupBlockResult(content) {
 }
 
 // settings_hooks_result <content|null> — the .claude/settings.json content
-// after setup_write_hooks: replace entries containing the exact generated
-// command, append the current entry, and preserve other hooks and fields. The
+// after setup_write_hooks: remove entries whose command is exactly the
+// current or the pre-rename (herdr-agents) generated command of the same
+// event — a user command that only mentions herdr-agents is kept — append
+// the current entry, and preserve other hooks and fields. The
 // output uses jq's formatting (2-space indent, empty containers, raw UTF-8,
 // one trailing newline). Returns the
 // full new content, or null when the merge cannot be produced (bash: die 4
@@ -95,7 +119,7 @@ export function settingsHooksResult(content) {
   if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) return null;
   if (doc.hooks === undefined || doc.hooks === null) doc.hooks = {};
   if (typeof doc.hooks !== 'object' || Array.isArray(doc.hooks)) return null;
-  const put = (ev, command) => {
+  const put = (ev, command, legacy) => {
     let arr = doc.hooks[ev];
     // jq `a // b` also replaces false: (.hooks[ev] // [])
     if (arr === undefined || arr === null || arr === false) arr = [];
@@ -114,7 +138,10 @@ export function settingsHooksResult(content) {
         let c = (h === null || typeof h !== 'object' || Array.isArray(h)) ? '' : h.command;
         if (c === undefined || c === null || c === false) c = '';
         if (typeof c !== 'string') return false;
-        if (c === command) { drop = true; break; }
+        // Exact-command match only: the current command and, since the
+        // herdr-agents → herdr-soho rename, the legacy command of the same
+        // event. A user command that merely contains herdr-agents is kept.
+        if (c === command || c === legacy) { drop = true; break; }
       }
       if (!drop) kept.push(entry);
     }
@@ -122,7 +149,7 @@ export function settingsHooksResult(content) {
     doc.hooks[ev] = kept;
     return true;
   };
-  if (!put('UserPromptSubmit', setupHookReminder())) return null;
-  if (!put('SessionStart', setupHookDoctor())) return null;
+  if (!put('UserPromptSubmit', setupHookReminder(), legacyHookReminder())) return null;
+  if (!put('SessionStart', setupHookDoctor(), legacyHookDoctor())) return null;
   return JSON.stringify(doc, null, 2) + '\n';
 }

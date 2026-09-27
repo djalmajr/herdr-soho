@@ -524,6 +524,17 @@ keys it sets:
 5. `HERDR_SOHO_<KEY>` environment variables
 6. command-line flags
 
+**Former herdr-agents names.** This skill was called `herdr-agents`. While a
+project or machine still has only the old names, the CLI reads them:
+`HERDR_AGENTS_<KEY>` when `HERDR_SOHO_<KEY>` is unset,
+`~/.config/herdr-agents/config` and `.agents/herdr-agents.conf` while the new
+file is absent (the first write — `config set`, `setup`, `doctor --fix` —
+copies the old file to the new name and leaves it in place), and the
+`.herdr-agents/` state directory while `.herdr-soho/` does not exist.
+`setup` replaces an old `<!-- herdr-agents:start/end -->` block and the old
+Claude hooks in place, and `doctor` prints one `legacy …` warning for each
+old name still in use.
+
 **Session layer.** `session set <key> <value>` writes the workspace's
 `<state>/session.conf`: it overrides the project and user files, but flags
 and `HERDR_SOHO_*` still win — the place for "only this session" (for

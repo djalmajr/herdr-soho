@@ -34,6 +34,7 @@ import {
 } from '../config.mjs';
 import { projectRoot, readTextFile } from '../platform.mjs';
 import { applyLaneFile, setupLaneSpec } from '../lanes.mjs';
+import { effectiveConfigFile, legacyProjectConfigPath, legacyUserConfigPath } from '../legacy.mjs';
 import { sessionConfPath } from '../session.mjs';
 import { setupBlockResult, settingsHooksResult } from '../setuptext.mjs';
 import { setupTargetExisting } from './setup.mjs';
@@ -381,6 +382,11 @@ export function cmdSetupPlan(args, ctx, env = process.env, cwd = process.cwd()) 
   try {
     const projconf = configFileFor('project', env, cwd);
     const userconf = configFileFor('user', env);
+    // The plan seeds its temp files from the file the layers actually
+    // read (the legacy herdr-agents file when the new path is absent);
+    // the paths shown stay the new ones.
+    const projconfSrc = effectiveConfigFile(projconf, legacyProjectConfigPath(projectRoot(env, cwd)));
+    const userconfSrc = effectiveConfigFile(userconf, legacyUserConfigPath(process.platform, env));
     let sessfile = '';
     let touchedProj = 0;
     let touchedUser = 0;
@@ -388,7 +394,7 @@ export function cmdSetupPlan(args, ctx, env = process.env, cwd = process.cwd()) 
     if (panes !== '' || laneSpecs.length > 0 || setProj.length > 0) {
       touchedProj = 1;
       const tmp = path.join(tmpd, 'proj.conf');
-      if (fs.existsSync(projconf)) fs.copyFileSync(projconf, tmp); else fs.writeFileSync(tmp, '');
+      if (fs.existsSync(projconfSrc)) fs.copyFileSync(projconfSrc, tmp); else fs.writeFileSync(tmp, '');
       // apply_lane_file … >/dev/null: the "set …" lines stay suppressed
       // (the warns go to stderr, like the bash).
       if (panes !== '') applyLaneFile(tmp, panes, env, cwd);
@@ -403,7 +409,7 @@ export function cmdSetupPlan(args, ctx, env = process.env, cwd = process.cwd()) 
     if (setUser.length > 0) {
       touchedUser = 1;
       const tmpu = path.join(tmpd, 'user.conf');
-      if (fs.existsSync(userconf)) fs.copyFileSync(userconf, tmpu); else fs.writeFileSync(tmpu, '');
+      if (fs.existsSync(userconfSrc)) fs.copyFileSync(userconfSrc, tmpu); else fs.writeFileSync(tmpu, '');
       for (const [k, v] of setUser) configWritePair(tmpu, k, v, env);
     }
     if (setSess.length > 0) {

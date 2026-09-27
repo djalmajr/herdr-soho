@@ -249,6 +249,11 @@ versioned) → `HERDR_SOHO_<KEY>` → flags. `herdr-soho config` shows the
 effective values and where each came from (scalar keys, then the dotted
 `args.*`/`role.*`/`model.*`/`effort.*`/`lane.*` keys in the file's own
 spelling). `brief_lint_aliases` sets alternate brief section headings.
+Projects and machines set up under the former name `herdr-agents` keep
+working: the CLI reads `HERDR_AGENTS_*`, the `herdr-agents` config files and
+the `.herdr-agents/` state directory while the new names are absent,
+`setup` replaces the old block and hooks in place, and `doctor` names every
+old name still in use (see the README's migration section).
 For a third-party fork, `setup --plan --local` previews a local
 `CLAUDE.local.md` block and Claude hooks; `setup --local` writes them. Local
 setup keeps the block and state directory out of Git through `info/exclude`,

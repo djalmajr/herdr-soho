@@ -19,7 +19,7 @@ The repository contains:
 ## Install the skill
 
 ```sh
-npx skills add djalmajr/herdr-soho --skill herdr-soho -g
+bunx skills add djalmajr/herdr-soho --skill herdr-soho -g
 ```
 
 The CLI needs Herdr and Node.js 20+ or Bun. Run it from a Herdr-managed
@@ -27,6 +27,32 @@ agent pane. The skill works without the plugin. The global install command
 above updates any existing `herdr-soho` installation; skip it if you want
 to keep your current version. `herdr-soho` replaces the former
 `herdr-agents` skill; see [Migrating from herdr-agents](#migrating-from-herdr-agents).
+
+## Migrating from herdr-agents
+
+`herdr-soho` is the new name of the `herdr-agents` skill, CLI and plugin.
+Replace a global installation with:
+
+```sh
+bunx skills remove herdr-agents -g -y
+bunx skills add djalmajr/herdr-soho --skill herdr-soho -g -y
+```
+
+Then run `herdr-soho setup` (or `setup --local` in a fork) once in each
+project set up with `herdr-agents`. It replaces the old instruction block
+and the old Claude hooks in place and keeps the rest of those files. Until
+then, the old `SessionStart` hook prints `herdr-agents doctor: skill script
+not found` and exits 0, and the old block names a skill that is no longer
+installed.
+
+The CLI keeps reading the old names while the new ones are absent, so no
+project configuration or state is lost:
+
+- `HERDR_AGENTS_*` variables, `~/.config/herdr-agents/config`,
+  `.agents/herdr-agents.conf`, and the `.herdr-agents/` state directory.
+  The first write (`config set`, `setup`, `doctor --fix`) copies a legacy
+  config file to its new name and leaves the old file in place.
+- `doctor` prints a `legacy …` warning for each old name still in use.
 
 ## Optional Herdr plugin
 
@@ -37,6 +63,10 @@ repository, link it once:
 herdr plugin link "$PWD/plugin"
 herdr plugin action list
 ```
+
+A checkout linked before the rename is registered as
+`djalmajr.herdr-agents`; unlink it and link the checkout again so Herdr
+loads `djalmajr.herdr-soho`.
 
 The `doctor` and `roster` actions inspect the workspace currently focused
 in Herdr, which can differ from the invoking shell's `HERDR_*` variables.

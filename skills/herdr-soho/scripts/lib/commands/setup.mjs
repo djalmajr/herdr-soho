@@ -13,11 +13,12 @@
 // lib/commands/setup-probe.mjs and runs the per-kind probes.
 import fs from 'node:fs';
 import path from 'node:path';
-import { DieError, cfg, configWritePair, configFileFor, stateRoot } from '../config.mjs';
+import { DieError, cfg, configWritePair, configFileFor, stateDirSetting, stateRoot } from '../config.mjs';
 import { homeDir, projectRoot, readTextFile, atomicWrite } from '../platform.mjs';
 import { warn } from '../state.mjs';
 import { applyLaneFile, setupLaneSpec } from '../lanes.mjs';
-import { SETUP_START, setupBlock, setupBlockResult, settingsHooksResult } from '../setuptext.mjs';
+import { effectiveConfigFile, legacyProjectConfigPath } from '../legacy.mjs';
+import { SETUP_START, LEGACY_SETUP_START, setupBlock, setupBlockResult, settingsHooksResult } from '../setuptext.mjs';
 import {
   ensureLocalExcludes, localRels, localTarget, planLocalExcludes,
   preflightLocalExcludes, refuseTrackedLocal, refuseUnignorableStateDir, resolveSetupMode, stateDirShown,
@@ -37,11 +38,15 @@ function isSymlink(p) {
 }
 
 // setup_target_existing <root>: the instruction file that already carries
-// the block, if any (AGENTS.md first, then CLAUDE.md), else null.
+// the block (current or the pre-rename legacy one), if any (AGENTS.md
+// first, then CLAUDE.md), else null.
 export function setupTargetExisting(root) {
   for (const f of [path.join(root, 'AGENTS.md'), path.join(root, 'CLAUDE.md')]) {
     if (!isFile(f)) continue;
-    try { if (readTextFile(f).includes(SETUP_START)) return f; } catch { /* unreadable */ }
+    try {
+      const text = readTextFile(f);
+      if (text.includes(SETUP_START) || text.includes(LEGACY_SETUP_START)) return f;
+    } catch { /* unreadable */ }
   }
   return null;
 }
@@ -53,7 +58,7 @@ export function setupTargetExisting(root) {
 export function setupWriteBlock(file) {
   let content = null;
   try { content = readTextFile(file); } catch { /* absent */ }
-  const had = content !== null && content.includes(SETUP_START);
+  const had = content !== null && (content.includes(SETUP_START) || content.includes(LEGACY_SETUP_START));
   const result = setupBlockResult(content);
   if (result === null) throw new DieError(`setup: produced an incomplete file for ${file} (file left untouched)`, 4);
   atomicWrite(file, result);
@@ -279,10 +284,11 @@ export function cmdSetup(args, ctx, env, cwd = process.cwd()) {
     else if (rels.length > 1) process.stdout.write(`state dir ignored: ${stateShown}\n`);
     else process.stdout.write(`state dir outside the repository: ${stateShown} (no repository Git exclusion is needed)\n`);
     process.stdout.write('note: only Claude Code reads CLAUDE.local.md and runs the hooks; Codex, Grok, Cursor and agy need a separate local instruction route.\n');
-    if (projectNeedsConfigPrompt(conf)) {
+    const promptConf = effectiveConfigFile(conf, legacyProjectConfigPath(root));
+    if (projectNeedsConfigPrompt(promptConf)) {
       // Local target kept in the guided follow-up: canonical `setup
       // --panes` would write the upstream's tracked instruction file.
-      warn(`project config ${conf} sets neither multi_role, any lane.<name>.kind, nor any role.<role>.kind. max_workers alone is not that choice. Orchestrator: run 'setup --detect', ask the user in their language how many agents at once (4 recommended, 3, or 2) and which detected assistant should implement, review, and research — do not say lane, kind, or panes to them — then run 'setup --local --panes 2|3|4 [--lane name=kind:model:effort]'. If doctor reports a missing or legacy config, finish with 'doctor --fix --panes 2|3|4'.`);
+      warn(`project config ${promptConf} sets neither multi_role, any lane.<name>.kind, nor any role.<role>.kind. max_workers alone is not that choice. Orchestrator: run 'setup --detect', ask the user in their language how many agents at once (4 recommended, 3, or 2) and which detected assistant should implement, review, and research — do not say lane, kind, or panes to them — then run 'setup --local --panes 2|3|4 [--lane name=kind:model:effort]'. If doctor reports a missing or legacy config, finish with 'doctor --fix --panes 2|3|4'.`);
     }
     return;
   }
@@ -290,14 +296,18 @@ export function cmdSetup(args, ctx, env, cwd = process.cwd()) {
   const claude = path.join(root, 'CLAUDE.md');
   if (isFile(claude) && !isSymlink(claude) && target !== claude) {
     let hasBlock = false;
-    try { hasBlock = readTextFile(claude).includes(SETUP_START); } catch { /* unreadable */ }
+    let claudeText = null;
+    try { claudeText = readTextFile(claude); } catch { /* unreadable */ }
+    hasBlock = claudeText !== null && (claudeText.includes(SETUP_START) || claudeText.includes(LEGACY_SETUP_START));
     if (!hasBlock) warn("CLAUDE.md exists separately and has no block: run 'setup --target CLAUDE.md' too, or make CLAUDE.md a symlink to AGENTS.md");
   }
   if (hooks === 1) writeHooksSection(root, env);
   stateRoot(ctx, env, cwd);
-  process.stdout.write(`state dir ignored: ${cfg(ctx, 'state_dir', '.herdr-soho', env)}/\n`);
+  process.stdout.write(`state dir ignored: ${stateDirSetting(ctx, env, cwd)}/\n`);
   process.stdout.write('note: Codex, Grok, Cursor and agy read the instruction file; only Claude Code runs the hooks.\n');
-  if (projectNeedsConfigPrompt(conf)) {
-    warn(`project config ${conf} sets neither multi_role, any lane.<name>.kind, nor any role.<role>.kind. max_workers alone is not that choice. Orchestrator: run 'setup --detect', ask the user in their language how many agents at once (4 recommended, 3, or 2) and which detected assistant should implement, review, and research — do not say lane, kind, or panes to them — then run 'setup --panes 2|3|4 [--lane name=kind:model:effort]'. If doctor reports a missing or legacy config, finish with 'doctor --fix --panes 2|3|4'.`);
+  // Read the legacy herdr-agents project file while the new one is absent.
+  const promptConf = effectiveConfigFile(conf, legacyProjectConfigPath(root));
+  if (projectNeedsConfigPrompt(promptConf)) {
+    warn(`project config ${promptConf} sets neither multi_role, any lane.<name>.kind, nor any role.<role>.kind. max_workers alone is not that choice. Orchestrator: run 'setup --detect', ask the user in their language how many agents at once (4 recommended, 3, or 2) and which detected assistant should implement, review, and research — do not say lane, kind, or panes to them — then run 'setup --panes 2|3|4 [--lane name=kind:model:effort]'. If doctor reports a missing or legacy config, finish with 'doctor --fix --panes 2|3|4'.`);
   }
 }
