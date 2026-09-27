@@ -50,7 +50,7 @@ project configuration or state is lost:
 
 - `HERDR_AGENTS_*` variables, `~/.config/herdr-agents/config`,
   `.agents/herdr-agents.conf`, and the `.herdr-agents/` state directory.
-  The first write to a config file (`config set`, `setup --panes`/`--lane`,
+  The first write to a config file (`config set`, `setup --panes`,
   `doctor --fix`) copies the legacy file to its new name and leaves the old
   file in place; `setup` alone only replaces the block and hooks.
 - `doctor` prints a `legacy …` warning for each old name still in use.

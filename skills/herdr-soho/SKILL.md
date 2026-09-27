@@ -529,7 +529,7 @@ project or machine still has only the old names, the CLI reads them:
 `HERDR_AGENTS_<KEY>` when `HERDR_SOHO_<KEY>` is unset,
 `~/.config/herdr-agents/config` and `.agents/herdr-agents.conf` while the new
 file is absent (the first write to that file — `config set`,
-`setup --panes`/`--lane`, `doctor --fix` — copies the old file to the new
+`setup --panes`, `doctor --fix` — copies the old file to the new
 name and leaves it in place), and the `.herdr-agents/` state directory
 while `.herdr-soho/` does not exist. `setup` replaces an old `<!-- herdr-agents:start/end -->` block and the old
 Claude hooks in place, and `doctor` prints one `legacy …` warning for each
