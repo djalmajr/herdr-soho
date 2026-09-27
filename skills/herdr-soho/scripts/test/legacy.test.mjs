@@ -272,6 +272,56 @@ test('setup (launcher): a team choice in the legacy project file counts, so no c
   assert.ok(!fs.existsSync(s.proj), 'setup without --panes must not create the new project file');
 });
 
+test('config set (launcher): a symlinked legacy config file is copied through the link on the first write', (t) => {
+  const s = setup();
+  t.after(() => s.cleanup());
+  // Mutation captured: deciding with lstatSync (the link is not a regular
+  // file) skips the copy, so the new file holds only the new key and the
+  // legacy keys stop being read.
+  const target = path.join(s.root, 'shared.conf');
+  fs.writeFileSync(target, 'herd_label=crew\nmax_workers=9\n');
+  fs.mkdirSync(path.dirname(s.legacyUser), { recursive: true });
+  fs.symlinkSync(target, s.legacyUser);
+  const r = s.run(['config', 'set', '--user', 'layout', 'tab']);
+  assert.equal(r.rc, 0, r.err);
+  assert.ok(r.err.includes(`copied legacy config ${s.legacyUser} to ${s.user}`), r.err);
+  assert.equal(fs.readFileSync(s.user, 'utf8'), 'herd_label=crew\nmax_workers=9\nlayout=tab\n');
+  assert.equal(fs.lstatSync(s.user).isSymbolicLink(), false);
+  assert.ok(fs.lstatSync(s.legacyUser).isSymbolicLink(), 'the legacy link stays');
+  assert.equal(fs.readFileSync(target, 'utf8'), 'herd_label=crew\nmax_workers=9\n');
+});
+
+test('config (launcher): state_dir from the defaults shows the legacy directory the commands use', (t) => {
+  const s = setup();
+  t.after(() => s.cleanup());
+  // Mutation captured: printing cfg(state_dir) for the defaults row shows
+  // .herdr-soho while every command uses .herdr-agents.
+  fs.mkdirSync(path.join(s.repo, '.herdr-agents'));
+  const r = s.run(['config']);
+  assert.equal(r.rc, 0, r.err);
+  assert.match(r.out, /^state_dir +\.herdr-agents +defaults$/m);
+});
+
+test('setup + doctor (launcher): a separate CLAUDE.md that keeps the legacy block is named', (t) => {
+  const s = setup();
+  t.after(() => s.cleanup());
+  // Mutation captured: treating the legacy marker as "has a block" in the
+  // separate-CLAUDE.md check hides it from setup, and a doctor that only
+  // reads the target file prints ok for AGENTS.md.
+  const legacyBlock = '<!-- herdr-agents:start -->\nold\n<!-- herdr-agents:end -->\n';
+  fs.writeFileSync(path.join(s.repo, 'AGENTS.md'), `# A\n\n${legacyBlock}`);
+  fs.writeFileSync(path.join(s.repo, 'CLAUDE.md'), `# C\n\n${legacyBlock}`);
+  const r = s.run(['setup', '--no-hooks']);
+  assert.equal(r.rc, 0, r.err);
+  assert.ok(r.err.includes("CLAUDE.md exists separately and still has the legacy herdr-agents block: run 'setup --target CLAUDE.md' too"), r.err);
+  const d = s.doctorRun();
+  assert.ok(warnLine(d.out, 'legacy herdr-agents instruction block in CLAUDE.md'), d.out);
+  const t2 = s.run(['setup', '--no-hooks', '--target', 'CLAUDE.md']);
+  assert.equal(t2.rc, 0, t2.err);
+  const d2 = s.doctorRun();
+  assert.ok(!d2.out.includes('legacy herdr-agents instruction block'), d2.out);
+});
+
 const LEGACY_PHRASES = [
   'legacy environment variable',
   'legacy user config',

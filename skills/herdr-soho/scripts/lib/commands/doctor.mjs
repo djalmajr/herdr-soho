@@ -850,6 +850,18 @@ export function doctorCheck(ctx, env = process.env, cwd = process.cwd()) {
   }
   else if (setupLocal) s.warn(`no herdr-soho block in ${LOCAL_INSTRUCTION_FILE}: run '${ENTRY_SCRIPT} setup --local' (writes the delegation rules between <!-- herdr-soho:start/end --> markers, kept unversioned)`);
   else s.warn(`no herdr-soho block in AGENTS.md/CLAUDE.md: run '${ENTRY_SCRIPT} setup' (writes the delegation rules between <!-- herdr-soho:start/end --> markers)`);
+  // A separate CLAUDE.md (not a symlink, not the file setup targets) that
+  // still carries only the pre-rename block: Claude Code keeps reading it.
+  const claudeMd = path.join(root, 'CLAUDE.md');
+  let claudeSeparate = false;
+  try { claudeSeparate = fs.lstatSync(claudeMd).isFile() && claudeMd !== t; } catch { /* absent */ }
+  if (claudeSeparate) {
+    let claudeText = '';
+    try { claudeText = readTextFile(claudeMd); } catch { /* unreadable */ }
+    if (claudeText.includes(LEGACY_SETUP_START) && !claudeText.includes(SETUP_START)) {
+      s.warn(`legacy herdr-agents instruction block in CLAUDE.md: run '${ENTRY_SCRIPT} setup --target CLAUDE.md' to replace it in place`);
+    }
+  }
   const settingsJson = path.join(root, '.claude', 'settings.json');
   const doctorHook = isFile(settingsJson) ? settingsHasDoctorHook(settingsJson) : null;
   if (doctorHook === 'new') {

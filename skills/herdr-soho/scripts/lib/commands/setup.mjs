@@ -295,11 +295,12 @@ export function cmdSetup(args, ctx, env, cwd = process.cwd()) {
   process.stdout.write(`block ${setupWriteBlock(target)}: ${target}\n`);
   const claude = path.join(root, 'CLAUDE.md');
   if (isFile(claude) && !isSymlink(claude) && target !== claude) {
-    let hasBlock = false;
     let claudeText = null;
     try { claudeText = readTextFile(claude); } catch { /* unreadable */ }
-    hasBlock = claudeText !== null && (claudeText.includes(SETUP_START) || claudeText.includes(LEGACY_SETUP_START));
-    if (!hasBlock) warn("CLAUDE.md exists separately and has no block: run 'setup --target CLAUDE.md' too, or make CLAUDE.md a symlink to AGENTS.md");
+    const hasNew = claudeText !== null && claudeText.includes(SETUP_START);
+    const hasLegacy = claudeText !== null && claudeText.includes(LEGACY_SETUP_START);
+    if (hasLegacy && !hasNew) warn("CLAUDE.md exists separately and still has the legacy herdr-agents block: run 'setup --target CLAUDE.md' too");
+    else if (!hasNew) warn("CLAUDE.md exists separately and has no block: run 'setup --target CLAUDE.md' too, or make CLAUDE.md a symlink to AGENTS.md");
   }
   if (hooks === 1) writeHooksSection(root, env);
   stateRoot(ctx, env, cwd);

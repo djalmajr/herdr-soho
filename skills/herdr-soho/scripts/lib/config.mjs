@@ -409,7 +409,12 @@ export function dottedKeyName(key, ctx, env = process.env, cwd = process.cwd()) 
 export function cmdConfig(ctx, env = process.env, cwd = process.cwd()) {
   const row = (k, v, s) => `${pad(k, 18)} ${pad(v, 30)} ${s}`;
   const lines = [row('KEY', 'VALUE', 'SOURCE')];
-  for (const k of CONFIG_SCALAR_KEYS) lines.push(row(k, cfg(ctx, k, '', env), cfgSource(ctx, k, env)));
+  for (const k of CONFIG_SCALAR_KEYS) {
+    // state_dir from the defaults layer shows the directory the commands
+    // use (the legacy .herdr-agents while a project only has that one).
+    const v = k === 'state_dir' && cfgSource(ctx, k, env) === 'defaults' ? stateDirSetting(ctx, env, cwd) : cfg(ctx, k, '', env);
+    lines.push(row(k, v, cfgSource(ctx, k, env)));
+  }
   const dotted = new Set();
   for (const k of ctx.entries.keys()) {
     if (/^(args|role|model|effort|lane)_/.test(k)) dotted.add(k);

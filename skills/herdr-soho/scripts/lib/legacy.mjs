@@ -87,7 +87,7 @@ export function effectiveConfigFile(newPath, legacyPath) {
 
 // migrate_legacy_config_file <dest>: when `dest` is the new user or project
 // config path, `dest` does not exist and the matching legacy file is a
-// regular file, the legacy content is copied byte for byte to a temp file
+// regular file (or a symlink to one), the legacy content is copied byte for byte to a temp file
 // in `dest`'s directory and renamed onto `dest` with the legacy mode
 // (the atomicWrite rule: same-directory temp + rename, nothing removed),
 // a warning names the copy on stderr, and true is returned. Any other case
@@ -102,14 +102,17 @@ export function migrateLegacyConfigFile(dest, env = process.env, cwd = process.c
       : '';
   if (legacy === '') return false;
   try { fs.lstatSync(dest); return false; } catch { /* absent: the copy target */ }
-  let lstat;
-  try { lstat = fs.lstatSync(legacy); } catch { return false; }
-  if (!lstat.isFile()) return false;
+  // statSync follows a symlinked legacy file, like the reading side
+  // (effectiveConfigFile): its target's bytes and mode are copied into a
+  // regular file at the new path, and the link itself stays untouched.
+  let st;
+  try { st = fs.statSync(legacy); } catch { return false; }
+  if (!st.isFile()) return false;
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const tmp = path.join(path.dirname(dest), `.${path.basename(dest)}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`);
   try {
     fs.copyFileSync(legacy, tmp);
-    fs.chmodSync(tmp, lstat.mode & 0o777);
+    fs.chmodSync(tmp, st.mode & 0o777);
     fs.renameSync(tmp, dest);
   } catch (err) {
     try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
