@@ -41,6 +41,12 @@ dispatching: any place where you would have to choose is a gap.
   exists at the end, how each criterion is proved (the command and the
   expected output), and every name, format, text and value the worker must
   not choose.
+- For flows that publish, retain, prune or delete state, include the
+  optional `Failure matrix` section; state which cases have local fixtures
+  and which need operational proof.
+- Include the checkpoint-after-gates rule: once every listed check passes,
+  stop proving; report external limits as `[partial]` with evidence and
+  leave scope-widening tests as open questions.
 - **Rules as exact predicates, each with a counterexample.** "A segment that
   *is* a family name decides the family (`my-router/anthropic/x` →
   anthropic; `anthropic-proxy/x` → unknown)" — not "a segment that is a

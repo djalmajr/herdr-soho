@@ -235,33 +235,63 @@ export function emptyCodeLines(text) {
   return out;
 }
 
-// lint_brief <file>: brief_lint=warn|strict|off (default warn). strict dies
-// 2 (with a friction entry for the living command); warn prints the warning
-// and continues. `off` never checks. A read-only role (opts.readOnly) skips
-// the `Owned files` check (see briefMissingSections).
-// The warning names the reason of every missing section: `brief <path> is
-// missing sections: [A] [B] — <reason A>; <reason B>`; strict appends
-// ` (brief_lint=strict)` to the same text.
-// A separate check flags the empty-inline-code symptom (``): it runs in
-// warn and strict alike (only brief_lint=off silences it), at most three
-// per-line warnings, then one for the rest.
-export function lintBrief(brief, ctx, env = process.env, opts = {}) {
+// A level 1-3 Failure matrix section, through the next heading of the same
+// or a higher level. The marker and reason order is part of the warning.
+function failureMatrixMissing(body) {
+  const lines = String(body ?? '').split('\n');
+  let start = -1;
+  let level = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = lines[i].match(/^(#{1,3}) +(.+)$/);
+    if (m && /^Failure matrix/i.test(m[2])) { start = i; level = m[1].length; break; }
+  }
+  if (start === -1) return [];
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const m = lines[i].match(/^(#{1,3}) +/);
+    if (m && m[1].length <= level) { end = i; break; }
+  }
+  const section = lines.slice(start + 1, end).join('\n');
+  return [
+    ['crash', 'a crash between publish and prune/delete is not covered'],
+    ['retry', 'a repeated or retried step is not covered'],
+    ['clock', 'a clock that goes backwards is not covered'],
+  ].filter(([marker]) => !section.includes(`[${marker}]`));
+}
+
+// Diagnostic data shared by the read-only `lint` command and dispatch.
+// Warnings have no program prefix so both entrypoints print them identically.
+export function briefLintFindings(brief, ctx, env = process.env, opts = {}) {
   const mode = cfg(ctx, 'brief_lint', 'warn', env);
-  if (mode === 'off') return;
+  if (mode === 'off') return { mode, warnings: [], missingMessage: '' };
   const { sections: aliases, ignored } = parseBriefLintAliases(cfg(ctx, 'brief_lint_aliases', '', env));
-  for (const item of ignored) warn(`brief_lint_aliases: ignored '${item}' (use Section=Heading|Heading)`);
+  const warnings = ignored.map((item) => `brief_lint_aliases: ignored '${item}' (use Section=Heading|Heading)`);
   let body = '';
   try { body = fs.readFileSync(brief, 'utf8'); } catch { body = ''; }
   const bad = emptyCodeLines(body);
   for (const n of bad.slice(0, 3)) {
-    warn(`brief ${brief} line ${n} has empty inline code (\`\`): a shell heredoc without quotes may have run the backticks`);
+    warnings.push(`brief ${brief} line ${n} has empty inline code (\`\`): a shell heredoc without quotes may have run the backticks`);
   }
-  if (bad.length > 3) warn(`… and ${bad.length - 3} more line(s)`);
+  if (bad.length > 3) warnings.push(`… and ${bad.length - 3} more line(s)`);
+  const missingMarkers = failureMatrixMissing(body);
+  if (missingMarkers.length) {
+    warnings.push(`brief ${brief} failure matrix is missing: ${missingMarkers.map(([marker]) => `[${marker}]`).join(' ')} — ${missingMarkers.map(([, reason]) => reason).join('; ')}`);
+  }
   const missing = briefMissingSections(brief, { ...opts, aliases });
-  if (missing === '') return;
-  const message = `brief ${brief} is missing sections:${missing} — ${missingSectionsReasons(missing)}`;
-  if (mode === 'strict') dieFriction(`${message} (brief_lint=strict)`, 2);
-  warn(message);
+  const missingMessage = missing === '' ? '' : `brief ${brief} is missing sections:${missing} — ${missingSectionsReasons(missing)}`;
+  return { mode, warnings, missingMessage };
+}
+
+// lint_brief <file>: warn prints diagnostics and continues; strict dies 2
+// (with a friction entry for the living command); `off` never checks. A
+// read-only role skips the `Owned files` check.
+export function lintBrief(brief, ctx, env = process.env, opts = {}) {
+  const { mode, warnings, missingMessage } = briefLintFindings(brief, ctx, env, opts);
+  if (mode === 'off') return;
+  for (const message of warnings) warn(message);
+  if (missingMessage === '') return;
+  if (mode === 'strict') dieFriction(`${missingMessage} (brief_lint=strict)`, 2);
+  warn(missingMessage);
 }
 
 // ---------- owned files of a brief ----------

@@ -5,7 +5,7 @@
 // [--project|--user]]`, `session [set <key> <value> | clear [key] | show]`,
 // `roles`, `role <name>`, `kinds`, `models <kind>`, `model <kind> <spec>
 // [effort]`, `spawn <role> …`, `dispatch <agent> <brief.md> …`,
-// `run <role> <brief.md> …`, `status <agent>…`, `roster`, `friction`,
+// `run <role> <brief.md> …`, `lint <brief.md> [--role <role>]`, `status <agent>…`, `roster`, `friction`,
 // `feedback send <report.md> "<one-line summary>"`, `tab-label`, `layout-plan`, `wait <agent>…`, `collect <agent>`,
 // `release <agent>`, `clean`, `doctor [--fix] [--panes 2|3|4] [--user]`,
 // `explain`, `init`, `title` (the orchestrator pane's current objective),
@@ -44,6 +44,7 @@ import { cmdTabLabel } from './lib/herdtabs.mjs';
 import { cmdSpawn } from './lib/spawn.mjs';
 import { cmdWait } from './lib/wait.mjs';
 import { cmdDispatch } from './lib/dispatch.mjs';
+import { cmdLint } from './lib/commands/lint.mjs';
 import { cmdRun } from './lib/commands/run.mjs';
 import { cmdCollect } from './lib/commands/collect.mjs';
 import { cmdStats } from './lib/commands/stats.mjs';
@@ -125,6 +126,11 @@ try {
       break;
     case 'dispatch': {
       const rc = cmdDispatch(argv.slice(1), ctx, env);
+      if (rc) process.exitCode = rc;
+      break;
+    }
+    case 'lint': {
+      const rc = cmdLint(argv.slice(1), ctx, env);
       if (rc) process.exitCode = rc;
       break;
     }

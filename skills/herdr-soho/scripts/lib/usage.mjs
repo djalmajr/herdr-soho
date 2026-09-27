@@ -45,6 +45,7 @@ Usage:
                       [--approvals ask|edits|full] [--reuse|--fresh]
                       [--tab-label TEXT] [-- <native agent args>]
   herdr-soho env                          # environment block for a feedback issue
+  herdr-soho lint <brief.md> [--role <role>]  # check the dispatch brief diagnostics without dispatching
   herdr-soho dispatch <agent> <brief.md> [--role R] [--timeout MS]
                       [--no-wait] [--allow-same-family] [--amend] [--for <author>[,…]]
                                              # --amend sends <file> as an amendment to the agent's current brief, with a new report that wait watches
