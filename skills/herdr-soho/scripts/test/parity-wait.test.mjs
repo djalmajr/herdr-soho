@@ -257,8 +257,10 @@ test('parity wait: a worker working until the timeout (test-quota.sh)', { timeou
   });
   assert.equal(r.steps[0].rc, 9);
   // The timeout line says how long this wait ran (normalized above) and the
-  // agent's state at that moment.
-  assert.deepEqual(lines(r.steps[0].out), [{ agent: 'build', status: 'timeout', elapsed_ms: '<ms>', state: 'working' }]);
+  // agent's state at that moment. A still screen that was only read is not
+  // activity: checkpoint false, null age, the old warn holds (the golden
+  // stderr is unchanged by the checkpoint feature).
+  assert.deepEqual(lines(r.steps[0].out), [{ agent: 'build', status: 'timeout', elapsed_ms: '<ms>', state: 'working', checkpoint: false, activity_age_s: null }]);
   assert.ok(!r.steps[0].out.includes('"status":"quota"'), 'a working agent never becomes quota');
 });
 

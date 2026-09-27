@@ -399,7 +399,7 @@
           "2000"
         ],
         "err": "PROG: warning: timeout waiting for 'build'; it may still be working (state: working). Run: herdr-soho wait build --timeout 4000\n",
-        "out": "{\"agent\":\"build\",\"status\":\"timeout\",\"elapsed_ms\":\"<ms>\",\"state\":\"working\"}\n",
+        "out": "{\"agent\":\"build\",\"status\":\"timeout\",\"elapsed_ms\":\"<ms>\",\"state\":\"working\",\"checkpoint\":false,\"activity_age_s\":null}\n",
         "rc": 9
       }
     ]
