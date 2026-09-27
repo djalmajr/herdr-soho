@@ -24,7 +24,7 @@
 // message → exit with the code only (bash passes herdr's own output
 // through and exits with herdr's code).
 import path from 'node:path';
-import { loadConfig, cmdConfig, cmdConfigSet, DieError } from './lib/config.mjs';
+import { loadConfig, cmdConfig, cmdConfigSet, nowrite, DieError } from './lib/config.mjs';
 import { cmdSession } from './lib/session.mjs';
 import { cmdRoles, cmdRole } from './lib/roles.mjs';
 import { cmdKinds } from './lib/kinds.mjs';
@@ -66,11 +66,29 @@ const env = process.env;
 const ctx = loadConfig();
 
 try {
+  // HERDR_AGENTS_NOWRITE=1: read-only inspection (the optional plugin's
+  // doctor/roster actions). Only the exact `doctor` and `roster`
+  // invocations — no extra arguments, so `doctor --fix` cannot write —
+  // are allowed; everything else is rejected before any state write.
+  // stateRoot skips the .gitignore entry and stateDir skips the state tree
+  // (config.mjs / state.mjs), and the friction log is skipped below;
+  // normal runs (without the env) are untouched.
+  if (nowrite(env)) {
+    const exact = (name) => cmd === name && argv.length === 1;
+    if (!exact('doctor') && !exact('roster')) {
+      // Name the command and count the extra arguments — never echo the
+      // argument values: caller-supplied text does not enter the diagnostic.
+      const shown = cmd === '' ? '(none)' : cmd;
+      const extra = cmd !== '' && argv.length > 1 ? ` (${argv.length - 1} extra argument${argv.length > 2 ? 's' : ''} not allowed)` : '';
+      die(`herdr-agents: HERDR_AGENTS_NOWRITE=1 is read-only: only the exact 'doctor' and 'roster' invocations run (the plugin's actions); rejected: ${shown}${extra} — unset HERDR_AGENTS_NOWRITE to write`, 2);
+    }
+  }
   if (LIVING.has(cmd)) {
     requireEnv(env);
     // FRICTION_LOG=<state>/friction.log when HERDR_ENV=1 and herdr is on
     // PATH (the jq requirement is gone, orchestrator decision 5).
-    if (findExecutable('herdr', env)) {
+    // nowrite: no friction log (a write), no stateDir call (a write).
+    if (!nowrite(env) && findExecutable('herdr', env)) {
       setFrictionLog(path.join(stateDir(ctx, env), 'friction.log'), cmd);
     }
   }

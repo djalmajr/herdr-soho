@@ -165,13 +165,23 @@ export function stateRootPath(ctx, env = process.env, cwd = process.cwd()) {
   return d;
 }
 
+// HERDR_AGENTS_NOWRITE=1: read-only inspection mode (the optional plugin
+// runs `doctor` and `roster` with it). stateRoot skips the .gitignore
+// entry, stateDir skips the state tree, and the entry point allows only
+// the exact `doctor` and `roster` invocations (no extra arguments, so
+// `doctor --fix` cannot write). Env only (never a config file): an
+// operator or a plugin opts in per invocation.
+export function nowrite(env = process.env) {
+  return env.HERDR_AGENTS_NOWRITE === '1';
+}
+
 // state_root() port: also keeps the .gitignore entry current (relative state
 // dir under a git work tree that does not ignore it yet).
 export function stateRoot(ctx, env = process.env, cwd = process.cwd()) {
   const root = projectRoot(env, cwd);
   const d = stateRootPath(ctx, env, cwd);
   const prefix = root + '/';
-  if (d.startsWith(prefix)) {
+  if (d.startsWith(prefix) && !nowrite(env)) {
     const rel = d.slice(prefix.length);
     const wt = spawnSync('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], { env, stdio: 'ignore' });
     if (wt.status === 0 && gitignoreNeeds(root, rel, env)) {

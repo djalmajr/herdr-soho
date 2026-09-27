@@ -404,3 +404,80 @@ catch (x) { if (x instanceof DieError) { process.stderr.write('die ' + x.code + 
     assert.ok(r.stderr.endsWith('die 2|'), r.stderr);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------- HERDR_AGENTS_NOWRITE (read-only inspection, the plugin's
+// doctor/roster actions) ----------
+
+test('nowrite: stateDir creates nothing; normal mode still creates the state tree and the .gitignore entry', () => {
+  const root = tmp('ha-state-nowrite-');
+  try {
+    const project = path.join(root, 'proj');
+    fs.mkdirSync(project, { recursive: true });
+    assert.equal(spawnSync('git', ['init', '--quiet'], { cwd: project, encoding: 'utf8' }).status, 0);
+    const ctx = { entries: new Map(), sources: [] };
+    // nowrite: the path is returned, nothing is created (no state tree,
+    // no .gitignore entry — the gitignoreNeeds path is real here: a fresh
+    // work tree that does not ignore .herdr-agents yet).
+    const sd = stateDir(ctx, { ...process.env, HERDR_WORKSPACE_ID: 'ws', HERDR_AGENTS_NOWRITE: '1' }, project);
+    assert.equal(sd, path.join(project, '.herdr-agents', 'ws'));
+    assert.ok(!fs.existsSync(path.join(project, '.herdr-agents')));
+    assert.ok(!fs.existsSync(path.join(project, '.gitignore')));
+    // Control: without the env the state tree and the .gitignore entry
+    // appear (normal CLI behavior is unchanged).
+    const sd2 = stateDir(ctx, { ...process.env, HERDR_WORKSPACE_ID: 'ws' }, project);
+    assert.ok(fs.statSync(path.join(sd2, 'briefs')).isDirectory());
+    assert.match(fs.readFileSync(path.join(project, '.gitignore'), 'utf8'), /^\.herdr-agents\/$/m);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('nowrite: the entry guard rejects non-exact invocations before any project write', { timeout: 120000 }, () => {
+  const root = tmp('ha-state-nowrite-guard-');
+  try {
+    const project = path.join(root, 'proj');
+    fs.mkdirSync(project, { recursive: true });
+    assert.equal(spawnSync('git', ['init', '--quiet'], { cwd: project, encoding: 'utf8' }).status, 0);
+    const before = fs.readdirSync(project).sort();
+    const entry = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'herdr-agents.mjs');
+    const env = { ...process.env, HERDR_AGENTS_NOWRITE: '1', HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'ws' };
+    // `doctor --fix` can still write: it is rejected, with every other
+    // non-exact invocation, before any state write. The rejection names
+    // the command (and counts the extra arguments) but never echoes the
+    // argument values — caller-supplied text must not enter the message.
+    for (const args of [
+      ['doctor', '--fix'],
+      ['doctor', '--panes', 'ZQXpanes42'],
+      ['roster', 'ZQXrosterarg'],
+      ['config', 'set', 'ZQXkey91', 'ZQXvalue92'],
+      ['session', 'clear', 'ZQXsesskey'],
+      ['spawn', 'ZQXagent1'],
+      ['clean'],
+    ]) {
+      const r = spawnSync(nodeBin(), [entry, ...args], { cwd: project, env, encoding: 'utf8', timeout: 60000 });
+      assert.equal(r.status, 2, `${args.join(' ')}: exit ${r.status}: ${r.stderr}`);
+      assert.match(r.stderr, /HERDR_AGENTS_NOWRITE=1 is read-only/);
+      const n = args.length - 1;
+      const extra = n > 0 ? ` \\(${n} extra argument${n > 1 ? 's' : ''} not allowed\\)` : '';
+      assert.match(r.stderr, new RegExp(`rejected: ${args[0]}${extra} `), `the command is named: ${r.stderr}`);
+      for (const v of args.slice(1)) {
+        // `set` stays under the 4-char floor: it is a CLI keyword, not
+        // caller data, and the static word `unset` would collide with a
+        // bare substring check; the full argument text is checked below.
+        if (v.length < 4) continue;
+        assert.ok(!r.stderr.includes(v), `${args.join(' ')}: argument value leaked into stderr: ${v}`);
+      }
+      if (n > 1) assert.ok(!r.stderr.includes(args.slice(1).join(' ')), `${args.join(' ')}: the argument text leaked`);
+      assert.deepEqual(fs.readdirSync(project).sort(), before, `${args.join(' ')}: the project is untouched`);
+    }
+    assert.ok(!fs.existsSync(path.join(project, '.gitignore')));
+    assert.ok(!fs.existsSync(path.join(project, '.herdr-agents')));
+    // Control: without the env the same write command keeps its normal
+    // behavior (config set writes the project file).
+    const r2 = spawnSync(nodeBin(), [entry, 'config', 'set', 'max_workers', '2'], {
+      cwd: project, env: { ...process.env, HERDR_WORKSPACE_ID: 'ws' }, encoding: 'utf8', timeout: 60000,
+    });
+    assert.equal(r2.status, 0, r2.stderr);
+    assert.ok(fs.existsSync(path.join(project, '.agents', 'herdr-agents.conf')));
+    // Mutation captured: an in-guard write (or a write command let through
+    // despite the env) changes the fresh project or the exit code above.
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

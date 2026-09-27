@@ -357,7 +357,12 @@ composed prompt (brief and amendment) says the worker alone writes that
 report, once the whole brief is done — a subagent or background task never
 writes it, because the orchestrator reads the report's existence as
 completion; and it says that every command output in the report is pasted
-from the run, never retyped or reconstructed.
+from the run, never retyped or reconstructed. The contract also names the
+report path, and the dispatch's path is authoritative: a brief's `# Report`
+section can name a different literal path (a hand-written or reused brief),
+but the worker writes to the dispatch's path anyway, and the dispatch's
+report routing (the JSON, `last-report`, the wait marker) never follows the
+brief's.
 
 ```bash
 $S dispatch impl brief.md            # blocks until impl's report exists (default)

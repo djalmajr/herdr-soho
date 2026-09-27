@@ -1,0 +1,6 @@
+.agents/
+.herdr-agents/
+.worktrees/
+node_modules/
+coverage/
+*.log

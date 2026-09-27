@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { die, readTextFile, runCli, atomicWrite } from './platform.mjs';
-import { stateRoot, DieError } from './config.mjs';
+import { stateRoot, nowrite, DieError } from './config.mjs';
 
 // ---------- time (local, like bash `date`) ----------
 
@@ -112,8 +112,11 @@ export function stateDirPath(ctx, env = process.env, cwd = process.cwd()) {
 
 // state_dir() port: <state_root>/<workspace_id> with briefs/, reports/,
 // wait/ and the agents.tsv header (created only when the file is absent).
+// HERDR_AGENTS_NOWRITE=1 (read-only inspection): the path is returned
+// without creating anything; reads of an absent state behave as before.
 export function stateDir(ctx, env = process.env, cwd = process.cwd()) {
   const d = stateDirPath(ctx, env, cwd);
+  if (nowrite(env)) return d;
   fs.mkdirSync(path.join(d, 'briefs'), { recursive: true });
   fs.mkdirSync(path.join(d, 'reports'), { recursive: true });
   fs.mkdirSync(path.join(d, 'wait'), { recursive: true });

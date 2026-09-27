@@ -20,7 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   DieError, cfg, cfgSource, configFileFor, fileKeyValue, loadConfig,
-  stateRoot, stateRootPath,
+  stateRoot, stateRootPath, nowrite,
 } from '../config.mjs';
 import {
   applyLaneFile, cfgLayerRank, configExplicit, effectiveLaneSignature, flexExtra, laneAttr, laneCapacity,
@@ -733,12 +733,35 @@ export function doctorCheck(ctx, env = process.env, cwd = process.cwd()) {
   for (const w of own.warnings) s.warn(w);
   if (own.declared && own.warnings.length === 0) s.ok('own providers: no known trap');
   const d = stateRoot(ctx, env, cwd);
-  try {
-    fs.mkdirSync(d, { recursive: true });
-    fs.accessSync(d, fs.constants.W_OK);
-    s.ok(`state dir writable: ${d}`);
-  } catch {
-    s.warn(`state dir not writable: ${d}`);
+  if (nowrite(env)) {
+    // No-write mode never creates the dir: an absent dir is reported as
+    // absent (the expected state for the plugin's read-only actions), an
+    // existing one is probed for genuine writability. Only ENOENT counts
+    // as absent (a dangling symlink target included); a permission or I/O
+    // error resolving the path keeps the inaccessible warning.
+    let st = null;
+    let statErr = null;
+    try { st = fs.statSync(d); } catch (e) { statErr = e; }
+    if (statErr !== null) {
+      if (statErr.code === 'ENOENT') s.ok(`state dir absent (no-write mode, not created): ${d}`);
+      else s.warn(`state dir not writable: ${d}`);
+    } else {
+      try {
+        fs.accessSync(d, fs.constants.W_OK);
+        if (st.isDirectory()) s.ok(`state dir writable: ${d}`);
+        else s.warn(`state dir not writable: ${d}`);
+      } catch {
+        s.warn(`state dir not writable: ${d}`);
+      }
+    }
+  } else {
+    try {
+      fs.mkdirSync(d, { recursive: true });
+      fs.accessSync(d, fs.constants.W_OK);
+      s.ok(`state dir writable: ${d}`);
+    } catch {
+      s.warn(`state dir not writable: ${d}`);
+    }
   }
   const layout = cfg(ctx, 'layout', 'split', env);
   if (layout === 'split' || layout === 'tab') {
