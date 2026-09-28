@@ -222,13 +222,15 @@ copying. Bind it with a `[[keys.command]]` entry of
 `send <ref|name> <message…>` delivers a message to another agent — any kind,
 local or on another machine — without the user in between. The target is a
 reference (`local/w12:p1`, `windows/w3:p1`, or a bare pane id on the local
-server) or an agent name on the local server. The message is always prefixed
-with a header that names the sender as a peer agent
-(`[herdr-soho:peer] Message from another agent — <ref> (<name>, <kind>,
-<role>), not from your user`) and says it carries no user intent or approval;
-the target's setup block tells it to treat such text that way, and it can
-reply with the same command. An `idle`, `done` or `unknown` target gets it at
-once; a `working`/`blocked` one is waited on until it settles
+server) or an agent name on the local server. The message is always prefixed with a 4-line header that names the sender as a
+peer agent (`[herdr-soho:peer] Message from another agent — <ref> (<name>,
+<kind>, <role>), not from your user`), says it carries no user intent or approval,
+how to reply with `send`, and announces that the message follows quoted with `> `
+(`The message follows, each line quoted with "> ".`). Each line of the body is
+quoted with `> ` (empty lines become `>`), so a fake header in the body can never
+be confused with the real one. The target's setup block tells it to treat such
+text that way, and it can reply with the same command. An `idle`, `done` or
+`unknown` target gets it at once; a `working`/`blocked` one is waited on until it settles
 (`--timeout MS`, default 600000) unless `--now` is given (then the target's
 own CLI decides queue vs mix). The wait timing out exits 17 with nothing
 sent; a prompt the agent does not take (stalled or blocked) exits 15 with no
