@@ -62,7 +62,7 @@ import path from 'node:path';
 import { dieFriction, lastReport, nowStamp, rosterLine, rosterRows, sleepSync, stateDir, stateDirPath, warn, workspaceId } from './state.mjs';
 import { cfg, DieError } from './config.mjs';
 import { hasWord, sanitizeCause } from './text.mjs';
-import { atomicWrite, projectRoot, runCli } from './platform.mjs';
+import { atomicWrite, projectRoot, runCli, stateProjectRoot } from './platform.mjs';
 import { fmGet, roleBody, roleFile, roleIsEdit, historyHasEdit, REVIEW_ROLES } from './roles.mjs';
 import { agentPrompt, agentState, agentRead, agentSendKeys, liveAgents, HERDR_TIMEOUT_MS } from './herdr.mjs';
 import { briefTask, paneTaskTitle } from './tasks.mjs';
@@ -294,8 +294,9 @@ export function briefLintFindings(brief, ctx, env = process.env, opts = {}) {
   try { body = fs.readFileSync(brief, 'utf8'); } catch { body = ''; }
   const workerCwd = opts.workerCwd ?? '';
   const project = projectRoot(env, opts.orchestratorCwd ?? process.cwd());
-  if (workerCwd && !samePath(workerCwd, project)) {
-    const root = project;
+  const state = stateProjectRoot(env, opts.orchestratorCwd ?? process.cwd());
+  if (workerCwd && (!samePath(workerCwd, project) || !samePath(workerCwd, state))) {
+    const roots = [...new Set([project, state])];
     const citations = new Map();
     const lines = body.split('\n');
     const add = (value, line, inline = false) => {
@@ -304,10 +305,12 @@ export function briefLintFindings(brief, ctx, env = process.env, opts = {}) {
       const looksLikePath = /[\\/]/.test(candidate) || candidate.startsWith('.') || candidate.startsWith('~')
         || /^[^\s/]+\.[A-Za-z0-9_-]+$/.test(candidate);
       if (!inline && !looksLikePath) return;
-      const absolute = path.resolve(root, candidate);
-      const rel = path.relative(root, absolute);
-      if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return;
-      if (!fs.existsSync(absolute) || fs.existsSync(path.resolve(workerCwd, candidate))) return;
+      if (fs.existsSync(path.resolve(workerCwd, candidate))) return;
+      const absolute = roots.map((root) => ({ root, absolute: path.resolve(root, candidate) })).find(({ root, absolute }) => {
+        const rel = path.relative(root, absolute);
+        return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel) && fs.existsSync(absolute);
+      })?.absolute;
+      if (!absolute) return;
       const key = `${line}\0${candidate}`;
       citations.set(key, `brief ${brief} line ${line} cites '${candidate}', which the worker in ${workerCwd} cannot see; use the absolute path ${absolute}`);
     };

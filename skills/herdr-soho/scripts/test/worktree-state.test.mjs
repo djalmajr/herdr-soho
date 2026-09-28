@@ -32,6 +32,12 @@ function initRepo(root) {
   git(['commit', '-qm', 'fixture']);
 }
 
+function git(root, args) {
+  const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  return (r.stdout || '').trim();
+}
+
 // Mutation captured: resolving linked-worktree state under the worker creates
 // an empty roster and causes commands to miss the main checkout's agent row.
 test('roster, status, and wait in a linked worktree read the main checkout state', { timeout: 60000 }, () => {
@@ -103,5 +109,51 @@ test('state root preserves the main checkout and non-git path behavior', () => {
     assert.equal(stateRootPath({ entries: new Map() }, env, realRepo), path.join(realRepo, '.herdr-soho'));
     assert.equal(stateProjectRoot(env, realOutside), realOutside);
     assert.equal(stateRootPath({ entries: new Map() }, env, realOutside), path.join(realOutside, '.herdr-soho'));
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});
+
+// Mutation captured: deriving a bare repository's root from dirname(commonDir)
+// puts state beside the bare repository instead of in its linked worktree.
+test('a linked worktree of a bare repository keeps state in that worktree', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-state-bare-worktree-'));
+  const source = path.join(temp, 'source');
+  const bare = path.join(temp, 'origin.git');
+  const worker = path.join(temp, 'worker');
+  try {
+    initRepo(source);
+    const clone = spawnSync('git', ['clone', '--bare', '-q', source, bare], { encoding: 'utf8' });
+    assert.equal(clone.status, 0, clone.stderr);
+    git(temp, ['--git-dir', bare, 'worktree', 'add', '-q', '-b', 'worker', worker, 'HEAD']);
+    const env = { ...process.env };
+    assert.equal(stateProjectRoot(env, worker), fs.realpathSync(worker));
+    assert.equal(stateRootPath({ entries: new Map() }, env, worker), path.join(fs.realpathSync(worker), '.herdr-soho'));
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});
+
+// Mutation captured: treating the parent .git/modules directory as a project
+// root stores a linked submodule worktree's state inside Git metadata.
+test('linked and ordinary submodule checkouts use the submodule checkout as state root', () => {
+  const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-state-submodule-')));
+  const superRepo = path.join(temp, 'super');
+  const subSource = path.join(temp, 'sub-source');
+  const submodule = path.join(superRepo, 'submodule');
+  const subWorktree = path.join(temp, 'sub-worktree');
+  try {
+    initRepo(superRepo);
+    initRepo(subSource);
+    const added = spawnSync('git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', subSource, 'submodule'], { cwd: superRepo, encoding: 'utf8' });
+    assert.equal(added.status, 0, added.stderr);
+    git(superRepo, ['add', '.gitmodules', 'submodule']);
+    git(superRepo, ['commit', '-qm', 'add submodule']);
+
+    const env = { ...process.env };
+    const realSubmodule = fs.realpathSync(submodule);
+    // Mutation captured: redirecting a submodule with identical git/common dirs to their parent moves state into Git metadata.
+    assert.equal(stateProjectRoot(env, realSubmodule), realSubmodule);
+    assert.equal(stateRootPath({ entries: new Map() }, env, realSubmodule), path.join(realSubmodule, '.herdr-soho'));
+
+    git(realSubmodule, ['worktree', 'add', '-q', '-b', 'linked', subWorktree, 'HEAD']);
+    assert.equal(stateProjectRoot(env, subWorktree), realSubmodule);
+    assert.equal(stateRootPath({ entries: new Map() }, env, subWorktree), path.join(realSubmodule, '.herdr-soho'));
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 });

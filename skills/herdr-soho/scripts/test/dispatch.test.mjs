@@ -319,9 +319,9 @@ function makeFix(prefix) {
   return fix;
 }
 
-function cmd(fix, args, extraEnv = {}) {
+function cmd(fix, args, extraEnv = {}, cwd = fix.repo) {
   return spawnSync(nodeBin(), [JS_ENTRY, ...args], {
-    cwd: fix.repo,
+    cwd,
     env: { ...fix.env, ...extraEnv },
     encoding: 'utf8',
     timeout: 60_000,
@@ -656,8 +656,7 @@ test('dispatch: a brief naming a different report path — the composed prompt k
   } finally { fix.cleanup(); }
 });
 
-// Mutation captured: omitting the worker-cwd visibility check sends a brief
-// with a path that exists only in the orchestrator checkout without warning.
+// Mutation captured: searching only projectRoot misses state paths; searching only stateProjectRoot misses worktree-only files.
 test('dispatch warns about relative paths visible only from the orchestrator checkout', { timeout: 60000 }, () => {
   const fix = makeFix('ha-dispatch-worktree-path-');
   try {
@@ -673,11 +672,12 @@ test('dispatch warns about relative paths visible only from the orchestrator che
     const workerCwd = path.join(fix.repo, '.worktrees', 'worker');
     fs.mkdirSync(path.dirname(workerCwd), { recursive: true });
     git(['worktree', 'add', '-q', '-b', 'worker', workerCwd]);
+    fs.writeFileSync(path.join(workerCwd, 'only-worktree.md'), 'only in this worktree\n');
     const hiddenRel = '.herdr-soho/w1/reports/x.md';
     const hidden = path.join(fix.repo, hiddenRel);
     fs.mkdirSync(path.dirname(hidden), { recursive: true });
     fs.writeFileSync(hidden, 'orchestrator only\n');
-    const briefBody = `${FULL_BRIEF}\nRead \`${hiddenRel}\` and \`visible.md\`.\n`;
+    const briefBody = `${FULL_BRIEF}\nRead \`${hiddenRel}\`, \`visible.md\`, and \`only-worktree.md\`.\n`;
     const brief = fix.brief('worktree-path.md', briefBody);
     const row = (name, cwd) => [name, 'p1', 'grok', 'implementer', 'xai', '0', cwd, '20260928T120000', '', 'ask', 'implementer', ''].join('\t');
     const citeLine = briefBody.split('\n').findIndex((line) => line.includes(hiddenRel)) + 1;
@@ -709,6 +709,21 @@ test('dispatch warns about relative paths visible only from the orchestrator che
     const rootRun = cmd(fix, ['dispatch', 'root', brief, '--no-wait']);
     assert.equal(rootRun.status, 0, rootRun.stderr);
     assert.doesNotMatch(rootRun.stderr, /which the worker in/);
+
+    const orchestratorInWorktree = `herdr-soho: warning: brief ${brief} line ${citeLine} cites '${hiddenRel}', which the worker in ${workerCwd} cannot see; use the absolute path ${hidden}\n`;
+    fix.writeRoster(undefined, row('same-wt', workerCwd));
+    const sameWorktreeRun = cmd(fix, ['dispatch', 'same-wt', brief, '--no-wait'], {}, workerCwd);
+    assert.equal(sameWorktreeRun.status, 0, sameWorktreeRun.stderr);
+    assert.ok(sameWorktreeRun.stderr.includes(orchestratorInWorktree), sameWorktreeRun.stderr);
+
+    const otherCwd = path.join(fix.root, 'other-worker-cwd');
+    fs.mkdirSync(otherCwd, { recursive: true });
+    fix.writeRoster(undefined, row('other', otherCwd));
+    const workerElsewhere = `herdr-soho: warning: brief ${brief} line ${citeLine} cites '${hiddenRel}', which the worker in ${otherCwd} cannot see; use the absolute path ${hidden}\n`;
+    const otherRun = cmd(fix, ['dispatch', 'other', brief, '--no-wait'], {}, workerCwd);
+    assert.equal(otherRun.status, 0, otherRun.stderr);
+    assert.ok(otherRun.stderr.includes(workerElsewhere), otherRun.stderr);
+    assert.ok(otherRun.stderr.includes(`cites 'only-worktree.md', which the worker in ${otherCwd} cannot see; use the absolute path ${path.join(workerCwd, 'only-worktree.md')}`), otherRun.stderr);
 
     fix.writeRoster(undefined, row('amend', workerCwd));
     const original = fix.brief('amend-original.md', FULL_BRIEF);

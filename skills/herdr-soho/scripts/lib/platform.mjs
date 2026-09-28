@@ -63,7 +63,25 @@ export function stateProjectRoot(env = process.env, cwd = process.cwd()) {
   const gitPath = path.resolve(cwd, (gitDir.stdout || '').trim());
   const commonPath = path.resolve(cwd, (commonDir.stdout || '').trim());
   if (!gitPath || gitPath === commonPath) return projectRoot(env, cwd);
-  return path.dirname(commonPath);
+  if (path.basename(commonPath) === '.git') return path.dirname(commonPath);
+  const worktrees = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  if (worktrees.status === 0) {
+    const first = (worktrees.stdout || '').split(/\r?\n\r?\n/, 1)[0];
+    const firstPath = first.split(/\r?\n/).find((line) => line.startsWith('worktree '));
+    if (firstPath && !first.split(/\r?\n/).some((line) => line === 'bare')) {
+      let root = path.resolve(cwd, firstPath.slice('worktree '.length));
+      const listedRel = path.relative(commonPath, root);
+      const listedInsideCommon = listedRel === '' || (listedRel !== '..' && !listedRel.startsWith(`..${path.sep}`) && !path.isAbsolute(listedRel));
+      if (listedInsideCommon) {
+        const worktree = spawnSync('git', ['--git-dir', commonPath, 'config', '--path', 'core.worktree'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        if (worktree.status === 0 && (worktree.stdout || '').trim()) root = path.resolve(commonPath, worktree.stdout.trim());
+      }
+      const rootRel = path.relative(commonPath, root);
+      const rootInsideCommon = rootRel === '' || (rootRel !== '..' && !rootRel.startsWith(`..${path.sep}`) && !path.isAbsolute(rootRel));
+      if (!rootInsideCommon) return root;
+    }
+  }
+  return projectRoot(env, cwd);
 }
 
 // `command -v` port: resolve an executable on PATH, honoring PATHEXT on
