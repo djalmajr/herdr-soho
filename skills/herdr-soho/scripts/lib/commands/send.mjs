@@ -8,20 +8,26 @@
 // `herdr [--machine m] agent get <pane id|name>`.
 //
 // Message: the words after the target joined with a space, or `--file
-// <path>` (the file content, trailing newlines trimmed) — never both.
+// <path>` (the file content, trailing newlines trimmed) — never both. The
+// body and the sender fields are scrubbed (literalPeerText) of the bytes a
+// terminal would run as keystrokes before the text is assembled.
 //
 // Delivery: an idle/done/unknown target gets the prompt at once; a
 // working/blocked target is waited on (`agent wait --until idle --until
 // done --timeout MS`, default 600000) unless `--now`. The prompt goes
 // through `agent prompt --wait … --timeout 15000`; agent_prompt_stalled /
-// agent_blocked are not-received with no automatic resend.
+// agent_blocked / the receipt-wait timeout are not-received (a timeout is
+// not a delivery) with no automatic resend.
 //
-// Policy: for a local target the `inbound` key (auto | off) of the target's
-// project is read in the target's directory with the target's session layer
-// and none of the sender's HERDR_SOHO_*/HERDR_AGENTS_* variables; off
-// refuses before anything is sent. A remote target's policy is not
-// consulted (the sending machine cannot read the remote project) — the
-// documented limitation.
+// Policy: for EVERY local target the `inbound` key (auto | off) of the
+// target's project is read in the target's directory with the target's
+// session layer and none of the sender's HERDR_SOHO_*/HERDR_AGENTS_*
+// variables; off refuses before anything is sent. When the target's cwd is
+// empty the read happens in a fresh empty directory (no project): the user
+// layer and the defaults still apply, and the sender's project can never
+// stand in for the target's. A remote target's policy is not consulted (the
+// sending machine cannot read the remote project) — the documented
+// limitation.
 //
 // Every attempt appends one line to <state>/peer-messages.tsv (ts from to
 // result chars; HERDR_SOHO_NOWRITE=1 skips it).
@@ -29,12 +35,16 @@
 // Exit codes: 0 sent, 2 usage, 4 herdr/target unavailable, 15 the target
 // did not take the message, 17 the target is still busy after the wait
 // timeout (nothing sent), 18 refused by the target's inbound=off.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { die, readTextFile } from '../platform.mjs';
 import { stateDirPath } from '../state.mjs';
 import { LOCAL_MACHINE } from '../sessionref.mjs';
 import {
   appendPeerLog, DEFAULT_SEND_TIMEOUT_MS, deliverPrompt, inboundPolicy,
-  peerHeader, resolveTarget, senderInfo, senderRefOf, waitUntilIdle,
+  literalPeerText, peerHeader, resolveTarget, senderInfo, senderRefOf,
+  waitUntilIdle,
 } from '../peer.mjs';
 
 export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
@@ -92,10 +102,26 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
   }
 
   // 2. The inbound policy: the target project's rule, consulted BEFORE any
-  // wait or send — for a local target only (a remote target's policy is not
-  // consulted; the sending machine cannot read the remote project).
-  if (t.machine === LOCAL_MACHINE && t.cwd !== '') {
-    if (inboundPolicy(t.cwd, t.workspaceId, env) === 'off') {
+  // wait or send — for EVERY local target (a remote target's policy is not
+  // consulted; the sending machine cannot read the remote project). When
+  // the target's cwd is empty (agent get gave no usable string), the read
+  // happens in a fresh empty directory (no project): the user layer and
+  // the defaults still apply, and the sender's project can never stand in
+  // for the target's.
+  if (t.machine === LOCAL_MACHINE) {
+    let policyCwd = t.cwd;
+    let policyTmp = '';
+    if (policyCwd === '') {
+      policyTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-send-policy-'));
+      policyCwd = policyTmp;
+    }
+    let policy;
+    try {
+      policy = inboundPolicy(policyCwd, t.workspaceId, env);
+    } finally {
+      if (policyTmp !== '') fs.rmSync(policyTmp, { recursive: true, force: true });
+    }
+    if (policy === 'off') {
       log(senderRefOf(env), ref, 'refused');
       die(`send: ${ref} does not accept peer messages (inbound=off)`, 18);
     }
@@ -120,18 +146,24 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
   }
 
   // 4. Deliver: header + blank line + body, through agent prompt --wait.
+  // The body and the sender fields pass through literalPeerText so no byte
+  // the target's terminal would run as a keystroke (CR, ESC, DEL, the
+  // bracketed-paste markers, the other control characters) reaches it; \n
+  // and \t stay. The header always comes first.
   const sender = senderInfo(ctx, env, cwd);
-  const text = `${peerHeader(sender.ref, sender.name, sender.kind, sender.role)}\n\n${body}`;
+  const text = `${peerHeader(literalPeerText(sender.ref), literalPeerText(sender.name), literalPeerText(sender.kind), literalPeerText(sender.role))}\n\n${literalPeerText(body)}`;
   const p = deliverPrompt(t.machine, t.targetArg, text, env);
   if (p.ok) {
     log(sender.ref, ref, 'sent');
     process.stdout.write(`sent to ${ref}\n`);
     return 0;
   }
-  if (p.code === 'agent_prompt_stalled' || p.code === 'agent_blocked') {
-    // No automatic resend: a second shot may duplicate the first.
-    log(sender.ref, ref, p.code === 'agent_prompt_stalled' ? 'stalled' : 'blocked');
-    die(`send: ${ref} did not take the message (${p.cause}); read its pane before sending again`, 15);
+  if (p.code === 'agent_prompt_stalled' || p.code === 'agent_blocked' || p.code === 'timeout') {
+    // No automatic resend: a second shot may duplicate the first, and the
+    // receipt timeout does not prove the text never reached the pane.
+    const result = p.code === 'agent_prompt_stalled' ? 'stalled' : p.code === 'agent_blocked' ? 'blocked' : 'timeout';
+    log(sender.ref, ref, result);
+    die(`send: ${ref} did not take the message (${p.code === 'timeout' ? 'timeout' : p.cause}); read its pane before sending again`, 15);
   }
   log(sender.ref, ref, 'error');
   die(`send: ${ref} unavailable: ${p.cause}`, 4);

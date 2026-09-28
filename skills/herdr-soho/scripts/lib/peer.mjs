@@ -42,6 +42,19 @@ export function peerHeader(senderRef, senderName, senderKind, senderRole) {
   ].join('\n');
 }
 
+// literalPeerText: the body and the sender fields, stripped of the bytes a
+// terminal would run as keystrokes — the bracketed-paste markers (a stray
+// ESC [201~ would close the paste `agent prompt` opens and the rest would
+// be typed as keys) and every control character but \n and \t (\r, ESC,
+// DEL and the rest of U+0000–U+001F go). A plain \n is the same channel as
+// the header's three lines: one submit, no extra Enter.
+export function literalPeerText(s) {
+  return String(s)
+    .replace(/\u001b\[200~/g, '')
+    .replace(/\u001b\[201~/g, '')
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '');
+}
+
 // senderRefOf: the caller's reference for the log (`local/<pane id>`),
 // `local/-` outside a Herdr pane — without any herdr call.
 export function senderRefOf(env = process.env) {
@@ -199,12 +212,13 @@ export function waitUntilIdle(machine, pane, timeoutMs, env = process.env) {
 
 // deliverPrompt: `herdr [--machine m] agent prompt <pane> <text> --wait
 // --until working --until blocked --until idle --until done --timeout 15000`.
-// ok=true when the submission is accepted (rc 0) or when herdr reports its
-// own receipt-wait `timeout` — the input was sent to the terminal; only the
-// state did not settle within the 15 s window (a long active turn of an
-// already-working target). agent_prompt_stalled and agent_blocked are
-// not-received (the caller exits 15); any other failure is a herdr failure
-// (the caller exits 4).
+// ok=true only when the submission is accepted (rc 0): the receipt wait
+// matched a state and the text plus the Enter were written. agent_prompt_
+// stalled, agent_blocked and herdr's own receipt-wait `timeout` are
+// not-received (the caller exits 15): the timeout does not prove the text
+// never landed (a slow submission, or --now with an active turn that does
+// not settle within 15 s) — it is never a delivery. Any other failure is a
+// herdr failure (the caller exits 4).
 export function deliverPrompt(machine, pane, text, env = process.env) {
   const args = [
     ...herdrMachineArgs(machine), 'agent', 'prompt', pane, text,
@@ -217,8 +231,6 @@ export function deliverPrompt(machine, pane, text, env = process.env) {
   if (r.status === 0) return { ok: true, code: '', cause: '' };
   if (r.timedOut) return { ok: false, code: '', cause: `herdr agent prompt timed out after ${PROMPT_WAIT_TIMEOUT_MS / 1000}s` };
   const e = structuredError(r, 'agent prompt', `failed (exit ${r.status ?? 1})`);
-  if (e.code === 'agent_prompt_stalled' || e.code === 'agent_blocked') return { ok: false, ...e };
-  if (e.code === 'timeout') return { ok: true, code: '', cause: '' };
   return { ok: false, ...e };
 }
 
