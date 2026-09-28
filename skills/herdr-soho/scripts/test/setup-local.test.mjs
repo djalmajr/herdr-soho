@@ -1131,7 +1131,7 @@ test('localRels + stateDirShown: ./, interior . and relative-external spellings 
     assert.deepEqual(localRels(repo, ctx, envOf('../outside-state'), repo), [LOCAL_INSTRUCTION_FILE], 'a relative external adds no state entry');
     assert.deepEqual(localRels(repo, ctx, envOf(`cache${path.sep}`), repo), [LOCAL_INSTRUCTION_FILE, 'cache'], 'trailing separator still normalizes');
     assert.equal(stateDirShown(repo, ctx, envOf(`.${path.sep}cache`), repo), 'cache/', 'shown: ./cache reads cache/');
-    assert.equal(stateDirShown(repo, ctx, envOf(path.join('a', '.', 'b')), repo), `${path.join('a', 'b')}/`, 'shown: interior dot resolves');
+    assert.equal(stateDirShown(repo, ctx, envOf(path.join('a', '.', 'b')), repo), 'a/b/', 'shown: interior dot resolves');
     assert.equal(stateDirShown(repo, ctx, envOf('../outside-state'), repo), path.resolve(repo, '../outside-state'), 'shown: external is the resolved absolute path');
     // path.resolve is lexical: it cannot erase the actual-name risks, which
     // assertSafeLocalRels still refuses on the resolved name (explicit per
@@ -1261,7 +1261,7 @@ test('classifyStateDir: ancestor symlink alias inside, sibling and nested work t
     // The benign counterpart: the interior alias alone (no in-repo
     // symlink in the path) reads inside with the root-relative physical
     // rel — even before the tail exists.
-    assert.deepEqual(classifyStateDir(repo, ctx, envOf(path.join(dir, 'sublink', 'newstate')), repo), { kind: 'inside', rel: path.join('sub', 'newstate'), shown: `${path.join('sub', 'newstate')}/` }, 'an interior alias reads inside with the physical rel');
+    assert.deepEqual(classifyStateDir(repo, ctx, envOf(path.join(dir, 'sublink', 'newstate')), repo), { kind: 'inside', rel: path.join('sub', 'newstate'), shown: 'sub/newstate/' }, 'an interior alias reads inside with the physical rel');
     // A final symlink to another in-repo directory: the entry would name a
     // different path than the one the state lands in.
     fs.mkdirSync(path.join(repo, '.herdr-soho'), { recursive: true });
@@ -1301,7 +1301,7 @@ test('classifyStateDir: ancestor symlink alias inside, sibling and nested work t
     } finally { git(repo, 'worktree', 'remove', '--force', nested); }
     // A plain external path and a missing in-repo tail.
     assert.deepEqual(classifyStateDir(repo, ctx, envOf(path.join(dir, 'elsewhere')), repo), { kind: 'external', shown: path.join(dir, 'elsewhere') }, 'plain external');
-    assert.deepEqual(classifyStateDir(repo, ctx, envOf(path.join('deep', 'cache')), repo), { kind: 'inside', rel: path.join('deep', 'cache'), shown: `${path.join('deep', 'cache')}/` }, 'missing tail is walked past');
+    assert.deepEqual(classifyStateDir(repo, ctx, envOf(path.join('deep', 'cache')), repo), { kind: 'inside', rel: path.join('deep', 'cache'), shown: 'deep/cache/' }, 'missing tail is walked past');
     // Mutation captured: following a symlink below the root (loop/cache
     // reads cache/), classifying a direct outside alias as external (no
     // entry), accepting an in-repo symlink reached through an outside
@@ -1712,7 +1712,7 @@ test('stateDirShown: relative and trailing-slash overrides, external absolute, d
     const ctx = loadConfig(env, repo);
     assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: 'cache' }, repo), 'cache/', 'relative override');
     assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: `cache${path.sep}` }, repo), 'cache/', 'trailing separator reads the same');
-    assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: path.join('deep', 'my cache') }, repo), `${path.join('deep', 'my cache')}/`, 'nested interior space');
+    assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: path.join('deep', 'my cache') }, repo), 'deep/my cache/', 'nested interior space');
     const external = path.resolve(os.tmpdir(), 'abs', 'elsewhere', 'state');
     assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: external }, repo), external, 'external: the actual absolute path');
     // Mutation captured: formatting the cfg default instead of the effective

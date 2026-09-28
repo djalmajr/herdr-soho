@@ -66,7 +66,10 @@ function probeFakeSource(name) {
   L.push("  case 'quotatime': process.stderr.write('Error: You have hit your usage limit. Try again at 14:30.\\n'); process.exit(1); break;");
   L.push('  case \'hang\': {');
   L.push("    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1500)'], { stdio: ['ignore', 'inherit', 'inherit'] });");
-  L.push('    setTimeout(() => {}, 30000);');
+  // On Windows the probe kills only cmd.exe behind the .cmd launcher and
+  // this node process outlives it, holding the fixture directory: it hangs
+  // 4 s there (still far past the 1 s limit) so the cleanup can finish.
+  L.push(`    setTimeout(() => {}, ${process.platform === 'win32' ? 4000 : 30000});`);
   L.push('    break;');
   L.push('  }');
   L.push("  default: process.stdout.write('ok\\n');");
@@ -109,7 +112,7 @@ test.before(() => {
     PROBE_ARGS_DIR: ARGS, PROBE_MODE_DIR: MODES,
   });
 });
-test.after(() => fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
+test.after(() => fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }));
 
 // Run the entry as a child process (the e2e half); clears the args logs
 // first so "no CLI ran" is provable from their absence.
