@@ -292,6 +292,33 @@ export function briefLintFindings(brief, ctx, env = process.env, opts = {}) {
   const warnings = ignored.map((item) => `brief_lint_aliases: ignored '${item}' (use Section=Heading|Heading)`);
   let body = '';
   try { body = fs.readFileSync(brief, 'utf8'); } catch { body = ''; }
+  const workerCwd = opts.workerCwd ?? '';
+  const project = projectRoot(env, opts.orchestratorCwd ?? process.cwd());
+  if (workerCwd && !samePath(workerCwd, project)) {
+    const root = project;
+    const citations = new Map();
+    const lines = body.split('\n');
+    const add = (value, line, inline = false) => {
+      const candidate = value.trim().replace(/[),.;:]+$/, '');
+      if (!candidate || path.isAbsolute(candidate)) return;
+      const looksLikePath = /[\\/]/.test(candidate) || candidate.startsWith('.') || candidate.startsWith('~')
+        || /^[^\s/]+\.[A-Za-z0-9_-]+$/.test(candidate);
+      if (!inline && !looksLikePath) return;
+      const absolute = path.resolve(root, candidate);
+      const rel = path.relative(root, absolute);
+      if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return;
+      if (!fs.existsSync(absolute) || fs.existsSync(path.resolve(workerCwd, candidate))) return;
+      const key = `${line}\0${candidate}`;
+      citations.set(key, `brief ${brief} line ${line} cites '${candidate}', which the worker in ${workerCwd} cannot see; use the absolute path ${absolute}`);
+    };
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      for (const m of line.matchAll(/`([^`]+)`/g)) add(m[1], i + 1, true);
+      for (const m of line.matchAll(/(?:^|[\s"'(])([^\s"'<>`]+)(?=$|[\s"'):,;])/g)) add(m[1], i + 1);
+    }
+    warnings.push(...citations.values());
+  }
+  if (opts.pathsOnly === true) return { mode, warnings, missingMessage: '' };
   const bad = emptyCodeLines(body);
   for (const n of bad.slice(0, 3)) {
     warnings.push(`brief ${brief} line ${n} has empty inline code (\`\`): a shell heredoc without quotes may have run the backticks`);
@@ -312,7 +339,10 @@ export function briefLintFindings(brief, ctx, env = process.env, opts = {}) {
 export function lintBrief(brief, ctx, env = process.env, opts = {}) {
   const { mode, warnings, missingMessage } = briefLintFindings(brief, ctx, env, opts);
   if (mode === 'off') return;
-  for (const message of warnings) warn(message);
+  for (const message of warnings) {
+    if (mode === 'strict' && message.includes('which the worker in ')) dieFriction(message, 2);
+    warn(message);
+  }
   if (missingMessage === '') return;
   if (mode === 'strict') dieFriction(`${missingMessage} (brief_lint=strict)`, 2);
   warn(missingMessage);
@@ -859,7 +889,9 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   // The section lint runs after the role is resolved: a read-only role
   // (mode != edit) needs no `Owned files` section. An amendment is a
   // delta, not a brief: no section lint.
-  if (amend !== 1) lintBrief(brief, ctx, env, { readOnly: !roleIsEdit(role, env, cwd) });
+  const wcwd = cols[6] ?? '';
+  if (amend === 1) lintBrief(brief, ctx, env, { pathsOnly: true, workerCwd: wcwd, orchestratorCwd: cwd });
+  else lintBrief(brief, ctx, env, { readOnly: !roleIsEdit(role, env, cwd), workerCwd: wcwd, orchestratorCwd: cwd });
   // The role's timeout (frontmatter, else dispatch_timeout), scaled by the
   // role's effective effort (xhigh 1.5x, max 2x) — the same value a later
   // `wait` without --timeout uses.
@@ -956,7 +988,6 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   // family check; stateDir returns the same path as stateDirPath above.
   stateDir(ctx, env, cwd);
   const ts = (opts.nowStamp ?? nowStamp)();
-  const wcwd = cols[6] ?? '';
   // D25: another live roster agent with an edit role in the same cwd
   // (column 7) edits this same tree: the composed prompt (brief and
   // amendment) carries the shared-tree line right before the standing

@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { die, readTextFile, projectRoot, userConfigPath, atomicWrite } from './platform.mjs';
+import { die, readTextFile, projectRoot, stateProjectRoot, userConfigPath, atomicWrite } from './platform.mjs';
 import {
   defaultStateDirName, effectiveConfigFile, legacyProjectConfigPath, legacyUserConfigPath,
   migrateLegacyConfigFile,
@@ -171,7 +171,7 @@ export function configFileFor(where, env = process.env, cwd = process.cwd()) {
 // effective default, defaultStateDirName); relative paths are under the
 // project root.
 export function stateRootPath(ctx, env = process.env, cwd = process.cwd()) {
-  const root = projectRoot(env, cwd);
+  const root = stateProjectRoot(env, cwd);
   let d = env.HERDR_SOHO_DIR || stateDirSetting(ctx, env, cwd);
   if (!path.isAbsolute(d)) d = path.resolve(root, d);
   return d;
@@ -185,7 +185,7 @@ export function stateDirSetting(ctx, env = process.env, cwd = process.cwd()) {
   if (env.HERDR_SOHO_STATE_DIR) return env.HERDR_SOHO_STATE_DIR;
   const e = ctx.entries.get('state_dir');
   if (e && e.source !== 'defaults' && e.value !== '') return e.value;
-  return defaultStateDirName(projectRoot(env, cwd));
+  return defaultStateDirName(stateProjectRoot(env, cwd));
 }
 
 // HERDR_SOHO_NOWRITE=1: read-only inspection mode (the optional plugin
@@ -215,7 +215,7 @@ export function stateGitignoreRel(root, statePath, pathApi = path) {
 // state_root() port: also keeps the .gitignore entry current (relative state
 // dir under a git work tree that does not ignore it yet).
 export function stateRoot(ctx, env = process.env, cwd = process.cwd()) {
-  const root = projectRoot(env, cwd);
+  const root = stateProjectRoot(env, cwd);
   const d = stateRootPath(ctx, env, cwd);
   const gitRel = stateGitignoreRel(root, d);
   if (gitRel && !nowrite(env)) {

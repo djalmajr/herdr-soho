@@ -656,6 +656,72 @@ test('dispatch: a brief naming a different report path — the composed prompt k
   } finally { fix.cleanup(); }
 });
 
+// Mutation captured: omitting the worker-cwd visibility check sends a brief
+// with a path that exists only in the orchestrator checkout without warning.
+test('dispatch warns about relative paths visible only from the orchestrator checkout', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-dispatch-worktree-path-');
+  try {
+    const git = (args) => {
+      const r = spawnSync('git', args, { cwd: fix.repo, encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stderr);
+    };
+    git(['config', 'user.email', 'test@example.invalid']);
+    git(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(fix.repo, 'visible.md'), 'visible in both checkouts\n');
+    git(['add', 'visible.md']);
+    git(['commit', '-qm', 'fixture']);
+    const workerCwd = path.join(fix.repo, '.worktrees', 'worker');
+    fs.mkdirSync(path.dirname(workerCwd), { recursive: true });
+    git(['worktree', 'add', '-q', '-b', 'worker', workerCwd]);
+    const hiddenRel = '.herdr-soho/w1/reports/x.md';
+    const hidden = path.join(fix.repo, hiddenRel);
+    fs.mkdirSync(path.dirname(hidden), { recursive: true });
+    fs.writeFileSync(hidden, 'orchestrator only\n');
+    const briefBody = `${FULL_BRIEF}\nRead \`${hiddenRel}\` and \`visible.md\`.\n`;
+    const brief = fix.brief('worktree-path.md', briefBody);
+    const row = (name, cwd) => [name, 'p1', 'grok', 'implementer', 'xai', '0', cwd, '20260928T120000', '', 'ask', 'implementer', ''].join('\t');
+    const citeLine = briefBody.split('\n').findIndex((line) => line.includes(hiddenRel)) + 1;
+    const expected = `herdr-soho: warning: brief ${brief} line ${citeLine} cites '${hiddenRel}', which the worker in ${workerCwd} cannot see; use the absolute path ${hidden}\n`;
+
+    fix.writeRoster(undefined, row('build', workerCwd));
+    fix.clearLog();
+    const warnRun = cmd(fix, ['dispatch', 'build', brief, '--no-wait']);
+    assert.equal(warnRun.status, 0, warnRun.stderr);
+    assert.ok(warnRun.stderr.includes(expected), warnRun.stderr);
+    assert.match(fix.log(), /agent prompt build/);
+
+    fix.writeRoster(undefined, row('strict', workerCwd));
+    fix.clearLog();
+    const strictRun = cmd(fix, ['dispatch', 'strict', brief, '--no-wait'], { HERDR_SOHO_BRIEF_LINT: 'strict' });
+    assert.equal(strictRun.status, 2, strictRun.stderr);
+    assert.equal(strictRun.stderr, expected.replace('herdr-soho: warning: ', 'herdr-soho: '));
+    assert.doesNotMatch(fix.log(), /agent prompt strict/);
+
+    fix.writeRoster(undefined, row('shared', workerCwd));
+    fix.clearLog();
+    const sharedRun = cmd(fix, ['dispatch', 'shared', brief, '--no-wait']);
+    assert.equal(sharedRun.status, 0, sharedRun.stderr);
+    assert.doesNotMatch(sharedRun.stderr, /cites 'visible\.md'/);
+    assert.equal((sharedRun.stderr.match(/which the worker in/g) ?? []).length, 1, 'only the main-checkout-only path is warned');
+
+    fix.writeRoster(undefined, row('root', fix.repo));
+    fix.clearLog();
+    const rootRun = cmd(fix, ['dispatch', 'root', brief, '--no-wait']);
+    assert.equal(rootRun.status, 0, rootRun.stderr);
+    assert.doesNotMatch(rootRun.stderr, /which the worker in/);
+
+    fix.writeRoster(undefined, row('amend', workerCwd));
+    const original = fix.brief('amend-original.md', FULL_BRIEF);
+    const first = cmd(fix, ['dispatch', 'amend', original, '--no-wait']);
+    assert.equal(first.status, 0, first.stderr);
+    fix.clearLog();
+    const amended = cmd(fix, ['dispatch', 'amend', brief, '--amend', '--no-wait']);
+    assert.equal(amended.status, 0, amended.stderr);
+    assert.ok(amended.stderr.includes(expected), amended.stderr);
+    assert.match(fix.log(), /agent prompt amend/);
+  } finally { fix.cleanup(); }
+});
+
 test('compose: report_language and worker_context=lean add their lines', { timeout: 60000 }, () => {
   const fix = makeFix('ha-dispatch-compose-lean-');
   try {

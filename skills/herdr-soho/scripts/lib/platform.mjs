@@ -53,6 +53,19 @@ export function projectRoot(env = process.env, cwd = process.cwd()) {
   return cwd;
 }
 
+// State belongs to the primary checkout when this cwd is in a linked
+// worktree. Normal checkouts and non-git directories keep projectRoot's
+// existing behavior.
+export function stateProjectRoot(env = process.env, cwd = process.cwd()) {
+  const gitDir = spawnSync('git', ['rev-parse', '--git-dir'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const commonDir = spawnSync('git', ['rev-parse', '--git-common-dir'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  if (gitDir.status !== 0 || commonDir.status !== 0) return projectRoot(env, cwd);
+  const gitPath = path.resolve(cwd, (gitDir.stdout || '').trim());
+  const commonPath = path.resolve(cwd, (commonDir.stdout || '').trim());
+  if (!gitPath || gitPath === commonPath) return projectRoot(env, cwd);
+  return path.dirname(commonPath);
+}
+
 // `command -v` port: resolve an executable on PATH, honoring PATHEXT on
 // Windows (decision 6). Returns the full path or null.
 export function findExecutable(name, env = process.env, platform = process.platform) {
