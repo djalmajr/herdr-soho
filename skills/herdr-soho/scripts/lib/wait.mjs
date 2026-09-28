@@ -46,6 +46,7 @@ import { providerDetect } from './provider.mjs';
 import { laneOfRole } from './lanes.mjs';
 import { roleTimeoutMs } from './resolve.mjs';
 import { markTaskDone } from './tasks.mjs';
+import { readTaskReportPointer, syncTaskReport } from './taskreport.mjs';
 
 // ---------- kind_approve_keys (:3616) ----------
 
@@ -657,6 +658,11 @@ export function waitFor(agents, opts) {
           const partial = partialCount(reportText);
           const header = reviewHeader(reportText);
           const done = { agent: a, status: 'done', report: r };
+          const taskPointer = readTaskReportPointer(sd, a);
+          if (taskPointer !== null && taskPointer.current === r) {
+            const stable = syncTaskReport(sd, a);
+            if (stable !== null) done.task_report = taskPointer.task_report;
+          }
           if (header) {
             done.verdict = header.verdict;
             done.findings = header.findings;

@@ -391,6 +391,20 @@ by hand. The amendment gets a new report that `wait` watches, and the pane
 keeps its current task. For a busy worker the message arrives when the CLI
 delivers it (most queue it).
 
+**One stable report path per task.** Every attempt still writes its own
+versioned report, but a task (a dispatch and its amendments) also has
+`task_report`: `<state>/reports/<agent>-<ts>.current.md`, named in the
+`dispatch` and `wait` JSON right after `report`, and on a
+`<!-- task report: … -->` line from `collect`. It is a regular file (no
+symlink) with the content of the task's current report: absent while
+that report is pending, written by `wait` when it reports `done` and by
+`collect`. An accepted `--amend` makes the amendment's report the current
+one (the earlier ones stay, listed in `<state>/task-report-<agent>.json`
+under `history`) and removes the copy until the amendment reports. A
+dispatch or amendment the transport refused restores `last-report-<agent>`,
+the pointer and the copy as they were, so the wait never follows a report
+that will not come.
+
 `wait` prints one JSON line per agent (`done`, `blocked`, `question`,
 `settled-no-report`, `gone`, `unavailable`, `quota`, `provider-error`,
 `capacity`, `not-received`, `timeout`) and exits 0 only when all reports
@@ -720,7 +734,12 @@ of the roster is not scanned. Each author is one of:
 - an agent in the roster (its family column);
 - a family: `anthropic`, `openai`, `xai` or `google`;
 - a kind with a fixed family (`claude`, `codex`, `grok`, `agy`, `gemini`).
-  `cursor`, `pi` and `opencode` have a family per model: name the family.
+  `cursor`, `pi` and `opencode` have a family per model: name the family;
+- an agent already released from the roster: its family comes from the
+  kind and model recorded in its accepted dispatches in this workspace.
+  No accepted dispatch, or dispatches that disagree on one known family,
+  fail (exit 2) and ask for the family instead. A live roster entry of
+  the same name wins, and the name must match exactly.
 
 An agent whose family is unknown cannot narrow the check. The family is
 first derived from its kind and model; when it is still unknown, the

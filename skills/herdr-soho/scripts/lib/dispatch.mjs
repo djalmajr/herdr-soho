@@ -24,10 +24,10 @@
 //     `wait_status` as the first key, so `dispatch … | tail -1` returns the
 //     whole JSON and callers filtering a field never lose the status; the
 //     other keys keep the bash `jq -n` order (agent, role, kind,
-//     composed_prompt, report, report_exists, auto_approved,
+//     composed_prompt, report, task_report, report_exists, auto_approved,
 //     and lane/model/match/renewal only on a quota, and lane/model/cause —
 //     plus retries on a capacity — only on a provider-error/capacity);
-//     `settled_report` sits right after `report` (before report_exists)
+//     `settled_report` sits right after `task_report` (before report_exists)
 //     only when the internal wait settled on another report — an
 //     amendment sent mid-wait re-pointed last-report-<agent> (D39) — and
 //     report_exists then qualifies that report; `amend: true` sits right after report_exists on an amendment, and
@@ -53,7 +53,6 @@ import { hasWord, sanitizeCause } from './text.mjs';
 import { atomicWrite, projectRoot } from './platform.mjs';
 import { fmGet, roleBody, roleFile, roleIsEdit, historyHasEdit, REVIEW_ROLES } from './roles.mjs';
 import { agentPrompt, agentState, agentRead, agentSendKeys, liveAgents } from './herdr.mjs';
-import { agentFamily, kindFamily } from './kinds.mjs';
 import { briefTask, paneTaskTitle } from './tasks.mjs';
 import { waitFor, pollIntervalMs, cksumField } from './wait.mjs';
 import { quotaDetect } from './quota.mjs';
@@ -62,6 +61,9 @@ import { dialogKind } from './dialog.mjs';
 import { laneOfRole } from './lanes.mjs';
 import { roleTimeoutMs } from './resolve.mjs';
 import { PROMPT_MARKER, lastNonEmptyLines, promptSitsInInput, markerSeq, markerSeqChanged } from './arrival.mjs';
+import { agentFamily, kindFamily } from './kinds.mjs';
+import { collectPrompts, readSidecar } from './commands/stats.mjs';
+import { readTaskReportPointer, taskReportPointerPath, writeTaskReportPointer, syncTaskReport } from './taskreport.mjs';
 // Re-exported so the names that were exported here before the move to
 // lib/arrival.mjs keep their import path.
 export { PROMPT_MARKER, lastNonEmptyLines, promptSitsInInput, markerSeq, markerSeqChanged };
@@ -102,14 +104,10 @@ export function familyConflicts(sd, fam, env = process.env, cwd = process.cwd())
 // One `--for <spec>` → family, or a DieError (usage, exit 2), in this
 // order: (1) a roster agent's name — the family of column 5 of its row;
 // an empty or `unknown` column is derived from the row's kind (column 3)
-// and model (column 9) via agentFamily, and stays `unknown` when that
-// cannot map either (the caller then runs the global roster scan, so a
-// --for never accepts more than a plain dispatch); (2) a family name
-// (anthropic|openai|xai|google); (3) a kind with a fixed family
-// (kindFamily !== 'unknown': claude, codex, grok, agy, gemini). Anything
-// else does not resolve.
+// and model (column 9); (2) a family name; (3) a fixed-family kind;
+// (4) accepted dispatch metadata for an agent no longer in the roster.
 const FOR_FAMILY_NAMES = ['anthropic', 'openai', 'xai', 'google'];
-export function forSpecFamily(spec, sd, env = process.env, cwd = process.cwd()) {
+export function forSpecFamily(spec, sd, env = process.env, cwd = process.cwd(), ctx = {}) {
   for (const line of rosterRows(sd)) {
     const f = line.split('\t');
     if ((f[0] ?? '') !== spec) continue;
@@ -120,7 +118,21 @@ export function forSpecFamily(spec, sd, env = process.env, cwd = process.cwd()) 
   if (FOR_FAMILY_NAMES.includes(spec)) return spec;
   const kfam = kindFamily(spec);
   if (kfam !== 'unknown') return kfam;
-  throw new DieError(`dispatch: --for '${spec}': not an agent in the roster, a family (anthropic|openai|xai|google) or a kind with a fixed family`, 2);
+  const tmpDir = path.join(env.TMPDIR || os.tmpdir(), 'herdr-soho', workspaceId(ctx, env, cwd), 'reports');
+  const pairs = collectPrompts(sd, tmpDir).filter((p) => p.agent === spec);
+  for (const pair of pairs) readSidecar(pair);
+  const accepted = pairs.filter((p) => p.sidecar?.submission === 'accepted');
+  if (accepted.length === 0) {
+    throw new DieError(`dispatch: --for '${spec}': not an agent in the roster, a family (anthropic|openai|xai|google), a kind with a fixed family, or an agent with an accepted dispatch recorded in this workspace`, 2);
+  }
+  const counts = new Map();
+  for (const pair of accepted) {
+    const family = agentFamily(pair.sidecar.kind, pair.sidecar.model);
+    counts.set(family, (counts.get(family) ?? 0) + 1);
+  }
+  if (counts.size === 1 && !counts.has('unknown')) return counts.keys().next().value;
+  const detail = [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([family, n]) => `${family} ×${n}`).join(', ');
+  throw new DieError(`dispatch: --for '${spec}': the recorded dispatches of this released agent do not agree on one known model family (${detail}); pass the family instead (anthropic|openai|xai|google)`, 2);
 }
 
 // ---------- lint_brief (:3887) ----------
@@ -791,7 +803,7 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
     const unknowns = [];
     for (const spec of forSpecs.split(',').map((s) => s.trim())) {
       let fam;
-      try { fam = forSpecFamily(spec, sd, env, cwd); }
+      try { fam = forSpecFamily(spec, sd, env, cwd, ctx); }
       catch (e) {
         if (e instanceof DieError) dieFriction(e.message, e.code);
         throw e;
@@ -915,7 +927,7 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
     sharedTree = sharedTreeEditor(rosterRows(sd), liveAgents(env), agent, wcwd, (r) => roleIsEdit(r, env, cwd));
   } catch { sharedTree = false; }
   const tmpReports = wcwd !== '' && wcwd !== projectRoot(env, cwd)
-    ? path.join(env.TMPDIR || os.tmpdir(), 'herdr-soho', workspaceId(ctx, env, cwd), 'reports')
+    ? path.resolve(env.TMPDIR || os.tmpdir(), 'herdr-soho', workspaceId(ctx, env, cwd), 'reports')
     : null;
   const composedAt = (suf) => (tmpReports !== null
     ? path.join(tmpReports, `${agent}-${ts}${suf}.brief.md`)
@@ -963,14 +975,50 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
     sidecarCause = sanitizeCause(e && e.message ? e.message : e) || 'unknown error';
   }
   if (sidecarCause !== '') {
-    process.stdout.write(JSON.stringify({ wait_status: 'error', agent, role, kind, composed_prompt: composed, report, report_exists: false, raw: `couldn't write the attempt sidecar: ${sidecarCause}` }) + '\n');
+    const taskReport = readTaskReportPointer(sd, agent)?.task_report
+      ?? path.join(sd, 'reports', `${path.basename(report, '.md')}.current.md`);
+    process.stdout.write(JSON.stringify({ wait_status: 'error', agent, role, kind, composed_prompt: composed, report, task_report: taskReport, report_exists: false, raw: `couldn't write the attempt sidecar: ${sidecarCause}` }) + '\n');
     warn(`could not write the attempt sidecar ${sidecar}: ${sidecarCause}`);
     return 4;
   }
   fs.writeFileSync(composed, amend === 1
     ? composeAmendment(fs.readFileSync(brief, 'utf8'), report, ctx, env, kind, cols[13] ?? '', sharedTree)
     : composePrompt(rf, role, agent, fs.readFileSync(brief, 'utf8'), report, ctx, env, kind, cols[13] ?? '', sharedTree));
-  fs.writeFileSync(path.join(sd, `last-report-${agent}`), `${report}\n`);
+  const lastPath = path.join(sd, `last-report-${agent}`);
+  const pointerPath = taskReportPointerPath(sd, agent);
+  const snapshot = (p) => {
+    try { return { exists: true, content: fs.readFileSync(p) }; }
+    catch (e) { if (e?.code === 'ENOENT') return { exists: false, content: null }; throw e; }
+  };
+  const priorLast = snapshot(lastPath);
+  const priorPointer = snapshot(pointerPath);
+  const priorValue = readTaskReportPointer(sd, agent);
+  const oldReport = priorLast.exists ? priorLast.content.toString('utf8').trim() : '';
+  const taskReport = priorValue?.task_report
+    ?? path.join(sd, 'reports', `${path.basename(report, '.md')}.current.md`);
+  const pointer = amend === 1
+    ? {
+      version: 1,
+      task_report: taskReport,
+      current: report,
+      history: priorValue !== null ? [...priorValue.history, priorValue.current] : (oldReport !== '' ? [path.resolve(oldReport)] : []),
+    }
+    : { version: 1, task_report: taskReport, current: report, history: [] };
+  const restoreTaskState = () => {
+    if (priorLast.exists) atomicWrite(lastPath, priorLast.content);
+    else fs.rmSync(lastPath, { force: true });
+    if (priorPointer.exists) atomicWrite(pointerPath, priorPointer.content);
+    else fs.rmSync(pointerPath, { force: true });
+    syncTaskReport(sd, agent);
+  };
+  try {
+    writeTaskReportPointer(sd, agent, pointer);
+    syncTaskReport(sd, agent);
+    fs.writeFileSync(lastPath, `${report}\n`);
+  } catch (e) {
+    restoreTaskState();
+    throw e;
+  }
   for (const suf of ['size', 'screen', 'since', 'blocked', 'approvals', 'quota',
     'provider', 'provider-cause', 'capacity-retries', 'capacity-at',
     'question', 'stuck-hash', 'stuck-since', 'stuck-warned', 'activity-at', 'probe-at',
@@ -1022,14 +1070,21 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
     preAuthCauses = priorAuthCauses(prePScreen);
   }
   let status = 'submitted';
-  const p = agentPrompt(agent, text, env);
+  let p;
+  try { p = agentPrompt(agent, text, env); }
+  catch (e) {
+    restoreTaskState();
+    try { writeSidecar('failed'); } catch { /* preserve the submission error */ }
+    throw e;
+  }
   if (!p.ok) {
     try { writeSidecar('failed'); }
     catch (e) {
       warn(`could not record the failed submission in the attempt sidecar ${sidecar}: ${sanitizeCause(e && e.message ? e.message : e) || 'unknown error'}`);
     }
+    restoreTaskState();
     status = 'error';
-    process.stdout.write(JSON.stringify({ wait_status: 'error', agent, role, kind, composed_prompt: composed, report, report_exists: false, raw: p.raw }) + '\n');
+    process.stdout.write(JSON.stringify({ wait_status: 'error', agent, role, kind, composed_prompt: composed, report, task_report: taskReport, report_exists: false, raw: p.raw }) + '\n');
     warn(`prompt submission failed; inspect with: herdr agent get ${agent} && herdr agent read ${agent}. Do not resend blindly.`);
     return 4;
   }
@@ -1105,7 +1160,7 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
       const seq = agentState(agent, env).seq;
       fs.writeFileSync(path.join(sd, 'wait', `${agent}.not-received`),
         `${Math.floor(Date.now() / 1000)}${seq !== '' ? ` ${seq}` : ''}\n`);
-      process.stdout.write(JSON.stringify({ wait_status: 'not-received', agent, role, kind, composed_prompt: composed, report, report_exists: reportNow }) + '\n');
+      process.stdout.write(JSON.stringify({ wait_status: 'not-received', agent, role, kind, composed_prompt: composed, report, task_report: taskReport, report_exists: reportNow }) + '\n');
       warn(`prompt to '${agent}' was not received after ${what}; read the pane (herdr agent read ${agent} --source visible) before sending anything else`);
       return 15;
     };
@@ -1291,9 +1346,10 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
     wait_status: status,
     agent, role, kind, composed_prompt: composed, report,
   };
+  out.task_report = taskReport;
   // settled_report: the report the internal wait settled on when an
   // amendment re-pointed last-report-<agent> mid-wait (D39). It sits
-  // right after `report`, before report_exists (which then qualifies it);
+  // right after `task_report`, before report_exists (which then qualifies it);
   // absent when the wait followed the dispatch's own report.
   if (wsettled !== '') out.settled_report = wsettled;
   out.report_exists = reportExists;
