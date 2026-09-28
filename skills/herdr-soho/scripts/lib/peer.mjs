@@ -328,15 +328,16 @@ const DIALOG_PATTERNS = [
   /\(y\/n\)/i,
 ];
 
-// isDialogScreen: true when the bottom 20 non-empty lines match folder/workspace trust
-// patterns (any status) or question detectors from dialog.mjs (only when target is 'blocked').
+// isDialogScreen: trust/confirmation patterns use the bottom 10 non-empty lines;
+// question detectors from dialog.mjs use the bottom 20 and only when status is 'blocked'.
 export function isDialogScreen(screen, kind = '', status = '') {
   if (!screen) return false;
-  const bottom = tailLines(screen, 20).join('\n');
-  if (DIALOG_PATTERNS.some((re) => re.test(bottom))) return true;
+  const bottom10 = tailLines(screen, 10).join('\n');
+  if (DIALOG_PATTERNS.some((re) => re.test(bottom10))) return true;
   if (status === 'blocked') {
-    if (kind && dialogKind(kind, bottom) === 'question') return true;
-    if (!kind && ['codex', 'claude', 'opencode'].some((k) => dialogKind(k, bottom) === 'question')) return true;
+    const bottom20 = tailLines(screen, 20).join('\n');
+    if (kind && dialogKind(kind, bottom20) === 'question') return true;
+    if (!kind && ['codex', 'claude', 'opencode'].some((k) => dialogKind(k, bottom20) === 'question')) return true;
   }
   return false;
 }

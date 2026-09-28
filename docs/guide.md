@@ -203,9 +203,9 @@ text that way, and it can reply with the same command. An `idle`, `done` or
 (`--timeout MS`, default 600000) unless `--now` is given (then the target's
 own CLI decides queue vs mix). The wait timing out exits 17 with nothing
 sent. Before sending, `send` inspects the target's visible screen: if reading fails, it exits 4 (`<ref>'s screen unreadable; nothing was sent`).
-If the bottom 20 non-empty lines match folder/workspace trust patterns (`Trust this workspace`,
+If the bottom 10 non-empty lines match folder/workspace trust patterns (`Trust this workspace`,
 `trust this folder`, `Do you trust`, `Enter to confirm`, `[y/N]`, `(y/n)`) under any status,
-or question detectors from `dialog.mjs` when the target is `blocked`, it waits up to `--timeout`
+or question detectors from `dialog.mjs` in the bottom 20 lines when the target is `blocked`, it waits up to `--timeout`
 for the dialog to clear, exiting 17 `dialog` without sending or typing if it remains.
 The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.
 Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).

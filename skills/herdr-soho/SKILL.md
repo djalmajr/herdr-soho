@@ -851,9 +851,9 @@ with the real one. A `working`/
 --until done --timeout MS`, default 600000) unless `--now` is given (the target's own
 CLI decides queue vs mix); timing out exits 17 with nothing sent (`<ref> is still <status> after <s>s`).
 Before sending, `send` checks the target's visible screen: if reading fails, it exits 4 (`<ref>'s screen unreadable; nothing was sent`).
-If the bottom 20 non-empty lines match folder/workspace trust patterns (`Trust this workspace`,
+If the bottom 10 non-empty lines match folder/workspace trust patterns (`Trust this workspace`,
 `trust this folder`, `Do you trust`, `Enter to confirm`, `[y/N]`, `(y/n)`) under any status,
-or question detectors from `dialog.mjs` when the target is `blocked`, it waits up to `--timeout`
+or question detectors from `dialog.mjs` in the bottom 20 lines when the target is `blocked`, it waits up to `--timeout`
 for the dialog to clear; if it does not clear, it exits 17 (`<ref> is showing a dialog; nothing was sent`),
 logging `dialog` without typing into the dialog.
 The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.

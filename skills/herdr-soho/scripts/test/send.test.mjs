@@ -39,6 +39,7 @@ const SENDER_PANE = 'w0test:p0a';
 const SENDER_NAME = 'soho-s4';
 const SENDER_WS = 'w0testws';
 const TARGET_PANE = 'w0test:p0b';
+const CURSOR_TRUST_ANSWERED_SCREEN = fs.readFileSync(new URL('./fixtures/cursor-trust-answered.txt', import.meta.url), 'utf8');
 
 // The fake herdr (source written by writeFakeCli). Every call is recorded
 // as a JSON argv line in $HERDR_FAKE_LOG before anything else.
@@ -1318,6 +1319,63 @@ test('dialog: trust workspace dialog blocks send, exits 17 dialog with no prompt
     assert.equal(cols[3], 'dialog', 'result logged as dialog');
     assert.match(cols[5], /^[0-9a-f]{8}$/, 'id present in log');
   } finally { fx.cleanup(); }
+});
+
+// Mutation captured: checking trust patterns in the last 20 lines blocks this answered Cursor screen instead of sending.
+test('dialog: answered Cursor trust screen with idle target proceeds to send', { timeout: 60000 }, () => {
+  const fx = makeFixture();
+  try {
+    fx.targetAgent('idle');
+    fx.env.HERDR_FAKE_VISIBLE_SCREEN = CURSOR_TRUST_ANSWERED_SCREEN;
+    const r = fx.run([TARGET_PANE, '--timeout', '50', 'hello']);
+    assert.equal(r.rc, 0, `rc ${r.rc}: ${r.err}`);
+    assert.equal(r.out, `sent to local/${TARGET_PANE}\n`);
+    assert.equal(fx.calls().filter((c) => c[1] === 'prompt').length, 1, 'message sent once');
+    assert.equal(fx.calls().filter((c) => c[1] === 'send-keys').length, 0, 'no key sent into the ready prompt');
+  } finally { fx.cleanup(); }
+});
+
+function assertOpenTrustDialogBlocks(screen) {
+  const fx = makeFixture();
+  try {
+    fx.targetAgent('idle');
+    const r = fx.run([TARGET_PANE, '--timeout', '50', 'hello'], { HERDR_FAKE_VISIBLE_SCREEN: screen });
+    assert.equal(r.rc, 17, `rc ${r.rc}: ${r.err}`);
+    assert.equal(fx.calls().filter((c) => c[1] === 'prompt').length, 0, 'no prompt sent into the dialog');
+    assert.equal(fx.calls().filter((c) => c[1] === 'send-keys').length, 0, 'no key sent into the dialog');
+  } finally { fx.cleanup(); }
+}
+
+// Mutation captured: dropping the workspace-trust pattern allows an open Cursor dialog to receive a prompt.
+test('dialog: open Cursor trust screen still blocks send', { timeout: 60000 }, () => {
+  assertOpenTrustDialogBlocks([
+    'Cursor Agent',
+    '│  ▶ [a] Trust this workspace │',
+    '│    [q] Quit │',
+    '│  Use arrow keys to navigate, Enter to select, or press the key shown │',
+    '╰──────────────────────────────────────────────────────────────────────╯',
+  ].join('\n'));
+});
+
+// Mutation captured: dropping the folder-trust pattern allows an open Claude dialog to receive a prompt.
+test('dialog: open Claude trust screen still blocks send', { timeout: 60000 }, () => {
+  assertOpenTrustDialogBlocks([
+    '❯ No, exit',
+    '  Yes, I trust this folder',
+    'Enter to confirm · Esc to cancel',
+  ].join('\n'));
+});
+
+// Mutation captured: dropping the folder-trust pattern allows an open Codex dialog to receive a prompt.
+test('dialog: open Codex trust screen still blocks send', { timeout: 60000 }, () => {
+  assertOpenTrustDialogBlocks([
+    'Trust this folder? Codex can read, edit, and run files here, subject to your permission',
+    'settings. Folder settings can run code automatically, even without a model request. Continue',
+    'only if you trust these files. Your trust decision will be saved.',
+    '› 1. Trust and continue',
+    '  2. Back to Agent Command Center',
+    '  enter continue · esc back',
+  ].join('\n'));
 });
 
 // Mutation captured: sending prompt into a dialog, typing keys into a dialog,
