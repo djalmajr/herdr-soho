@@ -16,7 +16,7 @@ import { loadConfig, configKeyOk, configValueOk, stateGitignoreRel } from '../li
 import { SETUP_START } from '../lib/setuptext.mjs';
 import {
   LOCAL_INSTRUCTION_FILE, assertSafeLocalRels, classifyStateDir, excludeAfterText, excludeEntry, excludePathFor, gitCommonDirFor, gitDirFor,
-  localRels, localTarget, missingExcludeEntries, normalizeGitPath, resolveSetupMode, setupTargetPath, stateDirShown,
+  localRels, localTarget, missingExcludeEntries, normalizeGitPath, resolveSetupMode, setupTargetPath, stateDirRelShown, stateDirShown,
 } from '../lib/setuplocal.mjs';
 import { cmdSetup, setupTargetExisting } from '../lib/commands/setup.mjs';
 import { cmdSetupPlan } from '../lib/commands/setup-plan.mjs';
@@ -644,14 +644,29 @@ test('setup --plan --local refuses a symlinked CLAUDE.local.md (rc 4) with no ou
 
 // ---------- unsafe state-dir exclude patterns (R28 review P2) ----------
 
+test('stateDirRelShown uses Git separators for Windows relative state paths', () => {
+  // Mutation captured: retaining the native Windows separator prints a\\b/ instead of a/b/.
+  assert.equal(stateDirRelShown('a\\b', 'win32'), 'a/b/');
+  assert.equal(stateDirRelShown('a\\b', 'posix'), 'a\\b/');
+});
+
 test('assertSafeLocalRels: glob metas, injection and traversal die 4; plain, !/#-leading and trailing-slash names pass', () => {
-  for (const bad of ['*', '?', '[ab]', 'a[b', 'a]b', 'back\\slash', '../evil', 'a/../b', './x', 'a//b', 'x\n/y', 'x\ry']) {
+  for (const bad of ['*', '?', '[ab]', 'a[b', 'a]b', '../evil', 'a/../b', './x', 'a//b', 'x\n/y', 'x\ry']) {
     assert.throws(
       () => assertSafeLocalRels([LOCAL_INSTRUCTION_FILE, bad], 'setup'),
       (e) => e.name === 'DieError' && e.code === 4,
       `rejected: '${bad}'`,
     );
   }
+  assert.throws(
+    () => assertSafeLocalRels([LOCAL_INSTRUCTION_FILE, 'back\\slash'], 'setup', 'posix'),
+    (e) => e.name === 'DieError' && e.code === 4,
+    'backslash is not a POSIX separator',
+  );
+  assert.doesNotThrow(
+    () => assertSafeLocalRels([LOCAL_INSTRUCTION_FILE, 'back\\slash'], 'setup', 'win32'),
+    'Windows backslash is normalized to back/slash before validation',
+  );
   assert.doesNotThrow(() => assertSafeLocalRels(
     [LOCAL_INSTRUCTION_FILE, '.herdr-soho', 'foo/bar', 'my state', '!bang', '#hash'], 'setup',
   ), 'ordinary names and !/#-leading names pass');

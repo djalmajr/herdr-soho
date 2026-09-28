@@ -64,11 +64,13 @@ function setup() {
     fs.mkdirSync(bin, { recursive: true });
     writeFakeCli(bin, 'herdr', FAKE_HERDR);
     for (const name of ['node', 'git', 'jq', 'timeout', 'bun']) {
+      if (name === 'node' && process.platform === 'win32') continue;
       const p = name === 'node' ? nodeBin() : findExecutable(name);
       if (!p) continue;
       try { linkTool(bin, name, p); } catch { /* present already */ }
     }
-    const tools = process.platform === 'win32' ? [bin] : [bin, '/usr/bin', '/bin'];
+    // A node.cmd link without `call` ends the parent batch launcher on Windows.
+    const tools = process.platform === 'win32' ? [bin, path.dirname(nodeBin())] : [bin, '/usr/bin', '/bin'];
     return run(['doctor'], { ...over, PATH: tools.join(path.delimiter) });
   };
   return {

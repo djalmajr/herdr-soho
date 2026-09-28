@@ -65,7 +65,7 @@ function probeFakeSource(name) {
   L.push("  case 'quota2': process.stderr.write('Error: You have hit your usage limit. Try again in 10 minutes.\\n'); process.stdout.write('Error: You have hit your usage limit. Try again in 5 minutes.\\n'); process.exit(1); break;");
   L.push("  case 'quotatime': process.stderr.write('Error: You have hit your usage limit. Try again at 14:30.\\n'); process.exit(1); break;");
   L.push('  case \'hang\': {');
-  L.push("    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 6000)'], { stdio: ['ignore', 'inherit', 'inherit'] });");
+  L.push("    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1500)'], { stdio: ['ignore', 'inherit', 'inherit'] });");
   L.push('    setTimeout(() => {}, 30000);');
   L.push('    break;');
   L.push('  }');
@@ -109,7 +109,7 @@ test.before(() => {
     PROBE_ARGS_DIR: ARGS, PROBE_MODE_DIR: MODES,
   });
 });
-test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
+test.after(() => fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
 
 // Run the entry as a child process (the e2e half); clears the args logs
 // first so "no CLI ran" is provable from their absence.

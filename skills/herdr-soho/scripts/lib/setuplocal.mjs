@@ -270,8 +270,12 @@ function descent(d, via, candidate, candidates, root) {
     if (t !== null) return t.root ? { kind: 'symlink', shown: d, rootTarget: true } : { kind: 'symlink', shown: d };
   }
   const rel = d.slice(via.length + 1);
-  if (candidate === root) return { kind: 'inside', rel, shown: `${rel}/` };
+  if (candidate === root) return { kind: 'inside', rel, shown: stateDirRelShown(rel) };
   return { kind: 'sibling', rel, worktreeRoot: candidate, shown: d };
+}
+
+export function stateDirRelShown(rel, platform = process.platform) {
+  return `${platform === 'win32' ? rel.replaceAll('\\', '/') : rel}/`;
 }
 
 // worktreeRoots <root> <env>: the worktree root paths git lists for this
@@ -392,7 +396,7 @@ export function classifyStateDir(root, ctx, env = process.env, cwd = process.cwd
   const rcRel = m.phys === m.rc ? '' : m.phys.slice(m.rc.length + 1);
   const tail = m.v === d ? '' : d.slice(m.v.length + 1);
   const rel = rcRel === '' ? tail : (tail === '' ? rcRel : `${rcRel}/${tail}`);
-  if (m.rc === root) return { kind: 'inside', rel, shown: `${rel}/` };
+  if (m.rc === root) return { kind: 'inside', rel, shown: stateDirRelShown(rel) };
   return { kind: 'sibling', rel, worktreeRoot: m.rc, shown: d };
 }
 
