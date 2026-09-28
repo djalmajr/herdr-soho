@@ -29,72 +29,60 @@ const ESC = '\\033'; // a literal \033 (bash printf octal escape)
 function makeFake(root) {
   const bin = path.join(root, 'bin');
   fs.mkdirSync(bin, { recursive: true });
-  const f = path.join(bin, 'herdr');
-  const script = [
-    '#!/usr/bin/env bash',
-    `printf '%s${NL}' "$*" >> "${root}/herdr.log"`,
-    'target="${3:-}"',
-    'case "$1 $2" in',
-    '  "agent get")',
-    '    case "$target" in',
-    `      notfound)`,
-    `        printf '%s${NL}' '{"error":{"code":"agent_not_found","message":"agent target notfound not found"},"id":"cli:agent:get"}' >&2`,
-    '        exit 1 ;;',
-    `      serverdown)`,
-    `        printf '%s${NL}' '{"id":"cli:agent:get","error":{"code":"server_not_running","message":"no herdr server is running"}}' >&2`,
-    '        exit 1 ;;',
-    '      nostatus)',
-    `        printf '%s${NL}' '{"result":{"agent":{"name":"nostatus"}}}'`,
-    '        exit 0 ;;',
-    '      messy)',
-    `        printf 'Error: Os { code: 13, kind: PermissionDenied, message: "Permission denied" }${NL}second-line\\t${ESC}[31mred${NL}' >&2`,
-    '        exit 1 ;;',
-    '      flaky)',
-    `        n=$(cat "${root}/flaky.count" 2>/dev/null || echo 0); n=$((n+1)); printf '%s' "$n" > "${root}/flaky.count"`,
-    '        if [ "$n" -le 2 ]; then exit 137; fi',
-    `        printf '%s${NL}' '{"result":{"agent":{"name":"flaky","agent_status":"working"}}}'`,
-    '        exit 0 ;;',
-    '      killed)',
-    '        exit 137 ;;',
-    '      termed)',
-    '        kill -TERM $$ ;;',
-    '      slow)',
-    '        sleep 5 ;;',
-    '      ok)',
-    `        printf '%s${NL}' '{"result":{"agent":{"name":"ok","agent_status":"working"}}}'`,
-    '        exit 0 ;;',
-    `      okseq)`,
-    `        printf '%s${NL}' '{"result":{"agent":{"name":"okseq","agent_status":"idle","state_change_seq":3}}}'`,
-    '        exit 0 ;;',
-    `      okseqstr)`,
-    `        printf '%s${NL}' '{"result":{"agent":{"name":"okseqstr","agent_status":"idle","state_change_seq":"7"}}}'`,
-    '        exit 0 ;;',
-    '      failmeta)',
-    "        printf 'meta boom' >&2",
-    '        exit 1 ;;',
-    '      *)',
-    `        printf 'unexpected target %s${NL}' "$target" >&2`,
-    '        exit 1 ;;',
-    '    esac ;;',
-    '  "agent list")',
-    `    printf '%s${NL}' '{"result":{"agents":[{"name":"a","pane_id":"p1","agent_status":"working","agent":"grok"}]}}' ;;`,
-    '  "pane list")',
-    `    if [ -f "${root}/panefail" ]; then printf 'pane fail' >&2; exit 1; fi`,
-    `    printf '%s${NL}' '{"result":{"panes":[{"pane_id":"p1","tab_id":"t1"}]}}' ;;`,
-    '  "tab list")',
-    `    printf '%s${NL}' '{"result":{"tabs":[{"tab_id":"t1","label":"herd-1"}]}}' ;;`,
-    '  "agent read")',
-    `    printf 'screen text${NL}' ;;`,
-    '  "pane report-metadata")',
-    `    if [ -f "${root}/metafail" ]; then printf 'meta boom' >&2; exit 1; fi`,
-    '    exit 0 ;;',
-    '  *)',
-    `    printf 'unexpected: %s${NL}' "$*" >&2`,
-    '    exit 1 ;;',
-    'esac',
-  ].join('\n') + '\n';
-  fs.writeFileSync(f, script, { mode: 0o755 });
-  return { bin, env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` }, log: path.join(root, 'herdr.log') };
+  const source = `
+import fs from 'node:fs';
+import path from 'node:path';
+const root = process.env.FAKE_HERDR_ROOT;
+const argv = process.argv.slice(2);
+fs.appendFileSync(path.join(root, 'herdr.log'), argv.join(' ') + '\\n');
+const target = argv[2] ?? '';
+const out = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
+const fail = (value) => { process.stderr.write(JSON.stringify(value) + '\\n'); process.exit(1); };
+if (argv[0] === 'agent' && argv[1] === 'get') {
+  switch (target) {
+    case 'notfound': fail({ error: { code: 'agent_not_found', message: 'agent target notfound not found' }, id: 'cli:agent:get' }); break;
+    case 'serverdown': fail({ id: 'cli:agent:get', error: { code: 'server_not_running', message: 'no herdr server is running' } }); break;
+    case 'nostatus': out({ result: { agent: { name: 'nostatus' } } }); break;
+    case 'messy': process.stderr.write('Error: Os { code: 13, kind: PermissionDenied, message: "Permission denied" }\\nsecond-line\\t\\u001b[31mred\\n'); process.exit(1); break;
+    case 'flaky': {
+      const counter = path.join(root, 'flaky.count');
+      const n = Number(fs.existsSync(counter) ? fs.readFileSync(counter, 'utf8') : 0) + 1;
+      fs.writeFileSync(counter, String(n));
+      if (n <= 2) process.exit(137);
+      out({ result: { agent: { name: 'flaky', agent_status: 'working' } } });
+      break;
+    }
+    case 'killed': process.exit(137); break;
+    case 'termed': process.exit(143); break;
+    case 'slow': setTimeout(() => {}, 5000); break;
+    case 'ok': out({ result: { agent: { name: 'ok', agent_status: 'working' } } }); break;
+    case 'okseq': out({ result: { agent: { name: 'okseq', agent_status: 'idle', state_change_seq: 3 } } }); break;
+    case 'okseqstr': out({ result: { agent: { name: 'okseqstr', agent_status: 'idle', state_change_seq: '7' } } }); break;
+    case 'failmeta': process.stderr.write('meta boom'); process.exit(1); break;
+    default: process.stderr.write('unexpected target ' + target + '\\n'); process.exit(1);
+  }
+} else if (argv[0] === 'agent' && argv[1] === 'list') {
+  out({ result: { agents: [{ name: 'a', pane_id: 'p1', agent_status: 'working', agent: 'grok' }] } });
+} else if (argv[0] === 'pane' && argv[1] === 'list') {
+  if (fs.existsSync(path.join(root, 'panefail'))) { process.stderr.write('pane fail'); process.exit(1); }
+  out({ result: { panes: [{ pane_id: 'p1', tab_id: 't1' }] } });
+} else if (argv[0] === 'tab' && argv[1] === 'list') {
+  out({ result: { tabs: [{ tab_id: 't1', label: 'herd-1' }] } });
+} else if (argv[0] === 'agent' && argv[1] === 'read') {
+  process.stdout.write('screen text\\n');
+} else if (argv[0] === 'pane' && argv[1] === 'report-metadata') {
+  if (fs.existsSync(path.join(root, 'metafail'))) { process.stderr.write('meta boom'); process.exit(1); }
+} else {
+  process.stderr.write('unexpected: ' + argv.join(' ') + '\\n');
+  process.exit(1);
+}
+`;
+  writeFakeCli(bin, 'herdr', source);
+  return {
+    bin,
+    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, USERPROFILE: root, FAKE_HERDR_ROOT: root },
+    log: path.join(root, 'herdr.log'),
+  };
 }
 
 function tmp(prefix) {

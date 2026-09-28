@@ -156,6 +156,8 @@ const H12 = '# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel
 const ROW = (name, pane, role, tab, lane = '') =>
   `${name}\t${pane}\tgrok\t${role}\txai\t1\t/tmp/work\tnow\tgrok-4.7\task\t${role}\t${lane}`;
 
+function cliPath(p) { return process.platform === 'win32' ? p.replaceAll('\\', '/') : p; }
+
 function makeFix(prefix) {
   let root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   root = fs.realpathSync(root);
@@ -174,6 +176,7 @@ function makeFix(prefix) {
   writeFakeCli(bin, 'herdr', HERDR_FAKE);
   const env = {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
@@ -470,7 +473,7 @@ test('cmdRegrid: layout=tab keeps a single-pane herd tab, rebuilds a 3-pane one,
       'agent get b1',
       'agent get b2',
       'agent get b3',
-      `tab create --workspace ws --cwd ${fix.repo} --label herd --no-focus`,
+      `tab create --workspace ws --cwd ${cliPath(fix.repo)} --label herd --no-focus`,
       'pane move q2 --tab t-new-1 --split right --target-pane r-new-1 --ratio 0.5 --no-focus',
       'pane close r-new-1',
       'pane move q3 --tab t-new-1 --split right --target-pane q2 --ratio 0.5000 --no-focus',
@@ -583,7 +586,7 @@ test('spawn: the automatic regrid rebuilds the herd tab silently', { timeout: 60
     // tab (labeled as the already-relabeled source tab), and none of its
     // output leaked into the spawn output.
     const log = fix.log();
-    assert.ok(log.includes('tab create --workspace ws --cwd ' + fix.repo + ' --label scout+impl --no-focus'), log.join('\n'));
+    assert.ok(log.includes('tab create --workspace ws --cwd ' + cliPath(fix.repo) + ' --label scout+impl --no-focus'), log.join('\n'));
     assert.ok(log.includes('pane move q2 --tab t-new-1 --split right --target-pane r-new-1 --ratio 0.5 --no-focus'), log.join('\n'));
     assert.ok(!/warning/.test(r.stderr), r.stderr);
     assert.ok(r.stdout.trim().endsWith('}'), 'only the spawn JSON on stdout');

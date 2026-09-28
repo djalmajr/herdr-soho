@@ -14,7 +14,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { writeFakeCli } from './fakes.mjs';
+import { canSymlink, linkTool } from './tools.mjs';
 import { nodeBin } from './parity.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import {
@@ -25,9 +27,27 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS = {
-  config: path.join(SCRIPTS, 'lib', 'config.mjs'),
-  herdtabs: path.join(SCRIPTS, 'lib', 'herdtabs.mjs'),
+  config: pathToFileURL(path.join(SCRIPTS, 'lib', 'config.mjs')).href,
+  herdtabs: pathToFileURL(path.join(SCRIPTS, 'lib', 'herdtabs.mjs')).href,
 };
+
+test('test tools: linkTool creates a platform launcher and canSymlink caches its result', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-test-tools-'));
+  try {
+    const target = path.join(root, 'target');
+    fs.writeFileSync(target, 'target');
+    const launcher = linkTool(root, 'herdr', target);
+    if (process.platform === 'win32') {
+      assert.equal(launcher, path.join(root, 'herdr.cmd'));
+      assert.equal(fs.readFileSync(launcher, 'utf8'), `@"${target}" %*\r\n`);
+    } else {
+      assert.equal(launcher, path.join(root, 'herdr'));
+      assert.equal(fs.realpathSync(launcher), fs.realpathSync(target));
+    }
+    const supported = canSymlink(root);
+    assert.equal(canSymlink(root), supported, 'the probe result is cached');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 // --- abbreviations (pure) ----------------------------------------------------
 
@@ -105,6 +125,7 @@ function isoEnv(root) {
   for (const d of ['home', 'conf', 'tmp', 'state/ws', 'repo']) fs.mkdirSync(path.join(root, d), { recursive: true });
   return {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: path.join(root, 'state'),
