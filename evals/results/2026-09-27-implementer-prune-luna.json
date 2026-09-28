@@ -1,0 +1,63 @@
+{
+  "fixture": "implementer-prune",
+  "role": "implementer",
+  "kind": "pi",
+  "model": "opencode/gpt-6-luna",
+  "effort": "high",
+  "brief_sha256": "84d1395846b21e76a5b28cc621c1a0dd440a6a74270892a5f3bded9006a70983",
+  "dispatched_at": "2026-09-28T00:34:27Z",
+  "first_patch_at": null,
+  "report_at": null,
+  "amendments": 0,
+  "probes": {
+    "passed": 6,
+    "total": 6,
+    "failed": []
+  },
+  "review": null,
+  "cost": "not observable",
+  "observations": [
+    {
+      "claim": "Hidden probes: 6/6 passed, no scope violation, manifest_ok true",
+      "evidence": "node evals/run-probes.mjs evals/fixtures/implementer-prune /tmp/herdr-soho-pilot/luna"
+    },
+    {
+      "claim": "Final mtime of src/prune.mjs: 2026-09-28T00:35:10Z (a final-write proxy, not the first observed patch)",
+      "evidence": "stat -f %Sm on the prepared copy after the report"
+    },
+    {
+      "claim": "Final mtime of the report file: 2026-09-28T00:35:52Z; first report write was not observed separately",
+      "evidence": "stat -f %Sm on the report path returned by wait"
+    },
+    {
+      "claim": "worker-run local checks: node --check PASS; out-of-tree Node checks PASS; one mutation (reversed comparator) failed its check",
+      "evidence": "worker report (pasted outputs)"
+    },
+    {
+      "claim": "Timeout applied: 1200000 ms (20 min) for both pilot runs; effort high; same brief file",
+      "evidence": "dispatch commands with --timeout 1200000 and spawn --effort high, .herdr-soho/w14 orchestrator log"
+    },
+    {
+      "claim": "No amendment was sent after dispatch",
+      "evidence": "roster/dispatch history for the pilot agent"
+    },
+    {
+      "claim": "Each worker had its own prepared copy under /tmp/herdr-soho-pilot/<label> (manifest_ok true at prepare)",
+      "evidence": "evals/prepare.mjs output"
+    },
+    {
+      "claim": "The report states that the hidden-probe command was not runnable in the prepared copy; that item was not marked [done]",
+      "evidence": "worker report, AC4/hidden-probe item"
+    }
+  ],
+  "inferences": [
+    {
+      "claim": "No [done] item is contradicted by a mapped hidden probe; implementer rubric score 3 for this run",
+      "basis": "all 6 mapped probes pass, no scope violation, and the report names its limitations (hidden probes unavailable, operational durability not claimed)"
+    },
+    {
+      "claim": "Approximate time to report from the final report mtime: 1.4 min",
+      "basis": "report mtime minus dispatched_at; first write not observed"
+    }
+  ]
+}
