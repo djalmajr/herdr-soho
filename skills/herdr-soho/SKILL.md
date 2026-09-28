@@ -388,12 +388,24 @@ exist (7 blocked/`question`, 6 settled/`gone`, 4 `unavailable`, 9 timeout,
 11 quota, 14 `provider-error`/`capacity`, 15 `not-received`). When
 several agents finish in one `wait`, the exit is the most severe of those:
 4, then 11, then 14, then 15, then 7, then 6. Argument order does not
-change it. A `timeout` line carries `elapsed_ms` (this wait's own) and
-`state` (the last probe tag, `working` or `pending`), and each timed-out
-agent gets a friction line naming the state and doubling the timeout this
-wait used: `timeout waiting for '<agent>'; it may still be working
-(state: <state>). Run: herdr-soho wait <agent> --timeout <2×>` (a
-non-numeric timeout drops the suggestion). Every composed prompt asks for each item's state as `[done]`,
+change it. A `timeout` line carries `elapsed_ms` (this wait's own),
+`state` (the last probe tag, `working` or `pending`), `checkpoint` and
+`activity_age_s`. A worker still `working` whose screen really changed
+within the stuck window (`stuck_warn_minutes`, 20 min when 0 or not a
+number) is a **neutral checkpoint**: `checkpoint: true`, no friction line,
+only `herdr-soho: checkpoint: '<agent>' is still working (screen changed
+<N>s ago); wait again: herdr-soho wait <agent> --timeout <t>` on stderr.
+Reading a screen is not activity: a change counts only when the
+normalized screen (counters and progress glyphs do not count) moves away
+from the hash an earlier probe recorded, a failed (empty) read counts for
+nothing, and the change is dated at that earlier probe
+(`wait/<agent>.probe-at`), the oldest moment it could have happened — a
+long gap between two waits never reads as fresh. Any other timed-out
+agent (`checkpoint: false`) gets a friction line naming the state and
+doubling the timeout this wait used: `timeout waiting for '<agent>'; it
+may still be working (state: <state>). Run: herdr-soho wait <agent>
+--timeout <2×>` (a non-numeric timeout drops the suggestion). The exit is
+9 either way. Every composed prompt asks for each item's state as `[done]`,
 `[partial]` or `[skipped]`. A `done` line gains `partial: N` (only when
 N > 0, after `report`) when N lines of the report outside code blocks
 carry `[partial]`, and the wait warns:
@@ -507,7 +519,15 @@ error is transient: one more try after 1 s, then 2 s, before counting; if
 it persists, the cause is
 `herdr agent get was killed (exit <rc>, <signal>: memory pressure or an
 external kill)`. A report counts as done
-once its size stops changing between two polls. `notify=on` in the config raises a Herdr toast
+once its size stops changing between two polls.
+
+`status` ends every TSV line with `task_s` (seconds from the dispatch —
+the mtime of `last-report-<agent>` — to the report, or to now while it is
+missing; `-` with no dispatch) and `activity_s` (for a `working` agent,
+seconds since the last screen change a wait observed, dated as above; `-`
+in any other state or with no observed change), and adds both as the last
+keys of its JSON lines (`null` when unknown). It writes no marker and
+prints no screen text. `notify=on` in the config raises a Herdr toast
 per finished worker. `roster` shows a `REPORT` column (`none | pending |
 ready`) for a quick glance.
 

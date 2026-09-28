@@ -223,11 +223,12 @@ test('wait: a real screen change observed between probes of one wait is a neutra
     const A = 'Compiling app 12% ◐ 3.1s\n';
     const B = 'Running the e2e suite for the billing tree\n';
     fix.screen(A);
-    // Seed the bookkeeping as if a previous probe saw A and an older
-    // change happened 100 s ago: the wait must REWRITE activity-at when
-    // its own probes observe A → B.
+    // Seed the bookkeeping as if a probe saw A a second ago and an older
+    // change happened 100 s ago: the wait must REWRITE activity-at when it
+    // observes A → B, dated at the probe before the move (≥ t0 - 1).
     const t0 = Math.floor(Date.now() / 1000);
     fix.waitFile('w', 'stuck-hash', `${cksumField(normalizeScreen(A))}\n`);
+    fix.waitFile('w', 'probe-at', `${t0 - 1}\n`);
     fix.waitFile('w', 'activity-at', `${t0 - 100}\n`);
     // Mutation captured: the probe never writing activity-at on a hash
     // move leaves the seeded age (≥ 100 s, over the window) in place —
@@ -244,7 +245,7 @@ test('wait: a real screen change observed between probes of one wait is a neutra
     assert.ok(l.activity_age_s >= 0 && l.activity_age_s <= 15, `the change is fresh (age ${l.activity_age_s}s)`);
     assert.equal(fix.waitRead('w', 'stuck-hash'), `${cksumField(normalizeScreen(B))}\n`, 'the probe re-recorded the moved screen');
     const at = Number((fix.waitRead('w', 'activity-at') ?? '').trim());
-    assert.ok(at >= t0 && at <= t0 + 10, `activity-at was rewritten by the wait (seeded ${t0 - 100}, now ${at})`);
+    assert.ok(at >= t0 - 1 && at <= t0 + 10, `activity-at was rewritten by the wait (seeded ${t0 - 100}, now ${at})`);
     assert.equal(r.stderr,
       `herdr-soho: checkpoint: 'w' is still working (screen changed ${l.activity_age_s}s ago); wait again: herdr-soho wait w --timeout 3000\n`,
       'the exact checkpoint line, nothing else on stderr');
@@ -315,11 +316,20 @@ test('activityAgeSeconds: 0 on a changed screen, the age on an equal one, null w
       else if (at !== undefined) fix.waitFile('a', 'activity-at', at);
       assert.equal(activityAgeSeconds(sd, 'a', screen, now), null, `null for stuck-hash ${JSON.stringify(hash)}, activity-at ${JSON.stringify(at)}`);
     }
-    // A changed normalized screen is 0 (real activity since the last
-    // recorded probe), whatever the activity-at marker holds.
+    // A changed normalized screen is a change since the last probe: its
+    // age is now - probe-at (else now - stuck-since), whatever activity-at
+    // holds; without either marker nothing dates it (null).
     fix.waitFile('a', 'stuck-hash', `${H}\n`);
     fix.waitFile('a', 'activity-at', `x\n`); // invalid on purpose
-    assert.equal(activityAgeSeconds(sd, 'a', 'Another screen 99% ◑\n', now), 0, 'a different normalized screen is 0');
+    assert.equal(activityAgeSeconds(sd, 'a', 'Another screen 99% ◑\n', now), null, 'a change with no probe time is undated');
+    fix.waitFile('a', 'stuck-since', `${now - 40}\n`);
+    assert.equal(activityAgeSeconds(sd, 'a', 'Another screen 99% ◑\n', now), 40, 'dated at stuck-since without probe-at');
+    fix.waitFile('a', 'probe-at', `${now - 3}\n`);
+    assert.equal(activityAgeSeconds(sd, 'a', 'Another screen 99% ◑\n', now), 3, 'dated at the last probe');
+    // Mutation captured: dating a change at `now` (0) makes a move seen
+    // across a long gap fresh.
+    fix.waitFile('a', 'probe-at', `${now - 1800}\n`);
+    assert.equal(activityAgeSeconds(sd, 'a', 'Another screen 99% ◑\n', now), 1800, 'a long gap stays old');
     // The same screen with moved counters (digits → #, glyphs → *) keeps
     // the hash: the age is nowS - activity-at, exact.
     fix.waitFile('a', 'activity-at', `${now - 10}\n`);
@@ -334,6 +344,57 @@ test('activityAgeSeconds: 0 on a changed screen, the age on an equal one, null w
     assert.equal(activityAgeSeconds(sd, 'a', '  \n', now), null, 'a blank read proves nothing');
     fix.waitFile('a', 'stuck-hash', `${String(cksumField(normalizeScreen('')))}\n`);
     assert.equal(activityAgeSeconds(sd, 'a', screen, now), null, 'moving from an empty-screen hash is not a change');
+  } finally { fix.cleanup(); }
+});
+
+// ---------- a long gap and a disabled stuck check are not fresh activity ----------
+
+// The last probe saw A 30 min ago; the next wait sees B. The move is real
+// but can be 30 min old: dated at that probe, it is over the window — no
+// checkpoint, the friction warn stands.
+test('wait: a move seen across a long gap between waits is dated at the old probe (not active)', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-checkpoint-gap-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer', 'grok', 'grok-4.7', 'build'));
+    fix.mode('working');
+    const t0 = Math.floor(Date.now() / 1000);
+    fix.waitFile('w', 'stuck-hash', `${cksumField(normalizeScreen('Screen A of the old wait\n'))}\n`);
+    fix.waitFile('w', 'probe-at', `${t0 - 1800}\n`);
+    fix.screen('Screen B now, unchanged since\n');
+    // Mutation captured: dating the observed move at the current probe
+    // turns this 30-minute-old move into "changed 0s ago" (checkpoint true).
+    const r = waitCmd(fix, ['w', '--timeout', '1000']);
+    assert.equal(r.status, 9, r.stderr);
+    const l = jsonLines(r.stdout)[0];
+    assert.equal(l.checkpoint, false, 'an old move is not fresh activity');
+    assert.ok(l.activity_age_s >= 1800, `aged from the old probe (got ${l.activity_age_s})`);
+    assert.equal((fix.friction().match(/timeout waiting for 'w'/g) ?? []).length, 1);
+  } finally { fix.cleanup(); }
+});
+
+// stuck_warn_minutes=0 turns the stuck warning off, not the bookkeeping: a
+// hash left by an earlier wait is replaced by the current screen, so a
+// still screen does not stay "changed 0s ago" forever.
+test('wait: with stuck_warn_minutes=0 the hash still follows the screen (no endless fresh change)', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-checkpoint-off-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer', 'grok', 'grok-4.7', 'build'));
+    fix.mode('working');
+    const still = 'A still screen after the earlier wait\n';
+    const t0 = Math.floor(Date.now() / 1000);
+    fix.waitFile('w', 'stuck-hash', `${cksumField(normalizeScreen('Another screen from before\n'))}\n`);
+    fix.waitFile('w', 'stuck-since', `${t0 - 3600}\n`);
+    fix.screen(still);
+    // Mutation captured: keeping the hash bookkeeping behind
+    // stuck_warn_minutes > 0 leaves the stale hash, and every timeout
+    // reads as a fresh change (checkpoint true, age 0).
+    for (const n of [1, 2]) {
+      const r = waitCmd(fix, ['w', '--timeout', '1000'], { HERDR_SOHO_STUCK_WARN_MINUTES: '0' });
+      assert.equal(r.status, 9, r.stderr);
+      const l = jsonLines(r.stdout)[0];
+      assert.equal(l.checkpoint, false, `wait ${n}: a still screen is not active`);
+    }
+    assert.equal(fix.waitRead('w', 'stuck-hash'), `${cksumField(normalizeScreen(still))}\n`, 'the hash follows the screen');
   } finally { fix.cleanup(); }
 });
 

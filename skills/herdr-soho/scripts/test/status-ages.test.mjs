@@ -144,7 +144,7 @@ function tsvRows(out) {
 // screen is 0, an equal hash with an activity-at 600 s old is at least
 // 600, and an equal hash with no activity-at is unknown. The ages differ,
 // no screen text leaks to stdout, and the status writes no marker.
-test('status: activity_s is 0 on a changed screen, the aged one on an equal hash, unknown without activity-at', { timeout: 60000 }, () => {
+test('status: activity_s dates a changed screen at the last probe, the aged one on an equal hash, unknown without activity-at', { timeout: 60000 }, () => {
   const fix = makeFix('ha-status-ages-activity-');
   try {
     const fresh = 'Fresh screen alpha ZZ1\n';
@@ -163,8 +163,10 @@ test('status: activity_s is 0 on a changed screen, the aged one on an equal hash
     fix.screenOf('still', still);
     const now = Math.floor(Date.now() / 1000);
     // fresh: the recorded hash is NOT the current screen (a real change
-    // since the last recorded probe) → 0, whatever the activity-at holds.
+    // since the last probe, 2 s ago) → dated at that probe, whatever the
+    // activity-at holds.
     fix.waitFile('fresh', 'stuck-hash', `${cksumField(normalizeScreen('Some other screen\n'))}\n`);
+    fix.waitFile('fresh', 'probe-at', `${now - 2}\n`);
     fix.waitFile('fresh', 'activity-at', `${now - 5}\n`);
     // aged: the hash matches and the last observed change is 600 s old.
     fix.waitFile('aged', 'stuck-hash', `${cksumField(normalizeScreen(same))}\n`);
@@ -185,7 +187,8 @@ test('status: activity_s is 0 on a changed screen, the aged one on an equal hash
       assert.equal(row[3], '-', 'no last-report marker → task_s unknown');
       assert.equal(row.length, 5, `five columns: ${JSON.stringify(row)}`);
     }
-    assert.equal(rows[0][4], '0', 'a changed normalized screen is 0');
+    const fresh0 = Number(rows[0][4]);
+    assert.ok(fresh0 >= 2 && fresh0 <= 10, `a changed screen is dated at the last probe (got ${rows[0][4]})`);
     const aged = Number(rows[1][4]);
     assert.ok(aged >= 600, `the aged change is at least 600 s (got ${aged})`);
     assert.equal(rows[2][4], '-', 'no observed change → unknown');
