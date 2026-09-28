@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 // die <msg> [code] — same message format and codes as the bash script.
@@ -162,6 +163,16 @@ export function atomicWrite(dest, content) {
 // argument escaped (cmdInvocation), never through `shell: true`. Returns
 // { notFound, resolved, status, signal, stdout, stderr, timedOut, error }
 // (error: the spawn error code, e.g. ENOENT for a bad shebang interpreter).
+//
+// Windows-only (issue #20): a .cmd/.bat target with a timeout runs through
+// the treekill helper (lib/treekill-run.mjs, spawned with the same runtime
+// as the CLI) because spawnSync kills only cmd.exe on timeout and the
+// batch's children survive. The helper reuses the mode's stdio/input/
+// encoding/env/cwd, arms the timeout itself and kills the whole process
+// tree (taskkill /T /F). Everything else — POSIX, .exe, no timeout — goes
+// through spawnSync exactly as before, byte for byte.
+const TREEKILL_HELPER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'treekill-run.mjs');
+
 export function runCli(exe, args, opts = {}) {
   const env = opts.env ?? process.env;
   const platform = opts.platform ?? process.platform;
@@ -177,6 +188,13 @@ export function runCli(exe, args, opts = {}) {
     command = inv.command;
     argv = inv.args;
     verbatim = inv.windowsVerbatimArguments;
+  }
+  // The treekill path is exactly: win32 + a .cmd/.bat target (the
+  // cmdInvocation wrap above set `verbatim`) + a real timeout. A timeout of
+  // 0 (no timeout) or any other platform/extension keeps today's spawnSync
+  // call, unchanged.
+  if (platform === 'win32' && verbatim && opts.timeoutMs > 0) {
+    return runCliTreeKill(resolved, command, argv, verbatim, opts, env);
   }
   // mergeOutput: stdout and stderr share one file descriptor, so the text
   // keeps the order it was written in (the bash `"$(cmd 2>&1)"`); it comes
@@ -261,5 +279,137 @@ export function runCli(exe, args, opts = {}) {
     stderr: typeof child.stderr === 'string' ? child.stderr : '',
     timedOut: child.status === null && child.signal != null,
     error: child.error?.code ?? null,
+  };
+}
+
+// runCliTreeKill — the Windows .cmd/.bat + timeout path of runCli (issue
+// #20). The spec JSON (command/args/windowsVerbatimArguments/timeoutMs/
+// resultFile) goes through a 0600 temp file — never through a command line
+// — in the same TMPDIR as the mode's own output files, and both temp files
+// are removed at the end. The helper is spawned with the mode's own
+// stdio/input/encoding/env/cwd so the command's streams reach exactly the
+// same places as today; the only difference from the command's own call is
+// the timeout: the helper arms it (and kills the tree), so the outer
+// spawnSync gets no command timeout — only a safety cap of timeoutMs + 15 s
+// against a stuck taskkill or a tree that ignores the kill.
+function runCliTreeKill(resolved, command, argv, verbatim, opts, env) {
+  const tmpdir = env.TMPDIR || os.tmpdir();
+  const suffix = `${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  const specFile = path.join(tmpdir, `.herdr-soho-tk-${suffix}.spec`);
+  const resultFile = path.join(tmpdir, `.herdr-soho-tk-${suffix}.result`);
+  fs.writeFileSync(specFile, JSON.stringify({
+    command,
+    args: argv,
+    windowsVerbatimArguments: verbatim,
+    timeoutMs: opts.timeoutMs,
+    resultFile,
+  }), { mode: 0o600 });
+  const cap = opts.timeoutMs + 15_000;
+  const helper = [TREEKILL_HELPER, specFile];
+  let outer;
+  // mergeOutput: the mode's single shared fd for stdout+stderr.
+  if (opts.mergeOutput) {
+    const tmp = path.join(tmpdir, `.herdr-soho-out-${suffix}`);
+    const fd = fs.openSync(tmp, 'w', 0o600);
+    try {
+      outer = spawnSync(process.execPath, helper, {
+        env,
+        cwd: opts.cwd,
+        stdio: ['ignore', fd, fd],
+        timeout: cap,
+        killSignal: 'SIGTERM',
+      });
+    } finally { fs.closeSync(fd); }
+    let text = '';
+    try { text = fs.readFileSync(tmp, 'utf8'); } catch { /* nothing written */ }
+    fs.rmSync(tmp, { force: true });
+    return finishTreeKill(resolved, outer, specFile, resultFile, { stdout: text, stderr: '' });
+  }
+  // outputFiles: the mode's two separate fds.
+  if (opts.outputFiles) {
+    const base = path.join(tmpdir, `.herdr-soho-out-${suffix}`);
+    const outFd = fs.openSync(`${base}.out`, 'w', 0o600);
+    const errFd = fs.openSync(`${base}.err`, 'w', 0o600);
+    try {
+      outer = spawnSync(process.execPath, helper, {
+        env,
+        cwd: opts.cwd,
+        stdio: ['ignore', outFd, errFd],
+        timeout: cap,
+        killSignal: 'SIGTERM',
+      });
+    } finally { fs.closeSync(outFd); fs.closeSync(errFd); }
+    const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+    const stdout = read(`${base}.out`);
+    const stderr = read(`${base}.err`);
+    fs.rmSync(`${base}.out`, { force: true });
+    fs.rmSync(`${base}.err`, { force: true });
+    return finishTreeKill(resolved, outer, specFile, resultFile, { stdout, stderr });
+  }
+  // Default: pipes (the helper's own pipes carry the command's streams) +
+  // the mode's `input`.
+  outer = spawnSync(process.execPath, helper, {
+    env,
+    cwd: opts.cwd,
+    input: opts.input,
+    encoding: 'utf8',
+    timeout: cap,
+    killSignal: 'SIGTERM',
+  });
+  return finishTreeKill(resolved, outer, specFile, resultFile, {
+    stdout: typeof outer.stdout === 'string' ? outer.stdout : '',
+    stderr: typeof outer.stderr === 'string' ? outer.stderr : '',
+  });
+}
+
+// finishTreeKill — read and remove the treekill temp files, then return the
+// same shape as today's spawnSync: timedOut → { status null, signal
+// SIGTERM, error ETIMEDOUT } (what herdr.mjs and setup-probe classify on);
+// a command that never started → its spawn error code with no status;
+// anything else → the child's own status/signal. When the helper left no
+// resultFile (it failed, or the safety cap killed it) the wrapper's own
+// error is returned — never an invented status.
+function finishTreeKill(resolved, outer, specFile, resultFile, streams) {
+  let doc = null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) doc = parsed;
+  } catch { /* the helper left no result */ }
+  fs.rmSync(specFile, { force: true });
+  fs.rmSync(resultFile, { force: true });
+  if (doc === null) {
+    const signal = outer.signal ?? null;
+    return {
+      notFound: false,
+      resolved,
+      status: null,
+      signal,
+      stdout: streams.stdout,
+      stderr: streams.stderr,
+      timedOut: outer.status === null && signal != null,
+      error: outer.error?.code ?? null,
+    };
+  }
+  if (doc.timedOut) {
+    return {
+      notFound: false,
+      resolved,
+      status: null,
+      signal: 'SIGTERM',
+      stdout: streams.stdout,
+      stderr: streams.stderr,
+      timedOut: true,
+      error: 'ETIMEDOUT',
+    };
+  }
+  return {
+    notFound: false,
+    resolved,
+    status: typeof doc.status === 'number' ? doc.status : null,
+    signal: doc.signal ?? null,
+    stdout: streams.stdout,
+    stderr: streams.stderr,
+    timedOut: false,
+    error: typeof doc.error === 'string' ? doc.error : null,
   };
 }
