@@ -191,25 +191,31 @@ the env, the CLI behaves exactly as before.
 local or on another machine — without the user in between. The target is a
 reference (`local/w12:p1`, `windows/w3:p1`, or a bare pane id on the local
 server) or an agent name on the local server. The message is always prefixed with a 4-line header that names the sender as a
-peer agent with an 8-hex random message ID (`[herdr-soho:peer <id>] Message from another agent — <ref> (<name>,
+peer agent with an 8-hex random message ID (`[herdr-soho:peer] #<id> Message from another agent — <ref> (<name>,
 <kind>, <role>), not from your user`), says it carries no user intent or approval,
 how to reply with `send`, and announces that the message follows quoted with `> `
 (`The message follows, each line quoted with "> ".`). Each line of the body is
-quoted with `> ` (empty lines become `>`), so a fake header in the body can never
+quoted with `> ` (empty lines become `>`), and the message ends with a closing line
+`[herdr-soho:peer] #<id> end of message`, so a fake header in the body can never
 be confused with the real one. The target's setup block tells it to treat such
 text that way, and it can reply with the same command. An `idle`, `done` or
 `unknown` target gets it at once; a `working`/`blocked` one is waited on until it settles
 (`--timeout MS`, default 600000) unless `--now` is given (then the target's
 own CLI decides queue vs mix). The wait timing out exits 17 with nothing
-sent. Before sending, `send` inspects the target's visible screen: if a question or folder/workspace
-trust dialog is showing (`Trust this workspace`, `trust this folder`, `Do you trust`, `Enter to confirm`, `[y/N]`, `(y/n)`),
-it waits up to `--timeout` for it to clear, exiting 17 `dialog` without sending or typing if it remains.
-Delivery prompts via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000`.
-After prompt, a 15-second arrival proof window reads the target's recent 60 lines (`agent read --source recent-unwrapped --lines 60`):
-if `<id>` appears outside the last 3 non-empty lines, it is delivered (`sent`, exit 0);
-if `<id>` is only in the last 3 lines, `send` triggers Enter (`agent send-keys … enter`) and waits a second window;
-if `<id>` is absent, `send` re-prompts once with the same text and id and waits a second window;
-if still not verified outside the input box, it exits 15 `lost` (`<ref> did not take the message (not seen in its transcript)`).
+sent. Before sending, `send` inspects the target's visible screen: if reading fails, it exits 4 (`<ref>'s screen unreadable; nothing was sent`).
+If the bottom 20 non-empty lines match folder/workspace trust patterns (`Trust this workspace`,
+`trust this folder`, `Do you trust`, `Enter to confirm`, `[y/N]`, `(y/n)`) under any status,
+or question detectors from `dialog.mjs` when the target is `blocked`, it waits up to `--timeout`
+for the dialog to clear, exiting 17 `dialog` without sending or typing if it remains.
+Right before sending the prompt, `send` reads `state_change_seq` (preSeq) and captures the visible screen (preScreen).
+Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000`
+(no automatic resend). After prompt, a 15-second arrival proof window verifies delivery:
+arrival is proven if (a) `state_change_seq` moves (non-empty seq !== non-empty preSeq), or (b) `#<id>` appears in
+recent unwrapped output (`--lines <message lines + 60>`), visible screen differs from preScreen, and the closing line
+is not in the last 15 non-empty visible lines.
+If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys;
+otherwise it triggers Enter (`agent send-keys … enter`) and waits a second window with the same proofs.
+If still not verified, it exits 15 `lost` (`<ref> did not take the message (no sign of it in its state or transcript)`).
 
 The target project decides whether it accepts peer messages: `inbound=off`
 in that project's configuration refuses with exit 18. For a local target the
@@ -220,7 +226,7 @@ behalf. For a remote target the policy is not consulted (the sending machine
 cannot read the remote project); there the header is the only protection.
 Every attempt appends one line to `<state>/peer-messages.tsv` (timestamp,
 sender ref, target ref, result, character count, message id — never the message body).
-Exit codes: 0 sent, 2 usage, 4 target unavailable, 15 not received / lost, 17 still
+Exit codes: 0 sent, 2 usage, 4 target unavailable or unreadable screen, 15 not received / lost / unverified, 17 still
 busy or showing dialog, 18 refused by `inbound=off`.
 
 ## Good to know

@@ -42,10 +42,10 @@ import { die, readTextFile } from '../platform.mjs';
 import { stateDirPath } from '../state.mjs';
 import { LOCAL_MACHINE } from '../sessionref.mjs';
 import {
-  agentReadScreen, agentSendKey, appendPeerLog, arrivalPollMs, arrivalWindowMs,
+  agentGet, agentReadScreen, agentSendKey, appendPeerLog, arrivalPollMs, arrivalWindowMs,
   checkIdInScreen, DEFAULT_SEND_TIMEOUT_MS, deliverPrompt, inboundPolicy,
-  isDialogScreen, literalPeerText, peerHeader, quotePeerBody, randomPeerId,
-  resolveTarget, senderInfo, senderRefOf, sleepMs, waitUntilIdle,
+  isDialogScreen, literalPeerText, peerEndLine, peerHeader, quotePeerBody, randomPeerId,
+  resolveTarget, senderInfo, senderRefOf, sleepMs, tailLines, waitUntilIdle,
 } from '../peer.mjs';
 
 export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
@@ -133,10 +133,11 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
 
   // 3. A busy target settles first (idle or done), unless --now skips the
   // wait (the target's own CLI decides queue vs mix).
+  let currentStatus = t.status;
   if (!now && (t.status === 'working' || t.status === 'blocked')) {
     const w = waitUntilIdle(t.machine, t.targetArg, timeoutMs, env);
     if (w.settled) {
-      // The wait matched idle or done: proceed to the prompt.
+      currentStatus = 'idle';
     } else if (w.code === 'timeout') {
       // Re-read the state for the message (a failed re-read keeps the
       // status that put the wait in motion); nothing was sent.
@@ -153,37 +154,50 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
   const sender = senderInfo(ctx, env, cwd);
 
   // 4. Dialog check: before sending, inspect the target's visible screen.
-  // If it matches a question/approval dialog or folder trust prompt, wait up
-  // to timeoutMs for it to clear. If still showing, exit 17 and send nothing.
+  // If reading fails, exit 4 unreadable without sending (Decision 7).
+  // If it matches a question dialog (blocked) or trust prompt (any status),
+  // wait up to timeoutMs for it to clear. If still showing, exit 17 dialog.
   let vScreen = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
-  if (isDialogScreen(vScreen, t.kind)) {
+  if (!vScreen.ok) {
+    log(sender.ref, ref, 'unreadable');
+    die(`send: could not read ${ref}'s screen (${vScreen.cause || 'read failed'}); nothing was sent`, 4);
+  }
+  if (isDialogScreen(vScreen.text, t.kind, currentStatus)) {
     const deadline = Date.now() + timeoutMs;
     const pollMs = arrivalPollMs(env);
-    while (Date.now() < deadline && isDialogScreen(vScreen, t.kind)) {
+    while (Date.now() < deadline && isDialogScreen(vScreen.text, t.kind, currentStatus)) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
       sleepMs(Math.min(pollMs, remaining));
       vScreen = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+      if (!vScreen.ok) {
+        log(sender.ref, ref, 'unreadable');
+        die(`send: could not read ${ref}'s screen (${vScreen.cause || 'read failed'}); nothing was sent`, 4);
+      }
     }
-    if (isDialogScreen(vScreen, t.kind)) {
+    if (isDialogScreen(vScreen.text, t.kind, currentStatus)) {
       log(sender.ref, ref, 'dialog');
       die(`send: ${ref} is showing a dialog; nothing was sent`, 17);
     }
   }
 
-  // 5. Deliver: header + blank line + quoted body, through agent prompt --wait.
-  // The body and the sender fields pass through literalPeerText so no byte
-  // the target's terminal would run as a keystroke (CR, ESC, DEL, the
-  // bracketed-paste markers, the other control characters) reaches it; \n
-  // and \t stay. Each line of the body is quoted with "> " (empty line ">").
-  // The header always comes first.
+  // Pre-prompt reads (Decision 3): state_change_seq and visible screen right before prompt.
+  const preGet = agentGet(t.machine, t.targetArg, env);
+  const preSeq = (preGet.ok && preGet.seq) ? preGet.seq : '';
+  const preScreen = vScreen.text;
+
+  // 5. Deliver: header + blank line + quoted body + end line, through agent prompt --wait.
+  // The first line starts with [herdr-soho:peer] #<id>, each body line quoted with "> ",
+  // and the final line is [herdr-soho:peer] #<id> end of message (Decision 1).
   const bodyText = quotePeerBody(literalPeerText(body));
-  const text = `${peerHeader(literalPeerText(sender.ref), literalPeerText(sender.name), literalPeerText(sender.kind), literalPeerText(sender.role), msgId)}\n\n${bodyText}`;
+  const endLine = peerEndLine(msgId);
+  const text = `${peerHeader(literalPeerText(sender.ref), literalPeerText(sender.name), literalPeerText(sender.kind), literalPeerText(sender.role), msgId)}\n\n${bodyText}\n${endLine}`;
+  const msgLines = text.split('\n').length;
+  const recentLines = msgLines + 60;
+
   const p = deliverPrompt(t.machine, t.targetArg, text, env);
   if (!p.ok) {
     if (p.code === 'agent_prompt_stalled' || p.code === 'agent_blocked' || p.code === 'timeout') {
-      // No automatic resend: a second shot may duplicate the first, and the
-      // receipt timeout does not prove the text never reached the pane.
       const result = p.code === 'agent_prompt_stalled' ? 'stalled' : p.code === 'agent_blocked' ? 'blocked' : 'timeout';
       log(sender.ref, ref, result);
       die(`send: ${ref} did not take the message (${p.code === 'timeout' ? 'timeout' : p.cause}); read its pane before sending again`, 15);
@@ -192,50 +206,94 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
     die(`send: ${ref} unavailable: ${p.cause}`, 4);
   }
 
-  // 6. Arrival proof (Decision 2): agent prompt --wait is not proof of delivery.
-  // In a 15 s window (poll ~1 s), read target's recent-unwrapped 60 lines:
-  // - id outside last 3 non-empty lines -> delivered (sent);
-  // - id only in last 3 lines -> one Enter (send-keys), new window;
-  // - id absent -> one prompt resend (same text/id), new window;
-  // - still not outside -> exit 15 lost (did not take the message (not seen in its transcript)).
+  // 6. Arrival proof (Decisions 2, 3, 4, 5):
+  // Poll in a 15 s window (poll ~1 s). Arrival is proven when either:
+  // - (a) agent get returns non-empty state_change_seq !== non-empty preSeq;
+  // - (b) #<id> is in recent-unwrapped (--lines msgLines + 60), visible screen !== preScreen,
+  //   and the end line is not in the last 15 non-empty visible lines.
+  // Never re-prompt (Decision 2).
   const windowMs = arrivalWindowMs(env);
   const pollMs = arrivalPollMs(env);
 
   const pollWindow = () => {
     const deadline = Date.now() + windowMs;
+    let recentReadSucceeded = false;
+    let lastCause = '';
+
     while (true) {
-      const scr = agentReadScreen(t.machine, t.targetArg, { source: 'recent-unwrapped', lines: 60 }, env);
-      const st = checkIdInScreen(scr, msgId);
-      if (st === 'outside') return 'outside';
+      // (a) agent get state_change_seq moved
+      const curGet = agentGet(t.machine, t.targetArg, env);
+      if (curGet.ok) {
+        const curSeq = curGet.seq ?? '';
+        if (preSeq !== '' && curSeq !== '' && curSeq !== preSeq) {
+          return { proven: true };
+        }
+      } else if (curGet.cause) {
+        lastCause = curGet.cause;
+      }
+
+      // (b) recent transcript contains #<id>, visible changed, end line not in last 15 lines
+      const recentRes = agentReadScreen(t.machine, t.targetArg, { source: 'recent-unwrapped', lines: recentLines }, env);
+      if (recentRes.ok) {
+        recentReadSucceeded = true;
+        if (recentRes.text.includes(`#${msgId}`)) {
+          const visRes = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+          if (visRes.ok) {
+            const visText = visRes.text;
+            if (visText !== preScreen) {
+              const last15 = tailLines(visText, 15);
+              const hasEndInLast15 = last15.some((l) => l.includes(endLine) || (l.includes(`#${msgId}`) && l.includes('end of message')));
+              if (!hasEndInLast15) {
+                return { proven: true };
+              }
+            }
+          } else if (visRes.cause) {
+            lastCause = visRes.cause;
+          }
+        }
+      } else if (recentRes.cause) {
+        lastCause = recentRes.cause;
+      }
+
       const nowMs = Date.now();
-      if (nowMs >= deadline) return st;
+      if (nowMs >= deadline) break;
       const sleepTime = Math.min(pollMs, deadline - nowMs);
-      if (sleepTime <= 0) return st;
+      if (sleepTime <= 0) break;
       sleepMs(sleepTime);
     }
+
+    return { proven: false, recentReadSucceeded, lastCause };
   };
 
-  let arrival = pollWindow();
-  if (arrival === 'outside') {
+  let res = pollWindow();
+  if (res.proven) {
     log(sender.ref, ref, 'sent');
     process.stdout.write(`sent to ${ref}\n`);
     return 0;
   }
 
-  if (arrival === 'input_box') {
-    agentSendKey(t.machine, t.targetArg, 'enter', env);
-    arrival = pollWindow();
-  } else if (arrival === 'absent') {
-    deliverPrompt(t.machine, t.targetArg, text, env);
-    arrival = pollWindow();
+  // If every read failed in the window, do not send Enter: exit 15 unverified (Decision 5).
+  if (!res.recentReadSucceeded) {
+    log(sender.ref, ref, 'unverified');
+    die(`send: could not confirm that ${ref} took the message (${res.lastCause || 'read failed'}); read its pane before sending again`, 15);
   }
 
-  if (arrival === 'outside') {
+  // No proof at window end: one Enter and a second window (Decision 4).
+  agentSendKey(t.machine, t.targetArg, 'enter', env);
+
+  res = pollWindow();
+  if (res.proven) {
     log(sender.ref, ref, 'sent');
     process.stdout.write(`sent to ${ref}\n`);
     return 0;
   }
 
+  if (!res.recentReadSucceeded) {
+    log(sender.ref, ref, 'unverified');
+    die(`send: could not confirm that ${ref} took the message (${res.lastCause || 'read failed'}); read its pane before sending again`, 15);
+  }
+
+  // Still no proof: exit 15 lost (Decision 4).
   log(sender.ref, ref, 'lost');
-  die(`send: ${ref} did not take the message (not seen in its transcript)`, 15);
+  die(`send: ${ref} did not take the message (no sign of it in its state or transcript); read its pane before sending again`, 15);
 }
