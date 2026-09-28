@@ -269,6 +269,21 @@ test('status: a blocked worker on an approval screen keeps the old TSV line', { 
 
 // ---------- a not-received marker: read-only, rc 15, no key ----------
 
+test('status: a queued marker stays working while the target is working', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-status-queued-working-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'w.queued'), `${Math.floor(Date.now() / 1000) - 120} 5\n`);
+    fix.modeOf('w', 'working');
+    // Mutation captured: treating .queued like .not-received reports rc 15 while the worker is still busy.
+    const r = cmd(fix, ['status', 'w']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^w\tworking\t/);
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'w.queued')), true, 'status is read-only');
+    assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
+  } finally { fix.cleanup(); }
+});
+
 // A dispatch that ended not-received recorded the moment, and the agent is
 // not working or blocked: the status is not-received (rc 15, through the
 // wait rank) and the command sends nothing — it only reads the marker (the

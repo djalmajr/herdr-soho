@@ -459,7 +459,9 @@ confidence — reading the code is not proof that a test fails. The
 `dispatch` JSON carries the same `partial: N` right after `report_exists`
 (after `amend`, when present), and the review fields (`verdict`,
 `findings`, `severity`) right after `report_exists` (after `amend`, when
-present). The JSON is one line with `wait_status` first, so
+present). With `--no-wait`, `dispatch` can also return `wait_status: queued`
+when a working target shows prompt evidence; this exits 0 and the prompt is
+picked up when its current turn ends. The JSON is one line with `wait_status` first, so
 `dispatch … | tail -1` returns the whole JSON. When the wait settled on a
 report different from the dispatch's own — an amendment sent mid-wait
 re-pointed `last-report-<agent>` — the JSON gains `settled_report: <path>`
@@ -519,18 +521,29 @@ friction line ("may be stuck in one tool call"); the wait goes on. A
 missing, empty or non-numeric screen-age marker counts from now (rewritten
 in place), never from the Unix epoch.
 
-`dispatch` also checks that the prompt arrived: before sending, it waits
-up to `prompt_settle_seconds` (20, 0 off) for the target to settle —
+`dispatch` also checks that the prompt arrived. If the target is already
+`working`, dispatch skips the settle wait and sends no key after the prompt.
+Within `prompt_check_seconds` (15, 0 off), a moved `state_change_seq` while
+working or a non-empty report confirms receipt. The composed prompt path or
+the `Read the file ` marker anywhere in the recent screen confirms that the
+prompt is queued; with `--no-wait`, dispatch returns `queued`, and otherwise
+it continues waiting for the report. If a working target shows no evidence,
+dispatch returns `not-received` (exit 15) and says no key was sent. For a
+target that was not working before sending, dispatch keeps the settle and
+arrival checks: it waits up to `prompt_settle_seconds` (20, 0 off) for
 `interactive_ready` true in `herdr agent get` (when present) and two
 consecutive identical visible screen reads 500 ms apart; passing the
-deadline warns and sends anyway. Within `prompt_check_seconds` (15, 0 off)
-the agent must start working or block with a moved `state_change_seq`, or the
-report must appear. If the prompt text sits in the agent's input box, it
-sends one Enter (JSON `enter_sent`); if the screen never moved, or moved
-without the composed prompt path visible in recent screen outside the last
-3 non-empty lines, it resends the prompt once (`resent`) followed by a fresh
-window with the strict rules; if nothing works, it returns `not-received`
-(exit 15) — read the pane before sending anything else. A
+deadline warns and sends anyway. If the prompt text sits in the agent's input
+box, it sends one Enter (JSON `enter_sent`); if the screen never moved, or
+moved without the composed prompt path visible in recent screen outside the
+last 3 non-empty lines, it resends the prompt once (`resent`) followed by a
+fresh window with the strict rules; if nothing works, it returns
+`not-received` (exit 15) — read the pane before sending anything else. A
+`queued` dispatch records the moment and the agent's `state_change_seq` in
+`<state>/wait/<agent>.queued`. A later `wait` keeps watching while the same
+working turn continues; when the target leaves working and the prompt remains
+in its input box, `wait` retries Enter once per `prompt_check_seconds` window,
+up to 3 retries. A new working seq or a report clears the marker. A
 `not-received` `dispatch` records the moment and the agent's
 `state_change_seq`, and a `wait` afterwards
 retries one Enter per `prompt_check_seconds` window while the prompt is

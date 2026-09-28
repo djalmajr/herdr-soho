@@ -367,6 +367,47 @@ test('wait: gone and unavailable with a cause', { timeout: 60000 }, () => {
 
 // ---------- a not-received dispatch is continued by the wait ----------
 
+test('wait: queued prompt leaves working and is retried with Enter when still in the input box', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-enter-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    const now = Math.floor(Date.now() / 1000);
+    fix.waitFile('w', 'queued', `${now - 120} 5\n`);
+    fix.modeOf('w', 'idle');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fix.screenOf('w', 'Welcome\n> Read the file /tmp/brief.md in full and execute it.\n');
+    // Mutation captured: dropping the queued-to-input retry conversion leaves the prompt unsent.
+    assert.equal(probeAgent(fix.ws, 'w', '', fix.ctx, fix.env), 'working');
+    assert.equal(fix.waitRead('w', 'queued'), null);
+    assert.match(fix.waitRead('w', 'not-received'), /^\d+ 5\n$/);
+    assert.match(fix.waitRead('w', 'enter-retry'), /^1 \d+\n$/);
+    assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), ['agent send-keys w enter']);
+  } finally { fix.cleanup(); }
+});
+
+test('wait: queued marker is cleared when the worker has a new seq and the report completes', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-done-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    const now = Math.floor(Date.now() / 1000);
+    fix.waitFile('w', 'queued', `${now - 120} 5\n`);
+    fix.modeOf('w', 'working');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '6\n');
+    // Mutation captured: a changed seq on a new working turn must discard the queued retry marker.
+    assert.equal(probeAgent(fix.ws, 'w', '', fix.ctx, fix.env), 'working');
+    assert.equal(fix.waitRead('w', 'queued'), null);
+
+    fix.waitFile('w', 'queued', `${now - 120} 5\n`);
+    const report = fix.report('w', '# Report\n\ndone.\n');
+    // Mutation captured: leaving .queued after report arrival lets a stale Enter retry run next.
+    assert.equal(probeAgent(fix.ws, 'w', report, fix.ctx, fix.env), 'pending');
+    assert.equal(fix.waitRead('w', 'queued'), null);
+    assert.equal(probeAgent(fix.ws, 'w', report, fix.ctx, fix.env), 'done');
+    assert.equal(fix.waitRead('w', 'queued'), null);
+    assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
+  } finally { fix.cleanup(); }
+});
+
 // A dispatch that ended not-received recorded the moment in .not-received;
 // the worker that starts working afterwards makes the marker stale: the
 // probe drops it (and the retry counter) and goes on as usual.

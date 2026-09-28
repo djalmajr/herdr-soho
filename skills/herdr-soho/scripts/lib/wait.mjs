@@ -10,7 +10,8 @@
 // cmd_wait :3802).
 //
 // A dispatch that ended `not-received` records the moment in
-// <state>/wait/<agent>.not-received (epoch seconds). The probe that finds
+// <state>/wait/<agent>.not-received (epoch seconds); a prompt accepted while
+// the target is working records <agent>.queued. The probe that finds
 // that marker with the agent not working/blocked continues what the
 // dispatch left: while the prompt is still visible in the agent's input
 // box it retries one Enter per prompt_check_seconds window, up to three
@@ -236,7 +237,8 @@ const ENTER_RETRY_LIMIT = 3;
 // <state>/wait/ (the .size/.screen/.since/.blocked/.question/.stuck-hash/
 // .stuck-since/.stuck-warned/.activity-at/.probe-at/.quota/.provider/.provider-cause/
 // .capacity-retries/.capacity-at files; a not-received dispatch adds
-// .not-received and the wait's Enter retries .enter-retry).
+// .not-received, a prompt queued behind a working turn adds the .queued
+// marker, and the wait's Enter retries use .enter-retry.
 // S5 items 2 and 11a: a confirmed blocked screen that matches the kind's
 // question marker (lib/dialog.mjs) returns `question` with the text saved
 // in <agent>.question (no key sent, same rank as blocked); a working
@@ -246,6 +248,9 @@ const ENTER_RETRY_LIMIT = 3;
 export function probeAgent(sd, agent, report, ctx, env = process.env) {
   const grace = Number(cfg(ctx, 'settled_grace', '45', env));
   if (reportNonEmpty(report)) {
+    fs.rmSync(path.join(sd, 'wait', `${agent}.queued`), { force: true });
+    fs.rmSync(path.join(sd, 'wait', `${agent}.not-received`), { force: true });
+    fs.rmSync(path.join(sd, 'wait', `${agent}.enter-retry`), { force: true });
     // Wait for the file size to stop changing (the worker may still be
     // writing); `.size` is cleared by waitFor, so a fresh report is only
     // `done` on the second probe.
@@ -266,7 +271,32 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
   // with the normal probe (no key in the seq case). Otherwise the wait
   // continues the dispatch with a bounded Enter retry (see below).
   const nrFile = path.join(sd, 'wait', `${agent}.not-received`);
+  const queuedFile = path.join(sd, 'wait', `${agent}.queued`);
   const retryFile = path.join(sd, 'wait', `${agent}.enter-retry`);
+  if (fs.existsSync(queuedFile)) {
+    const queuedText = readWaitFile(sd, agent, `${agent}.queued`);
+    if (st.state === 'working') {
+      if (!markerSeqChanged(queuedText, st.seq)) return 'working';
+      fs.rmSync(queuedFile, { force: true });
+      fs.rmSync(retryFile, { force: true });
+    } else if (st.state === 'blocked' || st.state === 'gone' || st.state === 'unavailable') {
+      fs.rmSync(queuedFile, { force: true });
+      fs.rmSync(retryFile, { force: true });
+    } else {
+      const screen = agentRead(env, agent, { source: 'visible' });
+      if (!promptSitsInInput(screen)) {
+        fs.rmSync(queuedFile, { force: true });
+        fs.rmSync(retryFile, { force: true });
+        return 'not-received';
+      }
+      // Once the worker leaves its turn, the queued prompt follows the same
+      // bounded Enter retry path as a not-received prompt. Refresh the seq
+      // while keeping the original window start so retries remain spaced.
+      const epoch = String(queuedText ?? '').trim().split(/\s+/)[0] ?? `${Math.floor(Date.now() / 1000)}`;
+      fs.writeFileSync(nrFile, `${epoch}${st.seq !== '' ? ` ${st.seq}` : ''}\n`);
+      fs.rmSync(queuedFile, { force: true });
+    }
+  }
   if (fs.existsSync(nrFile)) {
     const markText = readWaitFile(sd, agent, `${agent}.not-received`);
     // True when the marker holds a seq, the current one is known, and the

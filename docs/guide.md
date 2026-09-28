@@ -491,6 +491,9 @@ not landed:
   instead of waiting for the screen to settle. Read the pane before
   sending anything else. An authentication screen that predates the prompt
   and never changes also means the prompt was not received.
+- `queued` (`dispatch --no-wait`, exit 0): the worker is already `working` and
+  the recent screen shows the prompt marker or composed prompt path. No key is
+  sent while it remains working; a later `wait` continues the queued prompt.
 
 The other outcomes: `quota` (exit 11, the account's quota is out),
 `settled-no-report` or `gone` (exit 6), `unavailable` (exit 4 — restore

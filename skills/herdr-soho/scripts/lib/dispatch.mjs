@@ -1156,7 +1156,7 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   for (const suf of ['size', 'screen', 'since', 'blocked', 'approvals', 'quota',
     'provider', 'provider-cause', 'capacity-retries', 'capacity-at',
     'question', 'stuck-hash', 'stuck-since', 'stuck-warned', 'activity-at', 'probe-at',
-    'not-received', 'enter-retry', 'approve-screen']) {
+    'not-received', 'queued', 'enter-retry', 'approve-screen']) {
     fs.rmSync(path.join(sd, 'wait', `${agent}.${suf}`), { force: true });
   }
 
@@ -1167,6 +1167,10 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   const text = amend === 1
     ? `${PROMPT_MARKER}${composed} in full and execute it. It amends the brief you are working on. When finished, write your report to ${report} and reply with exactly that path and nothing else.`
     : `${PROMPT_MARKER}${composed} in full and execute it. It contains your role, your brief, and your report contract. When finished, write your report to ${report} and reply with exactly that path and nothing else.`;
+  const rawWin = String(cfg(ctx, 'prompt_check_seconds', '15', env));
+  const checkOn = /^[0-9]+$/.test(rawWin) && Number(rawWin) > 0;
+  const beforeSettle = checkOn ? agentState(agent, env) : { state: '', seq: '' };
+  const wasWorking = beforeSettle.state === 'working';
   // Item 15 (+amendment + arrival tightening):
   // 1. Settle wait: before sending, wait up to prompt_settle_seconds (20, 0 off)
   //    for the target to settle: interactive_ready true in `herdr agent get`
@@ -1174,7 +1178,7 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   //    Passing the deadline logs a warning and proceeds.
   const rawSettle = String(cfg(ctx, 'prompt_settle_seconds', '20', env));
   const settleSecs = /^[0-9]+$/.test(rawSettle) ? Number(rawSettle) : 20;
-  if (settleSecs > 0) {
+  if (settleSecs > 0 && !wasWorking) {
     const deadline = Date.now() + settleSecs * 1000;
     let prevScreen = agentRead(env, agent, { source: 'visible' });
     let settled = false;
@@ -1192,6 +1196,7 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
       warn(`prompt to '${agent}' did not settle in ${settleSecs}s; sending anyway`);
     }
   }
+  const preSendState = settleSecs > 0 && !wasWorking ? agentState(agent, env) : beforeSettle;
 
   // With the arrival check on (prompt_check_seconds a positive integer; 0 turns it off,
   // and an invalid value fails safe = off) the visible screen is hashed before
@@ -1208,14 +1213,12 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   //      input box): single resend of the same text (fresh H0/preSeq), then a fresh
   //      window with strict rules 1 and 4.
   // Still nothing: `not-received`, exit 15.
-  const rawWin = String(cfg(ctx, 'prompt_check_seconds', '15', env));
-  const checkOn = /^[0-9]+$/.test(rawWin) && Number(rawWin) > 0;
   let H0 = '';
   let preSeq = '';
   let preAuthCauses = new Set();
   if (checkOn) {
     H0 = cksumField(agentRead(env, agent, { source: 'visible' }));
-    preSeq = agentState(agent, env).seq;
+    preSeq = preSendState.seq;
     // R11/D58 amendments: screen-only auth evidence before the submit, on
     // the same source and line window the --no-wait observation uses
     // below. The state gate is skipped on purpose (the literal can never
@@ -1321,10 +1324,36 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
       fs.writeFileSync(path.join(sd, 'wait', `${agent}.not-received`),
         `${Math.floor(Date.now() / 1000)}${seq !== '' ? ` ${seq}` : ''}\n`);
       process.stdout.write(JSON.stringify({ wait_status: 'not-received', agent, role, kind, composed_prompt: composed, report, task_report: taskReport, report_exists: reportNow }) + '\n');
-      warn(`prompt to '${agent}' was not received after ${what}; read the pane (herdr agent read ${agent} --source visible) before sending anything else`);
+      const warning = wasWorking
+        ? `prompt to '${agent}' not confirmed: it was working and shows no sign of the prompt; no key was sent. Read the pane before sending anything else.`
+        : `prompt to '${agent}' was not received after ${what}; read the pane (herdr agent read ${agent} --source visible) before sending anything else`;
+      warn(warning);
       return 15;
     };
-    if (!waitForArrival(windowMs)) {
+    if (wasWorking) {
+      const promptEvidence = () => {
+        const recent = agentRead(env, agent, { source: 'recent-unwrapped', lines: 40 });
+        return recent.includes(composed) || recent.includes(PROMPT_MARKER);
+      };
+      if (!waitForArrival(windowMs, promptEvidence)) return notReceived('the working target showed no prompt evidence');
+      const current = agentState(agent, env);
+      let reportNow = false;
+      try { reportNow = fs.statSync(report).size > 0; } catch { reportNow = false; }
+      const seqMoved = preSeq !== '' && current.seq !== '' && current.seq !== preSeq;
+      const confirmed = reportNow || (seqMoved && (current.state === 'working' || current.state === 'blocked'));
+      if (!confirmed) {
+        status = 'queued';
+        try {
+          atomicWrite(sidecar, `${JSON.stringify({ ...sidecarMeta, submission: 'accepted', arrival: 'queued' })}\n`);
+        } catch (e) {
+          warn(`could not record the queued arrival in the attempt sidecar ${sidecar}: ${sanitizeCause(e && e.message ? e.message : e) || 'unknown error'}; the dispatch result stands`);
+        }
+        fs.writeFileSync(path.join(sd, 'wait', `${agent}.queued`),
+          `${Math.floor(Date.now() / 1000)}${current.seq !== '' ? ` ${current.seq}` : ''}\n`);
+        process.stderr.write(`herdr-soho: prompt queued: '${agent}' is working; it takes the prompt when its turn ends\n`);
+      }
+    }
+    if (!wasWorking && !waitForArrival(windowMs)) {
       const screen = agentRead(env, agent, { source: 'visible' });
       const screenMoved = String(cksumField(screen)) !== String(H0);
       if (screenMoved && composedPathSeenOutsideInput(agent, composed, env)) {

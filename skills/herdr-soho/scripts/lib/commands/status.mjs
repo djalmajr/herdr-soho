@@ -98,6 +98,13 @@ export function cmdStatus(argv, ctx, env = process.env, cwd = process.cwd()) {
         // rc 15 sits below 4, 11 and 14 and above 7 and 6 (the global
         // wait rank).
         if (waitRank(15) > waitRank(rc)) rc = 15;
+      } else if (!stale && fs.existsSync(path.join(sd, 'wait', `${a}.queued`))
+        && orig !== 'working' && orig !== 'blocked') {
+        // A queued prompt is pending while the worker is working. Once the
+        // worker stops without a report, status surfaces the unresolved
+        // arrival without modifying the marker or sending a key.
+        state = 'not-received';
+        if (waitRank(15) > waitRank(rc)) rc = 15;
       } else if (!stale && orig === 'blocked') {
         // A blocked worker whose visible screen is a decision question is
         // reported as `question` (rc 7) with the text — the question is
