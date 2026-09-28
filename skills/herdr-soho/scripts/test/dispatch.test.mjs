@@ -38,6 +38,7 @@ function sidecarForPrompt(prompt) {
   return path.join(path.dirname(prompt), `${basename.slice(0, -suffix.length)}.dispatch.json`);
 }
 
+// Mutation captured: selecting host path rules for `posix` accepts case variants on Windows.
 test('dispatch workspace path comparison accepts Windows slash and case variants', () => {
   assert.equal(samePath('C:/work/repo', 'C:\\work\\repo', 'win32'), true);
   assert.equal(samePath('C:/work/repo', 'c:/work/repo', 'win32'), true);

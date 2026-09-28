@@ -12,7 +12,7 @@ import { canSymlink } from './tools.mjs';
 const ENTRY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'herdr-soho.mjs');
 
 function setup() {
-  const prefix = process.platform === 'win32' ? "ha mutation 'guard' " : 'ha mutation "guard" ';
+  const prefix = process.platform === 'win32' ? 'ha mutation guard ' : 'ha mutation "guard" ';
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   const source = path.join(root, 'source');
   const copy = path.join(root, 'copy');

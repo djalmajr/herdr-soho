@@ -1422,6 +1422,6 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
 // Git and roster paths can use different slash styles on Windows. Compare
 // canonical paths with the selected platform's path rules before routing.
 export function samePath(left, right, platform = process.platform) {
-  const pathApi = platform === 'win32' ? path.win32 : path;
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
   return pathApi.relative(left, right) === '';
 }
