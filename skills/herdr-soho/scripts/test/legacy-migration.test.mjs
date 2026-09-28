@@ -1,7 +1,8 @@
 // The direct herdr-agents → herdr-soho switch, end to end, with the exact
 // hook commands old projects carry: once the old skill is gone the legacy
 // SessionStart hook finds no script (and says so, exit 0); `herdr-soho
-// setup` then replaces the old block and hooks in place, keeps the
+// setup` then renames the old block in place (keeping its text), replaces
+// the old hooks, keeps the
 // project's own content and hooks, and the new hooks run the new doctor.
 // Every HOME and project is temporary; every spawnSync carries a timeout.
 import test from 'node:test';
@@ -12,8 +13,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  LEGACY_SETUP_END, LEGACY_SETUP_START, SETUP_START, legacyHookDoctor, legacyHookReminder,
-  setupBlock, setupHookDoctor, setupHookReminder,
+  LEGACY_SETUP_END, LEGACY_SETUP_START, SETUP_END, SETUP_START, legacyHookDoctor, legacyHookReminder,
+  setupHookDoctor, setupHookReminder,
 } from '../lib/setuptext.mjs';
 
 const SKILL_SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -73,16 +74,16 @@ test('before setup, the legacy SessionStart hook finds no script once herdr-agen
   assert.equal(r.stdout, 'herdr-agents doctor: skill script not found\n');
 });
 
-test('herdr-soho setup replaces the old block and hooks in place and keeps the project\'s own content and hooks', (t) => {
+test('herdr-soho setup renames the old block in place, replaces the old hooks, and keeps the project\'s own content and hooks', (t) => {
   const f = fixture();
   t.after(f.cleanup);
   // Mutation captured: dropping the legacy-command match in the hooks merge
-  // leaves both the old and the new SessionStart hook; dropping the legacy
-  // markers from the block merge appends a second block at the end.
+  // leaves both the old and the new SessionStart hook; regenerating the
+  // block drops the project's own `old block body` line.
   const r = f.cli(['setup']);
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
   const agents = fs.readFileSync(path.join(f.proj, 'AGENTS.md'), 'utf8');
-  assert.equal(agents, `# Project\n\nOwn intro.\n\n${setupBlock()}\nOwn tail.\n`);
+  assert.equal(agents, `# Project\n\nOwn intro.\n\n${SETUP_START}\nold block body\n${SETUP_END}\n\nOwn tail.\n`);
   const { doc, cmds } = hookCommands(f.proj);
   assert.ok(!cmds.includes(legacyHookReminder()) && !cmds.includes(legacyHookDoctor()), cmds.join('\n'));
   assert.ok(cmds.includes(setupHookReminder()) && cmds.includes(setupHookDoctor()), cmds.join('\n'));

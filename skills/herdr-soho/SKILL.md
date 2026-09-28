@@ -533,9 +533,11 @@ project or machine still has only the old names, the CLI reads them:
 file is absent (the first write to that file — `config set`,
 `setup --panes`, `doctor --fix` — copies the old file to the new
 name and leaves it in place), and the `.herdr-agents/` state directory
-while `.herdr-soho/` does not exist. `setup` replaces an old `<!-- herdr-agents:start/end -->` block and the old
-Claude hooks in place, and `doctor` prints one `legacy …` warning for each
-old name still in use.
+while `.herdr-soho/` does not exist. `setup` migrates an old
+`<!-- herdr-agents:start/end -->` block in place — it renames the markers
+and the `herdr-agents` names inside it and keeps the rest of its text, a
+project's own lines included — and replaces the old Claude hooks; `doctor`
+prints one `legacy …` warning for each old name still in use.
 
 **Session layer.** `session set <key> <value>` writes the workspace's
 `<state>/session.conf`: it overrides the project and user files, but flags

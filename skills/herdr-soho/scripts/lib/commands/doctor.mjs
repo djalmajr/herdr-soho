@@ -845,8 +845,8 @@ export function doctorCheck(ctx, env = process.env, cwd = process.cwd()) {
     // Pre-rename block: `setup` (or `setup --local`, when the local target
     // is in force — a legacy block in CLAUDE.local.md or setup_target=local)
     // replaces it in place; no other doctor text changes.
-    if (localLegacy || setupLocal) s.warn(`legacy herdr-agents instruction block in ${LOCAL_INSTRUCTION_FILE}: run '${ENTRY_SCRIPT} setup --local' to replace it in place`);
-    else s.warn(`legacy herdr-agents instruction block in ${path.basename(t)}: run '${ENTRY_SCRIPT} setup' to replace it in place`);
+    if (localLegacy || setupLocal) s.warn(`legacy herdr-agents instruction block in ${LOCAL_INSTRUCTION_FILE}: run '${ENTRY_SCRIPT} setup --local' to rename it in place (its text is kept)`);
+    else s.warn(`legacy herdr-agents instruction block in ${path.basename(t)}: run '${ENTRY_SCRIPT} setup' to rename it in place (its text is kept)`);
   }
   else if (setupLocal) s.warn(`no herdr-soho block in ${LOCAL_INSTRUCTION_FILE}: run '${ENTRY_SCRIPT} setup --local' (writes the delegation rules between <!-- herdr-soho:start/end --> markers, kept unversioned)`);
   else s.warn(`no herdr-soho block in AGENTS.md/CLAUDE.md: run '${ENTRY_SCRIPT} setup' (writes the delegation rules between <!-- herdr-soho:start/end --> markers)`);
@@ -859,7 +859,7 @@ export function doctorCheck(ctx, env = process.env, cwd = process.cwd()) {
     let claudeText = '';
     try { claudeText = readTextFile(claudeMd); } catch { /* unreadable */ }
     if (claudeText.includes(LEGACY_SETUP_START) && !claudeText.includes(SETUP_START)) {
-      s.warn(`legacy herdr-agents instruction block in CLAUDE.md: run '${ENTRY_SCRIPT} setup --target CLAUDE.md' to replace it in place`);
+      s.warn(`legacy herdr-agents instruction block in CLAUDE.md: run '${ENTRY_SCRIPT} setup --target CLAUDE.md' to rename it in place (its text is kept)`);
     }
   }
   const settingsJson = path.join(root, '.claude', 'settings.json');

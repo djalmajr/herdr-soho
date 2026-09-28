@@ -37,15 +37,19 @@ test('legacy hooks: pinned sha256 and length of the exact pre-rename commands', 
 
 // Mutation captured: dropping LEGACY_SETUP_START from the entry condition
 // (or the line loop) sends a legacy-block file down the append path.
-test('setupBlockResult: the legacy block is replaced by the new block in the same position', () => {
-  // legacy block in the middle: surrounding lines kept, legacy markers consumed
-  assert.equal(setupBlockResult(`before\n${OLD_LEGACY_BLOCK}after\n`), `before\n${BLOCK}after\n`);
-  // only the legacy block
-  assert.equal(setupBlockResult(OLD_LEGACY_BLOCK), BLOCK);
-  // no trailing newline on the legacy end marker line
-  assert.equal(setupBlockResult(`before\n${LEGACY_SETUP_START}\nold\n${LEGACY_SETUP_END}`), `before\n${BLOCK}`);
-  // a line holding both legacy markers counts as a start (current semantics)
-  assert.equal(setupBlockResult(`a\n${LEGACY_SETUP_START}${LEGACY_SETUP_END}\nb\n`), `a\n${BLOCK}`);
+// Mutation captured: regenerating the block (instead of renaming it in
+// place) drops the project's own line; renaming outside the block rewrites
+// text that merely mentions the old name.
+test('setupBlockResult: a legacy block is renamed in place and keeps its own text', () => {
+  const own = `before herdr-agents\n${LEGACY_SETUP_START}\n## Multi-agent workflow (herdr-agents)\nLoad /herdr-agents; config in .agents/herdr-agents.conf; HERDR_AGENTS_DIR.\nOur own rule: name workers by job.\n${LEGACY_SETUP_END}\nafter herdr-agents\n`;
+  assert.equal(setupBlockResult(own),
+    `before herdr-agents\n${SETUP_START}\n## Multi-agent workflow (herdr-soho)\nLoad /herdr-soho; config in .agents/herdr-soho.conf; HERDR_SOHO_DIR.\nOur own rule: name workers by job.\n${SETUP_END}\nafter herdr-agents\n`);
+  // no trailing newline is kept as is
+  assert.equal(setupBlockResult(`${LEGACY_SETUP_START}\nold\n${LEGACY_SETUP_END}`), `${SETUP_START}\nold\n${SETUP_END}`);
+  // an unterminated legacy block is refused (null), like an incomplete result
+  assert.equal(setupBlockResult(`a\n${LEGACY_SETUP_START}\nno end\n`), null);
+  // with both kinds present, the legacy markers read as the current ones (replace)
+  assert.equal(setupBlockResult(`${SETUP_START}\nx\n${SETUP_END}\n${LEGACY_SETUP_START}\ny\n${LEGACY_SETUP_END}\n`), `${BLOCK}${BLOCK}`);
 });
 
 // Mutation captured: matching the word herdr-agents (instead of the full
