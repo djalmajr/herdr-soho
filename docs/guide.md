@@ -305,7 +305,10 @@ busy or showing dialog, 18 refused by `inbound=off`.
   (`spawn --cwd <worktree>`), and the worker's composed prompt adds a line
   telling it to report failures in files it does not own as outside its
   slice. A `done` report routed through `$TMPDIR/herdr-soho/<ws>/reports/`
-  is mirrored back into the state dir (best effort).
+  is mirrored back into the state dir (best effort). Linked worktrees share
+  the main checkout's state; briefs for a worker in a worktree should use
+  absolute paths, and `dispatch` warns when a cited relative path exists only
+  in the orchestrator's checkout.
 - One agent name is one growing session. After several briefs, or when a
   report includes unrelated prior work, close the completed worker with
   `release <name> --close` and spawn with `--fresh` for the next slice (only

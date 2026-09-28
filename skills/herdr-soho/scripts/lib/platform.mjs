@@ -53,6 +53,37 @@ export function projectRoot(env = process.env, cwd = process.cwd()) {
   return cwd;
 }
 
+// State belongs to the primary checkout when this cwd is in a linked
+// worktree. Normal checkouts and non-git directories keep projectRoot's
+// existing behavior.
+export function stateProjectRoot(env = process.env, cwd = process.cwd()) {
+  const gitDir = spawnSync('git', ['rev-parse', '--git-dir'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const commonDir = spawnSync('git', ['rev-parse', '--git-common-dir'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  if (gitDir.status !== 0 || commonDir.status !== 0) return projectRoot(env, cwd);
+  const gitPath = path.resolve(cwd, (gitDir.stdout || '').trim());
+  const commonPath = path.resolve(cwd, (commonDir.stdout || '').trim());
+  if (!gitPath || gitPath === commonPath) return projectRoot(env, cwd);
+  if (path.basename(commonPath) === '.git') return path.dirname(commonPath);
+  const worktrees = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  if (worktrees.status === 0) {
+    const first = (worktrees.stdout || '').split(/\r?\n\r?\n/, 1)[0];
+    const firstPath = first.split(/\r?\n/).find((line) => line.startsWith('worktree '));
+    if (firstPath && !first.split(/\r?\n/).some((line) => line === 'bare')) {
+      let root = path.resolve(cwd, firstPath.slice('worktree '.length));
+      const listedRel = path.relative(commonPath, root);
+      const listedInsideCommon = listedRel === '' || (listedRel !== '..' && !listedRel.startsWith(`..${path.sep}`) && !path.isAbsolute(listedRel));
+      if (listedInsideCommon) {
+        const worktree = spawnSync('git', ['--git-dir', commonPath, 'config', '--path', 'core.worktree'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        if (worktree.status === 0 && (worktree.stdout || '').trim()) root = path.resolve(commonPath, worktree.stdout.trim());
+      }
+      const rootRel = path.relative(commonPath, root);
+      const rootInsideCommon = rootRel === '' || (rootRel !== '..' && !rootRel.startsWith(`..${path.sep}`) && !path.isAbsolute(rootRel));
+      if (!rootInsideCommon) return root;
+    }
+  }
+  return projectRoot(env, cwd);
+}
+
 // `command -v` port: resolve an executable on PATH, honoring PATHEXT on
 // Windows (decision 6). Returns the full path or null.
 export function findExecutable(name, env = process.env, platform = process.platform) {

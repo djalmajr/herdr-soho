@@ -971,7 +971,10 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   `run` does not release.
 - **Worktrees are yours to create.** `git worktree add .worktrees/<slug>`
   (or `herdr worktree create`) and pass the path with `--cwd`. The roster
-  stays in the main repo; a worker whose cwd is not the repo root gets its
+  stays in the main repo; linked worktrees share the main checkout's state.
+  Briefs for a worker in a worktree should use absolute paths; `dispatch`
+  warns when a cited relative path exists only in the orchestrator's checkout.
+  A worker whose cwd is not the repo root gets its
   brief and report routed through `$TMPDIR/herdr-soho/<ws>/reports/`,
   which every known sandbox can write. You merge its diff back yourself
   (`git -C <worktree> diff | git apply`, or cherry-pick). `spawn` (a new
