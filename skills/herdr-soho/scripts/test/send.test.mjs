@@ -725,9 +725,14 @@ test('send.test.mjs uses impossible ids and no real pane ids (w12:p1, w14:pS, w3
   const content = fs.readFileSync(new URL(import.meta.url), 'utf8');
   const lines = content.split('\n');
   const forbidden = ['w12:p1', 'w14:pS', 'w3:p1', 'w5:p2', 'w9:p1'];
+  // The whole file is scanned; only the lines that name the forbidden ids
+  // on purpose (this test's title, the list, the mutation note) are skipped.
+  const namesThemOnPurpose = (l) => l.includes("test('send.test.mjs uses impossible ids")
+    || l.includes('const forbidden = ')
+    || l.includes('Mutation captured: introducing any real pane id');
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    if (l.includes("test('send.test.mjs uses impossible ids")) break;
+    if (namesThemOnPurpose(l)) continue;
     for (const f of forbidden) {
       assert.ok(!l.includes(f), `line ${i + 1} contains forbidden real id ${f}: ${l}`);
     }
