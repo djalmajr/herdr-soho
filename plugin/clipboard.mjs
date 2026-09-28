@@ -5,8 +5,13 @@
 // Native tool per platform, in the same order as Herdr's own fallback
 // chain (herdr v0.9.1 sources, src/platform/{macos,linux,windows}.rs):
 //   darwin:  pbcopy
-//   win32:   powershell -NoProfile -Command Set-Clipboard  (text on stdin;
-//             clip.exe is not used: it mangles UTF-8)
+//   win32:   powershell (ReadToEnd on the stdin; clip.exe is not used:
+//             it mangles UTF-8). The command itself reads the stdin —
+//             [Console]::In.ReadToEnd() — with UTF-8 input encoding,
+//             so the text never appears on the command line (no quote
+//             or $ mangling): powershell -NoProfile -Command
+//             "[Console]::InputEncoding=[Text.Encoding]::UTF8;
+//              Set-Clipboard -Value ([Console]::In.ReadToEnd())"
 //   linux:   wl-copy, then xclip -selection clipboard,
 //            then xsel --clipboard --input
 // A tool that is missing or fails yields the next tool; when no tool can
@@ -36,7 +41,8 @@ export function toolCandidates(platform) {
     case 'darwin':
       return [['pbcopy']];
     case 'win32':
-      return [['powershell', '-NoProfile', '-Command', 'Set-Clipboard']];
+      return [['powershell', '-NoProfile', '-Command',
+        '[Console]::InputEncoding=[Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())']];
     default:
       return [
         ['wl-copy'],

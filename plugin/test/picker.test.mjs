@@ -12,6 +12,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { Writable, PassThrough } from 'node:stream';
 import {
   createState,
@@ -21,6 +23,9 @@ import {
   render,
   entryLine,
   copyPayload,
+  stripControls,
+  notifyCopied,
+  FIND_TIMEOUT_MS,
   parseFindOutput,
   parseMachineList,
   FindError,
@@ -148,6 +153,34 @@ function captureStream() {
   return s;
 }
 
+// A stdin the test drives directly: each push() is one 'data' event with
+// exactly the given bytes (no coalescing, no TTY). fakeTtyStdin adds the
+// TTY surface (isTTY, setRawMode, destroy) that main uses to toggle the
+// raw mode and release the handle.
+function fakeStdin() {
+  const f = {
+    isTTY: false,
+    _data: null,
+    _end: null,
+    on(ev, cb) { if (ev === 'data') f._data = cb; if (ev === 'end') f._end = cb; return f; },
+    off() { return f; },
+    destroy() {},
+  };
+  f.push = (b) => { if (f._data) f._data(b); };
+  f.end = () => { if (f._end) f._end(); };
+  return f;
+}
+
+function fakeTtyStdin() {
+  const f = fakeStdin();
+  f.isTTY = true;
+  f.modes = [];
+  f.destroyed = false;
+  f.setRawMode = (m) => f.modes.push(m);
+  f.destroy = () => { f.destroyed = true; };
+  return f;
+}
+
 // A fake clipboard tool: writes its stdin (and, when argvFile is set,
 // its argv) to `out` and exits `exit`. On Windows it is a self-contained
 // node fake behind a .cmd launcher (there is no /bin/sh).
@@ -186,18 +219,78 @@ test('filter: words (whole or partial) match case-insensitively over the fields'
     const got = filterEntries(ENTRIES, query).map((e) => e.ref).sort();
     assert.deepEqual(got, [...wantRefs].sort(), `${label}: query ${JSON.stringify(query)}`);
   }
-  // Multiple words: every word must match (across the fields).
+  // Multiple words: every word must match (across the fields). The
+  // words are NOT adjacent in the joined search text (kind and workspace
+  // label, with the status word between them), so a filter reduced to a
+  // whole-query includes cannot match them.
   assert.deepEqual(
-    filterEntries(ENTRIES, 'orchestrator codex').map((e) => e.ref),
+    filterEntries(ENTRIES, 'codex pinar').map((e) => e.ref),
     ['windows/w3:p1'],
-    'multi-word: orchestrator (name) + codex (kind)',
+    'multi-word: codex (kind) + pinar (workspace label)',
+  );
+  assert.deepEqual(
+    filterEntries(ENTRIES, 'pinar codex').map((e) => e.ref),
+    ['windows/w3:p1'],
+    'multi-word: the same words in the reverse order',
   );
   assert.deepEqual(filterEntries(ENTRIES, 'orchestrator idle'), [], 'multi-word: no entry has both');
   // Mutation captured: making the filter case-sensitive (removing
   // toLowerCase on the query or the field) fails the 'ORCHE' and
   // 'WINDOWS' rows.
   // Mutation captured: dropping the multi-word split (matching the whole
-  // query as one string) fails 'orchestrator codex' (it spans two fields).
+  // query as one string) fails 'codex pinar' and 'pinar codex': the words
+  // are not adjacent in the joined text, so a whole-query includes
+  // cannot see them.
+});
+
+test('stripControls: C0 (\\t/\\n → space), C1, DEL and complete ESC sequences are removed', () => {
+  // The review probe fields: a name with CSI + OSC 52, a cwd with a
+  // newline and a CSI home.
+  assert.equal(stripControls('evil\x1b[2J\x1b[31mRED\x1b]52;c;UEFO\x07'), 'evilRED');
+  assert.equal(stripControls('/tmp/ok\nPASTED-LINE\x1b[H'), '/tmp/ok PASTED-LINE');
+  // \t and \n become a space; the rest of C0 is removed.
+  assert.equal(stripControls('a\tb\nc'), 'a b c');
+  assert.equal(stripControls('a\x00b\x01c\x1b'), 'abc');
+  // C1 and DEL are removed.
+  assert.equal(stripControls('a\u0080b\u009fc'), 'abc');
+  assert.equal(stripControls('a\x7fb'), 'ab');
+  // A lone ESC that opens no sequence is removed.
+  assert.equal(stripControls('a\x1bb'), 'ab');
+  // OSC terminated by ST (ESC \\); an unterminated sequence at the end.
+  assert.equal(stripControls('a\x1b]52;c;UEFO\x1b\\b'), 'ab');
+  assert.equal(stripControls('a\x1b[31m'), 'a');
+  assert.equal(stripControls('a\x1b]52;c;UEFO'), 'a');
+  // A field made only of controls empties out.
+  assert.equal(stripControls('\x1b[2J'), '');
+  // Clean text (accents included) is untouched.
+  assert.equal(stripControls('olá — referência windows/w3:p1'), 'olá — referência windows/w3:p1');
+  // Mutation captured: not scanning the CSI/OSC sequences leaves the
+  // \x1b bytes in 'evilRED'; keeping the C0 bytes fails the 'abc' row;
+  // keeping \t or \n verbatim fails the 'a b c' and cwd rows.
+});
+
+test('entryLine, the failure line and copyPayload: hostile fields come out flat and control-free', () => {
+  const e = {
+    ...JSON.parse(WINDOWS_1),
+    name: 'evil\x1b[2J\x1b[31mRED\x1b]52;c;UEFO\x07',
+    cwd: '/tmp/ok\nPASTED-LINE\x1b[H',
+  };
+  const line = entryLine(e, 200);
+  assert.equal(line, 'windows/w3:p1  evilRED  codex  working  pinar/1  /tmp/ok PASTED-LINE');
+  assert.ok(!line.includes('\x1b'), 'no ESC in the drawn row');
+  assert.ok(!line.includes('\n') && !line.includes('\t'), 'the row stays on one line');
+  const copied = copyPayload(e);
+  assert.equal(copied, 'windows/w3:p1 (evilRED, codex, working) /tmp/ok PASTED-LINE');
+  assert.ok(!copied.includes('\x1b'), 'no ESC in the copied text');
+  assert.ok(!copied.includes('\n') && !copied.includes('\t'), 'the copied text stays on one line');
+  // The failure line: the cause is the stderr of a subprocess.
+  const st = createState();
+  st.failures = [{ label: 'windows', cause: 'exit 1: boom\x1b[2J\x1b[31m' }];
+  const out = render(st, 200);
+  assert.doesNotMatch(out, /\x1b/);
+  assert.match(out, /máquina windows: falhou \(exit 1: boom\)/);
+  // Mutation captured: drawing or copying the fields raw (no stripControls)
+  // leaves the \x1b bytes in the row, the copied text and the failure line.
 });
 
 test('filter: an empty query shows everything', () => {
@@ -445,6 +538,34 @@ test('incremental load: a failing local find becomes a status line and nothing m
   // instead of degrading to a status line.
 });
 
+test('load: a find that overruns the per-machine timeout fails that machine as a status line', { timeout: 30000 }, async (t) => {
+  const dir = makeTmp(t);
+  assert.equal(FIND_TIMEOUT_MS, 60_000, 'the per-find ceiling is one minute per machine');
+  const cli = writeFakeFindCli(dir, 'to', {
+    local: { lines: [LOCAL_1] },
+    windows: { sleepMs: 3000, lines: [WINDOWS_1] },
+  });
+  const herdrBin = writeFakeHerdr(dir, 'to', { machineList: machineListJson([{ label: 'windows', enabled: true }]) });
+  const st = createState();
+  const r = await loadEntries(st, {
+    env: { HERDR_BIN_PATH: herdrBin },
+    nodeBin: process.execPath,
+    cliScript: cli,
+    herdrBin,
+    findTimeoutMs: 150,
+  });
+  assert.deepEqual(st.entries.map((e) => e.ref), ['local/w12:p1'], 'the local entry is in');
+  assert.equal(st.loading, 0, 'no load left in flight');
+  assert.equal(r.failures.length, 1);
+  assert.equal(r.failures[0].label, 'windows');
+  assert.match(r.failures[0].cause, /find timed out after/);
+  assert.match(render(st, 200), /máquina windows: falhou \(find timed out after 0\.15s\)/);
+  assert.doesNotMatch(render(st, 200), /carregando/);
+  // Mutation captured: not passing the timeout to the find spawn leaves
+  // the stuck machine loading (the test would hang until its own
+  // timeout) and the status line never appears.
+});
+
 // ---------- parseFindOutput / parseMachineList ----------
 
 test('parseFindOutput: good NDJSON, CRLF, and a malformed line rejects the whole load', () => {
@@ -585,19 +706,27 @@ test('clipboard: linux tries wl-copy, then xclip, then xsel — a failing tool y
   // takes over'.
 });
 
-test('clipboard: windows uses powershell with the text on stdin', (t) => {
+test('clipboard: windows uses a powershell that reads the stdin — exact argv, hostile text', (t) => {
   const dir = makeTmp(t);
   const out = path.join(dir, 'clip.txt');
   const argvFile = path.join(dir, 'argv.txt');
   writeFakeTool(dir, 'powershell', { out, argvFile });
-  const r = copyText('win text', { platform: 'win32', env: withFakeDir(dir) });
+  // Quotes, $ and an accent: the text must reach the command on the
+  // stdin, never on the command line.
+  const text = 'price is $5 and "quoted" and \'single\' and não\n';
+  const r = copyText(text, { platform: 'win32', env: withFakeDir(dir) });
   assert.equal(r.path, 'powershell');
-  assert.equal(fs.readFileSync(out, 'utf8'), 'win text');
+  assert.equal(fs.readFileSync(out, 'utf8'), text, 'the text reached the command on the stdin');
   const argv = fs.readFileSync(argvFile, 'utf8');
-  assert.match(argv, /-NoProfile/);
-  assert.match(argv, /Set-Clipboard/);
-  // Mutation captured: using clip.exe instead of PowerShell fails the
-  // tool name and the argv asserts.
+  assert.equal(
+    argv,
+    '-NoProfile -Command [Console]::InputEncoding=[Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())\n',
+    'the exact argv: the command reads the stdin itself (ReadToEnd); the text is not on the command line',
+  );
+  // Mutation captured: using clip.exe (or the old bare 'Set-Clipboard',
+  // which does not read the stdin) fails the tool name and the exact-argv
+  // assert; putting the text on the command line (a -Value '<text>'
+  // argument) changes the argv and would mangle the quotes and $.
 });
 
 test('clipboard: no tool, or a failing tool, writes the exact OSC 52 bytes', (t) => {
@@ -747,4 +876,381 @@ test('main: piped stdin ending exits as Esc without copying', { timeout: 30000 }
   assert.equal(r.copied, null);
   // Mutation captured: treating a piped EOF as an Enter (copy) copies
   // the first row and fails the copied=null assert.
+});
+
+test('main: a redraw that shrinks the frame erases the rest of the screen (\\x1b[J)', { timeout: 30000 }, async (t) => {
+  const dir = makeTmp(t);
+  const cli = writeFakeFindCli(dir, 'erase', { local: { lines: [LOCAL_1, LOCAL_2, WINDOWS_1] } });
+  const herdrBin = writeFakeHerdr(dir, 'erase', { machineList: machineListJson([]) });
+  const sin = new PassThrough();
+  const sout = captureStream();
+  const p = pickerMain({
+    env: { PATH: dir, HERDR_BIN_PATH: herdrBin },
+    nodeBin: process.execPath,
+    cliScript: cli,
+    herdrBin,
+    stdin: sin,
+    stdout: sout,
+    width: 120,
+  });
+  await waitUntil(() => {
+    const last = sout.text().slice(sout.text().lastIndexOf('\x1b[H'));
+    return last.includes('3 panes');
+  }, { timeoutMs: 5000 });
+  sin.write('pinar'); // the frame shrinks to one row
+  await waitUntil(() => {
+    const last = sout.text().slice(sout.text().lastIndexOf('\x1b[H'));
+    return last.includes('1 pane');
+  }, { timeoutMs: 5000 });
+  const last = sout.text().slice(sout.text().lastIndexOf('\x1b[H'));
+  assert.ok(last.endsWith('\x1b[J'), 'the frame ends by erasing the rest of the screen');
+  assert.doesNotMatch(last, /3 panes/, 'the old count line is gone from the new frame');
+  sin.write('\x1b');
+  const r = await p;
+  assert.equal(r.action, 'esc');
+  // Mutation captured: not appending \x1b[J at the end of the redraw
+  // leaves the old lines below a smaller frame (the frame no longer
+  // ends with the erase).
+});
+
+test('main: the first frame marks the local load in flight ("carregando local…", not "nenhum pane")', { timeout: 30000 }, async (t) => {
+  const dir = makeTmp(t);
+  const cli = writeFakeFindCli(dir, 'first', {
+    local: { sleepMs: 400, lines: [LOCAL_1] },
+    windows: { lines: [WINDOWS_1] },
+  });
+  const herdrBin = writeFakeHerdr(dir, 'first', { machineList: machineListJson([{ label: 'windows', enabled: true }]) });
+  const sin = new PassThrough();
+  const sout = captureStream();
+  const p = pickerMain({
+    env: { PATH: dir, HERDR_BIN_PATH: herdrBin },
+    nodeBin: process.execPath,
+    cliScript: cli,
+    herdrBin,
+    stdin: sin,
+    stdout: sout,
+    width: 100,
+  });
+  // The first frame is written synchronously, before the first await:
+  // it must already mark the local load in flight (not 'nenhum pane'),
+  // while the local find is still 400 ms away.
+  const tx = sout.text();
+  const second = tx.indexOf('\x1b[H', 1);
+  const first = second === -1 ? tx : tx.slice(0, second);
+  assert.match(first, /carregando local…/);
+  assert.doesNotMatch(first, /nenhum pane/);
+  await waitUntil(() => sout.text().includes('1 pane'), { timeoutMs: 5000 });
+  sin.write('\x1b');
+  const r = await p;
+  assert.equal(r.action, 'esc');
+  // Mutation captured: drawing the first frame before the local find is
+  // marked in flight makes it say 'nenhum pane' instead of
+  // 'carregando local…'.
+});
+
+test('main: a UTF-8 character cut across chunks is not corrupted (incremental decoder)', { timeout: 30000 }, async (t) => {
+  const dir = makeTmp(t);
+  const cli = writeFakeFindCli(dir, 'utf8', { local: { lines: [LOCAL_1] } });
+  const herdrBin = writeFakeHerdr(dir, 'utf8', { machineList: machineListJson([]) });
+  const sin = fakeStdin();
+  const sout = captureStream();
+  const p = pickerMain({
+    env: { PATH: dir, HERDR_BIN_PATH: herdrBin },
+    nodeBin: process.execPath,
+    cliScript: cli,
+    herdrBin,
+    stdin: sin,
+    stdout: sout,
+    width: 100,
+  });
+  // 'cafés': é is c3 a9; cut it across two chunks: 'caf' + c3 | a9 + 's'.
+  // Each push() is one 'data' event with exactly those bytes.
+  sin.push(Buffer.from('caf', 'utf8'));
+  sin.push(Buffer.from([0xc3]));
+  sin.push(Buffer.from([0xa9, 0x73]));
+  await waitUntil(() => sout.text().includes('> cafés'), { timeoutMs: 5000 });
+  const last = sout.text().slice(sout.text().lastIndexOf('\x1b[H'));
+  assert.doesNotMatch(last, /\uFFFD/, 'no replacement character in the query line');
+  sin.end();
+  const r = await p;
+  assert.equal(r.action, 'esc');
+  // Mutation captured: decoding each chunk with buf.toString('utf8')
+  // (no incremental decoder) turns the lone c3 into U+FFFD and the
+  // query line reads '> caf\uFFFDs'.
+});
+
+test('main: SIGTERM goes through the same finish as Esc — raw off, children killed, no copy', { timeout: 30000 }, async (t) => {
+  // process.kill(self, SIGTERM) terminates immediately on Windows
+  // (TerminateProcess): the handler — the same JavaScript — is
+  // exercised on POSIX.
+  if (process.platform === 'win32') return;
+  const dir = makeTmp(t);
+  const doneFile = path.join(dir, 'windows-done');
+  const cli = writeFakeFindCli(dir, 'sig', {
+    local: { lines: [LOCAL_1] },
+    windows: { sleepMs: 8000, lines: [WINDOWS_1], doneFile },
+  });
+  const herdrBin = writeFakeHerdr(dir, 'sig', { machineList: machineListJson([{ label: 'windows', enabled: true }]) });
+  const sin = fakeTtyStdin();
+  const sout = captureStream();
+  const events = [];
+  sin.destroy = () => { events.push('destroy'); sin.destroyed = true; };
+  const children = new Set();
+  const origAdd = children.add.bind(children);
+  children.add = (c) => {
+    const origKill = c.kill.bind(c);
+    c.kill = (...args) => {
+      events.push('kill');
+      return origKill(...args);
+    };
+    return origAdd(c);
+  };
+  let exitCode = null;
+  const p = pickerMain({
+    env: { PATH: dir, HERDR_BIN_PATH: herdrBin },
+    nodeBin: process.execPath,
+    cliScript: cli,
+    herdrBin,
+    children,
+    stdin: sin,
+    stdout: sout,
+    width: 100,
+    exit: (code) => { exitCode = code; },
+  });
+  await waitUntil(() => sout.text().includes('carregando windows…'), { timeoutMs: 5000 });
+  const started = Date.now();
+  process.kill(process.pid, 'SIGTERM');
+  const r = await p;
+  assert.ok(Date.now() - started < 5000, 'the exit is not held by the stuck load');
+  assert.equal(r.action, 'esc');
+  assert.equal(r.state.exit, 'esc', 'state.exit is marked in finish on signal');
+  assert.equal(r.copied, null, 'no copy on SIGTERM');
+  assert.equal(r.clipboard, null);
+  assert.equal(r.notification, null);
+  assert.equal(exitCode, 0, 'exit(0) was invoked on signal');
+  assert.deepEqual(sin.modes, [true, false], 'the raw mode was turned off');
+  assert.ok(sin.destroyed, 'the stdin handle was released');
+  assert.ok(events.includes('kill'), 'child was killed');
+  assert.ok(events.includes('destroy'), 'stdin was destroyed');
+  assert.ok(events.indexOf('kill') < events.indexOf('destroy'), 'children are killed before stdin is destroyed');
+  assert.doesNotMatch(sout.text(), /falhou/, 'no late redraw on signal after children are killed');
+  await sleep(1000);
+  assert.ok(!fs.existsSync(doneFile), 'the find child was killed on SIGTERM');
+  // Mutation captured: without the SIGTERM listener the process dies
+  // before the asserts (or the load keeps running and the raw mode is
+  // left on); with the listener but without the kill the fake find
+  // writes doneFile; removing exit(0) from the handler leaves exitCode null;
+  // moving stdin.destroy() before kill fails the order assert; not setting
+  // state.exit in finish lets the killed child trigger a late redraw
+  // with a failure line.
+});
+
+test('main: SIGHUP goes through the same finish as Esc — raw off, no copy', { timeout: 30000 }, async (t) => {
+  // process.kill(self, SIGHUP) terminates immediately on Windows:
+  // the handler is the same JavaScript, exercised on POSIX.
+  if (process.platform === 'win32') return;
+  const dir = makeTmp(t);
+  const cli = writeFakeFindCli(dir, 'hup', { local: { lines: [LOCAL_1] } });
+  const herdrBin = writeFakeHerdr(dir, 'hup', { machineList: machineListJson([]) });
+  const sin = fakeTtyStdin();
+  const sout = captureStream();
+  let exitCode = null;
+  const p = pickerMain({
+    env: { PATH: dir, HERDR_BIN_PATH: herdrBin },
+    nodeBin: process.execPath,
+    cliScript: cli,
+    herdrBin,
+    stdin: sin,
+    stdout: sout,
+    width: 100,
+    exit: (code) => { exitCode = code; },
+  });
+  await waitUntil(() => sout.text().includes('1 pane'), { timeoutMs: 5000 });
+  process.kill(process.pid, 'SIGHUP');
+  const r = await p;
+  assert.equal(r.action, 'esc');
+  assert.equal(r.copied, null, 'no copy on SIGHUP');
+  assert.equal(exitCode, 0, 'exit(0) was invoked on signal');
+  assert.deepEqual(sin.modes, [true, false], 'the raw mode was turned off');
+  assert.ok(sin.destroyed, 'the stdin handle was released');
+});
+
+for (const sigName of ['SIGTERM', 'SIGHUP']) {
+  test(`main: ${sigName} in the first frame on a real pty exits in <1s, kills find, draws nothing after signal`, { timeout: 30000 }, (t) => {
+    if (process.platform === 'win32') {
+      // Real PTY tests require termios/pty, not available on Windows.
+      return;
+    }
+    const dir = makeTmp(t);
+    const doneFile = path.join(dir, 'local-done');
+    const pidFile = path.join(dir, 'local-find-pid');
+    const cli = path.join(dir, 'fake-cli.mjs');
+    fs.writeFileSync(cli, `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid) + '\\n');
+setTimeout(() => {
+  fs.writeFileSync(${JSON.stringify(doneFile)}, 'done\\n');
+  process.exit(0);
+}, 10000);
+`, { mode: 0o755 });
+    const herdrBin = writeFakeHerdr(dir, 'pty', { machineList: machineListJson([]) });
+    const pickerPath = path.resolve(fileURLToPath(import.meta.url), '../../picker.mjs');
+    const runner = path.join(dir, 'runner.mjs');
+    fs.writeFileSync(runner, `import { main } from ${JSON.stringify(pickerPath)};
+await main({
+  env: process.env,
+  cliScript: ${JSON.stringify(cli)},
+  herdrBin: ${JSON.stringify(herdrBin)},
+  width: 80,
+});
+`);
+
+    const pyScript = `
+import json, os, pty, select, signal, subprocess, time, sys
+
+runner = sys.argv[1]
+pid_file = sys.argv[2]
+node_bin = sys.argv[3]
+sig_name = sys.argv[4]
+sig = getattr(signal, sig_name)
+env = os.environ.copy()
+
+master, slave = pty.openpty()
+proc = subprocess.Popen(
+    [node_bin, runner],
+    stdin=slave,
+    stdout=slave,
+    stderr=slave,
+    env=env,
+    start_new_session=True,
+)
+os.close(slave)
+
+buf = b""
+t0 = time.time()
+while time.time() - t0 < 5.0:
+    r, _, _ = select.select([master], [], [], 0.05)
+    if r:
+        try:
+            chunk = os.read(master, 4096)
+            if not chunk:
+                break
+            buf += chunk
+        except OSError:
+            break
+    if b"carregando local" in buf:
+        break
+
+t_wait = time.time()
+while time.time() - t_wait < 1.0 and not os.path.exists(pid_file):
+    time.sleep(0.01)
+
+t_sig = time.time()
+try:
+    os.kill(proc.pid, sig)
+except ProcessLookupError:
+    pass
+
+try:
+    proc.wait(timeout=2.0)
+    exit_s = time.time() - t_sig
+    rc = proc.returncode
+except subprocess.TimeoutExpired:
+    exit_s = time.time() - t_sig
+    rc = None
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+time.sleep(0.2)
+after_buf = b""
+while True:
+    r, _, _ = select.select([master], [], [], 0.05)
+    if not r:
+        break
+    try:
+        chunk = os.read(master, 4096)
+        if not chunk:
+            break
+        after_buf += chunk
+    except OSError:
+        break
+os.close(master)
+
+find_pid = None
+if os.path.exists(pid_file):
+    try:
+        find_pid = int(open(pid_file).read().strip())
+    except Exception:
+        pass
+
+find_alive = None
+if find_pid:
+    try:
+        os.kill(find_pid, 0)
+        find_alive = True
+    except OSError:
+        find_alive = False
+
+if find_alive:
+    try:
+        os.kill(find_pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+print(json.dumps({
+    "saw_first_frame": b"carregando local" in buf,
+    "returncode": rc,
+    "exit_s": exit_s,
+    "find_pid": find_pid,
+    "find_alive": find_alive,
+    "after_text": after_buf.decode("utf-8", "replace"),
+}))
+`;
+
+    const res = spawnSync('python3', ['-c', pyScript, runner, pidFile, process.execPath, sigName], {
+      env: { ...process.env, HERDR_BIN_PATH: herdrBin, HERDR_SOCKET_PATH: '/tmp/herdr-soho-no-such-socket' },
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 0, `python probe exited 0: ${res.stderr}`);
+    const r = JSON.parse(res.stdout);
+    assert.ok(r.saw_first_frame, 'the first frame was rendered before signal');
+    assert.equal(r.returncode, 0, 'the picker process exited with code 0');
+    assert.ok(r.exit_s < 1.0, `the picker exited in < 1 s (took ${r.exit_s}s)`);
+    assert.ok(r.find_pid !== null, 'the fake find recorded its pid');
+    assert.equal(r.find_alive, false, 'the find child process does not exist anymore');
+    assert.ok(!fs.existsSync(doneFile), 'the find child was killed before finishing');
+    // Nothing was written to the screen after the signal besides terminal restoration (\x1b[?25h).
+    const allowedRestoration = ['', '\x1b[?25h'];
+    assert.ok(
+      allowedRestoration.includes(r.after_text) || r.after_text.replaceAll('\x1b[?25h', '') === '',
+      `nothing written to screen after signal besides terminal restoration (got ${JSON.stringify(r.after_text)})`,
+    );
+    assert.doesNotMatch(r.after_text, /\x1b\[H/, 'no redraw occurred after the signal');
+    assert.doesNotMatch(r.after_text, /falhou/, 'no failure status was drawn after the signal');
+    // Mutation captured: putting stdin.destroy() before kill prevents the
+    // in-flight find from being killed in a pty; removing process.exit(0)
+    // from the handler leaves the selector alive (> 1s); omitting
+    // state.exit in finish lets a late redraw print a failure line after the signal.
+  });
+}
+
+// ---------- notification ----------
+
+test('notifyCopied: hostile ref with CSI, OSC and \\r has controls stripped from notification argv', (t) => {
+  const dir = makeTmp(t);
+  const argvFile = path.join(dir, 'herdr-argv.jsonl');
+  const herdrBin = writeFakeHerdr(dir, 'notify', { argvFile });
+  const hostileRef = 'local/w1\x1b[2J\x1b[31m:p1\r\x1b]52;c;UEFO\x07';
+  const r = notifyCopied(herdrBin, hostileRef, { env: { PATH: dir } });
+  assert.equal(r.ok, true);
+  const argvs = fs.readFileSync(argvFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const note = argvs.find((a) => a[0] === 'notification');
+  assert.ok(note, 'notification command was invoked');
+  assert.deepEqual(note, ['notification', 'show', 'herdr-soho', '--body', 'copied local/w1:p1', '--sound', 'none']);
+  assert.ok(!note.some((arg) => arg.includes('\x1b')), 'no ESC in notification show argv');
+  assert.ok(!note.some((arg) => arg.includes('\r')), 'no \\r in notification show argv');
+  // Mutation captured: mounting the notification body with the raw ref
+  // (without stripControls) leaves ESC and \r in the notification show argv.
 });
