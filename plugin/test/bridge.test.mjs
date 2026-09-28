@@ -14,10 +14,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   run,
+  runPick,
   BridgeError,
   EXIT_INVALID_TARGET,
   EXIT_HERDR_FAILURE,
   ACTIONS,
+  PICK_OPEN_ARGS,
 } from '../bridge.mjs';
 
 // ---------- fakes ----------
@@ -546,4 +548,119 @@ test('real CLI: doctor and roster leave a fresh git project untouched (no .gitig
   }
   // Mutation captured: a CLI write in either action (a .gitignore append or
   // a state tree) changes the project's entries and fails the asserts.
+});
+
+// ---------- pick: open the picker pane ----------
+
+// A fake `herdr` that answers `pane get` (success) and `plugin pane open`
+// (records the exact argv in argvFile, then stdout/exit per the config).
+function writePickFakeHerdr(dir, name, { argvFile, open = { exit: 0, stdout: '', stderr: '' } }) {
+  const script = `import fs from 'node:fs';
+const argvFile = ${JSON.stringify(argvFile)};
+const open = ${JSON.stringify(open)};
+const cwd = ${JSON.stringify(dir)};
+const a = process.argv.slice(2);
+if (argvFile) fs.appendFileSync(argvFile, JSON.stringify(a) + '\\n');
+if (a[0] === 'pane' && a[1] === 'get') {
+  process.stdout.write(JSON.stringify({ id: 'cli:pane:get', result: { pane: { pane_id: a[2], tab_id: 'wJ:t1', workspace_id: 'wJ', cwd } } }));
+  process.exit(0);
+}
+if (a[0] === 'plugin' && a[1] === 'pane' && a[2] === 'open') {
+  if (open.stdout) process.stdout.write(open.stdout);
+  if (open.stderr) process.stderr.write(open.stderr);
+  process.exit(open.exit);
+}
+process.stderr.write('unexpected: ' + a.join(' ') + '\\n');
+process.exit(9);
+`;
+  return writeLauncherFake(dir, `herdr-${name}`, script);
+}
+
+test('pick: opens the picker pane with the exact arguments and does not run the CLI', (t) => {
+  const dir = makeTmp(t);
+  const argvFile = path.join(dir, 'herdr-argv.jsonl');
+  const herdrBin = writePickFakeHerdr(dir, 'ok', {
+    argvFile,
+    open: { exit: 0, stdout: JSON.stringify({ id: 'cli:plugin:pane:open', result: { pane_id: 'wJ:p40' } }) + '\n' },
+  });
+  const cli = writeFakeCli(dir, 'pickok', { stdout: 'SHOULD-NOT-RUN\n' });
+  const marker = path.join(dir, 'marker.json');
+  const env = { ...baseEnv(herdrBin), HERDR_FAKE_CLI_MARKER: marker };
+
+  const r = run('pick', { env, cliScript: cli, timeouts: TIME });
+
+  assert.equal(r.code, 0, `exit ${r.code}: ${r.out}${r.err}`);
+  assert.match(r.out, /herdr-soho plugin: target workspace=wJ pane=wJ:p24/);
+  const argvs = fs.readFileSync(argvFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(argvs.length, 2, 'exactly two herdr calls: pane get, then pane open');
+  assert.deepEqual(argvs[0].slice(-3), ['pane', 'get', 'wJ:p24'], 'the context pane is validated first');
+  // Pinned against the literal (not only the export): a wrong entrypoint,
+  // placement or missing --focus fails this even if the export changes.
+  assert.deepEqual(argvs[1], ['plugin', 'pane', 'open', '--plugin', 'djalmajr.herdr-soho', '--entrypoint', 'picker', '--placement', 'overlay', '--focus']);
+  assert.deepEqual(argvs[1], PICK_OPEN_ARGS, 'the exact pane open arguments');
+  assert.ok(!fs.existsSync(marker), 'pick never runs the CLI');
+  // Mutation captured: a different entrypoint id, placement or a missing
+  // --focus in the args fails the pinned-literal deepEqual.
+});
+
+test('pick: a bad context fails without opening any pane', (t) => {
+  const dir = makeTmp(t);
+  const argvFile = path.join(dir, 'herdr-argv.jsonl');
+  const herdrBin = writePickFakeHerdr(dir, 'badctx', { argvFile });
+  const cli = writeFakeCli(dir, 'pickctx', { stdout: 'OK\n' });
+  const marker = path.join(dir, 'marker.json');
+  const env = { ...baseEnv(herdrBin), HERDR_FAKE_CLI_MARKER: marker };
+  delete env.HERDR_PLUGIN_CONTEXT_JSON;
+
+  const e = bridgeErr(() => run('pick', { env, cliScript: cli, timeouts: TIME }));
+  assert.equal(e.code, EXIT_INVALID_TARGET);
+  assert.ok(!fs.existsSync(argvFile), 'no pane get, no pane open');
+  assert.ok(!fs.existsSync(marker));
+  // Mutation captured: opening the pane before the context validation
+  // leaves the argv file behind and fails the assert.
+});
+
+test('pick: a pane-open failure passes the herdr code and stderr through', (t) => {
+  const dir = makeTmp(t);
+  const argvFile = path.join(dir, 'herdr-argv.jsonl');
+  const herdrBin = writePickFakeHerdr(dir, 'openfail', {
+    argvFile,
+    open: { exit: 5, stderr: 'ui_busy: a modal is already open\n' },
+  });
+  const cli = writeFakeCli(dir, 'pickfail', { stdout: 'OK\n' });
+  const marker = path.join(dir, 'marker.json');
+  const env = { ...baseEnv(herdrBin), HERDR_FAKE_CLI_MARKER: marker };
+
+  const r = run('pick', { env, cliScript: cli, timeouts: TIME });
+
+  assert.equal(r.code, 5, `exit ${r.code}: ${r.out}${r.err}`);
+  assert.match(r.err, /ui_busy/);
+  assert.match(r.out, /target workspace=wJ/);
+  const argvs = fs.readFileSync(argvFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(argvs[argvs.length - 1], PICK_OPEN_ARGS);
+  assert.ok(!fs.existsSync(marker));
+  // Mutation captured: swallowing a non-zero pane-open exit (returning 0
+  // or throwing) fails the code/stderr asserts.
+});
+
+test('pick: runPick is callable directly and rejects a workspace divergence', (t) => {
+  const dir = makeTmp(t);
+  const argvFile = path.join(dir, 'herdr-argv.jsonl');
+  const herdrBin = writeLauncherFake(dir, 'herdr-pickdiv', `import fs from 'node:fs';
+const a = process.argv.slice(2);
+if (a[0] === 'pane' && a[1] === 'get') {
+  process.stdout.write(${JSON.stringify(paneOk(dir, { workspaceId: 'wK', paneId: 'wK:p9' }))});
+  process.exit(0);
+}
+fs.appendFileSync(${JSON.stringify(argvFile)}, JSON.stringify(a) + '\\n');
+process.exit(0);
+`);
+  const env = { ...baseEnv(herdrBin), HERDR_PLUGIN_CONTEXT_JSON: contextJson() };
+
+  const e = bridgeErr(() => runPick({ env, timeouts: TIME }));
+  assert.equal(e.code, EXIT_INVALID_TARGET);
+  assert.match(e.message, /diverg/i);
+  assert.ok(!fs.existsSync(argvFile), 'no pane open on a divergence');
+  // Mutation captured: skipping the workspace divergence check in runPick
+  // opens the pane and fails the assert.
 });

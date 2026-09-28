@@ -204,6 +204,18 @@ orchestrator resolves it). `find` is read-only — it reads one
 4 when the local machine is unavailable; a remote machine that fails
 prints a stderr line and the rest is still listed.
 
+The optional plugin also opens a session picker: the `pick` action
+("Find a session and copy its reference") lists the panes of the local
+server and of the enabled machines, with a type-to-filter over
+reference, name, kind, status, workspace/tab labels, cwd and machine
+(local first, remotes appended as they arrive; a machine that fails to
+load shows a status line). `Enter` copies the selected reference to the
+clipboard — the first token is the reference, e.g. `local/w12:p1
+(orchestrator-10, claude, working) /Users/…`, with `-` where a field is
+missing — for pasting into the chat; `Esc`/`Ctrl-C` close without
+copying. Bind it with a `[[keys.command]]` entry of
+`type = "plugin_action"` and `command = "djalmajr.herdr-soho.pick"`.
+
 ## Good to know
 
 - The role prompt is the worker's first message; the project's
