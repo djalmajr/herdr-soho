@@ -15,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { nodeBin } from './parity.mjs';
 import { atomicWrite } from '../lib/platform.mjs';
 import { sanitizeCause } from '../lib/text.mjs';
+import { relativeStatePath } from '../lib/config.mjs';
 import {
   stateDir, rosterRows, rosterLine, withRosterLock, rosterAppend,
   rosterRemove, rosterSetRole, rosterReplacePane, lastReport, lastReportPath,
@@ -422,16 +423,30 @@ test('nowrite: stateDir creates nothing; normal mode still creates the state tre
     // nowrite: the path is returned, nothing is created (no state tree,
     // no .gitignore entry — the gitignoreNeeds path is real here: a fresh
     // work tree that does not ignore .herdr-soho yet).
-    const sd = stateDir(ctx, { ...process.env, HERDR_WORKSPACE_ID: 'ws', HERDR_SOHO_NOWRITE: '1' }, project);
+    const nowriteEnv = { ...process.env, HERDR_WORKSPACE_ID: 'ws', HERDR_SOHO_NOWRITE: '1' };
+    delete nowriteEnv.HERDR_SOHO_DIR;
+    delete nowriteEnv.HERDR_SOHO_STATE_DIR;
+    const sd = stateDir(ctx, nowriteEnv, project);
     assert.equal(sd, path.join(project, '.herdr-soho', 'ws'));
     assert.ok(!fs.existsSync(path.join(project, '.herdr-soho')));
     assert.ok(!fs.existsSync(path.join(project, '.gitignore')));
+    // Mutation captured: checking `root + '/'` instead of path.relative
+    // excludes Windows child paths and omits the state directory from gitignore.
     // Control: without the env the state tree and the .gitignore entry
     // appear (normal CLI behavior is unchanged).
-    const sd2 = stateDir(ctx, { ...process.env, HERDR_WORKSPACE_ID: 'ws' }, project);
+    const normalEnv = { ...process.env, HERDR_WORKSPACE_ID: 'ws' };
+    delete normalEnv.HERDR_SOHO_DIR;
+    delete normalEnv.HERDR_SOHO_STATE_DIR;
+    const sd2 = stateDir(ctx, normalEnv, project);
     assert.ok(fs.statSync(path.join(sd2, 'briefs')).isDirectory());
     assert.match(fs.readFileSync(path.join(project, '.gitignore'), 'utf8'), /^\.herdr-soho\/$/m);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('relativeStatePath uses Windows separators and rejects sibling paths', () => {
+  const root = 'C:\\workspace\\repo';
+  assert.equal(relativeStatePath(root, 'C:\\workspace\\repo\\.herdr-soho\\ws', path.win32), path.win32.join('.herdr-soho', 'ws'));
+  assert.equal(relativeStatePath(root, 'C:\\workspace\\repo-copy\\.herdr-soho', path.win32), '');
 });
 
 test('nowrite: the entry guard rejects non-exact invocations before any project write', { timeout: 120000 }, () => {

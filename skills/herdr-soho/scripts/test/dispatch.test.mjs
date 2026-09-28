@@ -38,9 +38,12 @@ function sidecarForPrompt(prompt) {
   return path.join(path.dirname(prompt), `${basename.slice(0, -suffix.length)}.dispatch.json`);
 }
 
-test('dispatch workspace path comparison accepts Windows slash variants', () => {
+test('dispatch workspace path comparison accepts Windows slash and case variants', () => {
   assert.equal(samePath('C:/work/repo', 'C:\\work\\repo', 'win32'), true);
-  assert.equal(samePath('C:/work/repo', 'C:\\work\\other', 'win32'), false);
+  assert.equal(samePath('C:/work/repo', 'c:/work/repo', 'win32'), true);
+  assert.equal(samePath('C:/Work/Repo', 'c:\\work\\repo', 'win32'), true);
+  assert.equal(samePath('C:\\work\\repo', 'C:\\work\\other', 'win32'), false);
+  assert.equal(samePath('/work/Repo', '/work/repo', 'posix'), false);
 });
 
 // ---------- fake herdr (Node) ----------

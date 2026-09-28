@@ -76,6 +76,10 @@ export function legacyProjectConfigPath(root) {
   return path.join(root, '.agents', 'herdr-agents.conf');
 }
 
+export function legacyStatePath(root, pathApi = path) {
+  return pathApi.join(root, '.herdr-agents');
+}
+
 // The config file a layer actually reads: the new file when it is a
 // regular file, else the legacy file when it is, else the new one (a
 // write target for a layer that reads nothing yet).
@@ -167,10 +171,10 @@ export function legacyDoctorWarnings({ env = process.env, cwd = process.cwd(), p
   const statePinned = Boolean(env.HERDR_SOHO_DIR) || Boolean(env.HERDR_SOHO_STATE_DIR)
     || (entry !== undefined && entry.source !== 'defaults' && entry.value !== '');
   if (!statePinned && defaultStateDirName(root) === '.herdr-agents') {
-    out.push(`legacy state dir in use: ${root}/.herdr-agents (once no worker is live, rename it to .herdr-soho and ignore .herdr-soho/ in git)`);
+    out.push(`legacy state dir in use: ${legacyStatePath(root)} (once no worker is live, rename it to .herdr-soho and ignore .herdr-soho/ in git)`);
   }
   if (isDirectory(path.join(root, '.herdr-agents')) && isDirectory(path.join(root, '.herdr-soho'))) {
-    out.push(`legacy state dir ${root}/.herdr-agents is no longer used (${root}/.herdr-soho exists); clean it once its reports are no longer needed`);
+    out.push(`legacy state dir ${legacyStatePath(root)} is no longer used (${path.join(root, '.herdr-soho')} exists); clean it once its reports are no longer needed`);
   }
   return out;
 }

@@ -17,6 +17,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { nodeBin } from './parity.mjs';
 import { writeFakeCli } from './fakes.mjs';
+import { findExecutable } from '../lib/platform.mjs';
+import { linkTool } from './tools.mjs';
 
 const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
@@ -38,17 +40,22 @@ function makeFix(prefix) {
   }
   const env = {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
     HERDR_WORKSPACE_ID: 'ws',
     HERDR_ENV: '1',
     PATH: '',
+    COMSPEC: process.env.COMSPEC,
+    PATHEXT: process.env.PATHEXT,
   };
   const bin = path.join(root, 'bin');
   fs.mkdirSync(bin);
   writeFakeCli(bin, 'herdr', `process.stderr.write('{"error":{"code":"server_not_running","message":"no server"}}\\n');\nprocess.exit(1);\n`);
-  env.PATH = [bin, '/usr/bin', '/bin', path.dirname(nodeBin())].join(path.delimiter);
+  const git = findExecutable('git');
+  if (git) linkTool(bin, 'git', git);
+  env.PATH = [bin, path.dirname(nodeBin()), ...(git ? [path.dirname(git)] : [])].join(path.delimiter);
   const fix = {
     root, ws, workerCwd, env,
     // The worker's files: a.mjs and b.bin under the worker cwd (relative
@@ -159,17 +166,22 @@ test('collect --verify: a relative worker cwd resolves against the project root,
     fs.mkdirSync(path.join(ws, 'wait'), { recursive: true });
     const env = {
       HOME: path.join(root, 'home'),
+      USERPROFILE: path.join(root, 'home'),
       XDG_CONFIG_HOME: path.join(root, 'conf'),
       TMPDIR: path.join(root, 'tmp'),
       HERDR_SOHO_DIR: state,
       HERDR_WORKSPACE_ID: 'ws',
       HERDR_ENV: '1',
       PATH: '',
+      COMSPEC: process.env.COMSPEC,
+      PATHEXT: process.env.PATHEXT,
     };
     const bin = path.join(root, 'bin');
     fs.mkdirSync(bin);
     writeFakeCli(bin, 'herdr', `process.stderr.write('{"error":{"code":"server_not_running","message":"no server"}}\\n');\nprocess.exit(1);\n`);
-    env.PATH = [bin, '/usr/bin', '/bin', path.dirname(nodeBin())].join(path.delimiter);
+    const git = findExecutable('git');
+    if (git) linkTool(bin, 'git', git);
+    env.PATH = [bin, path.dirname(nodeBin()), ...(git ? [path.dirname(git)] : [])].join(path.delimiter);
     // Column 7 (cwd) is RELATIVE, as spawn --cwd may store it.
     fs.writeFileSync(path.join(ws, 'agents.tsv'),
       H12 + `b\tp-b\tgrok\timplementer\txai\t1\twork\tnow\t\tfull\t\t\n`);
@@ -192,11 +204,14 @@ test('collect --verify: a relative worker cwd resolves against the project root,
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('collect --verify: a report that exists but cannot be read is an error (exit 4)', { timeout: 60000 }, () => {
+test('collect --verify: a report that exists but cannot be read is an error (exit 4)', { timeout: 60000 }, (t) => {
   const fix = makeFix('ha-collect-verify-unreadable-');
   try {
     const p = fix.report(fix.verifyBody());
     fs.chmodSync(p, 0o000); // exists, unreadable (the tests do not run as root)
+    let readable = true;
+    try { fs.readFileSync(p); } catch { readable = false; }
+    if (readable) return t.skip('the platform or current user can still read a mode-000 file');
     // A fake herdr on PATH: the friction log is only live with herdr on
     // PATH, and the verify error must land there as a collect entry.
     const bin = path.join(fix.root, 'bin');

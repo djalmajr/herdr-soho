@@ -191,6 +191,8 @@ function makeFix(prefix) {
     FAKE_MOVE_FAIL: path.join(root, 'move-fail'),
     FAKE_LOG: path.join(root, 'herdr.log'),
     PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    COMSPEC: process.env.COMSPEC,
+    PATHEXT: process.env.PATHEXT,
   };
   fs.writeFileSync(env.FAKE_MODE, 'idle\n');
   const fix = {
@@ -627,7 +629,7 @@ test('release --close: the automatic regrid rebuilds the herd tab silently', { t
     assert.equal(r.stdout, 'closed pane pa\nreleased a\n');
     const log = fix.log();
     assert.ok(log.includes('pane close pa'), log.join('\n'));
-    assert.ok(log.includes('tab create --workspace ws --cwd ' + fix.repo + ' --label herd --no-focus'), log.join('\n'));
+    assert.ok(log.includes('tab create --workspace ws --cwd ' + cliPath(fix.repo) + ' --label herd --no-focus'), log.join('\n'));
     assert.ok(log.includes('pane move q2 --tab t-new-1 --split right --target-pane r-new-1 --ratio 0.5 --no-focus'), log.join('\n'));
     assert.ok(!/warning/.test(r.stderr), r.stderr);
   } finally { fix.cleanup(); }
