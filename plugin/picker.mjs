@@ -32,10 +32,14 @@ import { cmdInvocation } from '../skills/herdr-soho/scripts/lib/platform.mjs';
 
 // Ceiling for direct herdr calls (machine list, notification), mirroring
 // the skill CLI's herdr ceiling (scripts/lib/herdr.mjs HERDR_TIMEOUT_MS)
-// the way bridge.mjs does. The `find` loads themselves get no ceiling:
-// remote machines measure 5–20 s, and Esc always aborts (main kills the
-// load children).
+// the way bridge.mjs does. The `find` loads get their own, higher
+// ceiling (remote machines measure 5–20 s): a find that overruns it is
+// killed and becomes that machine's status line; Esc/SIGTERM always
+// abort the rest (main kills the load children).
 export const HERDR_CALL_TIMEOUT_MS = 30_000;
+
+// Per-find ceiling (per machine, local included).
+export const FIND_TIMEOUT_MS = 60_000;
 
 // Filtered over these fields, case-insensitively. `name` and `kind` may
 // be null; the missing values simply do not match.
@@ -106,6 +110,7 @@ export function createState() {
     query: '',
     selected: 0,
     loading: 0,    // in-flight loads
+    loadingLocal: false, // the local find is the load in flight ("carregando local…")
     failures: [],  // { label, cause } per failed load (status lines, not errors)
     lastEntry: null, // the entry Enter selected
     copied: null,  // the text Enter copied
@@ -145,17 +150,74 @@ function clampSelection(state) {
   state.selected = Math.min(state.selected, Math.max(0, visible(state).length - 1));
 }
 
+// Pane fields (and a failure cause, the stderr of a subprocess) are
+// third-party text: a name, label or cwd may carry C0/C1 controls or
+// ANSI sequences (CSI, OSC 52) from whatever produced it. One filter,
+// applied to every field before drawing (entryLine, the failure line)
+// and before building the copied text (copyPayload):
+//   - C0 (U+0000–U+001F) is removed, except \t and \n, which become a
+//     space (a field must stay on one line);
+//   - C1 (U+0080–U+009F) and DEL are removed;
+//   - complete ESC sequences are removed: a CSI (ESC[ … final byte)
+//     and an OSC (ESC] … BEL or ST);
+//   - a lone ESC that opens no sequence is a C0 control and goes away.
+export function stripControls(text) {
+  const s = String(text ?? '');
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === '\x1b') {
+      const nxt = s[i + 1];
+      if (nxt === '[') { // CSI: skip to the final byte (0x40–0x7e)
+        i += 2;
+        while (i < s.length && !(s.charCodeAt(i) >= 0x40 && s.charCodeAt(i) <= 0x7e)) i += 1;
+        if (i < s.length) i += 1;
+        continue;
+      }
+      if (nxt === ']') { // OSC: skip to BEL or ST
+        i += 2;
+        while (i < s.length && s[i] !== '\x07' && !(s[i] === '\x1b' && s[i + 1] === '\\')) i += 1;
+        if (i < s.length) i += s[i] === '\x07' ? 1 : 2; // BEL or the ST
+        continue;
+      }
+      i += 1; // a lone ESC: C0 control, removed
+      continue;
+    }
+    const cp = s.charCodeAt(i);
+    if (cp < 0x20) {
+      if (cp === 0x09 || cp === 0x0a) out += ' '; // \t / \n → space
+      i += 1;
+      continue;
+    }
+    if (cp === 0x7f || (cp >= 0x80 && cp <= 0x9f)) { i += 1; continue; }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 // The text Enter copies: `<ref> (<name>, <kind>, <status>) <cwd>`, with
-// `-` where a field is null. The first token is always the reference.
+// `-` where a field is null. The fields are third-party text, so each
+// one goes through stripControls before the text is built. The first
+// token is always the reference.
 export function copyPayload(entry) {
-  const d = (v) => (typeof v === 'string' && v !== '' ? v : '-');
+  const d = (v) => {
+    const s = stripControls(typeof v === 'string' ? v : '');
+    return s !== '' ? s : '-';
+  };
   return `${d(entry.ref)} (${d(entry.name)}, ${d(entry.kind)}, ${d(entry.status)}) ${d(entry.cwd)}`;
 }
 
 // A row: `ref  name  kind  status  workspace/tab  cwd`, truncated to
-// `width` (two-space columns; the cwd absorbs the cut with a '…').
+// `width` (two-space columns; the cwd absorbs the cut with a '…'). The
+// columns are third-party text, so each one goes through stripControls
+// before it is drawn.
 export function entryLine(entry, width = 80) {
-  const d = (v) => (typeof v === 'string' && v !== '' ? v : '-');
+  const d = (v) => {
+    const s = stripControls(typeof v === 'string' ? v : '');
+    return s !== '' ? s : '-';
+  };
   const cols = [d(entry.ref), d(entry.name), d(entry.kind), d(entry.status), `${d(entry.workspace_label)}/${d(entry.tab_label)}`, d(entry.cwd)];
   const sep = '  ';
   const lead = cols.slice(0, -1);
@@ -168,8 +230,9 @@ export function entryLine(entry, width = 80) {
 }
 
 // The screen: the query line, the rows ('*' marks the selection), the
-// "carregando windows…" line while a load is in flight, one status line
-// per failed load, and the count.
+// "carregando local…" line while the local find is in flight, the
+// "carregando windows…" line while the machine list or a remote load is
+// in flight, one status line per failed load, and the count.
 export function render(state, width = 80) {
   const list = visible(state);
   const lines = [`> ${state.query}`];
@@ -179,8 +242,14 @@ export function render(state, width = 80) {
   if (list.length === 0 && state.entries.length > 0) {
     lines.push(`nenhum resultado para "${state.query}"`);
   }
-  if (state.loading > 0) lines.push('carregando windows…');
-  for (const f of state.failures) lines.push(`máquina ${f.label}: falhou (${f.cause})`);
+  if (state.loading > 0) {
+    lines.push(state.loadingLocal ? 'carregando local…' : 'carregando windows…');
+  }
+  for (const f of state.failures) {
+    // label and cause are third-party text (machine label, stderr of a
+    // subprocess): through stripControls before the line is drawn.
+    lines.push(`máquina ${stripControls(f.label)}: falhou (${stripControls(f.cause)})`);
+  }
   if (state.entries.length === 0 && state.loading === 0 && state.failures.length === 0) {
     lines.push('nenhum pane');
   }
@@ -287,20 +356,30 @@ export const ESC_RESOLVE_MS = 50;
 
 // ---------- data loading (CLI + herdr spawns, injectable) ----------
 
-function runCliJsonLines(nodeBin, cliScript, args, { env, children }) {
+function runCliJsonLines(nodeBin, cliScript, args, { env, children, timeoutMs } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(nodeBin, [cliScript, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     const stdout = [];
     const stderr = [];
+    let timedOut = false;
+    const timer = timeoutMs ? setTimeout(() => {
+      timedOut = true;
+      try { child.kill(); } catch { /* already gone */ }
+    }, timeoutMs) : null;
     if (children) { children.add(child); child.once('close', () => children.delete(child)); }
     child.stdout.on('data', (d) => stdout.push(d));
     child.stderr.on('data', (d) => stderr.push(d));
-    child.on('error', (e) => reject(new FindError(`spawn failed: ${e.message}`)));
+    child.on('error', (e) => {
+      if (timer) clearTimeout(timer);
+      reject(new FindError(`spawn failed: ${e.message}`));
+    });
     child.on('close', (code) => {
+      if (timer) clearTimeout(timer);
       // Release the pipe handles: a closed-but-referenced child's pipe
       // sockets keep the event loop alive until they are destroyed.
       try { child.stdout.destroy(); } catch { /* already gone */ }
       try { child.stderr.destroy(); } catch { /* already gone */ }
+      if (timedOut) { reject(new FindError(`find timed out after ${timeoutMs / 1000}s`)); return; }
       if (code === 0) resolve(Buffer.concat(stdout).toString('utf8'));
       else {
         const err = code === null ? 'killed'
@@ -365,7 +444,7 @@ export async function loadEntries(state, opts = {}) {
 
   const find = (machine) => runCliJsonLines(nodeBin, cliScript,
     machine === null ? ['find', '--json'] : ['find', '--json', '--machine', machine],
-    { env, children: opts.children });
+    { env, children: opts.children, timeoutMs: opts.findTimeoutMs ?? FIND_TIMEOUT_MS });
 
   const fail = (label, e) => {
     state.failures.push({ label, cause: e && e.message ? e.message : String(e) });
@@ -373,15 +452,21 @@ export async function loadEntries(state, opts = {}) {
     onChange();
   };
 
-  state.loading = 1; // the local find
+  // The local find is marked in flight before it starts: the first frame
+  // already says "carregando local…", not "nenhum pane".
+  state.loading = 1;
+  state.loadingLocal = true;
+  onChange();
   let local;
   try {
     local = parseFindOutput(await find(null), { label: 'local' });
   } catch (e) {
+    state.loadingLocal = false;
     fail('local', e instanceof FindError ? e : new FindError(String(e)));
     return { failures: state.failures };
   }
   state.loading = 0; // the local find is in
+  state.loadingLocal = false;
   state.entries.push(...local);
   onChange();
 
@@ -461,15 +546,25 @@ export async function main(opts = {}) {
     const lines = render(state, width()).split('\n');
     let out = '\x1b[H';
     for (let i = 0; i < lines.length - 1; i++) out += `${lines[i]}\x1b[K\n`;
+    // Erase the rest of the screen: a frame smaller than the previous
+    // one must not leave the old lines behind (old count, "carregando",
+    // an old selection row).
+    out += '\x1b[J';
     stdout.write(out);
   };
 
   let done = null;
   let escTimer = null;
+  // A SIGTERM/SIGHUP (e.g. Herdr closing the pane) goes through the same
+  // finish as Esc/Ctrl-C: raw mode off, the find children killed, no
+  // copy — and the process only leaves after main resolves.
+  const onSignal = () => finish('esc');
   const finish = (action) => {
     if (done) return;
     done = { action };
     if (escTimer) { clearTimeout(escTimer); escTimer = null; }
+    process.removeListener('SIGTERM', onSignal);
+    process.removeListener('SIGHUP', onSignal);
     stdin.off('data', onData);
     stdin.off('end', onEnd);
     if (stdin.isTTY) { try { stdin.setRawMode(false); } catch { /* not a tty */ } }
@@ -487,8 +582,14 @@ export async function main(opts = {}) {
         : { ok: false, skipped: true };
     }
   };
+  // UTF-8 across chunks: a multi-byte character cut at a chunk boundary
+  // (e.g. the c3 of é) must not become U+FFFD — the decoder keeps the
+  // partial bytes for the next chunk. TextDecoder with stream: true is
+  // the incremental decoder (the stdlib StringDecoder is gone since
+  // Node 26).
+  const decoder = new TextDecoder('utf-8');
   const onData = (buf) => {
-    const text = buf.toString('utf8');
+    const text = decoder.decode(buf, { stream: true });
     if (escTimer) { clearTimeout(escTimer); escTimer = null; }
     const action = feedChunk(state, text);
     if (action) { finish(action); return; }
@@ -514,6 +615,12 @@ export async function main(opts = {}) {
   }
   stdin.on('data', onData);
   if (typeof stdin.on === 'function') stdin.on('end', onEnd);
+  process.once('SIGTERM', onSignal);
+  process.once('SIGHUP', onSignal);
+  // The local find is in flight before the first frame (loadEntries also
+  // marks it; the two marks are the same value).
+  state.loading = 1;
+  state.loadingLocal = true;
   redraw();
 
   // Local first, remotes appended as they arrive; the user can already
