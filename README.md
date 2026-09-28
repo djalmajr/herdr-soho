@@ -15,9 +15,10 @@ The repository contains:
   templates, dependency-free Node/Bun CLI, and tests.
 - [`plugin/`](plugin/) — an optional local Herdr plugin that exposes
   workspace-scoped, read-only actions (`doctor`, `roster`) through the same
-  CLI. Its actions inspect the focused project and never write to it (they
-  run the CLI with `HERDR_SOHO_NOWRITE=1`: no `.gitignore` entry, no state
-  directory).
+  CLI, plus a session picker (`pick`) that copies a session reference to
+  the clipboard. Its actions inspect the focused project and never write
+  to it (they run the CLI with `HERDR_SOHO_NOWRITE=1`: no `.gitignore`
+  entry, no state directory).
 - [`docs/guide.md`](docs/guide.md) — usage and configuration guide.
 
 ## Install the skill
@@ -80,6 +81,40 @@ The `doctor` and `roster` actions inspect the workspace currently focused
 in Herdr, which can differ from the invoking shell's `HERDR_*` variables.
 Their output names the resolved workspace and pane. To inspect action
 results from the CLI, run `herdr plugin log list`.
+
+### Finding a session
+
+The `pick` action ("Find a session and copy its reference") opens a
+picker over the focused pane, listing the panes of the local Herdr server
+and of every enabled machine from `herdr machine list` — local first,
+remotes appended as they arrive (a machine that fails to load shows a
+status line, not an error). Type to filter: letters, digits, space and
+punctuation match case-insensitively over the reference, name, kind,
+status, workspace and tab labels, cwd and machine (`↑`/`↓` select,
+`Enter` copies the selection to the clipboard and closes, `Esc` or
+`Ctrl-C` close without copying). The copied text puts the session
+reference first, so it can be pasted into the chat as-is:
+
+```text
+local/w12:p1 (orchestrator-10, claude, working) /Users/…
+```
+
+A name, kind or cwd that is null is copied as `-`. The copy prefers the
+platform's native tool (macOS `pbcopy`; Windows PowerShell
+`Set-Clipboard`; Linux `wl-copy`, then `xclip -selection clipboard`,
+then `xsel --clipboard --input`) and, when none exists or they fail,
+writes OSC 52, which Herdr forwards to the user's terminal. A successful
+copy also shows a `herdr-soho` notification.
+
+To bind the action to a key, add an entry to the Herdr config (any key
+you like):
+
+```toml
+[[keys.command]]
+key = "prefix+l" # any key
+type = "plugin_action"
+command = "djalmajr.herdr-soho.pick"
+```
 
 ## Develop locally
 

@@ -142,8 +142,10 @@ $S friction add "<text>" [--brief P] # record one friction note (level note, com
 $S run scouter brief.md               # spawn + dispatch + collect
 $S wait build review                 # block until every report exists
 $S roster                            # live agents with role/kind/pane/state/report and the current task (TASK)
+$S send build "check the report"     # peer message: a ref (local/w12:p1, windows/w3:p1) or a name on the local server; --file <path>; --now; --timeout MS (default 600000)
 $S release build --close             # closes only panes the skill created
 $S clean --older-than 7              # drop gone agents, delete old briefs/reports
+$S find [words] [--machine <label>]… [--all] [--json]  # live panes with a paste-ready reference, filtered by the words
 ```
 
 `stats` scans composed prompts and reports in the workspace state and
@@ -183,6 +185,78 @@ run — no extra arguments, so `doctor --fix` cannot write — and the CLI
 never writes to the project (no `.gitignore` entry, no state directory,
 no friction log); every other invocation exits 2 with a message. Without
 the env, the CLI behaves exactly as before.
+
+## Finding a session
+
+`$S find [words]` lists the live panes of the local Herdr — with
+`--machine <label>` (repeatable) or `--all` (every enabled machine of
+`herdr machine list`), of other machines too — one line per pane: the
+reference `<machine>/<ws>:<pane>`, the agent name, kind, status,
+workspace and tab labels, and the cwd. Every word must match (name, kind,
+status, labels, ids, cwd or title, case-insensitive); a single word that
+is a reference matches only that machine's pane and queries that machine
+even without `--machine`. `--json` prints the full entry per line.
+
+The reference is the handle for a pane: copy it from a `find` line and
+paste it into the chat to name the pane (a later command or the
+orchestrator resolves it). `find` is read-only — it reads one
+`herdr api snapshot` per machine (30 s each) and changes nothing. Exit
+0 with at least one entry, 1 with none (like `grep`), 2 on bad usage,
+4 when the local machine is unavailable; a remote machine that fails
+prints a stderr line and the rest is still listed.
+
+The optional plugin also opens a session picker: the `pick` action
+("Find a session and copy its reference") lists the panes of the local
+server and of the enabled machines, with a type-to-filter over
+reference, name, kind, status, workspace/tab labels, cwd and machine
+(local first, remotes appended as they arrive; a machine that fails to
+load shows a status line). `Enter` copies the selected reference to the
+clipboard — the first token is the reference, e.g. `local/w12:p1
+(orchestrator-10, claude, working) /Users/…`, with `-` where a field is
+missing — for pasting into the chat; `Esc`/`Ctrl-C` close without
+copying. Bind it with a `[[keys.command]]` entry of
+`type = "plugin_action"` and `command = "djalmajr.herdr-soho.pick"`.
+
+## Peer messages
+
+`send <ref|name> <message…>` delivers a message to another agent — any kind,
+local or on another machine — without the user in between. The target is a
+reference (`local/w12:p1`, `windows/w3:p1`, or a bare pane id on the local
+server) or an agent name on the local server. The message is always prefixed with a 4-line header that names the sender as a
+peer agent with an 8-hex random message ID (`[herdr-soho:peer] #<id> Message from another agent — <ref> (<name>,
+<kind>, <role>), not from your user`), says it carries no user intent or approval,
+how to reply with `send`, and announces that the message follows quoted with `> `
+(`The message follows, each line quoted with "> ".`). Each line of the body is
+quoted with `> ` (empty lines become `>`), and the message ends with a closing line
+`[herdr-soho:peer] #<id> end of message`, so a fake header in the body can never
+be confused with the real one. The target's setup block tells it to treat such
+text that way, and it can reply with the same command. An `idle`, `done` or
+`unknown` target gets it at once; a `working`/`blocked` one is waited on until it settles
+(`--timeout MS`, default 600000) unless `--now` is given (then the target's
+own CLI decides queue vs mix). The wait timing out exits 17 with nothing
+sent. Before sending, `send` inspects the target's visible screen: if reading fails, it exits 4 (`<ref>'s screen unreadable; nothing was sent`).
+If the bottom 10 non-empty lines match folder/workspace trust patterns (`Trust this workspace`,
+`trust this folder`, `Do you trust`, `Enter to confirm`, `[y/N]`, `(y/n)`) under any status,
+or question detectors from `dialog.mjs` in the bottom 20 lines when the target is `blocked`, it waits up to `--timeout`
+for the dialog to clear, exiting 17 `dialog` without sending or typing if it remains.
+The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.
+Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).
+Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000`
+(no automatic resend). After prompt, a 15-second arrival proof window verifies delivery if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof).
+If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
+If still not verified, it exits 15 `lost` (`<ref> did not take the message (no sign of it in its state or transcript)`).
+
+The target project decides whether it accepts peer messages: `inbound=off`
+in that project's configuration refuses with exit 18. For a local target the
+sending side reads that key in the target's directory, with the target's
+session layer and without the sender's `HERDR_SOHO_*` variables — so the
+sender's own configuration can never authorize or refuse on the target's
+behalf. For a remote target the policy is not consulted (the sending machine
+cannot read the remote project); there the header is the only protection.
+Every attempt appends one line to `<state>/peer-messages.tsv` (timestamp,
+sender ref, target ref, result, character count, message id — never the message body).
+Exit codes: 0 sent, 2 usage, 4 target unavailable or unreadable screen, 15 not received / lost / unverified, 17 still
+busy or showing dialog, 18 refused by `inbound=off`.
 
 ## Good to know
 
@@ -232,12 +306,19 @@ the env, the CLI behaves exactly as before.
   telling it to report failures in files it does not own as outside its
   slice. A `done` report routed through `$TMPDIR/herdr-soho/<ws>/reports/`
   is mirrored back into the state dir (best effort).
-- One agent name is one growing session. After several briefs, or when a
-  report includes unrelated prior work, close the completed worker with
-  `release <name> --close` and spawn with `--fresh` for the next slice (only
-  panes this skill created close). A name still live in Herdr, even after a
-  plain `release`, makes the spawn choose a suffix. A report covers only the
-  current brief and its explicit amendments.
+- One agent name is one growing session. Reuse the pane for the next slice
+  instead of closing it. Same slice or subject: reuse it as it is (`--amend`
+  for fix rounds). Another subject in the same project: send `/compact`
+  (Claude Code, Codex, pi) with `herdr agent prompt <name> "/compact"`
+  while it is idle, read the pane until the CLI confirms it (Codex prints
+  `Context compacted`), then dispatch. An unrelated subject: clear the
+  session the same way (`/new` in Codex and pi, `/clear` in Claude Code).
+  A CLI without such a command: `release --close` and spawn again. Close a
+  worker with
+  `release <name> --close` only when the session will not use it again
+  (only panes this skill created close). A name still live in Herdr, even
+  after a plain `release`, makes the spawn choose a suffix. A report covers
+  only the current brief and its explicit amendments.
 - `release --close` ends the agent; without `--close` it keeps running.
 
 ## Configuration
@@ -468,8 +549,10 @@ worker whose last report is already written instead of opening a new pane.
 With lanes on (the default) the lane's idle worker is reused even when the
 next brief is another role of the same lane; a lane never mixes CLIs (a
 kind mismatch exits 13: `release --close` it and set `lane.<name>.kind`).
-Cheaper and keeps the worker's context; use `--fresh` when a slice must
-start clean.
+Cheaper and keeps the worker's context; before an unrelated slice, compact
+or clear the reused session (see "One agent name is one growing session"
+under "Good to know") rather than passing
+`--fresh`, which opens another pane.
 
 ## Feeding improvements back
 
@@ -515,6 +598,26 @@ lines, an `auto_approve` dialog that loops, a worker stuck without a
 report, the skill's own exit 137, `wait` timing out while the worker is
 still working, and the worktree/mutation isolation rules) with the fix
 and the validation procedure for a new kind.
+
+## Codex
+
+When Codex runs inside a Herdr pane, its default shell environment policy
+(`[shell_environment_policy] inherit = "core"`) drops all `HERDR_*`
+environment variables (`HERDR_ENV`, `HERDR_PANE_ID`, etc.) from child commands
+it runs. As a result, `herdr-soho` cannot see that it is running inside Herdr.
+
+The recommended fix preserves what `core` already passes and adds `HERDR_*`:
+
+```toml
+[shell_environment_policy]
+inherit = "all"
+include_only = ["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "USER", "TMPDIR", "HERDR_*"]
+```
+
+Every key defined under `[shell_environment_policy.set]` must also be added to
+`include_only` (because `include_only` is applied after `set`). After saving
+the changes in `~/.codex/config.toml` (or `${CODEX_HOME}/config.toml`), restart
+Codex for the changes to take effect. Run `herdr-soho doctor` to verify.
 
 ## Requirements
 

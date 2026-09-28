@@ -8,6 +8,7 @@ import os from 'node:os';
 import { die, runCli, findExecutable } from './platform.mjs';
 import { DieError } from './config.mjs';
 import { sanitizeCause } from './text.mjs';
+import { diagnoseOutsideHerdr } from './codex-env.mjs';
 
 // A ceiling for every `herdr` call (decision: the bash script left these
 // calls untimed and hung with a stuck server; 30 s is generous for a local
@@ -25,8 +26,16 @@ function strOrEmpty(v) {
 // require_env() port. Decision 5 (orchestrator): `jq` is no longer a
 // requirement, so the `jq is required` check is gone; HERDR_ENV and the
 // herdr CLI still are.
-export function requireEnv(env = process.env) {
-  if (env.HERDR_ENV !== '1') die('not running inside Herdr (HERDR_ENV != 1); refusing to control a session from outside', 2);
+export function requireEnv(env = process.env, opts = {}) {
+  if (env.HERDR_ENV !== '1') {
+    const msg = diagnoseOutsideHerdr(
+      'not running inside Herdr (HERDR_ENV != 1); refusing to control a session from outside',
+      env,
+      process.platform,
+      opts,
+    );
+    die(msg, 2);
+  }
   if (!findExecutable('herdr', env)) die('herdr CLI not found in PATH', 2);
 }
 
