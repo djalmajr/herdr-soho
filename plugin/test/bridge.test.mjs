@@ -22,6 +22,23 @@ import {
 
 // ---------- fakes ----------
 
+// A JS fake `<name>` behind the platform's launcher: `<name>.fake.mjs` plus
+// a POSIX sh wrapper `<name>`, or `<name>.cmd` on Windows. Returns the
+// launcher path.
+function writeLauncherFake(dir, name, script) {
+  const js = path.join(dir, `${name}.fake.mjs`);
+  fs.writeFileSync(js, `${script}\n`);
+  if (process.platform === 'win32') {
+    const cmd = path.join(dir, `${name}.cmd`);
+    fs.writeFileSync(cmd, `@"${process.execPath}" "%~dp0${name}.fake.mjs" %*\r\n`);
+    return cmd;
+  }
+  const sh = path.join(dir, name);
+  const q = (v) => `'${String(v).replace(/'/g, "'\\''")}'`;
+  fs.writeFileSync(sh, `#!/bin/sh\nexec ${q(process.execPath)} ${q(js)} "$@"\n`, { mode: 0o755 });
+  return sh;
+}
+
 // A fake `herdr` executable: optional sleep (for the timeout cases, the
 // exit path is delayed so the process actually stays alive), optional
 // argv recording, then stdout/stderr and exit code.
@@ -35,9 +52,9 @@ function writeFakeHerdr(dir, name, { exit = 0, stdout = '', stderr = '', sleepMs
   const script = sleepMs
     ? `import fs from 'node:fs';\nsetTimeout(() => {\n${actions}\n}, ${sleepMs});`
     : `import fs from 'node:fs';\n${actions}`;
-  const file = path.join(dir, `herdr-${name}.mjs`);
-  fs.writeFileSync(file, `#!/usr/bin/env node\n${script}\n`, { mode: 0o755 });
-  return file;
+  // A JS fake behind the platform's launcher (sh on POSIX, .cmd on
+  // Windows, where a script cannot be spawned directly).
+  return writeLauncherFake(dir, `herdr-${name}`, script);
 }
 
 // A fake skill CLI: records argv, cwd and the effective HERDR_* env (plus
@@ -480,27 +497,23 @@ each(
 // the test's fresh project, embedded in the script (the bridge's pane get
 // spawn inherits the bridge process env, not the test env).
 function writeRealTestHerdr(dir, project) {
-  const script = `#!/bin/sh
-case "$1" in
-  pane)
-    if [ "$2" = "get" ]; then
-      printf '{"result":{"pane":{"pane_id":"%s","tab_id":"wJ:t1","workspace_id":"wJ","cwd":"${project}"}}}\\n' "$3"
-    else
-      printf '{"result":{"panes":[]}}\\n'
-    fi
-    ;;
-  tab) printf '{"result":{"tabs":[]}}\\n' ;;
-  agent) printf '{"result":{"agents":[]}}\\n' ;;
-  --version) printf 'herdr 0.9.1\\n' ;;
-  status) printf 'server 0.9.1\\n' ;;
-  --skill) printf 'fake skill marker\\n' ;;
-  *) printf 'unexpected: %s\\n' "$*" >&2; exit 1 ;;
-esac
-exit 0
+  const script = `const a = process.argv.slice(2);
+const out = (v) => process.stdout.write(typeof v === 'string' ? v : JSON.stringify(v) + '\\n');
+switch (a[0]) {
+  case 'pane':
+    if (a[1] === 'get') out({ result: { pane: { pane_id: a[2], tab_id: 'wJ:t1', workspace_id: 'wJ', cwd: ${JSON.stringify(project)} } } });
+    else out({ result: { panes: [] } });
+    break;
+  case 'tab': out({ result: { tabs: [] } }); break;
+  case 'agent': out({ result: { agents: [] } }); break;
+  case '--version': out('herdr 0.9.1\\n'); break;
+  case 'status': out('server 0.9.1\\n'); break;
+  case '--skill': out('fake skill marker\\n'); break;
+  default: process.stderr.write('unexpected: ' + a.join(' ') + '\\n'); process.exit(1);
+}
 `;
-  const file = path.join(dir, 'herdr');
-  fs.writeFileSync(file, script, { mode: 0o755 });
-  return file;
+  // Named `herdr` (herdr.cmd on Windows): the real CLI finds it on PATH.
+  return writeLauncherFake(dir, 'herdr', script);
 }
 
 test('real CLI: doctor and roster leave a fresh git project untouched (no .gitignore, no state)', { timeout: 120000 }, (t) => {
