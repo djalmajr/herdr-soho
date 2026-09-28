@@ -24,6 +24,7 @@ import { ENTRY_SCRIPT } from '../lib/commands/doctor.mjs';
 import { fixtureEnv, nodeBin, JS_ENTRY } from './parity.mjs';
 
 const git = (repo, ...args) => spawnSync('git', args, { cwd: repo, env: process.env, encoding: 'utf8', timeout: 30000 });
+const ROOT_PERMISSION_SKIP = process.getuid?.() === 0 ? 'permission bits do not apply to root' : false;
 
 // A disposable fork fixture: git repo with an upstream-tracked CLAUDE.md
 // and .gitignore (committed, so ls-files sees them), plus isolated
@@ -690,7 +691,8 @@ test('setup --local accepts ordinary and !/#-leading state dirs; unrelated untra
 
 // ---------- unreadable exclude file (R28 review: ENOENT-only absence) ----------
 
-test('setup --local fails rc 4 on an unreadable exclude file, preserving bytes and writing nothing', { timeout: 120000 }, () => {
+test('setup --local fails rc 4 on an unreadable exclude file, preserving bytes and writing nothing', { timeout: 120000 }, (t) => {
+  if (ROOT_PERMISSION_SKIP) { t.skip('permission bits do not apply to root'); return; }
   const { dir, repo, env } = forkFixture();
   try {
     seedUpstream(repo);
@@ -738,11 +740,12 @@ test('setup --local and --plan both fail rc 4 when the exclude path is a directo
 
 // ---------- exclude preflight before the panes preset (R28 review P2) ----------
 
-test('setup --local --panes refuses an unreadable exclude (rc 4) before the panes preset lands in the tracked config', { timeout: 180000 }, () => {
+test('setup --local --panes refuses an unreadable exclude (rc 4) before the panes preset lands in the tracked config', { timeout: 180000 }, async (t) => {
   // The project config is tracked upstream, so the refusal must leave it
   // byte-identical: the panes write used to land before the exclude read
   // failed.
-  for (const kind of ['directory', 'unreadable']) {
+  for (const kind of ['directory', 'unreadable']) await t.test(kind, async (t) => {
+    if (kind === 'unreadable' && ROOT_PERMISSION_SKIP) { t.skip('permission bits do not apply to root'); return; }
     const { dir, repo, env } = forkFixture();
     try {
       fs.mkdirSync(path.join(repo, '.agents'), { recursive: true });
@@ -768,11 +771,12 @@ test('setup --local --panes refuses an unreadable exclude (rc 4) before the pane
       // Mutation captured: the panes preset written before the exclude
       // failure, or any block/hooks write, fails the asserts above.
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  }
+  });
 });
 
-test('setup --plan --local --panes refuses an unreadable exclude (rc 4) before showing a plan', { timeout: 180000 }, () => {
-  for (const kind of ['directory', 'unreadable']) {
+test('setup --plan --local --panes refuses an unreadable exclude (rc 4) before showing a plan', { timeout: 180000 }, async (t) => {
+  for (const kind of ['directory', 'unreadable']) await t.test(kind, async (t) => {
+    if (kind === 'unreadable' && ROOT_PERMISSION_SKIP) { t.skip('permission bits do not apply to root'); return; }
     const { dir, repo, env } = forkFixture();
     try {
       seedUpstream(repo);
@@ -795,7 +799,7 @@ test('setup --plan --local --panes refuses an unreadable exclude (rc 4) before s
       // Mutation captured: the panes diff shown as a successful plan, or
       // any mutation, fails the asserts above.
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  }
+  });
 });
 
 test('setup --plan --local --panes on a healthy exclude still shows the panes and exclude diffs', { timeout: 120000 }, () => {
@@ -826,7 +830,8 @@ test('setup --plan --local --panes on a healthy exclude still shows the panes an
 
 // ---------- missing exclude under an unwritable parent (R28 review P2) ----------
 
-test('setup --local --panes refuses a missing exclude under an unwritable parent (rc 4) before the tracked config changes', { timeout: 180000 }, () => {
+test('setup --local --panes refuses a missing exclude under an unwritable parent (rc 4) before the tracked config changes', { timeout: 180000 }, (t) => {
+  if (ROOT_PERMISSION_SKIP) { t.skip('permission bits do not apply to root'); return; }
   // The exclude is absent and its parent directory is read-only: the write
   // itself could never land, so the panes preset must not reach the tracked
   // config (it used to land before the atomicWrite failed with EACCES).
@@ -857,7 +862,8 @@ test('setup --local --panes refuses a missing exclude under an unwritable parent
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --plan --local --panes refuses a missing exclude under an unwritable parent (rc 4) with no plan output', { timeout: 120000 }, () => {
+test('setup --plan --local --panes refuses a missing exclude under an unwritable parent (rc 4) with no plan output', { timeout: 120000 }, (t) => {
+  if (ROOT_PERMISSION_SKIP) { t.skip('permission bits do not apply to root'); return; }
   const { dir, repo, env } = forkFixture();
   try {
     seedUpstream(repo);
@@ -2036,7 +2042,8 @@ test('setup --plan --local and setup --local --dry-run: no writeFileSync/unlinkS
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --local --dry-run refuses a missing exclude under an unwritable parent (rc 4) with no output', { timeout: 120000 }, () => {
+test('setup --local --dry-run refuses a missing exclude under an unwritable parent (rc 4) with no output', { timeout: 120000 }, (t) => {
+  if (ROOT_PERMISSION_SKIP) { t.skip('permission bits do not apply to root'); return; }
   // The dry-run preflight is read-only (no write probe) but must refuse the
   // same unwritable parent the plan and the real setup refuse, with empty
   // stdout — the would-lines are printed only after the refusal passes.

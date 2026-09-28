@@ -161,6 +161,23 @@ else
   done
 fi
 
+# Fail before launching suites with a clear message when a development tool
+# used by the Bash tests is missing. The Node suites remain independently
+# runnable without these tools.
+need_tool() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    printf 'run-tests.sh: needs %s (the bash suites use it); install it or run the Node suites only\n' "$1" >&2
+    exit 2
+  fi
+}
+need_tool jq
+need_tool git
+need_tool timeout
+if ! command -v node >/dev/null 2>&1 && ! command -v bun >/dev/null 2>&1; then
+  printf '%s\n' 'run-tests.sh: needs node or bun (the bash suites use it); install it or run the Node suites only' >&2
+  exit 2
+fi
+
 # Every HERDR_SOHO_* and HERDR_AGENTS_* variable present in the parent
 # environment, by name (the legacy prefix goes too, so a caller's
 # HERDR_AGENTS_* cannot leak into a run).
