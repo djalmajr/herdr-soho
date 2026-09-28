@@ -1107,15 +1107,14 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   // interval) ms, the agent is probed:
   //   1. arrived when state is working or blocked and state_change_seq moved
   //      since before the send (preSeq), or a non-empty report exists;
-  //   2. at the window's end, when one of the last 15 non-empty visible
-  //      lines carries the marker, the prompt sat in the input box: one
-  //      Enter key, then a fresh window with only rule 1;
-  //   3. unchanged screen or screen changed without the composed prompt path
-  //      visible in recent screen outside the last 3 non-empty lines:
-  //      the single resend of the same text (fresh H0/preSeq), then a fresh
-  //      window with strict rules 1 and 4;
-  //   4. changed screen with the composed prompt path visible in recent screen
-  //      outside the last 3 non-empty lines: received, no resend.
+  //   2. at the window's end, when the screen changed and the composed prompt path
+  //      is visible in recent screen outside the last 3 non-empty lines:
+  //      received (rule 4), no Enter and no resend;
+  //   3. else, when one of the last 15 non-empty visible lines carries the marker,
+  //      the prompt sat in the input box: one Enter key, then a fresh window with only rule 1;
+  //   4. else (screen unchanged or changed without composed prompt path outside
+  //      input box): single resend of the same text (fresh H0/preSeq), then a fresh
+  //      window with strict rules 1 and 4.
   // Still nothing: `not-received`, exit 15.
   const rawWin = String(cfg(ctx, 'prompt_check_seconds', '15', env));
   const checkOn = /^[0-9]+$/.test(rawWin) && Number(rawWin) > 0;
@@ -1235,23 +1234,24 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
     };
     if (!waitForArrival(windowMs)) {
       const screen = agentRead(env, agent, { source: 'visible' });
-      if (promptSitsInInput(screen)) {
+      const screenMoved = String(cksumField(screen)) !== String(H0);
+      if (screenMoved && composedPathSeenOutsideInput(agent, composed, env)) {
+        // (4) strict rule 4: the screen changed and the composed prompt path
+        // is visible in recent screen outside the last 3 non-empty lines:
+        // received, no Enter and no resend.
+      } else if (promptSitsInInput(screen)) {
         // (2) the text is visible in the input box: it sat there without
         // an Enter. Send one Enter and re-check with only rule 1.
         agentSendKeys(agent, 'enter', env);
         enterSent = true;
         warn(`prompt to '${agent}' sat in the input box; sent Enter`);
         if (!waitForArrival(windowMs)) return notReceived('an Enter on the text left in its input box');
-      } else if (String(cksumField(screen)) !== String(H0) && composedPathSeenOutsideInput(agent, composed, env)) {
-        // (4) strict rule 4: the screen changed and the composed prompt path
-        // is visible in recent screen outside the last 3 non-empty lines:
-        // received, no resend.
       } else {
         // (3 + fallback of 4): the screen never moved, or moved without the
         // composed prompt path outside the input box: single resend of the same
         // text (fresh H0/preSeq), then a fresh window with strict rules 1 and 4.
         if (staleAuthBlock()) return notReceived('its block on a provider auth error');
-        warn(`prompt to '${agent}' did not arrive (screen unchanged, agent not working); sending it once more`);
+        warn(`prompt to '${agent}' did not arrive; sending it once more`);
         H0 = cksumField(agentRead(env, agent, { source: 'visible' }));
         preSeq = agentState(agent, env).seq;
         if (agentPrompt(agent, text, env).ok) {

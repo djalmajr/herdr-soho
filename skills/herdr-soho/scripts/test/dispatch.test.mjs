@@ -1427,7 +1427,7 @@ test('dispatch: an ignored prompt is resent once and the JSON carries resent', {
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved', 'resent']);
     const log = fix.log().split('\n').filter((l) => l !== '');
     assert.equal(log.filter((l) => l.startsWith('agent prompt build ')).length, 2, 'exactly two prompts');
-    assert.match(r.stderr, /prompt to 'build' did not arrive \(screen unchanged, agent not working\); sending it once more/);
+    assert.match(r.stderr, /prompt to 'build' did not arrive; sending it once more/);
   } finally { fix.cleanup(); }
 });
 

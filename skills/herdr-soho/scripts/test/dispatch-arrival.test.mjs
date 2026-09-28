@@ -48,13 +48,43 @@ if (cmd === 'agent get') {
     } catch {}
   }
   let screen = '';
-  try { screen = fs.readFileSync(process.env.FAKE_SCREEN, 'utf8'); } catch {}
+  if (!isRecent && process.env.FAKE_SCREEN_SEQ) {
+    try {
+      const seq = JSON.parse(fs.readFileSync(process.env.FAKE_SCREEN_SEQ, 'utf8'));
+      let idx = 0;
+      if (process.env.FAKE_SCREEN_SEQ_IDX) {
+        try { idx = parseInt(fs.readFileSync(process.env.FAKE_SCREEN_SEQ_IDX, 'utf8').trim(), 10) || 0; } catch {}
+        fs.writeFileSync(process.env.FAKE_SCREEN_SEQ_IDX, String(idx + 1) + '\\n');
+      }
+      screen = seq[Math.min(idx, seq.length - 1)];
+      if (!screen.endsWith('\\n')) screen += '\\n';
+    } catch {}
+  } else {
+    try { screen = fs.readFileSync(process.env.FAKE_SCREEN, 'utf8'); } catch {}
+  }
+  if (!isRecent && process.env.FAKE_VISIBLE_LOG) {
+    try { fs.appendFileSync(process.env.FAKE_VISIBLE_LOG, screen); } catch {}
+  }
   process.stdout.write(screen);
 } else if (cmd === 'agent prompt') {
   let count = 0;
   try { count = parseInt(fs.readFileSync(process.env.FAKE_PROMPT_COUNT, 'utf8').trim(), 10) || 0; } catch {}
   count += 1;
   try { fs.writeFileSync(process.env.FAKE_PROMPT_COUNT, String(count) + '\\n'); } catch {}
+
+  if (process.env.FAKE_CHECK_VISIBLE_EQUAL) {
+    try {
+      const vlog = fs.readFileSync(process.env.FAKE_VISIBLE_LOG, 'utf8');
+      const lines = vlog.split('\\n').filter((l) => l.trim() !== '');
+      if (lines.length >= 2 && lines[lines.length - 1] !== lines[lines.length - 2]) {
+        process.stderr.write('fake error: agent prompt called while last two visible screens differed: ' + JSON.stringify(lines.slice(-2)) + '\\n');
+        process.exit(1);
+      }
+    } catch (e) {
+      process.stderr.write('check error: ' + e + '\\n');
+      process.exit(1);
+    }
+  }
 
   const hook = process.env.FAKE_PROMPT_HOOK;
   if (hook && fs.existsSync(hook)) {
@@ -156,7 +186,6 @@ test('arrival (a): target blinks working with same seq and changing screen, lose
     fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
     fs.writeFileSync(fix.env.FAKE_SEQ, '1\n');
     fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
-      const fs = require('node:fs');
       // Redraws screen with boot messages on each prompt
       fs.writeFileSync(process.env.FAKE_SCREEN, 'boot welcome redraw ' + count + '\\n');
       fs.writeFileSync(process.env.FAKE_RECENT, 'boot welcome redraw ' + count + '\\nline 2\\nline 3\\nline 4\\n');
@@ -172,7 +201,7 @@ test('arrival (a): target blinks working with same seq and changing screen, lose
     assert.equal(r.status, 15, `expected exit 15, got ${r.status}. stderr: ${r.stderr}`);
     const j = JSON.parse(r.stdout.trim().split('\n').pop());
     assert.equal(j.wait_status, 'not-received');
-    assert.match(r.stderr, /prompt to 'build' did not arrive \(screen unchanged, agent not working\); sending it once more/);
+    assert.match(r.stderr, /prompt to 'build' did not arrive; sending it once more/);
     assert.match(r.stderr, /prompt to 'build' was not received after one resend/);
 
     const logLines = fix.log().split('\n').filter((l) => l.startsWith('agent prompt '));
@@ -279,45 +308,46 @@ test('arrival (d): settle wait waits for interactive_ready and two identical vis
   try {
     const brief = fix.brief('brief.md', BRIEF);
 
-    // Sub-case d1: settle wait is active (prompt_settle_seconds=3).
-    // Target starts with interactive_ready=false. Screen changes between calls.
-    // Fake dynamically changes ready to true and screens to identical after 1 settle probe.
-    fs.writeFileSync(fix.env.FAKE_READY, 'false\n');
-    fs.writeFileSync(fix.env.FAKE_SCREEN, 'booting-1\n');
+    // Sub-case d1: settle wait is active (prompt_settle_seconds=5).
+    // Target has interactive_ready=true. The fake changes visible screen on each read
+    // until the second identical read:
+    // Read 0: 'booting-1'
+    // Read 1: 'booting-2'
+    // Read 2: 'booting-3'
+    // Read 3: 'booting-3' (second identical read)
+    // Read 4+: 'booting-3'
+    // And fails if agent prompt appears while the last two visible readings differed.
+    const seqFile = path.join(fix.root, 'screen-seq.json');
+    const idxFile = path.join(fix.root, 'screen-idx');
+    const visibleLog = path.join(fix.root, 'visible-reads.log');
+    fs.writeFileSync(idxFile, '0\n');
+    fs.writeFileSync(visibleLog, '');
+    fs.writeFileSync(seqFile, JSON.stringify([
+      'booting-1',
+      'booting-2',
+      'booting-3',
+      'booting-3',
+    ]));
+
+    fs.writeFileSync(fix.env.FAKE_READY, 'true\n');
     fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
     fs.writeFileSync(fix.env.FAKE_SEQ, '1\n');
-
-    // A hook on herdr fake execution: simulate settling after first check
-    // We can handle this by having a probe counter in a file
-    const probeFile = path.join(fix.root, 'probe-count');
-    fs.writeFileSync(probeFile, '0\n');
 
     // Update FAKE_PROMPT_HOOK for prompt arrival
     fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
       fs.writeFileSync(process.env.FAKE_SEQ, '2\\n');
     `);
 
-    // We can customize the fake herdr to settle after probe 1
-    // Let's create an external settle controller in the fake:
-    const settleCtrl = path.join(fix.root, 'settle-ctrl.js');
-    fs.writeFileSync(settleCtrl, `
-      const fs = require('node:fs');
-      const pf = '${probeFile}';
-      let c = parseInt(fs.readFileSync(pf, 'utf8').trim(), 10) || 0;
-      c += 1;
-      fs.writeFileSync(pf, String(c) + '\\n');
-      if (c >= 2) {
-        fs.writeFileSync(process.env.FAKE_READY, 'true\\n');
-        fs.writeFileSync(process.env.FAKE_SCREEN, 'booting-settled\\n');
-      }
-    `);
-
-    // Mutation captured: sending prompt before interactive_ready is true or before two identical screens
-    // causes agent prompt to be called before settling.
+    // Mutation captured: if (ready && currScreen === prevScreen) -> if (ready)
+    // causes settle wait to exit prematurely on iteration 1 while consecutive visible screens still differ,
+    // causing agent prompt to be invoked while last two visible screens differ and failing with exit 4.
     const r1 = cmd(fix, ['dispatch', 'build', brief, '--no-wait'], {
       HERDR_SOHO_PROMPT_CHECK_SECONDS: '1',
       HERDR_SOHO_PROMPT_SETTLE_SECONDS: '5',
-      NODE_OPTIONS: `--require ${settleCtrl}`,
+      FAKE_SCREEN_SEQ: seqFile,
+      FAKE_SCREEN_SEQ_IDX: idxFile,
+      FAKE_VISIBLE_LOG: visibleLog,
+      FAKE_CHECK_VISIBLE_EQUAL: '1',
     });
 
     assert.equal(r1.status, 0, `expected exit 0, got ${r1.status}. stderr: ${r1.stderr}`);
@@ -417,5 +447,82 @@ test('arrival (e): screen changed and composed prompt path visible outside last 
 
     const logLines = fix.log().split('\n').filter((l) => l.startsWith('agent prompt '));
     assert.equal(logLines.length, 1, 'expected exactly 1 prompt attempt (no resend)');
+  } finally { fix.cleanup(); }
+});
+
+// (f) reprodução das sondas A e D: agente working com mesmo state_change_seq, texto do prompt na tela
+// visível e na recente com 4 linhas depois -> recebido via regra 4 (exit 0, nenhum Enter, nenhum reenvio),
+// tanto em dispatch quanto em --amend
+test('arrival (f): probes A and D - working target with same seq, prompt text on visible screen + recent with 4 trailing lines -> received via rule 4 without Enter or resend', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-arr-f-');
+  try {
+    const brief = fix.brief('brief.md', BRIEF);
+    // Target is working with fixed seq 5 throughout
+    fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fs.writeFileSync(fix.env.FAKE_SCREEN, 'initial-boot-screen\n');
+
+    // Prompt hook renders prompt text followed by 4 trailing lines on visible screen and recent screen
+    fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
+      const text = argv[3] || '';
+      const m = text.match(/Read the file (.+?) in full/);
+      const composedPath = m ? m[1] : '';
+
+      const content = [
+        'header line 1',
+        'header line 2',
+        'Read the file ' + composedPath + ' in full and execute it. It contains your role...',
+        'trailing line 1',
+        'trailing line 2',
+        'trailing line 3',
+        'trailing line 4',
+      ].join('\\n') + '\\n';
+
+      fs.writeFileSync(process.env.FAKE_SCREEN, content);
+      fs.writeFileSync(process.env.FAKE_RECENT, content);
+    `);
+
+    // Sonda A: plain dispatch
+    // Mutation captured: evaluating promptSitsInInput before rule 4 treats the prompt marker
+    // in the last 15 lines of visible screen as text stuck in the input box, sending Enter and exiting 15.
+    const rA = cmd(fix, ['dispatch', 'build', brief, '--no-wait'], {
+      HERDR_SOHO_PROMPT_CHECK_SECONDS: '1',
+      HERDR_SOHO_PROMPT_SETTLE_SECONDS: '0',
+    });
+
+    assert.equal(rA.status, 0, `probe A expected exit 0, got ${rA.status}. stderr: ${rA.stderr}`);
+    const jA = JSON.parse(rA.stdout.trim().split('\n').pop());
+    assert.equal(jA.wait_status, 'submitted');
+    assert.equal('resent' in jA, false, 'probe A must not resend');
+
+    const logA = fix.log().split('\n').filter(Boolean);
+    const promptsA = logA.filter((l) => l.startsWith('agent prompt '));
+    const entersA = logA.filter((l) => l.startsWith('agent send-keys '));
+    assert.equal(promptsA.length, 1, 'probe A must have exactly 1 prompt attempt');
+    assert.equal(entersA.length, 0, 'probe A must not send any Enter key');
+    assert.ok(!rA.stderr.includes('sat in the input box; sent Enter'), 'no Enter warning in probe A');
+    assert.ok(!rA.stderr.includes('sending it once more'), 'no resend warning in probe A');
+
+    // Sonda D: amend on working worker with same seq and text on screen
+    fs.writeFileSync(fix.env.FAKE_LOG, '');
+    const briefAmend = fix.brief('brief-amend.md', `# Goal\n\nAmend goal.\n\n# Expected result\n\nAmend received.\n\n# Owned files\n\nskills/herdr-soho/scripts/lib/dispatch.mjs\n\n# Forbidden\n\nNone.\n\n# Report\n\nDone.\n`);
+
+    const rD = cmd(fix, ['dispatch', 'build', briefAmend, '--amend', '--no-wait'], {
+      HERDR_SOHO_PROMPT_CHECK_SECONDS: '1',
+      HERDR_SOHO_PROMPT_SETTLE_SECONDS: '0',
+    });
+
+    assert.equal(rD.status, 0, `probe D expected exit 0, got ${rD.status}. stderr: ${rD.stderr}`);
+    const jD = JSON.parse(rD.stdout.trim().split('\n').pop());
+    assert.equal(jD.wait_status, 'submitted');
+    assert.equal('resent' in jD, false, 'probe D must not resend');
+
+    const logD = fix.log().split('\n').filter(Boolean);
+    const promptsD = logD.filter((l) => l.startsWith('agent prompt '));
+    const entersD = logD.filter((l) => l.startsWith('agent send-keys '));
+    assert.equal(promptsD.length, 1, 'probe D must have exactly 1 prompt attempt');
+    assert.equal(entersD.length, 0, 'probe D must not send any Enter key');
+    assert.ok(!rD.stderr.includes('sat in the input box; sent Enter'), 'no Enter warning in probe D');
+    assert.ok(!rD.stderr.includes('sending it once more'), 'no resend warning in probe D');
   } finally { fix.cleanup(); }
 });
