@@ -21,6 +21,8 @@ metadata:
 
 # /herdr-soho
 
+*soho* stands for **SO**ftware **HO**use (formerly `herdr-agents`).
+
 Turn the calling agent into an **orchestrator** and give it a team of
 **role agents** running as real CLI agents in Herdr panes. The orchestrator
 is not configured anywhere: it is whichever agent runs this skill from a

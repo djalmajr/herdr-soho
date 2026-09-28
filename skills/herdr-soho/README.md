@@ -4,6 +4,9 @@ A small team of coding agents, each in its own Herdr panel. You stay in
 your panel and lead. The others research, write code, or review. They
 never commit, push, or open pull requests.
 
+*soho* stands for **SO**ftware **HO**use: a small software house of role
+agents run from your panel. The skill was called `herdr-agents` before.
+
 Use it inside Herdr when the work is more than a couple of files: a
 feature, a survey of several files or another repository, a UI change, or
 a review before push. A one-file fix you can do yourself does not need
