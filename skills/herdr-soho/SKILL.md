@@ -838,11 +838,14 @@ or on another machine, without the user approving it. The target is a
 reference (the `find`/picker form `local/w12:p1`, `windows/w3:p1`, or a bare
 pane id) or an agent name on the local server, resolved with `herdr
 [--machine m] agent get`; a pane without an agent exits 4 (`no agent in
-<ref>`). The message is always prefixed with a header that names the sender
+<ref>`). The message is always prefixed with a 4-line header that names the sender
 as a peer agent — `[herdr-soho:peer] Message from another agent —
-<sender-ref> (<name>, <kind>, <role>), not from your user` — says it carries
-no user intent or approval, and how to reply with `send` itself; outside a
-Herdr pane the sender degrades to `local/-` with dashes. A `working`/
+<sender-ref> (<name>, <kind>, <role>), not from your user` —, says it carries
+no user intent or approval, tells how to reply with `send` itself, and announces
+that the message follows quoted with `> ` (`The message follows, each line quoted with "> ".`);
+outside a Herdr pane the sender degrades to `local/-` with dashes. Each line of the
+body is quoted with `> ` (empty lines become `>`), so a fake header in the body
+can never be confused with the real one. A `working`/
 `blocked` target is waited on until `idle`/`done` (`agent wait --until idle
 --until done --timeout MS`, default 600000) and then prompted; `--now` sends
 at once (the target's own CLI decides queue vs mix); the wait timing out

@@ -43,7 +43,7 @@ import { stateDirPath } from '../state.mjs';
 import { LOCAL_MACHINE } from '../sessionref.mjs';
 import {
   appendPeerLog, DEFAULT_SEND_TIMEOUT_MS, deliverPrompt, inboundPolicy,
-  literalPeerText, peerHeader, resolveTarget, senderInfo, senderRefOf,
+  literalPeerText, peerHeader, quotePeerBody, resolveTarget, senderInfo, senderRefOf,
   waitUntilIdle,
 } from '../peer.mjs';
 
@@ -145,13 +145,15 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
     }
   }
 
-  // 4. Deliver: header + blank line + body, through agent prompt --wait.
+  // 4. Deliver: header + blank line + quoted body, through agent prompt --wait.
   // The body and the sender fields pass through literalPeerText so no byte
   // the target's terminal would run as a keystroke (CR, ESC, DEL, the
   // bracketed-paste markers, the other control characters) reaches it; \n
-  // and \t stay. The header always comes first.
+  // and \t stay. Each line of the body is quoted with "> " (empty line ">").
+  // The header always comes first.
   const sender = senderInfo(ctx, env, cwd);
-  const text = `${peerHeader(literalPeerText(sender.ref), literalPeerText(sender.name), literalPeerText(sender.kind), literalPeerText(sender.role))}\n\n${literalPeerText(body)}`;
+  const bodyText = quotePeerBody(literalPeerText(body));
+  const text = `${peerHeader(literalPeerText(sender.ref), literalPeerText(sender.name), literalPeerText(sender.kind), literalPeerText(sender.role))}\n\n${bodyText}`;
   const p = deliverPrompt(t.machine, t.targetArg, text, env);
   if (p.ok) {
     log(sender.ref, ref, 'sent');
