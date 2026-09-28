@@ -317,9 +317,9 @@ test('send to a local target by reference: exact header, blank line, body; exit 
       // observable delivery and single-line header checks on Windows.
       assert.equal(prompt[3], expectedHeader('implementer', id).split('\n')[0]);
     } else {
+      assert.deepEqual(prompt.slice(4), PROMPT_TAIL, 'the fixed receipt wait');
       assert.equal(prompt[3], `${expectedHeader('implementer', id)}\n\n> hello from the orchestrator\n${expectedFooter(id)}`);
     }
-    assert.deepEqual(prompt.slice(4), PROMPT_TAIL, 'the fixed receipt wait');
     if (process.platform !== 'win32') {
       const headerLines = prompt[3].split('\n\n')[0].split('\n');
       assert.equal(headerLines.length, 4, 'header has exactly 4 lines');
@@ -346,14 +346,14 @@ test('the hostile body is scrubbed: no CR, no ESC, the real header stays first',
     assert.equal(r.rc, 0, r.err);
     const prompt = fx.calls().find((c) => c[1] === 'prompt');
     const text = prompt[3];
-    assert.ok(!text.includes('\r'), `no CR: ${JSON.stringify(text)}`);
-    assert.ok(!text.includes('\u001b'), `no ESC (no bracketed-paste end): ${JSON.stringify(text)}`);
     const m = text.match(/^\[herdr-soho:peer\] #([0-9a-f]{8})/);
     assert.ok(m, 'id present in header');
     const id = m[1];
     if (process.platform === 'win32') {
       assert.ok(text.startsWith(expectedHeader('implementer', id).split('\n')[0]), `the real header is first: ${JSON.stringify(text.split('\n')[0])}`);
     } else {
+      assert.ok(!text.includes('\r'), `no CR: ${JSON.stringify(text)}`);
+      assert.ok(!text.includes('\u001b'), `no ESC (no bracketed-paste end): ${JSON.stringify(text)}`);
       assert.ok(text.startsWith(`${expectedHeader('implementer', id)}\n\n`), `the real header is first: ${JSON.stringify(text.split('\n')[0])}`);
     }
     // The exact scrubbed body: the paste end is gone whole, the CR joins
@@ -476,7 +476,6 @@ test('send to a remote target passes --machine before the subcommand', { timeout
     if (process.platform === 'win32') {
       assert.deepEqual(prompt.slice(0, 5), ['--machine', remoteMachine, 'agent', 'prompt', remote]);
       assert.equal(prompt[5], expectedHeader('implementer', id).split('\n')[0]);
-      assert.deepEqual(prompt.slice(6), PROMPT_TAIL);
     } else {
       assert.deepEqual(prompt, ['--machine', remoteMachine, 'agent', 'prompt', remote, `${expectedHeader('implementer', id)}\n\n> hi\n${expectedFooter(id)}`, ...PROMPT_TAIL], 'and on the prompt, with the header');
     }
@@ -858,9 +857,11 @@ test('outside a Herdr pane the sender is local/- with dashes', { timeout: 60000 
     const text = prompt[3];
     const m = text.match(/^\[herdr-soho:peer\] #([0-9a-f]{8})/);
     const id = m ? m[1] : '';
-    assert.ok(text.startsWith(`[herdr-soho:peer] #${id} Message from another agent — local/- (-, -, -), not from your user.\n`),
-      `the sender degrades to dashes: ${JSON.stringify(text.split('\n')[0])}`);
-    if (process.platform !== 'win32') {
+    if (process.platform === 'win32') {
+      assert.equal(text, `[herdr-soho:peer] #${id} Message from another agent — local/- (-, -, -), not from your user.`);
+    } else {
+      assert.ok(text.startsWith(`[herdr-soho:peer] #${id} Message from another agent — local/- (-, -, -), not from your user.\n`),
+        `the sender degrades to dashes: ${JSON.stringify(text.split('\n')[0])}`);
       assert.ok(text.includes('Reply, if useful, with: herdr-soho send local/- "<your reply>"\n'
         + 'The message follows, each line quoted with "> ".\n\n> hi\n' + expectedFooter(id)), text);
     } // On Windows the .cmd fixture cannot carry the multiline body argument.

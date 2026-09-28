@@ -187,8 +187,8 @@ function fakeTtyStdin() {
 function writeFakeTool(dir, name, { out, exit = 0, argvFile = null } = {}) {
   if (process.platform === 'win32') {
     const js = path.join(dir, `tool-${name}.mjs`);
-    const rec = argvFile ? `require('node:fs').writeFileSync(${JSON.stringify(argvFile)}, process.argv.slice(2).join(' ') + ' ' + '\\n');` : '';
-    fs.writeFileSync(js, `let d = ''; process.stdin.on('data', (c) => { d += c; }); process.stdin.on('end', () => { ${rec}require('node:fs').writeFileSync(${JSON.stringify(out)}, d); process.exit(${exit}); });`);
+    const rec = argvFile ? `fs.writeFileSync(${JSON.stringify(argvFile)}, process.argv.slice(2).join(' ') + '\\n');` : '';
+    fs.writeFileSync(js, `import fs from 'node:fs';\nlet d = ''; process.stdin.on('data', (c) => { d += c; }); process.stdin.on('end', () => { ${rec}fs.writeFileSync(${JSON.stringify(out)}, d); process.exit(${exit}); });`);
     const cmd = path.join(dir, `${name}.cmd`);
     fs.writeFileSync(cmd, `@"${process.execPath}" "%~dp0tool-${name}.mjs" %*\r\n`);
     return cmd;
@@ -699,7 +699,7 @@ function withFakeDir(dir) {
 // ---------- clipboard ----------
 
 test('clipboard: darwin uses pbcopy from a controlled PATH, text on stdin', (t) => {
-  if (process.platform === 'win32') t.skip('Windows cannot execute the extensionless pbcopy tool used by the darwin fixture');
+  if (process.platform === 'win32') return t.skip('Windows cannot execute the extensionless pbcopy tool used by the darwin fixture');
   const dir = makeTmp(t);
   const out = path.join(dir, 'clip.txt');
   writeFakeTool(dir, 'pbcopy', { out });
@@ -712,7 +712,7 @@ test('clipboard: darwin uses pbcopy from a controlled PATH, text on stdin', (t) 
 });
 
 test('clipboard: linux tries wl-copy, then xclip, then xsel — a failing tool yields the next', (t) => {
-  if (process.platform === 'win32') t.skip('Windows cannot execute the extensionless wl-copy and xclip tools used by the linux fixture');
+  if (process.platform === 'win32') return t.skip('Windows cannot execute the extensionless wl-copy and xclip tools used by the linux fixture');
   const dir = makeTmp(t);
   const outWl = path.join(dir, 'wl.txt');
   const outXc = path.join(dir, 'xc.txt');

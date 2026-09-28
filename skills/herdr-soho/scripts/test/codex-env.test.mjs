@@ -512,9 +512,18 @@ test('Decision 2 case: sem ancestral codex (nenhuma chamada ao Herdr)', () => {
   }
 });
 
+// Mutation captured: removing the Windows short-circuit adds ancestry details to the base message.
+test('Decision 2: Windows returns the base message even with a Codex ancestor', () => {
+  const baseMessage = 'not running inside Herdr (HERDR_ENV != 1); refusing to control a session from outside';
+  const message = diagnoseOutsideHerdr(baseMessage, { PATH: '' }, 'win32', {
+    getAncestors: () => [{ pid: 5, name: 'codex' }],
+  });
+  assert.equal(message, baseMessage);
+});
+
 // Mutation captured: omitting the matched pane diagnosis causes requireEnv to report a generic outside-Herdr error.
 test('Decision 2 case: um painel casa (local/<pane> e exit 2)', {
-  skip: process.platform === 'win32' && 'Windows has no ps or /proc process ancestry source for this fixture',
+  skip: process.platform === 'win32' && 'diagnoseOutsideHerdr returns the base message on Windows by design',
 }, () => {
   const root = tmp('ha-d2-one-match-');
   try {
@@ -571,7 +580,7 @@ try {
 
 // Mutation captured: choosing an arbitrary pane when multiple match violates unambiguous identification.
 test('Decision 2 case: dois paineis casam', {
-  skip: process.platform === 'win32' && 'Windows has no ps or /proc process ancestry source for this fixture',
+  skip: process.platform === 'win32' && 'diagnoseOutsideHerdr returns the base message on Windows by design',
 }, () => {
   const root = tmp('ha-d2-two-matches-');
   try {
@@ -618,7 +627,7 @@ test('Decision 2 case: dois paineis casam', {
 
 // Mutation captured: failing to match any pane despite codex ancestor must add the ambiguity suffix.
 test('Decision 2 case: nenhum painel casa', {
-  skip: process.platform === 'win32' && 'Windows has no ps or /proc process ancestry source for this fixture',
+  skip: process.platform === 'win32' && 'diagnoseOutsideHerdr returns the base message on Windows by design',
 }, () => {
   const root = tmp('ha-d2-no-match-');
   try {
@@ -652,7 +661,7 @@ test('Decision 2 case: nenhum painel casa', {
 
 // Mutation captured: adding the current process PID to ancestor set matches the pane and names it erroneously.
 test('Decision 2 case: own pid alone in a pane does not name the pane', {
-  skip: process.platform === 'win32' && 'Windows has no ps or /proc process ancestry source for this fixture',
+  skip: process.platform === 'win32' && 'diagnoseOutsideHerdr returns the base message on Windows by design',
 }, () => {
   const root = tmp('ha-d2-ownpid-alone-');
   try {

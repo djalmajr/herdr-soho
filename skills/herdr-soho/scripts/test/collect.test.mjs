@@ -289,8 +289,7 @@ test('collect --verify: no report keeps the error collect already gives', { time
   } finally { fix.cleanup(); }
 });
 
-// Mutation captured: removing runCliTreeKill's TMPDIR mkdir makes the
-// Windows timeout path throw ENOENT before the child helper can run.
+// Mutation captured: removing tempDirFor's mkdir makes runCli report ENOENT instead of writing the spec.
 test('Windows .cmd timeout creates a missing TMPDIR before writing its spec', { timeout: 30000 }, (t) => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-treekill-tmpdir-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -299,7 +298,7 @@ test('Windows .cmd timeout creates a missing TMPDIR before writing its spec', { 
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'fixture.cmd'), '');
   const comspec = writeFakeCli(bin, 'comspec', 'process.exit(0);\n');
-  const env = { PATH: bin, PATHEXT: '.cmd', COMSPEC: comspec, TMPDIR: tmpdir };
+  const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`, PATHEXT: '.cmd', COMSPEC: comspec, TMPDIR: tmpdir };
   assert.equal(fs.existsSync(tmpdir), false, 'the temp directory starts absent');
 
   const result = runCli('fixture', ['agent', 'get'], { env, platform: 'win32', timeoutMs: 10_000 });
@@ -307,6 +306,54 @@ test('Windows .cmd timeout creates a missing TMPDIR before writing its spec', { 
   assert.equal(result.status, 0, JSON.stringify(result));
   assert.equal(result.error, null);
   assert.equal(fs.existsSync(tmpdir), true, 'runCliTreeKill creates the configured temp directory');
+});
+
+// Mutation captured: removing runCli's temp-error conversion lets EEXIST escape from each file-backed mode.
+test('runCli returns temp directory errors for every file-backed mode', () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-runcli-temp-errors-')));
+  try {
+    const bin = path.join(root, 'bin');
+    const badTmpdir = path.join(root, 'not-a-directory');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'fixture.cmd'), '');
+    fs.writeFileSync(badTmpdir, 'file');
+    const comspec = writeFakeCli(bin, 'comspec', 'process.exit(0);\n');
+    const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`, PATHEXT: '.cmd', COMSPEC: comspec, TMPDIR: badTmpdir };
+    const cases = [
+      ['treekill', { platform: 'win32', timeoutMs: 1000 }],
+      ['mergeOutput', { platform: 'win32', mergeOutput: true }],
+      ['outputFiles', { platform: 'win32', outputFiles: true }],
+    ];
+    for (const [name, options] of cases) {
+      const result = runCli('fixture', [], { env, ...options });
+      assert.equal(result.error, 'EEXIST', `${name}: ${JSON.stringify(result)}`);
+      assert.equal(result.status, null, `${name} has no child status`);
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// Mutation captured: omitting path.resolve makes the child look for the relative spec under its own cwd.
+test('Windows .cmd timeout resolves a relative TMPDIR before using a different child cwd', () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-treekill-relative-tmpdir-')));
+  const relativeTmpdir = `.herdr-soho-relative-tmp-${process.pid}-${crypto.randomBytes(3).toString('hex')}`;
+  const absoluteTmpdir = path.resolve(relativeTmpdir);
+  try {
+    const bin = path.join(root, 'bin');
+    const childCwd = path.join(root, 'child-cwd');
+    fs.mkdirSync(bin);
+    fs.mkdirSync(childCwd);
+    fs.writeFileSync(path.join(bin, 'fixture.cmd'), '');
+    const comspec = writeFakeCli(bin, 'comspec', 'process.exit(0);\n');
+    const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`, PATHEXT: '.cmd', COMSPEC: comspec, TMPDIR: relativeTmpdir };
+    const result = runCli('fixture', [], { env, platform: 'win32', cwd: childCwd, timeoutMs: 10_000 });
+    assert.equal(result.status, 0, JSON.stringify(result));
+    assert.equal(result.error, null);
+    assert.equal(fs.existsSync(absoluteTmpdir), true, 'the parent resolves and creates the absolute temp directory');
+    assert.equal(fs.existsSync(path.join(childCwd, relativeTmpdir)), false, 'the helper does not create a second relative directory');
+  } finally {
+    fs.rmSync(absoluteTmpdir, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // An agent still working (or blocked) with no report gets the short
