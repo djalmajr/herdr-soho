@@ -70,7 +70,7 @@ function probeFakeSource(name) {
   L.push("    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], { stdio: ['ignore', 'inherit', 'inherit'] });");
   // On Windows the probe kills only cmd.exe behind the .cmd launcher and
   // this node process outlives it, holding the fixture directory: it hangs
-  // 4 s there (still far past the 1 s limit) so the cleanup can finish.
+  // 4 s there (still far past the 1 s limit) so the cleanup waits less.
   L.push(`    setTimeout(() => {}, ${process.platform === 'win32' ? 4000 : 30000});`);
   L.push('    break;');
   L.push('  }');
@@ -114,7 +114,17 @@ test.before(() => {
     PROBE_ARGS_DIR: ARGS, PROBE_MODE_DIR: MODES,
   });
 });
-test.after(() => fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 40, retryDelay: 500 }));
+// On Windows the timeout fake's processes keep files under ROOT open for
+// up to 10 s after the probe returns (see the hang fake); rmSync's own
+// retries do not cover that there, so wait them out here.
+test.after(async () => {
+  for (let attempt = 0; ; attempt++) {
+    try { fs.rmSync(ROOT, { recursive: true, force: true }); return; } catch (e) {
+      if (process.platform !== 'win32' || attempt >= 60 || !['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(e.code)) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+});
 
 // Run the entry as a child process (the e2e half); clears the args logs
 // first so "no CLI ran" is provable from their absence.
