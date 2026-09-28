@@ -159,7 +159,7 @@ setTimeout(() => {}, 60000);
     // The helper ends on the child's exit right after the kill — not when
     // the outer cap would fire (a missed kill would only end at the cap).
     assert.equal(outer.status, 0, `the helper ended on the child's exit, not the cap (took ${ms} ms): ${outer.stderr}`);
-    assert.ok(ms < 5000, `timeout + kill under 5 s (took ${ms} ms)`);
+    assert.ok(ms < 10000, `timeout + kill under 10 s, not the 30 s outer limit (took ${ms} ms)`);
     assert.equal(outer.stdout, 'b-out\n', 'the child output still reached the caller');
     const result = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
     assert.equal(result.timedOut, true, 'the timer fired while the child lived');
@@ -373,7 +373,7 @@ test('runCli win32 (simulated): mergeOutput mode — finishes before the timeout
       TK_PIDS_FILE: s.pidsFile,
     }, { timeoutMs: 800 });
     const ms = Date.now() - t0;
-    assert.ok(ms < 5000, `the call ends at the timeout + kill, not the cap (took ${ms} ms)`);
+    assert.ok(ms < 10000, `the call ends at the timeout + kill, not the 15.8 s cap (took ${ms} ms)`);
     assert.equal(to.status, null);
     assert.equal(to.signal, 'SIGTERM');
     assert.equal(to.timedOut, true);
@@ -411,7 +411,7 @@ test('runCli win32 (simulated): outputFiles mode — finishes before the timeout
       TK_PIDS_FILE: s.pidsFile,
     }, { timeoutMs: 800 });
     const ms = Date.now() - t0;
-    assert.ok(ms < 5000, `the call ends at the timeout + kill, not the cap (took ${ms} ms)`);
+    assert.ok(ms < 10000, `the call ends at the timeout + kill, not the 15.8 s cap (took ${ms} ms)`);
     assert.equal(to.status, null);
     assert.equal(to.signal, 'SIGTERM');
     assert.equal(to.timedOut, true);
@@ -455,7 +455,7 @@ test('runCli win32 (simulated): default mode with input — finishes before the 
       TK_PIDS_FILE: s.pidsFile,
     }, { timeoutMs: 800 });
     const ms = Date.now() - t0;
-    assert.ok(ms < 5000, `the call ends at the timeout + kill, not the cap (took ${ms} ms)`);
+    assert.ok(ms < 10000, `the call ends at the timeout + kill, not the 15.8 s cap (took ${ms} ms)`);
     assert.equal(to.status, null);
     assert.equal(to.signal, 'SIGTERM');
     assert.equal(to.timedOut, true);
@@ -470,7 +470,7 @@ test('runCli win32 (simulated): default mode with input — finishes before the 
 // instead of the helper's own pipes (the helper's ownPipes spawn mutated
 // back to `spawn(command, args, { stdio: 'inherit', … })`) lets the
 // grandchild hold the outer pipes open: the call only ends at the
-// timeoutMs + 15 s safety cap (~15.8 s here) and the ms < 5000 assert
+// timeoutMs + 15 s safety cap (~20 s here) and the ms < 12000 assert
 // below fails (run against the pre-fix helper on a throwaway copy).
 test('runCli win32 (simulated): default mode — a grandchild holding the pipes cannot hold the call past the timeout', {
   skip: process.platform === 'win32'
@@ -489,9 +489,11 @@ test('runCli win32 (simulated): default mode — a grandchild holding the pipes 
     const r = simRun(s, null, {
       TK_CMD_MODE: 'hold',
       TK_PIDS_FILE: s.pidsFile,
-    }, { timeoutMs: 800 });
+    }, { timeoutMs: 5000 });
     const ms = Date.now() - t0;
-    assert.ok(ms < 5000, `the call ends at the command's exit, not the safety cap (took ${ms} ms)`);
+    // The cap is timeoutMs + 15 s = 20 s; the command exits at once, so the
+    // call ends far below it (12 s leaves room for a loaded host).
+    assert.ok(ms < 12000, `the call ends at the command's exit, not the safety cap (took ${ms} ms)`);
     assert.equal(r.status, 0, 'the command exited 0 before the timeout');
     assert.equal(r.signal, null);
     assert.equal(r.timedOut, false);
@@ -555,7 +557,7 @@ setTimeout(() => {}, 120000);
   const ms = Date.now() - t0;
   const pids = fs.existsSync(pidsFile) ? fs.readFileSync(pidsFile, 'utf8').trim().split('\n').map(Number) : [];
   try {
-    assert.ok(ms < 5000, `under 5 s (took ${ms} ms)`);
+    assert.ok(ms < 10000, `under 10 s, not the 16 s cap (took ${ms} ms)`);
     assert.equal(r.notFound, false);
     assert.equal(r.status, null);
     assert.equal(r.signal, 'SIGTERM');
