@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { JS_ENTRY, nodeBin, fixtureEnv } from './parity.mjs';
+import { writeFakeCli } from './fakes.mjs';
 import { loadConfig, cfg, KNOWN_KINDS, configValueOk } from '../lib/config.mjs';
 import { fmGet, skillDir } from '../lib/roles.mjs';
 import {
@@ -33,18 +34,12 @@ function setup() {
   const fakes = path.join(root, 'fakes');
   for (const d of [repo, home, conf, state, tmp, fakes]) fs.mkdirSync(d, { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: repo, stdio: 'ignore' });
-  const env = fixtureEnv({ HOME: home, XDG_CONFIG_HOME: conf, HERDR_SOHO_DIR: state, TMPDIR: tmp });
+  const env = fixtureEnv({ HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: conf, HERDR_SOHO_DIR: state, TMPDIR: tmp });
   return {
     root, repo, home, conf, state, tmp, fakes, env,
     fakeEnv: () => ({ ...env, PATH: `${fakes}${path.delimiter}${process.env.PATH}` }),
     cleanup() { fs.rmSync(root, { recursive: true, force: true }); },
   };
-}
-
-function writeFakeCli(dir, name, lines) {
-  const f = path.join(dir, name);
-  fs.writeFileSync(f, lines.join('\n') + '\n', { mode: 0o755 });
-  return f;
 }
 
 test('kind effort ceilings and clamp_to', (t) => {
@@ -129,12 +124,7 @@ test('cursor: effort rides in the model id and --model is never doubled', (t) =>
 test('cursorModelWithEffort consults --list-models (fake cursor-agent)', { timeout: 120000 }, (t) => {
   const s = setup();
   try {
-    writeFakeCli(s.fakes, 'cursor-agent', [
-      '#!/bin/sh',
-      'if [ "$1" = "--list-models" ]; then',
-      '  printf "%s\\n" "grok-4.7-max - xAI Grok 4.7 (max)" "grok-4.7-high - xAI Grok 4.7 (high)" "grok-4.7 - xAI Grok 4.7" "grok-4.6 - xAI Grok 4.6"',
-      'fi',
-    ]);
+    writeFakeCli(s.fakes, 'cursor-agent', "if (process.argv[2] === '--list-models') process.stdout.write(['grok-4.7-max - xAI Grok 4.7 (max)', 'grok-4.7-high - xAI Grok 4.7 (high)', 'grok-4.7 - xAI Grok 4.7', 'grok-4.6 - xAI Grok 4.6'].join('\\n') + '\\n');\n");
     const env = s.fakeEnv();
     const warns = [];
     const w = (m) => warns.push(m);
@@ -300,12 +290,7 @@ test('resolveModel cursor: exact id and early failure (fake cursor-agent)', { ti
   const s = setup();
   try {
     // The bash test overrides model_ids locally with exactly these two ids.
-    writeFakeCli(s.fakes, 'cursor-agent', [
-      '#!/bin/sh',
-      'if [ "$1" = "--list-models" ]; then',
-      '  printf "%s\\n" "grok-4.7-xhigh - X" "claude-opus-4-8-xhigh - X"',
-      'fi',
-    ]);
+    writeFakeCli(s.fakes, 'cursor-agent', "if (process.argv[2] === '--list-models') process.stdout.write('grok-4.7-xhigh - X\\nclaude-opus-4-8-xhigh - X\\n');\n");
     const env = s.fakeEnv();
     assert.equal(resolveModel('cursor', 'grok-4.7-xhigh', 'xhigh', env), 'grok-4.7-xhigh');
     // Unknown/parameterized ids die 2 before spawn (no id printed).
@@ -317,7 +302,7 @@ test('resolveModel cursor: exact id and early failure (fake cursor-agent)', { ti
 test('kinds CLI: table with fake CLIs on PATH (installed yes/no)', { timeout: 120000 }, (t) => {
   const s = setup();
   try {
-    for (const n of ['grok', 'agy', 'cursor-agent']) writeFakeCli(s.fakes, n, ['#!/bin/sh', 'exit 0']);
+    for (const n of ['grok', 'agy', 'cursor-agent']) writeFakeCli(s.fakes, n, 'process.exit(0);\n');
     const r = spawnSync(nodeBin(), [JS_ENTRY, 'kinds'], { cwd: s.repo, env: s.fakeEnv(), encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     const rows = r.stdout.trim().split('\n').slice(1);

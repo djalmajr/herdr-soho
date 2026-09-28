@@ -20,6 +20,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { JS_ENTRY, nodeBin, fixtureEnv } from './parity.mjs';
 import { writeFakeCli } from './fakes.mjs';
+import { linkTool } from './tools.mjs';
 import { findExecutable } from '../lib/platform.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import {
@@ -100,10 +101,10 @@ test.before(() => {
   // out to git); the four probe fakes of test-probe.sh — agy/opencode stay
   // absent for the not-installed cases.
   const git = findExecutable('git');
-  if (git) fs.symlinkSync(git, path.join(BIN, 'git'));
+  if (git) linkTool(BIN, 'git', git);
   for (const name of ['pi', 'codex', 'claude', 'grok']) writeFakeCli(BIN, name, probeFakeSource(name));
   ENV = fixtureEnv({
-    HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, HERDR_WORKSPACE_ID: 'ws', TMPDIR: TMP,
+    HOME, USERPROFILE: HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, HERDR_WORKSPACE_ID: 'ws', TMPDIR: TMP,
     PATH: `${BIN}${path.delimiter}/usr/bin${path.delimiter}/bin`,
     PROBE_ARGS_DIR: ARGS, PROBE_MODE_DIR: MODES,
   });

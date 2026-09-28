@@ -24,7 +24,7 @@ import {
 import { explainActivity, explainIdleParagraph, explainPrintRunning, explainRecommendation, explainStateDir } from '../lib/commands/explain.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import { DieError } from '../lib/config.mjs';
-import { configFileFor } from '../lib/config.mjs';
+import { configFileFor, stateRootPath } from '../lib/config.mjs';
 import { setupHookDoctor } from '../lib/setuptext.mjs';
 
 let ROOT;
@@ -51,7 +51,7 @@ let ENV;
   FAKES = path.join(root, 'fakes');
   for (const d of [REPO, HOME, CONF, STATE, TMP, FAKES]) fs.mkdirSync(d, { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: REPO, stdio: 'ignore', timeout: 30000 });
-  ENV = fixtureEnv({ HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, TMPDIR: TMP });
+  ENV = fixtureEnv({ HOME, USERPROFILE: HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, TMPDIR: TMP });
 })();
 test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
@@ -344,7 +344,7 @@ test('doctorModelPairs: an unresolvable kind+model pair warns; an unavailable li
   // A kind nobody uses is never listed: the grok fake records its calls
   // and none happens when the only pair is a claude kind (no list there).
   const mark = path.join(ROOT, 'grok-called');
-  writeFakeCli(FAKES, 'grok', `require('node:fs').appendFileSync(${JSON.stringify(mark)}, 'called\\n');\nif (process.argv[2] === 'models') process.stdout.write('grok-4.7\\n');\n`);
+  writeFakeCli(FAKES, 'grok', `import fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(mark)}, 'called\\n');\nif (process.argv[2] === 'models') process.stdout.write('grok-4.7\\n');\n`);
   writeProj('panes=4\nlane.build.kind=claude\nlane.build.model=any\n');
   lines.length = 0;
   doctorModelPairs(loadConfig(env, REPO), env, REPO, say);
@@ -1060,7 +1060,7 @@ test('cmdDoctor: --fix --session rewrites the session.conf and re-runs the check
   writeSession('panes=4\nlane.ops.kind=codex\n');
   writeFakeCli(FAKES, 'herdr', 'process.exit(0);\n'); // no host herdr may be called
   const r = spawnSync(nodeBin(), [JS_ENTRY, 'doctor', '--fix', '--session', '--panes', '4'],
-    { cwd: REPO, env: { ...ENV, HERDR_WORKSPACE_ID: 'ws', PATH: FAKES }, encoding: 'utf8', timeout: 60000 });
+    { cwd: REPO, env: { ...ENV, HERDR_WORKSPACE_ID: 'ws', PATH: [FAKES].join(path.delimiter) }, encoding: 'utf8', timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes("removed lane.ops.kind=codex (no lane 'ops' in the panes=4 preset)"), r.stdout);
   assert.ok(r.stdout.includes(`doctor --fix: updated ${SESSION_CONF}`), r.stdout);
@@ -1082,6 +1082,15 @@ test('cmdDoctor: --fix --session rewrites the session.conf and re-runs the check
 });
 
 // ---------- nowrite: the state-dir line of doctor ----------
+
+// Mutation captured: joining root and state_dir with `/` gives the wrong Windows spelling.
+test('stateRootPath: relative state dirs use the native path separator', () => {
+  cleanLayers();
+  const env = { ...ENV, HERDR_SOHO_DIR: '', HERDR_SOHO_STATE_DIR: '' };
+  const ctx = loadConfig(env, REPO);
+  assert.equal(stateRootPath(ctx, env, REPO), path.join(REPO, '.herdr-soho'));
+  cleanLayers();
+});
 
 // doctorCheck against an arbitrary cwd with the host herdr faked (the
 // doctorOut pattern, parameterized cwd).
@@ -1162,7 +1171,7 @@ test('cmdDoctor: unknown option dies 2; doctor --fix --user re-runs the check in
   cleanLayers();
   writeProj('panes=3\n');
   writeFakeCli(FAKES, 'herdr', 'process.exit(0);\n'); // no host herdr may be called
-  const r = spawnSync(nodeBin(), [JS_ENTRY, 'doctor', '--fix', '--panes', '4'], { cwd: REPO, env: { ...ENV, PATH: FAKES }, encoding: 'utf8', timeout: 60000 });
+  const r = spawnSync(nodeBin(), [JS_ENTRY, 'doctor', '--fix', '--panes', '4'], { cwd: REPO, env: { ...ENV, PATH: [FAKES].join(path.delimiter) }, encoding: 'utf8', timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes('set panes=4'), r.stdout);
   // The preset file freezes no roles or kinds, so the team choice is
@@ -1199,7 +1208,7 @@ if (sub === 'get') {
 }
 `;
   writeFakeCli(FAKES, 'herdr', fake);
-  const env = { ...ENV, PATH: `${FAKES}:/usr/bin:/bin` };
+  const env = { ...ENV, PATH: [FAKES, '/usr/bin', '/bin'].join(path.delimiter) };
   const ctx = ctxOf();
   // A finished report (the recorded path exists and is non-empty) is idle,
   // even over a working state; with the report still missing, working wins.
@@ -1217,7 +1226,7 @@ if (sub === 'get') {
   fs.writeFileSync(path.join(sd, 'last-report-report'), '/does/not/exist.md\n');
   assert.equal(explainActivity('report', sd, ctx, env, REPO), 'waiting for report');
   // No herdr on the PATH at all: the roster alone decides.
-  const envNoHerdr = { ...ENV, PATH: '/usr/bin:/bin' };
+  const envNoHerdr = { ...ENV, PATH: ['/usr/bin', '/bin'].join(path.delimiter) };
   assert.equal(explainActivity('report', sd, ctx, envNoHerdr, REPO), 'waiting for report', 'no herdr: the recorded report waits');
   assert.equal(explainActivity('idle', sd, ctx, envNoHerdr, REPO), 'idle', 'no herdr, no report: idle');
   cleanLayers();
@@ -1472,7 +1481,7 @@ test('doctor: the literal key value never appears on stdout/stderr', () => {
     providers: { 'my-provider': { apiKey: 'sk-test-secret', models: [{ id: 'my-model', maxTokens: 20000 }] } },
   }));
   writeFakeCli(FAKES, 'herdr', 'process.exit(0);\n'); // no host herdr may be called
-  const r = spawnSync(nodeBin(), [JS_ENTRY, 'doctor'], { cwd: REPO, env: { ...ENV, PATH: FAKES }, encoding: 'utf8', timeout: 30000 });
+  const r = spawnSync(nodeBin(), [JS_ENTRY, 'doctor'], { cwd: REPO, env: { ...ENV, PATH: [FAKES].join(path.delimiter) }, encoding: 'utf8', timeout: 30000 });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes(`own provider 'my-provider' (pi) has a literal apiKey in ${PI_MODELS_FILE}`), r.stdout);
   assert.ok(!r.stdout.includes('sk-test-secret'), 'stdout leaks the key:\n' + r.stdout);

@@ -34,6 +34,7 @@ function isoRoot(prefix) {
   spawnSync('git', ['init', '-q'], { cwd: path.join(root, 'repo'), stdio: 'ignore', timeout: 30000 });
   const env = {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: path.join(root, 'state'),

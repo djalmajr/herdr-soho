@@ -19,14 +19,15 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { fixtureEnv, nodeBin } from './parity.mjs';
 import { writeFakeCli } from './fakes.mjs';
-import { findExecutable } from '../lib/platform.mjs';
+import { canSymlink, linkTool } from './tools.mjs';
+import { cmdInvocation, findExecutable } from '../lib/platform.mjs';
 import {
   applyLegacyEnv, defaultStateDirName, effectiveConfigFile,
   legacyEnvCopied, legacyProjectConfigPath, legacyUserConfigPath, migrateLegacyConfigFile,
 } from '../lib/legacy.mjs';
 
 const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const LAUNCHER = path.join(SCRIPTS, 'herdr-soho');
+const LAUNCHER = path.join(SCRIPTS, process.platform === 'win32' ? 'herdr-soho.cmd' : 'herdr-soho');
 // The doctor runs with a controlled PATH (like test-doctor-fix.sh): the
 // fake herdr plus links to the tools it spawns, so no host herdr or agent
 // CLI is ever called.
@@ -45,9 +46,16 @@ function setup() {
   const tmp = path.join(root, 'tmp');
   for (const d of [repo, home, conf, tmp]) fs.mkdirSync(d, { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: repo, stdio: 'ignore', timeout: 30000 });
-  const env = fixtureEnv({ HOME: home, XDG_CONFIG_HOME: conf, TMPDIR: tmp });
+  const env = fixtureEnv({ HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: conf, TMPDIR: tmp });
   const run = (args, over = {}, cwd = repo) => {
-    const r = spawnSync(LAUNCHER, args, { cwd, env: { ...env, ...over }, encoding: 'utf8', timeout: 60000 });
+    const childEnv = { ...env, ...over };
+    const invocation = process.platform === 'win32'
+      ? cmdInvocation(LAUNCHER, args, childEnv)
+      : { command: LAUNCHER, args };
+    const r = spawnSync(invocation.command, invocation.args, {
+      cwd, env: childEnv, encoding: 'utf8', timeout: 60000,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    });
     return { rc: r.status === null ? -1 : r.status, out: r.stdout ?? '', err: r.stderr ?? '' };
   };
   const doctorRun = (over = {}) => {
@@ -58,9 +66,10 @@ function setup() {
     for (const name of ['node', 'git', 'jq', 'timeout', 'bun']) {
       const p = name === 'node' ? nodeBin() : findExecutable(name);
       if (!p) continue;
-      try { fs.symlinkSync(p, path.join(bin, name)); } catch { /* present already */ }
+      try { linkTool(bin, name, p); } catch { /* present already */ }
     }
-    return run(['doctor'], { ...over, PATH: `${bin}:/usr/bin:/bin` });
+    const tools = process.platform === 'win32' ? [bin] : [bin, '/usr/bin', '/bin'];
+    return run(['doctor'], { ...over, PATH: tools.join(path.delimiter) });
   };
   return {
     root, repo, home, conf, tmp, env, run, doctorRun,
@@ -160,9 +169,9 @@ test('migrateLegacyConfigFile: the user and project new paths copy byte for byte
   fs.chmodSync(s.legacyUser, 0o640);
   assert.equal(migrateLegacyConfigFile(s.user, s.env, s.repo), true);
   assert.deepEqual(fs.readFileSync(s.user), bytes);
-  assert.equal(fs.statSync(s.user).mode & 0o777, 0o640);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(s.user).mode & 0o777, 0o640);
   assert.deepEqual(fs.readFileSync(s.legacyUser), bytes); // untouched
-  assert.equal(fs.statSync(s.legacyUser).mode & 0o777, 0o640);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(s.legacyUser).mode & 0o777, 0o640);
   assert.equal(migrateLegacyConfigFile(s.user, s.env, s.repo), false); // dest exists now
   fs.mkdirSync(path.dirname(s.legacyProj), { recursive: true });
   fs.writeFileSync(s.legacyProj, 'k=2\n');
@@ -275,6 +284,7 @@ test('setup (launcher): a team choice in the legacy project file counts, so no c
 test('config set (launcher): a symlinked legacy config file is copied through the link on the first write', (t) => {
   const s = setup();
   t.after(() => s.cleanup());
+  if (!canSymlink(s.root)) return t.skip('symlinks need privilege on Windows');
   // Mutation captured: deciding with lstatSync (the link is not a regular
   // file) skips the copy, so the new file holds only the new key and the
   // legacy keys stop being read.

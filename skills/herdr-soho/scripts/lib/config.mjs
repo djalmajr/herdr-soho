@@ -173,7 +173,7 @@ export function configFileFor(where, env = process.env, cwd = process.cwd()) {
 export function stateRootPath(ctx, env = process.env, cwd = process.cwd()) {
   const root = projectRoot(env, cwd);
   let d = env.HERDR_SOHO_DIR || stateDirSetting(ctx, env, cwd);
-  if (!path.isAbsolute(d)) d = root + '/' + d;
+  if (!path.isAbsolute(d)) d = path.resolve(root, d);
   return d;
 }
 

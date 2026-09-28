@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { cmdInvocation, findExecutable } from '../lib/platform.mjs';
 import {
   LEGACY_SETUP_END, LEGACY_SETUP_START, SETUP_START, legacyHookDoctor, legacyHookReminder,
   setupBlock, setupHookDoctor, setupHookReminder,
@@ -18,6 +19,13 @@ import {
 
 const SKILL_SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const USER_HOOK = "sh -c 'echo my own herdr-agents note'";
+const SHELL = process.platform === 'win32'
+  ? findExecutable('sh') ?? (() => {
+    const git = findExecutable('git');
+    const bundled = git && path.resolve(path.dirname(git), '..', 'usr', 'bin', 'sh.exe');
+    return bundled && fs.existsSync(bundled) ? bundled : findExecutable('bash') ?? 'sh';
+  })()
+  : '/bin/sh';
 
 function fixture() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-migration-')));
@@ -45,14 +53,23 @@ function fixture() {
     },
   };
   fs.writeFileSync(path.join(proj, '.claude', 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
-  const env = { PATH: process.env.PATH, HOME: home, TMPDIR: tmp };
+  const env = { PATH: [path.dirname(SHELL), process.env.PATH].filter(Boolean).join(path.delimiter), HOME: home, USERPROFILE: home, TMPDIR: tmp };
   // Claude Code runs a hook command through the shell, in the project, with
   // CLAUDE_PROJECT_DIR set.
-  const runHook = (command) => spawnSync('/bin/sh', ['-c', command], {
+  const runHook = (command) => spawnSync(SHELL, ['-c', command], {
     cwd: proj, env: { ...env, HERDR_ENV: '1', CLAUDE_PROJECT_DIR: proj }, encoding: 'utf8', timeout: 120000,
   });
   const launcher = path.join(home, '.agents', 'skills', 'herdr-soho', 'scripts', 'herdr-soho');
-  const cli = (args) => spawnSync(launcher, args, { cwd: proj, env, encoding: 'utf8', timeout: 120000 });
+  const cli = (args) => {
+    const windowsLauncher = `${launcher}.cmd`;
+    const invocation = process.platform === 'win32'
+      ? cmdInvocation(windowsLauncher, args, env)
+      : { command: launcher, args };
+    return spawnSync(invocation.command, invocation.args, {
+      cwd: proj, env, encoding: 'utf8', timeout: 120000,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    });
+  };
   return { root, home, proj, runHook, cli, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 

@@ -20,6 +20,8 @@ import {
 } from '../lib/setuptext.mjs';
 import { setupTargetExisting, setupWriteBlock, setupWriteHooks, projectNeedsConfigPrompt } from '../lib/commands/setup.mjs';
 import { fixtureEnv, nodeBin, JS_ENTRY } from './parity.mjs';
+import { canSymlink } from './tools.mjs';
+import { findExecutable } from '../lib/platform.mjs';
 
 const ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-setup-unit-')));
 const REPO = path.join(ROOT, 'repo');
@@ -51,6 +53,13 @@ test.after(() => {
 
 const BLOCK = setupBlock();
 const OLD_BLOCK = `${SETUP_START}\nold block line\n${SETUP_END}\n`;
+const SHELL = process.platform === 'win32'
+  ? findExecutable('sh') ?? (() => {
+    const git = findExecutable('git');
+    const bundled = git && path.resolve(path.dirname(git), '..', 'usr', 'bin', 'sh.exe');
+    return bundled && fs.existsSync(bundled) ? bundled : findExecutable('bash') ?? 'sh';
+  })()
+  : 'sh';
 
 test('setupBlock: markers, heading, no absolute path (test-setup.sh rule)', () => {
   assert.ok(BLOCK.startsWith(`${SETUP_START}\n`), 'starts with the start marker');
@@ -88,9 +97,9 @@ test('setupHookDoctor runs the first available launcher from the four candidates
     fs.mkdirSync(path.dirname(candidate), { recursive: true });
     fs.writeFileSync(candidate, `printf 'warn candidate-${index}: %s\\n' "$*"\n`);
   }
-  const runHook = () => spawnSync('sh', ['-c', setupHookDoctor()], {
+  const runHook = () => spawnSync(SHELL, ['-c', setupHookDoctor()], {
     cwd: project,
-    env: { ...process.env, HOME: home, CLAUDE_PROJECT_DIR: project, HERDR_ENV: '1' },
+    env: { ...process.env, HOME: home, PATH: [path.dirname(SHELL), process.env.PATH].filter(Boolean).join(path.delimiter), CLAUDE_PROJECT_DIR: project, HERDR_ENV: '1' },
     encoding: 'utf8',
     timeout: 30000,
   });
@@ -277,7 +286,7 @@ test('setupWriteHooks: creates the directory and file; invalid settings is DieEr
 });
 
 // Mutation captured: a rename over the unresolved AGENTS.md replaces the link with a plain file.
-test('setup end to end: AGENTS.md -> CLAUDE.md keeps the link, CLAUDE.md gets the block exactly once', { timeout: 120000 }, () => {
+test('setup end to end: AGENTS.md -> CLAUDE.md keeps the link, CLAUDE.md gets the block exactly once', { timeout: 120000 }, (t) => {
   const dir = path.join(ROOT, 'symlink-e2e');
   const repo = path.join(dir, 'repo');
   const home = path.join(dir, 'home');
@@ -288,9 +297,10 @@ test('setup end to end: AGENTS.md -> CLAUDE.md keeps the link, CLAUDE.md gets th
   spawnSync('git', ['init', '-q'], { cwd: repo, stdio: 'ignore', timeout: 30000 });
   const claude = path.join(repo, 'CLAUDE.md');
   const agents = path.join(repo, 'AGENTS.md');
+  if (!canSymlink(dir)) return t.skip('symlinks need privilege on Windows');
   fs.writeFileSync(claude, '# Agent instructions\n');
   fs.symlinkSync('CLAUDE.md', agents);
-  const env = fixtureEnv({ HOME: home, XDG_CONFIG_HOME: conf, HERDR_SOHO_DIR: state, TMPDIR: tmp });
+  const env = fixtureEnv({ HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: conf, HERDR_SOHO_DIR: state, TMPDIR: tmp });
   const run = () => spawnSync(nodeBin(), [JS_ENTRY, 'setup'], { cwd: repo, env, encoding: 'utf8', timeout: 60000 });
   try {
     const first = run();
