@@ -230,7 +230,7 @@ mutation-guard <copy>` before mutating — the guard fails when the copy
 sits inside the source (or the source inside it), holds a symlink into
 the source, or when `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR`, a
 `--env NAME` or a `.cargo/config[.toml]` `target-dir` points into the
-source (exit 1; 0 when isolated, 2 for bad usage; nothing is written, and
+source (a relative value resolved against the copy) (exit 1; 0 when isolated, 2 for bad usage; nothing is written, and
 a path it cannot resolve fails closed) — and never cleans a shared cache
 or the source's build output to recover; the `implementer`, `tasker` and
 `designer` stop every process they started before writing the report,

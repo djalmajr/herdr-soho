@@ -90,13 +90,15 @@ function symlinkIntoSource(copy, source) {
   return '';
 }
 
-function envPointingIntoSource(env, names, source) {
+// A relative build destination resolves against the copy: that is where
+// the role runs the build.
+function envPointingIntoSource(env, names, copy, source) {
   const offenders = [];
   for (const name of names) {
     const value = env[name];
-    if (value === undefined || value === '' || !path.isAbsolute(value)) continue;
+    if (value === undefined || value === '') continue;
     try {
-      if (inside(source, canonicalPath(value))) offenders.push(`${name} points into the source tree`);
+      if (inside(source, canonicalPath(path.resolve(copy, value)))) offenders.push(`${name} points into the source tree`);
     } catch {
       // If a configured destination cannot be resolved, do not echo it or
       // assume it is safe to write there.
@@ -116,13 +118,20 @@ function cargoTargetInsideSource(copy, source) {
       return `${relative} cannot be read`;
     }
     for (const line of text.split(/\r?\n/)) {
-      const match = /^\s*target-dir\s*=\s*"((?:\\.|[^"\\])*)"\s*(?:#.*)?$/.exec(line);
-      if (!match) continue;
+      // A TOML basic ("…", escapes) or literal ('…', none) string; Cargo
+      // resolves a relative target-dir against the directory holding .cargo.
+      const basic = /^\s*target-dir\s*=\s*"((?:\\.|[^"\\])*)"\s*(?:#.*)?$/.exec(line);
+      const literal = basic ? null : /^\s*target-dir\s*=\s*'([^']*)'\s*(?:#.*)?$/.exec(line);
+      if (!basic && !literal) continue;
       let value;
-      try { value = JSON.parse(`"${match[1]}"`); } catch { continue; }
-      if (!path.isAbsolute(value)) continue;
+      if (basic) {
+        try { value = JSON.parse(`"${basic[1]}"`); } catch { return `${relative} target-dir cannot be resolved safely`; }
+      } else {
+        value = literal[1];
+      }
+      if (value === '') continue;
       try {
-        if (inside(source, canonicalPath(value))) return `${relative} sets target-dir inside the source tree`;
+        if (inside(source, canonicalPath(path.resolve(copy, value)))) return `${relative} sets target-dir inside the source tree`;
       } catch {
         return `${relative} target-dir cannot be resolved safely`;
       }
@@ -166,7 +175,7 @@ export function cmdMutationGuard(args, env = process.env, cwd = process.cwd()) {
   catch { symlinkFailure = 'unable to inspect symlinks safely'; }
   failed = printCheck('no-symlink-into-source', symlinkFailure) || failed;
 
-  const envFailure = envPointingIntoSource(env, [...new Set([...BUILD_ENV, ...parsed.envNames])], source);
+  const envFailure = envPointingIntoSource(env, [...new Set([...BUILD_ENV, ...parsed.envNames])], copy, source);
   failed = printCheck('build-env', envFailure) || failed;
 
   const configFailure = cargoTargetInsideSource(copy, source);

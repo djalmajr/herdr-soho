@@ -101,6 +101,33 @@ test('rejects absolute cargo target-dir values inside the source', (t) => {
   } finally { s.cleanup(); }
 });
 
+test('relative and single-quoted build destinations are resolved against the copy', (t) => {
+  const s = setup();
+  try {
+    // Mutation captured: skipping a relative value (or a TOML literal
+    // string in single quotes) passes a copy whose build output lands in the
+    // source tree once cargo runs in the copy.
+    fs.mkdirSync(path.join(s.copy, '.cargo'));
+    const cfg = path.join(s.copy, '.cargo', 'config.toml');
+    fs.writeFileSync(cfg, 'target-dir = "../source/target"\n');
+    let r = s.run([s.copy, '--source', s.source]);
+    assert.equal(r.rc, 1, r.out);
+    assert.match(r.out, /fail cargo-config: \.cargo[\\/]config\.toml sets target-dir inside the source tree/);
+    fs.writeFileSync(cfg, `target-dir = '${path.join(s.source, 'target')}'\n`);
+    r = s.run([s.copy, '--source', s.source]);
+    assert.equal(r.rc, 1, r.out);
+    assert.match(r.out, /fail cargo-config/);
+    fs.writeFileSync(cfg, "target-dir = 'target'\n");
+    r = s.run([s.copy, '--source', s.source], { CARGO_TARGET_DIR: '../source/target' });
+    assert.equal(r.rc, 1, r.out);
+    assert.match(r.out, /ok cargo-config/);
+    assert.match(r.out, /fail build-env: CARGO_TARGET_DIR points into the source tree/);
+    assert.ok(!r.out.includes('../source/target'), 'the value is never printed');
+    r = s.run([s.copy, '--source', s.source], { CARGO_TARGET_DIR: 'target' });
+    assert.equal(r.rc, 0, r.out);
+  } finally { s.cleanup(); }
+});
+
 test('accepts an isolated copy, ignores broken links and does not descend into .git', (t) => {
   const s = setup();
   try {
