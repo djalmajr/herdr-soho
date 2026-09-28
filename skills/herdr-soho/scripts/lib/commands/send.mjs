@@ -42,9 +42,10 @@ import { die, readTextFile } from '../platform.mjs';
 import { stateDirPath } from '../state.mjs';
 import { LOCAL_MACHINE } from '../sessionref.mjs';
 import {
-  appendPeerLog, DEFAULT_SEND_TIMEOUT_MS, deliverPrompt, inboundPolicy,
-  literalPeerText, peerHeader, quotePeerBody, resolveTarget, senderInfo, senderRefOf,
-  waitUntilIdle,
+  agentReadScreen, agentSendKey, appendPeerLog, arrivalPollMs, arrivalWindowMs,
+  checkIdInScreen, DEFAULT_SEND_TIMEOUT_MS, deliverPrompt, inboundPolicy,
+  isDialogScreen, literalPeerText, peerHeader, quotePeerBody, randomPeerId,
+  resolveTarget, senderInfo, senderRefOf, sleepMs, waitUntilIdle,
 } from '../peer.mjs';
 
 export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
@@ -88,9 +89,12 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
   }
   if (body === '') die('send: empty message (pass the message words or --file <path>)', 2);
 
+  // The message id: 8 random hex characters generated for this send attempt.
+  const msgId = randomPeerId();
+
   // The attempt log lives in the sender's state dir (its workspace).
   const sd = stateDirPath(ctx, env, cwd);
-  const log = (fromRef, toRef, result) => appendPeerLog(sd, fromRef, toRef, result, body.length, env);
+  const log = (fromRef, toRef, result) => appendPeerLog(sd, fromRef, toRef, result, body.length, msgId, env);
 
   // 1. Resolve the target (herdr agent get; the machine from the ref).
   const t = resolveTarget(target, env);
@@ -145,28 +149,93 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
     }
   }
 
-  // 4. Deliver: header + blank line + quoted body, through agent prompt --wait.
+  // Resolve sender identity for the peer header.
+  const sender = senderInfo(ctx, env, cwd);
+
+  // 4. Dialog check: before sending, inspect the target's visible screen.
+  // If it matches a question/approval dialog or folder trust prompt, wait up
+  // to timeoutMs for it to clear. If still showing, exit 17 and send nothing.
+  let vScreen = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+  if (isDialogScreen(vScreen, t.kind)) {
+    const deadline = Date.now() + timeoutMs;
+    const pollMs = arrivalPollMs(env);
+    while (Date.now() < deadline && isDialogScreen(vScreen, t.kind)) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      sleepMs(Math.min(pollMs, remaining));
+      vScreen = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+    }
+    if (isDialogScreen(vScreen, t.kind)) {
+      log(sender.ref, ref, 'dialog');
+      die(`send: ${ref} is showing a dialog; nothing was sent`, 17);
+    }
+  }
+
+  // 5. Deliver: header + blank line + quoted body, through agent prompt --wait.
   // The body and the sender fields pass through literalPeerText so no byte
   // the target's terminal would run as a keystroke (CR, ESC, DEL, the
   // bracketed-paste markers, the other control characters) reaches it; \n
   // and \t stay. Each line of the body is quoted with "> " (empty line ">").
   // The header always comes first.
-  const sender = senderInfo(ctx, env, cwd);
   const bodyText = quotePeerBody(literalPeerText(body));
-  const text = `${peerHeader(literalPeerText(sender.ref), literalPeerText(sender.name), literalPeerText(sender.kind), literalPeerText(sender.role))}\n\n${bodyText}`;
+  const text = `${peerHeader(literalPeerText(sender.ref), literalPeerText(sender.name), literalPeerText(sender.kind), literalPeerText(sender.role), msgId)}\n\n${bodyText}`;
   const p = deliverPrompt(t.machine, t.targetArg, text, env);
-  if (p.ok) {
+  if (!p.ok) {
+    if (p.code === 'agent_prompt_stalled' || p.code === 'agent_blocked' || p.code === 'timeout') {
+      // No automatic resend: a second shot may duplicate the first, and the
+      // receipt timeout does not prove the text never reached the pane.
+      const result = p.code === 'agent_prompt_stalled' ? 'stalled' : p.code === 'agent_blocked' ? 'blocked' : 'timeout';
+      log(sender.ref, ref, result);
+      die(`send: ${ref} did not take the message (${p.code === 'timeout' ? 'timeout' : p.cause}); read its pane before sending again`, 15);
+    }
+    log(sender.ref, ref, 'error');
+    die(`send: ${ref} unavailable: ${p.cause}`, 4);
+  }
+
+  // 6. Arrival proof (Decision 2): agent prompt --wait is not proof of delivery.
+  // In a 15 s window (poll ~1 s), read target's recent-unwrapped 60 lines:
+  // - id outside last 3 non-empty lines -> delivered (sent);
+  // - id only in last 3 lines -> one Enter (send-keys), new window;
+  // - id absent -> one prompt resend (same text/id), new window;
+  // - still not outside -> exit 15 lost (did not take the message (not seen in its transcript)).
+  const windowMs = arrivalWindowMs(env);
+  const pollMs = arrivalPollMs(env);
+
+  const pollWindow = () => {
+    const deadline = Date.now() + windowMs;
+    while (true) {
+      const scr = agentReadScreen(t.machine, t.targetArg, { source: 'recent-unwrapped', lines: 60 }, env);
+      const st = checkIdInScreen(scr, msgId);
+      if (st === 'outside') return 'outside';
+      const nowMs = Date.now();
+      if (nowMs >= deadline) return st;
+      const sleepTime = Math.min(pollMs, deadline - nowMs);
+      if (sleepTime <= 0) return st;
+      sleepMs(sleepTime);
+    }
+  };
+
+  let arrival = pollWindow();
+  if (arrival === 'outside') {
     log(sender.ref, ref, 'sent');
     process.stdout.write(`sent to ${ref}\n`);
     return 0;
   }
-  if (p.code === 'agent_prompt_stalled' || p.code === 'agent_blocked' || p.code === 'timeout') {
-    // No automatic resend: a second shot may duplicate the first, and the
-    // receipt timeout does not prove the text never reached the pane.
-    const result = p.code === 'agent_prompt_stalled' ? 'stalled' : p.code === 'agent_blocked' ? 'blocked' : 'timeout';
-    log(sender.ref, ref, result);
-    die(`send: ${ref} did not take the message (${p.code === 'timeout' ? 'timeout' : p.cause}); read its pane before sending again`, 15);
+
+  if (arrival === 'input_box') {
+    agentSendKey(t.machine, t.targetArg, 'enter', env);
+    arrival = pollWindow();
+  } else if (arrival === 'absent') {
+    deliverPrompt(t.machine, t.targetArg, text, env);
+    arrival = pollWindow();
   }
-  log(sender.ref, ref, 'error');
-  die(`send: ${ref} unavailable: ${p.cause}`, 4);
+
+  if (arrival === 'outside') {
+    log(sender.ref, ref, 'sent');
+    process.stdout.write(`sent to ${ref}\n`);
+    return 0;
+  }
+
+  log(sender.ref, ref, 'lost');
+  die(`send: ${ref} did not take the message (not seen in its transcript)`, 15);
 }
