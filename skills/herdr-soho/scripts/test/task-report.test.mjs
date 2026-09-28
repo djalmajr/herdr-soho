@@ -190,3 +190,33 @@ test('dispatch-amend-done-collect works when all symlink creation APIs fail with
     // Mutation captured: replacing the regular-file copy with symlink creation fails under this EPERM preload.
   } finally { f.cleanup(); }
 });
+
+// Review R4 (P1): a done report routed through $TMPDIR is mirrored into
+// <state>/reports/; once the system reaps the original, the stable copy must
+// keep the mirror's content instead of being removed.
+test('syncTaskReport keeps the stable copy from the state mirror when the $TMPDIR original is gone', async () => {
+  const { syncTaskReport, writeTaskReportPointer } = await import('../lib/taskreport.mjs');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-taskreport-mirror-')));
+  try {
+    const sd = path.join(root, 'state', 'ws');
+    const tmpReports = path.join(root, 'tmp', 'reports');
+    fs.mkdirSync(path.join(sd, 'reports'), { recursive: true });
+    fs.mkdirSync(tmpReports, { recursive: true });
+    const original = path.join(tmpReports, 'build-20260927T101010.md');
+    const mirror = path.join(sd, 'reports', 'build-20260927T101010.md');
+    const stable = path.join(sd, 'reports', 'build-20260927T101010.current.md');
+    writeTaskReportPointer(sd, 'build', { version: 1, task_report: stable, current: original, history: [] });
+    fs.writeFileSync(original, '# done report\n');
+    fs.writeFileSync(mirror, '# done report\n');
+    assert.equal(syncTaskReport(sd, 'build'), stable);
+    // Mutation captured: removing the stable copy whenever the current
+    // original is unreadable deletes what the wait published.
+    fs.rmSync(original);
+    assert.equal(syncTaskReport(sd, 'build'), stable);
+    assert.equal(fs.readFileSync(stable, 'utf8'), '# done report\n');
+    // With neither the original nor the mirror (a pending report), the copy goes.
+    fs.rmSync(mirror);
+    assert.equal(syncTaskReport(sd, 'build'), null);
+    assert.equal(fs.existsSync(stable), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

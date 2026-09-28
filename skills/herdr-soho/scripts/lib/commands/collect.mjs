@@ -125,7 +125,7 @@ export function cmdCollect(argv, ctx, env = process.env, cwd = process.cwd()) {
   if (report !== '' && reportNonEmpty(report)) {
     if (verify) return verifyReport(sd, agent, report, env, cwd);
     process.stdout.write(`<!-- report: ${report} -->\n`);
-    if (taskPointer !== null) process.stdout.write(`<!-- task report: ${taskPointer.task_report} -->\n`);
+    if (taskPointer !== null && fs.existsSync(taskPointer.task_report)) process.stdout.write(`<!-- task report: ${taskPointer.task_report} -->\n`);
     process.stdout.write(fs.readFileSync(report, 'utf8')); // `cat`
     return 0;
   }

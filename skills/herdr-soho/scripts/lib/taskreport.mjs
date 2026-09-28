@@ -21,15 +21,26 @@ export function writeTaskReportPointer(sd, agent, pointer) {
   atomicWrite(taskReportPointerPath(sd, agent), `${JSON.stringify(pointer)}\n`);
 }
 
+function readNonEmpty(file) {
+  try {
+    const content = fs.readFileSync(file);
+    return content.length === 0 ? null : content;
+  } catch { return null; }
+}
+
+// The stable copy follows the task's current report. A done report routed
+// through $TMPDIR is mirrored by the wait into <state>/reports/ under the
+// same name, and the system may reap the original: the mirror then stands
+// in. With neither (a pending report or amendment), the copy is removed.
 export function syncTaskReport(sd, agent) {
   const pointer = readTaskReportPointer(sd, agent);
   if (pointer === null) return null;
   const stable = pointer.task_report;
-  let content;
-  try {
-    content = fs.readFileSync(pointer.current);
-    if (content.length === 0) content = null;
-  } catch { content = null; }
+  let content = readNonEmpty(pointer.current);
+  if (content === null) {
+    const mirror = path.join(sd, 'reports', path.basename(pointer.current));
+    if (path.resolve(mirror) !== path.resolve(pointer.current)) content = readNonEmpty(mirror);
+  }
   if (content === null) {
     fs.rmSync(stable, { force: true });
     return null;
