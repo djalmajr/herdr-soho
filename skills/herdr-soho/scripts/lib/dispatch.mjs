@@ -159,29 +159,73 @@ export function forSpecFamily(spec, sd, env = process.env, cwd = process.cwd(), 
 // section is not asked of it; the other sections still hold. opts.aliases
 // (from parseBriefLintAliases) maps a section name to alternate heading
 // prefixes: a level 1-3 header that starts with one of them, case-
-// insensitive, satisfies the section.
+// insensitive, satisfies the section. Portuguese built-ins also require a
+// title boundary after the prefix.
+const BRIEF_SECTION_HEADINGS = {
+  Goal: ['Goal'],
+  'Expected result': ['Expected result', 'Acceptance', 'Definition of done'],
+  'Owned files': ['Owned files', 'Owned', 'Scope'],
+  Forbidden: ['Forbidden', 'Non-goals', 'Constraints'],
+  Report: ['Report'],
+};
+
+const BRIEF_SECTION_PTBR_HEADINGS = {
+  Goal: ['Objetivo', 'Meta'],
+  'Expected result': ['Resultado esperado', 'Critérios de aceitação', 'Critérios de aceite', 'Pronto quando'],
+  'Owned files': ['Arquivos', 'Escopo'],
+  Forbidden: ['Proibido', 'Fora do escopo', 'Restrições'],
+  Report: ['Relatório'],
+};
+
+function normalizeBriefHeading(value) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function briefHeadingTitle(line) {
+  return String(line ?? '').match(/^#{1,3} +(.+)$/)?.[1] ?? null;
+}
+
+function startsWithHeadingPrefix(title, prefixes, strictBoundary = false) {
+  const normalizedTitle = normalizeBriefHeading(title);
+  return prefixes.some((prefix) => {
+    const normalizedPrefix = normalizeBriefHeading(prefix);
+    if (normalizedPrefix === '' || !normalizedTitle.startsWith(normalizedPrefix)) return false;
+    if (!strictBoundary) return true;
+    const remainder = normalizedTitle.slice(normalizedPrefix.length).trimStart();
+    return remainder === '' || !/[\p{L}\p{N}]/u.test(remainder[0]);
+  });
+}
+
+function hasBriefSectionHeading(text, label, aliases) {
+  const prefixes = BRIEF_SECTION_HEADINGS[label] ?? [];
+  const portuguesePrefixes = BRIEF_SECTION_PTBR_HEADINGS[label] ?? [];
+  return String(text ?? '').split(String.fromCharCode(10)).some((line) => {
+    const title = briefHeadingTitle(line);
+    return title !== null && (
+      startsWithHeadingPrefix(title, prefixes)
+      || startsWithHeadingPrefix(title, portuguesePrefixes, true)
+      || startsWithHeadingPrefix(title, aliases)
+    );
+  });
+}
+
 export function briefMissingSections(brief, opts = {}) {
   let text;
   try { text = fs.readFileSync(brief, 'utf8'); } catch { text = ''; }
   const aliases = opts.aliases ?? {};
-  const aliasHit = (name) => {
-    const alts = aliases[name];
-    if (!Array.isArray(alts)) return false;
-    return alts.some((h) => {
-      const esc = String(h).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return new RegExp(`^#{1,3} +${esc}`, 'im').test(text);
-    });
-  };
   const checks = [
-    [[/^#{1,3} +goal/im], 'Goal'],
-    [[/^#{1,3} +(expected result|acceptance|definition of done)/im], 'Expected result'],
-    ...(opts.readOnly === true ? [] : [[[/^#{1,3} +(owned files|owned|scope)/im], 'Owned files']]),
-    [[/^#{1,3} +(forbidden|non-goals|constraints)/im], 'Forbidden'],
-    [[/^#{1,3} +report/im], 'Report'],
-    [[/(commit|push)/i], "no-git line: say 'no commit/push'"],
+    'Goal',
+    'Expected result',
+    ...(opts.readOnly === true ? [] : ['Owned files']),
+    'Forbidden',
+    'Report',
   ];
   let missing = '';
-  for (const [res, label] of checks) if (!res.some((re) => re.test(text)) && !aliasHit(label)) missing += ` [${label}]`;
+  for (const label of checks) {
+    const alts = Array.isArray(aliases[label]) ? aliases[label] : [];
+    if (!hasBriefSectionHeading(text, label, alts)) missing += ` [${label}]`;
+  }
+  if (!/(commit|push)/i.test(text)) missing += " [no-git line: say 'no commit/push']";
   return missing;
 }
 
@@ -322,22 +366,35 @@ export function lintBrief(brief, ctx, env = process.env, opts = {}) {
 
 // The accepted `Owned files` headers (the same spellings the lint asks
 // for) and the lone words that are not paths (any case).
-const OWNED_HEADER_RES = [/^#{1,3} +owned files/i, /^#{1,3} +owned/i, /^#{1,3} +scope/i];
+const OWNED_HEADER_PREFIXES = BRIEF_SECTION_HEADINGS['Owned files'];
 const PATH_STOPWORDS = new Set(['nenhum', 'none']);
+const OWNERSHIP_EXCLUSIONS = new Set([
+  'nenhum', 'nenhuma', 'nao', 'nunca', 'exceto',
+  'not', 'never', 'none', 'except', 'excluding', 'outside',
+]);
+
+function isExcludedOwnershipLine(line) {
+  const body = String(line ?? '').replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '');
+  const start = body.replace(/^(?:\s|[*_])+/u, '');
+  const firstWord = normalizeBriefHeading(start).match(/^([a-z0-9]+)/)?.[1] ?? '';
+  return OWNERSHIP_EXCLUSIONS.has(firstWord);
+}
 
 // The `Owned files` section (or its lint alias) of a brief text: from the
 // header to the next header of the same or a higher level. '' when absent.
 function ownedSection(text, aliases = {}) {
   const lines = String(text ?? '').split('\n');
-  const alt = aliases['Owned files'];
+  const alt = Array.isArray(aliases['Owned files']) ? aliases['Owned files'] : [];
   let start = -1;
   let level = 0;
   for (let i = 0; i < lines.length; i += 1) {
     const m = lines[i].match(/^(#{1,3}) +(.+)$/);
     if (!m) continue;
-    const title = m[2];
-    const aliased = Array.isArray(alt) && alt.some((h) => new RegExp(`^${String(h).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(title));
-    if (OWNED_HEADER_RES.some((re) => re.test(lines[i])) || aliased) { start = i; level = m[1].length; break; }
+    if (
+      startsWithHeadingPrefix(m[2], OWNED_HEADER_PREFIXES)
+      || startsWithHeadingPrefix(m[2], BRIEF_SECTION_PTBR_HEADINGS['Owned files'], true)
+      || startsWithHeadingPrefix(m[2], alt)
+    ) { start = i; level = m[1].length; break; }
   }
   if (start === -1) return '';
   const out = [lines[start]];
@@ -374,6 +431,7 @@ export function ownedPaths(text, aliases = {}) {
     out.push(p);
   };
   for (const line of section.split('\n')) {
+    if (isExcludedOwnershipLine(line)) continue;
     for (const m of line.matchAll(/`([^`]+)`/g)) push(m[1]);
     const li = line.match(/^\s*([-*+]|\d+[.)])\s+([^`].*)$/);
     if (li) push(li[2]);
