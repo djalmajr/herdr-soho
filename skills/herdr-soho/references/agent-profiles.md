@@ -119,7 +119,8 @@ project, max 59):
     passed to an external CLI, and its test with a fake CLI did not see
     it; run the real binary with adversarial input;
   - in a long reused session, two reports mentioned a subject from outside
-    the brief. Spawn it `--fresh` after many tasks;
+    the brief. Compact or clear its session before an unrelated slice (see
+    "One agent, one growing session" in SKILL.md);
   - one pane gave no report after 9 min and was abandoned;
   - closed a task without reading a prompt sent to it mid-slice with a raw
     `herdr agent prompt`. The skill's way to add to a running slice is
