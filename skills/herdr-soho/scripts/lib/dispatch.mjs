@@ -9,15 +9,27 @@
 // :3870-3886 (family_conflicts), :3887-3899 (lint_brief), :3900-4102
 // (cmd_dispatch).
 //
-// S5 item 15 (+orchestrator amendment): before the send the visible screen
-// is hashed (H0); for prompt_check_seconds (0 turns the check off) the
-// agent is probed at min(1000, poll interval) ms — arrived when the state
-// is working/blocked or a non-empty report exists; at the window's end, the
-// prompt text sitting in the input box gets one Enter (enter_sent), a still
-// H0 screen gets the single resend (resent), any other screen change counts
-// as received; still nothing → `not-received` (exit 15, and the attempt
-// sidecar gets the `arrival: "not-received"` mark — the accepted
-// submission stands). A `question` wait ends 7.
+// S5 item 15 (+orchestrator amendment + arrival tightening): before the send,
+// the target is waited on to settle up to prompt_settle_seconds (20, 0 off):
+// interactive_ready in `herdr agent get` (when present) and two identical
+// consecutive visible screen reads 500 ms apart; passing the deadline warns
+// and sends anyway. Before the send the visible screen is hashed (H0); for
+// prompt_check_seconds (0 turns the check off) the agent is probed at
+// min(1000, poll interval) ms:
+//   1. arrived when state is working or blocked and state_change_seq moved
+//      since before the send (preSeq), or a non-empty report exists;
+//   2. at the window's end, when one of the last 15 non-empty visible
+//      lines carries the marker, the prompt sat in the input box: one
+//      Enter key, then a fresh window with only rule 1;
+//   3. unchanged screen or screen changed without the composed prompt path
+//      visible in recent screen outside the last 3 non-empty lines:
+//      the single resend of the same text (fresh H0/preSeq), then a fresh
+//      window with strict rules 1 and 4;
+//   4. changed screen with the composed prompt path visible in recent screen
+//      outside the last 3 non-empty lines: received, no resend.
+// Still nothing → `not-received` (exit 15, and the attempt sidecar gets the
+// `arrival: "not-received"` mark — the accepted submission stands). A
+// `question` wait ends 7.
 //
 // Faithful-port notes:
 //   - the dispatch JSON is one line (never pretty-printed) with
@@ -50,9 +62,9 @@ import path from 'node:path';
 import { dieFriction, lastReport, nowStamp, rosterLine, rosterRows, sleepSync, stateDir, stateDirPath, warn, workspaceId } from './state.mjs';
 import { cfg, DieError } from './config.mjs';
 import { hasWord, sanitizeCause } from './text.mjs';
-import { atomicWrite, projectRoot } from './platform.mjs';
+import { atomicWrite, projectRoot, runCli } from './platform.mjs';
 import { fmGet, roleBody, roleFile, roleIsEdit, historyHasEdit, REVIEW_ROLES } from './roles.mjs';
-import { agentPrompt, agentState, agentRead, agentSendKeys, liveAgents } from './herdr.mjs';
+import { agentPrompt, agentState, agentRead, agentSendKeys, liveAgents, HERDR_TIMEOUT_MS } from './herdr.mjs';
 import { briefTask, paneTaskTitle } from './tasks.mjs';
 import { waitFor, pollIntervalMs, cksumField } from './wait.mjs';
 import { quotaDetect } from './quota.mjs';
@@ -726,6 +738,34 @@ function priorAuthCauses(screen) {
 // flag or env variable reads it). Tests use it to pin the pairs of two
 // dispatches to one fixed second and exercise a real collision
 // deterministically, without a clock or a process start in the window.
+// Check interactive_ready from `herdr agent get <agent>`: true if ready;
+// absent/null/CLI-error does not bind (returns true); false if explicitly false.
+function isInteractiveReady(agent, env) {
+  try {
+    const r = runCli('herdr', ['agent', 'get', agent], { env, timeoutMs: HERDR_TIMEOUT_MS });
+    if (r.status !== 0 || !r.stdout) return true;
+    const j = JSON.parse(r.stdout);
+    const ag = j?.result?.agent;
+    if (!ag || ag.interactive_ready === undefined || ag.interactive_ready === null) return true;
+    return ag.interactive_ready === true;
+  } catch {
+    return true;
+  }
+}
+
+// True when the composed prompt path is visible in recent-unwrapped lines,
+// outside the last 3 non-empty lines (the input box area).
+function composedPathSeenOutsideInput(agent, composed, env) {
+  const rec = agentRead(env, agent, { source: 'recent-unwrapped', lines: 40 });
+  const lines = String(rec ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .filter((l) => l.trim() !== '');
+  if (lines.length <= 3) return false;
+  const outsideInput = lines.slice(0, -3);
+  return outsideInput.some((l) => l.includes(composed));
+}
+
 export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), opts = {}) {
   const agent = argv[0];
   const brief = argv[1];
@@ -1035,23 +1075,47 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   const text = amend === 1
     ? `${PROMPT_MARKER}${composed} in full and execute it. It amends the brief you are working on. When finished, write your report to ${report} and reply with exactly that path and nothing else.`
     : `${PROMPT_MARKER}${composed} in full and execute it. It contains your role, your brief, and your report contract. When finished, write your report to ${report} and reply with exactly that path and nothing else.`;
-  // Item 15 (+amendment): the acceptance of the `agent prompt` call is not
-  // proof the prompt reached the worker (a dead pane kept its welcome
-  // screen; a CLI kept the text sitting in its input box). With the check
-  // on (prompt_check_seconds a positive integer; 0 turns it off, and an
-  // invalid value fails safe = off) the visible screen is hashed before
-  // the send (H0) and, for prompt_check_seconds at min(1000, poll
+  // Item 15 (+amendment + arrival tightening):
+  // 1. Settle wait: before sending, wait up to prompt_settle_seconds (20, 0 off)
+  //    for the target to settle: interactive_ready true in `herdr agent get`
+  //    (when present) and two identical consecutive visible screen reads 500 ms apart.
+  //    Passing the deadline logs a warning and proceeds.
+  const rawSettle = String(cfg(ctx, 'prompt_settle_seconds', '20', env));
+  const settleSecs = /^[0-9]+$/.test(rawSettle) ? Number(rawSettle) : 20;
+  if (settleSecs > 0) {
+    const deadline = Date.now() + settleSecs * 1000;
+    let prevScreen = agentRead(env, agent, { source: 'visible' });
+    let settled = false;
+    while (Date.now() + 500 <= deadline) {
+      sleepSync(500);
+      const ready = isInteractiveReady(agent, env);
+      const currScreen = agentRead(env, agent, { source: 'visible' });
+      if (ready && currScreen === prevScreen) {
+        settled = true;
+        break;
+      }
+      prevScreen = currScreen;
+    }
+    if (!settled) {
+      warn(`prompt to '${agent}' did not settle in ${settleSecs}s; sending anyway`);
+    }
+  }
+
+  // With the arrival check on (prompt_check_seconds a positive integer; 0 turns it off,
+  // and an invalid value fails safe = off) the visible screen is hashed before
+  // the send (H0) and preSeq read; for prompt_check_seconds at min(1000, poll
   // interval) ms, the agent is probed:
-  //   1. arrived when the state is working or blocked, or a non-empty
-  //      report exists (a screen change alone no longer counts);
+  //   1. arrived when state is working or blocked and state_change_seq moved
+  //      since before the send (preSeq), or a non-empty report exists;
   //   2. at the window's end, when one of the last 15 non-empty visible
   //      lines carries the marker, the prompt sat in the input box: one
   //      Enter key, then a fresh window with only rule 1;
-  //   3. still on the exact H0 screen (and not 2): the single resend of
-  //      the same text (fresh H0), then a fresh window with only rule 1;
-  //   4. a changed screen (and not 2, and not arrived): considered
-  //      received (a worker detected by a screen that does not report
-  //      working), no resend.
+  //   3. unchanged screen or screen changed without the composed prompt path
+  //      visible in recent screen outside the last 3 non-empty lines:
+  //      the single resend of the same text (fresh H0/preSeq), then a fresh
+  //      window with strict rules 1 and 4;
+  //   4. changed screen with the composed prompt path visible in recent screen
+  //      outside the last 3 non-empty lines: received, no resend.
   // Still nothing: `not-received`, exit 15.
   const rawWin = String(cfg(ctx, 'prompt_check_seconds', '15', env));
   const checkOn = /^[0-9]+$/.test(rawWin) && Number(rawWin) > 0;
@@ -1104,13 +1168,15 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
     const windowMs = Number(rawWin) * 1000;
     const pollMs = Math.min(1000, pollIntervalMs(env));
     // Rule 1 only: the state or the report says the prompt landed — but
-    // a block on a stale auth screen is not an arrival (R11/D58): the
-    // worker never took the prompt.
+    // working/blocked only counts when state_change_seq differs from preSeq
+    // (a working state already present before the submit proves nothing),
+    // and a block on a stale auth screen is never an arrival.
     const arrived = () => {
       try { if (fs.statSync(report).size > 0) return true; } catch {}
       const st = agentState(agent, env);
-      if (st.state === 'working') return true;
-      if (st.state === 'blocked') return !staleAuthBlock();
+      const seqMoved = preSeq !== '' && st.seq !== '' && st.seq !== preSeq;
+      if (st.state === 'working') return seqMoved;
+      if (st.state === 'blocked') return seqMoved && !staleAuthBlock();
       return false;
     };
     // True when the worker sits blocked on an auth screen that predates
@@ -1129,14 +1195,15 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
       const pa = providerDetect(st.state, screen);
       return pa !== null && pa.status === 'provider-error' && pa.auth === true;
     };
-    const waitForArrival = (ms) => {
+    const waitForArrival = (ms, extra = null) => {
       const deadline = Date.now() + ms;
       for (;;) {
         if (arrived()) return true;
+        if (extra && extra()) return true;
         if (Date.now() >= deadline) break;
         sleepSync(pollMs);
       }
-      return arrived();
+      return arrived() || Boolean(extra && extra());
     };
     // Same keys as the error case above (without raw). The .not-received
     // marker (epoch seconds + the agent's state_change_seq read now) lets a
@@ -1175,23 +1242,28 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
         enterSent = true;
         warn(`prompt to '${agent}' sat in the input box; sent Enter`);
         if (!waitForArrival(windowMs)) return notReceived('an Enter on the text left in its input box');
-      } else if (String(cksumField(screen)) === String(H0)) {
-        // (3) the screen never moved: resend the same text once — unless
-        // the worker sits blocked on a stale auth screen (R11/D58): it
-        // cannot take the prompt, so no resend; not-received now.
+      } else if (String(cksumField(screen)) !== String(H0) && composedPathSeenOutsideInput(agent, composed, env)) {
+        // (4) strict rule 4: the screen changed and the composed prompt path
+        // is visible in recent screen outside the last 3 non-empty lines:
+        // received, no resend.
+      } else {
+        // (3 + fallback of 4): the screen never moved, or moved without the
+        // composed prompt path outside the input box: single resend of the same
+        // text (fresh H0/preSeq), then a fresh window with strict rules 1 and 4.
         if (staleAuthBlock()) return notReceived('its block on a provider auth error');
         warn(`prompt to '${agent}' did not arrive (screen unchanged, agent not working); sending it once more`);
         H0 = cksumField(agentRead(env, agent, { source: 'visible' }));
+        preSeq = agentState(agent, env).seq;
         if (agentPrompt(agent, text, env).ok) {
           resent = true;
-          if (!waitForArrival(windowMs)) return notReceived('one resend');
+          if (!waitForArrival(windowMs, () => {
+            const curScreen = agentRead(env, agent, { source: 'visible' });
+            return String(cksumField(curScreen)) !== String(H0) && composedPathSeenOutsideInput(agent, composed, env);
+          })) return notReceived('one resend');
         } else {
           return notReceived('one resend');
         }
       }
-      // (4) the screen changed without the input marker — a worker
-      // detected by a screen that does not report working: received, no
-      // resend.
     }
   }
 

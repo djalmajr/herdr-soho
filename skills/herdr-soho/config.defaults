@@ -187,6 +187,12 @@ provider_retry_delay=60
 # (exit 15). 0 turns the check off.
 prompt_check_seconds=15
 
+# Seconds `dispatch` waits before sending the prompt for the target to
+# settle (interactive_ready in `herdr agent get` when present and two
+# consecutive identical visible screen reads 500 ms apart). 0 turns the
+# check off.
+prompt_settle_seconds=20
+
 # Minutes a working agent may show the same screen (counters aside) before
 # the wait logs a "may be stuck in one tool call" warning, once. 0 = off.
 stuck_warn_minutes=20

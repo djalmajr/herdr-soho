@@ -88,6 +88,31 @@ const screenTargetOf = (t) => {
   const per = process.env.FAKE_SCREEN_DIR + '/screen-' + t;
   try { fs.accessSync(per); return per; } catch { return process.env.FAKE_SCREEN; }
 };
+const seqOf = (t) => {
+  let per = '';
+  if (process.env.FAKE_MODE_DIR) {
+    try { per = fs.readFileSync(process.env.FAKE_MODE_DIR + '/seq-' + t, 'utf8').trim(); } catch {}
+  }
+  if (per) return per;
+  try {
+    const s = fs.readFileSync(process.env.FAKE_SEQ, 'utf8').trim();
+    if (s) return s;
+  } catch {}
+  if (process.env.FAKE_PROMPT_ARRIVE) return '1';
+  if (process.env.FAKE_SENDKEYS_WORK && fs.existsSync(process.env.FAKE_SENDKEYS_WORK)) return '1';
+  return '';
+};
+const bumpSeq = (t) => {
+  const cur = parseInt(seqOf(t) || '1', 10);
+  const next = cur + 1;
+  if (process.env.FAKE_MODE_DIR) {
+    try { fs.writeFileSync(process.env.FAKE_MODE_DIR + '/seq-' + t, String(next) + '\\n'); return next; } catch {}
+  }
+  if (process.env.FAKE_SEQ) {
+    try { fs.writeFileSync(process.env.FAKE_SEQ, String(next) + '\\n'); return next; } catch {}
+  }
+  return next;
+};
 if (cmd === 'agent get') {
   const m = modeOf(t);
   if (m === 'denied') {
@@ -98,9 +123,8 @@ if (cmd === 'agent get') {
     process.stderr.write('{"error":{"code":"agent_not_found","message":"agent target ' + t + ' not found"}}\\n');
     process.exit(1);
   }
-  let seqVal = '';
-  try { seqVal = fs.readFileSync(process.env.FAKE_SEQ, 'utf8').trim(); } catch {}
-  const seqJson = seqVal !== '' ? ', "state_change_seq": ' + seqVal + '' : '';
+  const seqVal = seqOf(t);
+  const seqJson = seqVal !== '' ? ', "state_change_seq": ' + seqVal : '';
   process.stdout.write('{"result":{"agent":{"name":"' + t + '","agent_status":"' + m + '"' + seqJson + '}}}\\n');
 } else if (cmd === 'agent read') {
   process.stdout.write(screenOf(t));
@@ -112,14 +136,20 @@ if (cmd === 'agent get') {
     try {
       const old = fs.readFileSync(lr, 'utf8').trim();
       const at = old.lastIndexOf('/');
-      const fresh = old.slice(0, at + 1) + old.slice(at + 1).replace(/\.md$/, '') + '-settled.md';
+      const fresh = old.slice(0, at + 1) + old.slice(at + 1).replace(/\\.md$/, '') + '-settled.md';
       fs.writeFileSync(fresh, 'settled report\\n');
       fs.writeFileSync(lr, fresh + '\\n');
     } catch {}
     process.stdout.write('{"result":{"submitted":true}}\\n');
+  } else if (process.env.FAKE_PROMPT_BLOCKED) {
+    bumpSeq(t);
+    process.stdout.write('{"result":{"submitted":true}}\\n');
   } else if (process.env.FAKE_PROMPT_SKIP && fs.existsSync(process.env.FAKE_PROMPT_SKIP)) {
     // Item 15: a silent no-op — the pane is left exactly where it was.
     fs.rmSync(process.env.FAKE_PROMPT_SKIP, { force: true });
+    if (process.env.FAKE_MODE_DIR) {
+      try { fs.writeFileSync(process.env.FAKE_MODE_DIR + '/skipped-' + t, '1\\n'); } catch {}
+    }
     process.stdout.write('{"result":{}}\\n');
   } else if (process.env.FAKE_PROMPT_FAIL && fs.existsSync(process.env.FAKE_PROMPT_FAIL)) {
     process.stderr.write('prompt failed: the fake refused\\n');
@@ -131,6 +161,7 @@ if (cmd === 'agent get') {
   } else if (process.env.FAKE_PROMPT_ARRIVE) {
     try { fs.writeFileSync(modeFileOf(t), 'working\\n'); } catch {}
     try { fs.writeFileSync(screenTargetOf(t), 'thinking…\\n'); } catch {}
+    bumpSeq(t);
     process.stdout.write('{"result":{"submitted":true}}\\n');
   } else if (process.env.FAKE_REPORT_TEXT !== undefined) {
     // The fake worker writes the report in answer to the prompt: the
@@ -140,7 +171,7 @@ if (cmd === 'agent get') {
     // with a moved screen); with FAKE_REPORT_APPEND the prompt echo is
     // appended instead (a report with a scrollback-only move).
     const promptText = argv[3] ?? '';
-    const rm = promptText.match(/write your report to (.+) and reply with exactly that path and nothing else\.$/);
+    const rm = promptText.match(/write your report to (.+) and reply with exactly that path and nothing else\\.$/);
     if (rm) { try { fs.writeFileSync(rm[1], process.env.FAKE_REPORT_TEXT); } catch {} }
     if (process.env.FAKE_PROMPT_AUTHSCREEN && fs.existsSync(process.env.FAKE_PROMPT_AUTHSCREEN)) {
       try { fs.writeFileSync(screenTargetOf(t), fs.readFileSync(process.env.FAKE_PROMPT_AUTHSCREEN, 'utf8')); } catch {}
@@ -150,11 +181,26 @@ if (cmd === 'agent get') {
     process.stdout.write('{"result":{"submitted":true}}\\n');
   } else if (process.env.FAKE_PROMPT_AUTHSCREEN && fs.existsSync(process.env.FAKE_PROMPT_AUTHSCREEN)) {
     // R11/D58: the worker takes the prompt and stops on an auth screen.
-    try { fs.writeFileSync(screenTargetOf(t), fs.readFileSync(process.env.FAKE_PROMPT_AUTHSCREEN, 'utf8')); } catch {}
+    const promptText = argv[3] ?? '';
+    const m = promptText.match(/Read the file (.+?) in full/);
+    const comp = m ? m[1] : '';
+    const prefix = comp !== '' ? 'Reading ' + comp + '\\n.\\n.\\n.\\n' : '';
+    try {
+      const auth = fs.readFileSync(process.env.FAKE_PROMPT_AUTHSCREEN, 'utf8');
+      fs.writeFileSync(screenTargetOf(t), prefix + auth);
+    } catch {}
     process.stdout.write('{"result":{"submitted":true}}\\n');
   } else {
     // Accepted into the scrollback: the screen moves, the state stays.
-    try { fs.appendFileSync(screenTargetOf(t), 'prompt received: ok\\n'); } catch {}
+    let wasSkipped = false;
+    if (process.env.FAKE_MODE_DIR) {
+      wasSkipped = fs.existsSync(process.env.FAKE_MODE_DIR + '/skipped-' + t);
+    }
+    const promptText = argv[3] ?? '';
+    const m = promptText.match(/Read the file (.+?) in full/);
+    const comp = m ? m[1] : '';
+    const prefix = (!wasSkipped && comp !== '') ? 'Reading ' + comp + '\\n.\\n.\\n.\\n' : '';
+    try { fs.appendFileSync(screenTargetOf(t), prefix + 'prompt received: ok\\n'); } catch {}
     if (process.env.FAKE_AUTH_APPEND && fs.existsSync(process.env.FAKE_AUTH_APPEND)) {
       // R11/D58 amendment 3: the worker then emits a fresh auth failure
       // (the file content) after the prompt echo.
@@ -167,10 +213,12 @@ if (cmd === 'agent get') {
   // FAKE_SENDKEYS_WORK file exists; otherwise the key is swallowed.
   if (process.env.FAKE_SENDKEYS_WORK && fs.existsSync(process.env.FAKE_SENDKEYS_WORK)) {
     try { fs.writeFileSync(modeFileOf(t), 'working\\n'); } catch {}
+    bumpSeq(t);
   }
   if (process.env.FAKE_SENDKEYS_BLOCKED_AUTH && fs.existsSync(process.env.FAKE_SENDKEYS_BLOCKED_AUTH)) {
     try { fs.writeFileSync(modeFileOf(t), 'blocked\\n'); } catch {}
     try { fs.writeFileSync(screenTargetOf(t), fs.readFileSync(process.env.FAKE_SENDKEYS_BLOCKED_AUTH, 'utf8')); } catch {}
+    bumpSeq(t);
   }
   process.stdout.write('{"result":{}}\\n');
 } else if (cmd === 'agent list') {
@@ -1432,7 +1480,7 @@ test('dispatch: prompt_check_seconds=0 sends one prompt and probes nothing', { t
     // Mutation captured: running the arrival check anyway (or resending)
     // adds agent get/read lines or a second prompt to the log below.
     const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait'],
-      { HERDR_SOHO_PROMPT_CHECK_SECONDS: '0' });
+      { HERDR_SOHO_PROMPT_CHECK_SECONDS: '0', HERDR_SOHO_PROMPT_SETTLE_SECONDS: '0' });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(parsePretty(r.stdout).wait_status, 'submitted');
     const log = fix.log().split('\n').filter((l) => l !== '');
@@ -1758,12 +1806,12 @@ test('dispatch: a worker that ends in a question exits 7 with the question in th
     const brief = fix.brief('brief.md', FULL_BRIEF);
     fix.mode('blocked');
     fix.screen('  1. Use the local cache\n  2. Fetch from remote\n\nEnter to submit answer, esc to cancel\n');
-    fix.promptSkip(); // silent no-op: the screen stays exactly the question screen
+    fs.writeFileSync(fix.env.FAKE_SEQ, '1\n');
     // Mutation captured: a `question` wait falling through to the default
     // case (or a JSON without the question key after auto_approved)
     // changes the rc and the key set below.
     const r = cmd(fix, ['dispatch', 'build', brief, '--timeout', '10000'],
-      { HERDR_SOHO_PROMPT_CHECK_SECONDS: '3' });
+      { HERDR_SOHO_PROMPT_CHECK_SECONDS: '3', FAKE_PROMPT_BLOCKED: '1' });
     assert.equal(r.status, 7, r.stderr);
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'question');
@@ -2920,14 +2968,14 @@ test('dispatch: a blocked worker ends 7 and the final JSON carries the wait dial
     const brief = fix.brief('brief.md', FULL_BRIEF);
     fix.mode('blocked');
     fix.screen('Approve write to scripts/x.mjs?\n  1. Yes\n  2. No\n');
-    fix.promptSkip(); // the prompt is a silent no-op: the screen keeps the dialog verbatim
+    fs.writeFileSync(fix.env.FAKE_SEQ, '1\n');
     // auto_approve off (the default): the confirmed blocked probe returns
     // 'blocked' with the dialog — no key is sent, the wait line carries it.
     // Mutation captured: the dialog field dropped by the dispatch consumer
     // (or placed after the review header fields) breaks the key set and the
     // dialog value below.
     const r = cmd(fix, ['dispatch', 'build', brief, '--timeout', '10000'],
-      { HERDR_SOHO_PROMPT_CHECK_SECONDS: '3' });
+      { HERDR_SOHO_PROMPT_CHECK_SECONDS: '3', FAKE_PROMPT_BLOCKED: '1' });
     assert.equal(r.status, 7, r.stderr);
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'blocked');
@@ -3406,7 +3454,7 @@ test('dispatch --no-wait: prompt_check_seconds=0 observes nothing on an auth scr
     // Mutation captured: observing anyway (or resending) adds agent
     // get/read lines or a second prompt to the log below.
     const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait'],
-      { HERDR_SOHO_PROMPT_CHECK_SECONDS: '0' });
+      { HERDR_SOHO_PROMPT_CHECK_SECONDS: '0', HERDR_SOHO_PROMPT_SETTLE_SECONDS: '0' });
     assert.equal(r.status, 0, r.stderr);
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
@@ -3717,7 +3765,7 @@ test('dispatch --no-wait: a scrollback-only append does not attribute the old au
     // Mutation captured: attributing on a mere screen move reports
     // provider-error (14) with the old 401 instead of submitted (0).
     const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait'],
-      { HERDR_SOHO_PROMPT_CHECK_SECONDS: '1' });
+      { HERDR_SOHO_PROMPT_CHECK_SECONDS: '1', FAKE_PROMPT_ECHO: '1' });
     assert.equal(r.status, 0, r.stderr);
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
@@ -3827,6 +3875,7 @@ test('dispatch --no-wait: Enter does not make a preexisting identical auth cause
     fix.mode('idle');
     const old = 'Error: 401 Unauthorized: Incorrect API key provided';
     fix.screen(`${old}\n`);
+    fs.writeFileSync(fix.env.FAKE_SEQ, '1\n');
     const blocked = path.join(fix.root, 'old-auth-after-enter.txt');
     fs.writeFileSync(blocked, `${old}\n`);
     const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait'],
