@@ -284,6 +284,7 @@ function makeFix(prefix) {
     FAKE_SENDKEYS_WORK: path.join(root, 'sendkeys-work'),
     FAKE_SEQ: path.join(root, 'seq'),
     PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    HERDR_SOCKET_PATH: path.join(root, 'missing-herdr.sock'),
   };
   fs.writeFileSync(env.FAKE_MODE, 'idle\n');
   fs.writeFileSync(env.FAKE_SCREEN, '');
@@ -428,6 +429,44 @@ test('lint: each section absent, each alternative accepted', { timeout: 60000 },
       const f = fix.brief('brief.md', FULL_BRIEF.replace('# Forbidden', `# ${alt}`));
       assert.equal(briefMissingSections(f), '', `alt ${alt}`);
     }
+  } finally { fix.cleanup(); }
+});
+
+test('lint: built-in Portuguese section headings and accentless headings pass', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-dispatch-lint-ptbr-');
+  try {
+    const portuguese = fix.brief('pt.md', `## Objetivo\n\nDo it.\n\n## Resultado esperado\n\nDone.\n\n## Arquivos\n\n- src/a.ts\n\n## Proibido\n\nNo commit/push.\n\n## Relatório\n\nDone.\n`);
+    // Mutation captured: dropping any built-in pt-BR prefix or making the
+    // default comparison accent-sensitive reports missing sections here.
+    assert.equal(briefMissingSections(portuguese), '');
+    const accentless = fix.brief('accentless.md', fs.readFileSync(portuguese, 'utf8').replace('## Relatório', '## Relatorio'));
+    assert.equal(briefMissingSections(accentless), '');
+    assert.deepEqual(ownedPaths('## Escopo\n\n- src/a.ts\n'), ['src/a.ts'], 'Escopo is the owned section by default');
+  } finally { fix.cleanup(); }
+});
+
+test('lint and ownership: Portuguese section prefixes reject word continuations', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-dispatch-ptbr-prefix-boundary-');
+  try {
+    const withOwnedHeading = (heading) => FULL_BRIEF.replace('# Owned files', `## ${heading}`);
+    // Mutation captured: allowing Portuguese prefix words to continue as letters treats excluded headings as real ownership and hides the actual section.
+    for (const heading of ['Arquivos proibidos', 'Escopo fora']) {
+      const brief = fix.brief(`${heading}.md`, withOwnedHeading(heading));
+      assert.equal(briefMissingSections(brief), ' [Owned files]', heading);
+    }
+    assert.deepEqual(ownedPaths('## Arquivos proibidos\n\n- src/secret.ts\n\n## Arquivos — donos\n\n- src/mine.ts\n'), ['src/mine.ts']);
+    assert.deepEqual(ownedPaths('## Escopo fora\n\n- src/secret.ts\n\n## Escopo:\n\n- src/mine.ts\n'), ['src/mine.ts']);
+  } finally { fix.cleanup(); }
+});
+
+test('lint: Meta is a Portuguese Goal heading but Metadata and Metadados are not', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-dispatch-ptbr-meta-boundary-');
+  try {
+    const withGoalHeading = (heading) => FULL_BRIEF.replace('# Goal\n', '').replace('# Expected result', `## ${heading}\n\n# Expected result`);
+    // Mutation captured: accepting a Portuguese prefix followed by letters lets Metadata or Metadados satisfy Goal.
+    assert.equal(briefMissingSections(fix.brief('meta.md', withGoalHeading('Meta'))), '');
+    assert.equal(briefMissingSections(fix.brief('metadata.md', withGoalHeading('Metadata'))), ' [Goal]');
+    assert.equal(briefMissingSections(fix.brief('metadados.md', withGoalHeading('Metadados'))), ' [Goal]');
   } finally { fix.cleanup(); }
 });
 
@@ -2421,6 +2460,9 @@ test('lint: an alias heading covering the section passes, a mid-title one does n
     assert.equal(briefMissingSections(fix.brief('mid.md', aliasBody('## The Parte A context')), { aliases: { Goal: ['Parte A'] } }), ' [Goal]');
     // Any alternative of the list works.
     assert.equal(briefMissingSections(fix.brief('alt.md', aliasBody('### Contexto')), { aliases: { Goal: ['Parte A', 'Contexto'] } }), '');
+    // Mutation captured: aliases must use the same accent-insensitive
+    // comparison as built-in Portuguese headings.
+    assert.equal(briefMissingSections(fix.brief('accentless-alias.md', aliasBody('## Criterios')), { aliases: { Goal: ['Critérios'] } }), '');
   } finally { fix.cleanup(); }
 });
 
@@ -2629,6 +2671,10 @@ test('ownedPaths: spans, list items, normalization, stopwords, aliases, section 
   // Lone words that are not paths (any case, with or without punctuation).
   assert.deepEqual(ownedPaths('# Owned files\n\nNenhum\n'), []);
   assert.deepEqual(ownedPaths('# Owned files\n\n- none\n- Nenhum.\n'), []);
+  // Mutation captured: exclusion-leading lines must not contribute embedded
+  // paths, while a negation later in a line must not discard its path.
+  assert.deepEqual(ownedPaths('# Owned files\n\n- Not `x/y.ts`\n- **Exceto** `a/b.ts`\n- `c/d.ts` (não mexa no resto)\n'), ['c/d.ts']);
+  assert.deepEqual(ownedPaths('# Owned files\n\n- `skills/herdr-soho/scripts/lib/dispatch.mjs`\n- Nenhum arquivo de `src/server/commands/artifact.ts`, `src/server/fns.ts` ou catálogo i18n: outro implementador atua nessa área.\n'), ['skills/herdr-soho/scripts/lib/dispatch.mjs']);
   // The section ends at the next same-or-higher header, not a deeper one;
   // a deeper sub-header stays inside.
   assert.deepEqual(ownedPaths('## Owned files\n\n- scripts/a.mjs\n\n### Notes\n\n- docs/b.md\n\n# Forbidden\n\n- scripts/c.mjs\n'),
@@ -2729,6 +2775,12 @@ test('dispatch: the owned-files overlap warn fires for a file-name glob of the p
   } finally { fix.cleanup(); }
 });
 
+test('ownedPaths: common Portuguese No, Sem, and Fora openers keep their paths', () => {
+  // Mutation captured: treating common Portuguese sentence openers as exclusions drops files the worker was asked to edit.
+  assert.deepEqual(ownedPaths('# Owned files\n\n- No arquivo `ok.ts`\n- Sem mudar a API, edite `x.ts`\n- Fora de testes: `src/y.ts`\n'), ['ok.ts', 'x.ts', 'src/y.ts']);
+  assert.deepEqual(ownedPaths('# Owned files\n\n- Nenhum `z.ts`\n'), []);
+});
+
 // The pending brief of a recorded report: the same timestamp pair under
 // briefs/ (state routing) or alongside the report (the $TMPDIR routing).
 test('pendingBriefPath: the state and the $TMPDIR routing', { timeout: 60000 }, () => {
@@ -2781,6 +2833,21 @@ function seedPendingOther(fix, other, ownedLines, { cwd = '/tmp/work', tmp = fal
     ROW12(other, 'p2', 'grok', 'implementer', 'xai', cwd, 'grok-4.7', 'other'),
     ROW12('build', 'p1', 'grok', 'implementer', 'xai', fix.repo, 'grok-4.7', 'build'));
 }
+
+test('dispatch: excluded real-world paths do not cause a false overlap warning', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-dispatch-overlap-exclusion-');
+  try {
+    const brief = fix.brief('brief.md', FULL_BRIEF.replace('scripts/x.mjs', '- skills/herdr-soho/scripts/lib/dispatch.mjs\n- Nenhum arquivo de `src/server/commands/artifact.ts`, `src/server/fns.ts` ou catálogo i18n: outro implementador atua nessa área.'));
+    assert.deepEqual(ownedPaths(fs.readFileSync(brief, 'utf8')), ['skills/herdr-soho/scripts/lib/dispatch.mjs']);
+    seedPendingOther(fix, 'other', ['- src/server/fns.ts']);
+    // Mutation captured: failing to ignore the excluded path falsely warns
+    // that this brief overlaps the pending worker on src/server/fns.ts.
+    const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait'], { HERDR_SOHO_PROMPT_CHECK_SECONDS: '0' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!r.stderr.includes('owns files that'), r.stderr);
+    assert.ok(!r.stderr.includes('src/server/fns.ts'), r.stderr);
+  } finally { fix.cleanup(); }
+});
 
 // The edit-role warn: one per other agent with an intersection, at most
 // five paths listed; the read-only role gets the reviewing text; an

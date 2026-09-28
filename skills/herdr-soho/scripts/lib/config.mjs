@@ -28,7 +28,7 @@ export const CONFIG_SCALAR_KEYS = [
   'settled_grace', 'spawn_timeout', 'dispatch_timeout', 'provider_retries',
   'provider_retry_delay', 'prompt_check_seconds', 'prompt_settle_seconds', 'stuck_warn_minutes', 'state_dir',
   'report_language', 'notify', 'feedback', 'feedback_repo', 'feedback_dir', 'feedback_to',
-  'setup_target',
+  'setup_target', 'inbound',
 ];
 export const KNOWN_KINDS = ['claude', 'codex', 'grok', 'agy', 'gemini', 'cursor', 'pi', 'opencode'];
 export const EFFORT_LADDER = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -147,6 +147,7 @@ export function configValueOk(key, value, env = process.env, cwd = process.cwd()
     || key === 'prompt_check_seconds' || key === 'prompt_settle_seconds' || key === 'stuck_warn_minutes') return /^[0-9]+$/.test(value);
   if (key === 'multi_role' || key === 'reuse_workers' || key === 'lanes') return ['on', 'off'].includes(value);
   if (key === 'setup_target') return ['canonical', 'local'].includes(value);
+  if (key === 'inbound') return ['auto', 'off'].includes(value);
   if (key === 'panes') return ['2', '3', '4'].includes(value);
   if (key === 'pane_mode') return ['strict', 'flex'].includes(value);
   if (key === 'flex_extra') return /^[0-9]+$/.test(value);
