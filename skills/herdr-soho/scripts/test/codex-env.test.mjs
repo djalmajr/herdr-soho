@@ -283,6 +283,31 @@ set = { HERDR_ENV = "1", HERDR_PANE_ID = "2", HERDR_WORKSPACE_ID = "3" }
   }
 });
 
+// Mutation captured: joining the inline set table only until the first `}`
+// (even inside a string) truncates it, the parse turns null and the
+// doctor goes silent on inherit="none".
+test('Decision 2 case: a multi-line inline set table with } inside a string is read whole', () => {
+  const root = tmp('ha-codex-set-brace-');
+  try {
+    const conf = path.join(root, 'config.toml');
+    fs.writeFileSync(conf, `[shell_environment_policy]
+inherit = "none"
+set = { HERDR_ENV = "a}b",
+  OTHER = "x" }
+`);
+    const policy = parseCodexPolicy(fs.readFileSync(conf, 'utf8'));
+    assert.notEqual(policy, null);
+    const say = new DoctorSay();
+    doctorCodexPolicyWarnings({ CODEX_HOME: root }, say);
+    assert.equal(say.warnCount, 1);
+    const evaluation = evaluateCodexPolicy(policy);
+    assert.equal(evaluation.drops, true);
+    assert.match(evaluation.reason, /inherit="none"/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // Mutation captured: applying set after include_only allows set to bypass include_only filtering.
 test('Decision 1 case: all + include_only=["PATH"] + set HERDR_ENV warns include_only does not match HERDR_ENV', () => {
   const root = tmp('ha-codex-inc-set-');

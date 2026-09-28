@@ -25,6 +25,29 @@ export function stripTomlComment(line) {
 // Parse key names only from a TOML inline table { ... }.
 // Returns null on duplicate keys or malformed syntax.
 // Never extracts or retains values.
+// True once the inline table that opens the text has closed: its `{`
+// balanced by a `}` outside quotes (a `}` inside a string value does not
+// count; `\` escapes only inside double quotes, as in TOML).
+function inlineTableClosed(tableText) {
+  let depth = 0;
+  let quote = '';
+  for (let i = 0; i < tableText.length; i += 1) {
+    const ch = tableText[i];
+    if (quote !== '') {
+      if (quote === '"' && ch === '\\') { i += 1; continue; }
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return true;
+    }
+  }
+  return false;
+}
+
 function parseInlineTableKeys(tableText) {
   const trimmed = tableText.trim();
   if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null;
@@ -198,7 +221,7 @@ export function parseCodexPolicy(content) {
         if (hasSetSection) return null; // duplicate set definition
         let tableText = valPart;
         if (valPart.startsWith('{')) {
-          while (!tableText.includes('}') && i + 1 < lines.length) {
+          while (!inlineTableClosed(tableText) && i + 1 < lines.length) {
             const nextWithoutComment = stripTomlComment(lines[i + 1]).trim();
             if (nextWithoutComment.match(/^\s*\[([^\]]+)\]\s*$/)) break;
             i++;
