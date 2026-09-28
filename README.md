@@ -61,8 +61,9 @@ project configuration or state is lost:
 
 ## Optional Herdr plugin
 
-The plugin supports Herdr 0.9.1+ on macOS. From a local checkout of this
-repository, link it once:
+The plugin supports Herdr 0.9.1+ on Linux, macOS and Windows (it runs the
+CLI with the `node` on the Herdr host's `PATH`). From a local checkout of
+this repository, link it once:
 
 ```sh
 herdr plugin link "$PWD/plugin"
