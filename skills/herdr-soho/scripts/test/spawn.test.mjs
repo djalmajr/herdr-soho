@@ -2059,10 +2059,10 @@ test('spawn: scoped args stay with their kind; resume flags are refused; a faile
   } finally { fix.cleanup(); }
 });
 
-test('spawn: a session set after the spawn blocks the reuse', { timeout: 60000 }, (t) => {
+test('spawn: a session set after the spawn blocks the reuse', { timeout: 60000 }, async (t) => {
   // Same role: the worker opened without args; a session-layer role arg
   // afterwards makes the requested args differ → no reuse.
-  t.test('same role', { timeout: 60000 }, () => {
+  await t.test('same role', { timeout: 60000 }, () => {
     const { fix, proj } = confFix('ha-spawn-session-after-1-');
     try {
       proj('lanes=off\n');
@@ -2088,7 +2088,7 @@ test('spawn: a session set after the spawn blocks the reuse', { timeout: 60000 }
   });
   // Cross-role: the idle worker opened without args; a session-layer arg
   // for the requested role → no cross-role reuse.
-  t.test('cross-role', { timeout: 60000 }, () => {
+  await t.test('cross-role', { timeout: 60000 }, () => {
     const { fix, proj } = confFix('ha-spawn-session-after-2-');
     try {
       proj('lanes=off\n');
@@ -2111,7 +2111,7 @@ test('spawn: a session set after the spawn blocks the reuse', { timeout: 60000 }
   });
   // Lane: the idle lane worker opened without args; a session-layer lane
   // arg afterwards → kind-mismatch 13 on the next spawn of the lane.
-  t.test('lane', { timeout: 60000 }, () => {
+  await t.test('lane', { timeout: 60000 }, () => {
     const { fix, proj } = confFix('ha-spawn-session-after-3-');
     try {
       proj('lane.build.roles=implementer\nlane.build.kind=grok\n');

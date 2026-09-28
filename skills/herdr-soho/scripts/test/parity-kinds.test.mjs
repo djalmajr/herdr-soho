@@ -39,7 +39,7 @@ const CODEX_JSON = JSON.stringify({
 // run time (after the seed ran).
 const envState = { fakes: '' };
 const fakePathEnv = () => ({
-  get PATH() { return `${envState.fakes}${path.delimiter}${process.env.PATH}`; },
+  get PATH() { return `${envState.fakes}${path.delimiter}${path.dirname(process.execPath)}`; },
 });
 
 function seed(fix) {
@@ -50,6 +50,10 @@ function seed(fix) {
     const f = path.join(fakes, name);
     fs.writeFileSync(f, lines.join('\n') + '\n', { mode: 0o755 });
   };
+  // The kinds table's installed column is part of this golden: provide every
+  // CLI it marks installed without inheriting the invoking host's PATH.
+  writeFakeCli(fakes, 'claude', '');
+  writeFakeCli(fakes, 'codex', '');
   fake('grok', [
     '#!/bin/sh',
     'if [ "$1" = "models" ]; then',
