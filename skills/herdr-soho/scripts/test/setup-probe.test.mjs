@@ -65,7 +65,7 @@ function probeFakeSource(name) {
   L.push("  case 'quota2': process.stderr.write('Error: You have hit your usage limit. Try again in 10 minutes.\\n'); process.stdout.write('Error: You have hit your usage limit. Try again in 5 minutes.\\n'); process.exit(1); break;");
   L.push("  case 'quotatime': process.stderr.write('Error: You have hit your usage limit. Try again at 14:30.\\n'); process.exit(1); break;");
   L.push('  case \'hang\': {');
-  L.push("    spawn('sleep', ['10'], { stdio: ['ignore', 'inherit', 'inherit'] });");
+  L.push("    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 6000)'], { stdio: ['ignore', 'inherit', 'inherit'] });");
   L.push('    setTimeout(() => {}, 30000);');
   L.push('    break;');
   L.push('  }');

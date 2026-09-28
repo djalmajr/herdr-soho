@@ -21,7 +21,7 @@ import { effectiveConfigFile, legacyProjectConfigPath } from '../legacy.mjs';
 import { SETUP_START, SETUP_END, LEGACY_SETUP_START, setupBlock, setupBlockResult, settingsHooksResult } from '../setuptext.mjs';
 import {
   ensureLocalExcludes, localRels, localTarget, planLocalExcludes,
-  preflightLocalExcludes, refuseTrackedLocal, refuseUnignorableStateDir, resolveSetupMode, stateDirShown,
+  preflightLocalExcludes, refuseTrackedLocal, refuseUnignorableStateDir, resolveSetupMode, setupTargetPath, stateDirShown,
 } from '../setuplocal.mjs';
 import { cmdSetupDetect } from './setup-detect.mjs';
 import { cmdSetupPlan } from './setup-plan.mjs';
@@ -214,7 +214,7 @@ export function cmdSetup(args, ctx, env, cwd = process.cwd()) {
       else target = path.join(root, 'AGENTS.md');
     }
   }
-  if (!path.isAbsolute(target)) target = root + '/' + target;
+  target = setupTargetPath(root, target);
 
   if (panes !== '' && panes !== '2' && panes !== '3' && panes !== '4') throw new DieError('setup: --panes must be 2, 3 or 4', 2);
   // Parse/validate every --lane spec up front (R28 review P3): a bad kind
