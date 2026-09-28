@@ -69,7 +69,9 @@ test "${HERDR_ENV:-}" = 1 && command -v herdr >/dev/null && { command -v node >/
 ```
 
 If the check fails, say you are not inside Herdr (or Node.js 20+/Bun is
-missing) and stop. Never control a Herdr session from outside Herdr. The `herdr` skill
+missing) and stop. If the check fails and you are running under Codex, run
+`herdr-soho doctor` before concluding you are outside Herdr. Never control a
+Herdr session from outside Herdr. The `herdr` skill
 (`herdr --skill`) is the authority for CLI syntax; this skill adds the role
 layer on top of it and never replaces it.
 

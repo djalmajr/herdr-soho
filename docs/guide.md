@@ -505,6 +505,26 @@ report, the skill's own exit 137, `wait` timing out while the worker is
 still working, and the worktree/mutation isolation rules) with the fix
 and the validation procedure for a new kind.
 
+## Codex
+
+When Codex runs inside a Herdr pane, its default shell environment policy
+(`[shell_environment_policy] inherit = "core"`) drops all `HERDR_*`
+environment variables (`HERDR_ENV`, `HERDR_PANE_ID`, etc.) from child commands
+it runs. As a result, `herdr-soho` cannot see that it is running inside Herdr.
+
+The recommended fix preserves what `core` already passes and adds `HERDR_*`:
+
+```toml
+[shell_environment_policy]
+inherit = "all"
+include_only = ["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "USER", "USERNAME", "TMPDIR", "TEMP", "TMP", "HERDR_*"]
+```
+
+Every key defined under `[shell_environment_policy.set]` must also be added to
+`include_only` (because `include_only` is applied after `set`). After saving
+the changes in `~/.codex/config.toml` (or `${CODEX_HOME}/config.toml`), restart
+Codex for the changes to take effect. Run `herdr-soho doctor` to verify.
+
 ## Requirements
 
 - Herdr ≥ 0.9 with the agent CLIs you intend to use installed and detected
