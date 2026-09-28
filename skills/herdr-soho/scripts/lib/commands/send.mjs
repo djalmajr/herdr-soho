@@ -44,8 +44,8 @@ import { LOCAL_MACHINE } from '../sessionref.mjs';
 import {
   agentGet, agentReadScreen, agentSendKey, appendPeerLog, arrivalPollMs, arrivalWindowMs,
   checkIdInScreen, DEFAULT_SEND_TIMEOUT_MS, deliverPrompt, inboundPolicy,
-  isDialogScreen, literalPeerText, peerEndLine, peerHeader, quotePeerBody, randomPeerId,
-  resolveTarget, senderInfo, senderRefOf, sleepMs, tailLines, waitUntilIdle,
+  isDialogScreen, literalPeerText, normalizeScreen, peerEndLine, peerHeader, quotePeerBody,
+  randomPeerId, resolveTarget, senderInfo, senderRefOf, sleepMs, tailLines, waitUntilIdle,
 } from '../peer.mjs';
 
 export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
@@ -162,6 +162,14 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
     log(sender.ref, ref, 'unreadable');
     die(`send: could not read ${ref}'s screen (${vScreen.cause || 'read failed'}); nothing was sent`, 4);
   }
+  // Pair every dialog-screen observation with a fresh status: waitUntilIdle can
+  // return while the target has already moved to a blocked question dialog.
+  const screenGet = agentGet(t.machine, t.targetArg, env);
+  if (!screenGet.ok) {
+    log(sender.ref, ref, 'error');
+    die(`send: ${ref} unavailable: ${screenGet.cause}`, 4);
+  }
+  currentStatus = screenGet.status;
   if (isDialogScreen(vScreen.text, t.kind, currentStatus)) {
     const deadline = Date.now() + timeoutMs;
     const pollMs = arrivalPollMs(env);
@@ -174,6 +182,13 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
         log(sender.ref, ref, 'unreadable');
         die(`send: could not read ${ref}'s screen (${vScreen.cause || 'read failed'}); nothing was sent`, 4);
       }
+      // Decision 4 (achado 4): refresh status alongside every screen read.
+      const loopGet = agentGet(t.machine, t.targetArg, env);
+      if (!loopGet.ok) {
+        log(sender.ref, ref, 'error');
+        die(`send: ${ref} unavailable: ${loopGet.cause}`, 4);
+      }
+      currentStatus = loopGet.status;
     }
     if (isDialogScreen(vScreen.text, t.kind, currentStatus)) {
       log(sender.ref, ref, 'dialog');
@@ -181,9 +196,16 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
     }
   }
 
-  // Pre-prompt reads (Decision 3): state_change_seq and visible screen right before prompt.
+  // Pre-prompt reads (Decision 3): state_change_seq, status, and visible screen right before prompt.
+  // preStatus is used in proof (a): the seq change only proves arrival when
+  // preStatus was idle/done (so a pre-existing working turn cannot satisfy it).
   const preGet = agentGet(t.machine, t.targetArg, env);
   const preSeq = (preGet.ok && preGet.seq) ? preGet.seq : '';
+  const preStatus = preGet.ok ? preGet.status : '';
+  if (preGet.ok && isDialogScreen(vScreen.text, t.kind, preStatus)) {
+    log(sender.ref, ref, 'dialog');
+    die(`send: ${ref} is showing a dialog; nothing was sent`, 17);
+  }
   const preScreen = vScreen.text;
 
   // 5. Deliver: header + blank line + quoted body + end line, through agent prompt --wait.
@@ -206,11 +228,14 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
     die(`send: ${ref} unavailable: ${p.cause}`, 4);
   }
 
-  // 6. Arrival proof (Decisions 2, 3, 4, 5):
+  // 6. Arrival proof (Decisions 1, 2, 3, 4):
   // Poll in a 15 s window (poll ~1 s). Arrival is proven when either:
-  // - (a) agent get returns non-empty state_change_seq !== non-empty preSeq;
+  // - (a) agent get returns non-empty state_change_seq !== non-empty preSeq,
+  //   AND preStatus was idle/done AND new status is working/blocked
+  //   (Decision 1, achado 1: a pre-existing working turn cannot satisfy this).
   // - (b) #<id> is in recent-unwrapped (--lines msgLines + 60), visible screen !== preScreen,
-  //   and the end line is not in the last 15 non-empty visible lines.
+  //   and the normalized end line is absent from the entire normalized visible screen
+  //   (Decision 3, achado 3: checking only the last 15 lines allowed false positives).
   // Never re-prompt (Decision 2).
   const windowMs = arrivalWindowMs(env);
   const pollMs = arrivalPollMs(env);
@@ -221,18 +246,30 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
     let lastCause = '';
 
     while (true) {
-      // (a) agent get state_change_seq moved
+      // (a) agent get state_change_seq moved, but only when preStatus was idle/done
+      // (Decision 1, achado 1): with preStatus=working (e.g. --now), the turn that
+      // was already in progress could move the seq; that is not proof of this message.
       const curGet = agentGet(t.machine, t.targetArg, env);
       if (curGet.ok) {
         const curSeq = curGet.seq ?? '';
-        if (preSeq !== '' && curSeq !== '' && curSeq !== preSeq) {
-          return { proven: true };
+        const curStatus = curGet.status ?? '';
+        const preWasIdle = preStatus === 'idle' || preStatus === 'done';
+        const curIsWorking = curStatus === 'working' || curStatus === 'blocked';
+        if (preSeq !== '' && curSeq !== '' && curSeq !== preSeq && preWasIdle && curIsWorking) {
+          const visRes = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+          if (visRes.ok && !isDialogScreen(visRes.text, t.kind, curStatus)) {
+            return { proven: true };
+          }
+          if (!visRes.ok && visRes.cause) lastCause = visRes.cause;
         }
       } else if (curGet.cause) {
         lastCause = curGet.cause;
       }
 
-      // (b) recent transcript contains #<id>, visible changed, end line not in last 15 lines
+      // (b) recent transcript contains #<id>, visible screen differs from preScreen,
+      // and the end line is absent from the ENTIRE normalized visible screen
+      // (Decision 3, achado 3): checking only the last 15 lines misses cases where
+      // the end line appears above that cutoff but is still visible in the viewport.
       const recentRes = agentReadScreen(t.machine, t.targetArg, { source: 'recent-unwrapped', lines: recentLines }, env);
       if (recentRes.ok) {
         recentReadSucceeded = true;
@@ -240,10 +277,15 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
           const visRes = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
           if (visRes.ok) {
             const visText = visRes.text;
-            if (visText !== preScreen) {
-              const last15 = tailLines(visText, 15);
-              const hasEndInLast15 = last15.some((l) => l.includes(endLine) || (l.includes(`#${msgId}`) && l.includes('end of message')));
-              if (!hasEndInLast15) {
+            if (visText !== preScreen && !isDialogScreen(visText, t.kind, curGet.ok ? curGet.status : currentStatus)) {
+              // Normalize the id, end line and visible screen to compare them
+              // without sensitivity to whitespace, wrapping or box-drawing chars.
+              const normVis = normalizeScreen(visText);
+              const normId = normalizeScreen(`#${msgId}`);
+              const normEnd = normalizeScreen(endLine);
+              // A visible id with a clipped footer is still ambiguous (viewport
+              // clipping is not proof that the message left the input area).
+              if (!normVis.includes(normEnd) && !normVis.includes(normId)) {
                 return { proven: true };
               }
             }
@@ -278,7 +320,40 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
     die(`send: could not confirm that ${ref} took the message (${res.lastCause || 'read failed'}); read its pane before sending again`, 15);
   }
 
-  // No proof at window end: one Enter and a second window (Decision 4).
+  // No proof at end of first window. Before pressing Enter, re-read the visible
+  // screen and status (Decision 2, achado 2): a dialog that appeared after the
+  // prompt must not receive the keystroke.
+  const preEnterVis = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+  if (!preEnterVis.ok) {
+    // Cannot verify screen state: do not press Enter.
+    log(sender.ref, ref, 'unverified');
+    die(`send: could not confirm that ${ref} took the message (${preEnterVis.cause || 'read failed'}); read its pane before sending again`, 15);
+  }
+  const preEnterGet = agentGet(t.machine, t.targetArg, env);
+  if (!preEnterGet.ok) {
+    log(sender.ref, ref, 'unverified');
+    die(`send: could not confirm that ${ref} took the message (${preEnterGet.cause || 'status read failed'}); read its pane before sending again`, 15);
+  }
+  const preEnterStatus = preEnterGet.status;
+
+  // If a dialog appeared after the prompt, exit 17 — press nothing.
+  if (isDialogScreen(preEnterVis.text, t.kind, preEnterStatus)) {
+    log(sender.ref, ref, 'dialog');
+    die(`send: ${ref} is showing a dialog after the message was typed; press nothing and read its pane`, 17);
+  }
+
+  // Only press Enter when the message is visibly sitting in the input box
+  // (the #<id> appears in the last 15 non-empty lines). When absent from
+  // those lines, the message is not in the input box and pressing Enter is
+  // blind: exit 15 lost.
+  const preEnterLast15 = tailLines(preEnterVis.text, 15);
+  const idInBox = preEnterLast15.some((l) => normalizeScreen(l).includes(`#${msgId}`));
+  if (!idInBox) {
+    log(sender.ref, ref, 'lost');
+    die(`send: ${ref} did not take the message (no sign of it in its state or transcript); read its pane before sending again`, 15);
+  }
+
+  // The message is in the input box: press Enter and run a second proof window.
   agentSendKey(t.machine, t.targetArg, 'enter', env);
 
   res = pollWindow();

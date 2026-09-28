@@ -290,6 +290,13 @@ export function tailLines(text, count = 20) {
     .slice(-count);
 }
 
+// normalizeScreen: removes all whitespace (including newlines) and box-drawing
+// characters (U+2500–U+257F) so the result can be compared for substring
+// presence independently of layout, wrapping, or frame decorations.
+export function normalizeScreen(text) {
+  return String(text ?? '').replace(/[\s\u2500-\u257F]/g, '');
+}
+
 // agentReadScreen: `herdr [--machine m] agent read <pane> --source <s> [--lines N]`
 // Distinguishes failure ({ ok: false, cause }) from empty screen ({ ok: true, text: '' }).
 export function agentReadScreen(machine, pane, { source = 'visible', lines } = {}, env = process.env) {

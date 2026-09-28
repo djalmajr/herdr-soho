@@ -33,7 +33,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fixtureEnv, nodeBin, JS_ENTRY } from './parity.mjs';
 import { writeFakeCli } from './fakes.mjs';
-import { appendPeerLog, arrivalWindowMs, PEER_LOG_FILE } from '../lib/peer.mjs';
+import { appendPeerLog, arrivalWindowMs, normalizeScreen, PEER_LOG_FILE } from '../lib/peer.mjs';
 
 const SENDER_PANE = 'w0test:p0a';
 const SENDER_NAME = 'soho-s4';
@@ -60,8 +60,10 @@ if (kind === 'agent/get') {
     process.exit(1);
   }
   const ag = { ...a };
+  const prompted = process.env.HERDR_FAKE_PROMPT_FILE && fs.existsSync(process.env.HERDR_FAKE_PROMPT_FILE);
   if (process.env.HERDR_FAKE_ENTER_FILE && fs.existsSync(process.env.HERDR_FAKE_ENTER_FILE) && process.env.HERDR_FAKE_ENTER_SEQ !== undefined) {
     ag.state_change_seq = Number(process.env.HERDR_FAKE_ENTER_SEQ);
+    if (process.env.HERDR_FAKE_ENTER_STATUS !== undefined) ag.agent_status = process.env.HERDR_FAKE_ENTER_STATUS;
   } else if (process.env.HERDR_FAKE_SEQ !== undefined) {
     if (process.env.HERDR_FAKE_SEQ !== '') ag.state_change_seq = Number(process.env.HERDR_FAKE_SEQ);
     else delete ag.state_change_seq;
@@ -70,15 +72,29 @@ if (kind === 'agent/get') {
     if (s !== '') ag.state_change_seq = Number(s);
     else delete ag.state_change_seq;
   } else if (ag.state_change_seq === undefined) {
-    const prompted = process.env.HERDR_FAKE_PROMPT_FILE && fs.existsSync(process.env.HERDR_FAKE_PROMPT_FILE);
     ag.state_change_seq = prompted ? 2 : 1;
+  }
+  if (cmd[2] === process.env.HERDR_FAKE_TARGET_PANE && prompted) {
+    if (process.env.HERDR_FAKE_POST_PROMPT_SEQ !== undefined) ag.state_change_seq = Number(process.env.HERDR_FAKE_POST_PROMPT_SEQ);
+    if (process.env.HERDR_FAKE_POST_PROMPT_STATUS !== undefined) ag.agent_status = process.env.HERDR_FAKE_POST_PROMPT_STATUS;
+    else if (ag.agent_status === undefined || ag.agent_status === 'idle') ag.agent_status = 'working';
+  }
+  if (cmd[2] === process.env.HERDR_FAKE_TARGET_PANE
+      && process.env.HERDR_FAKE_WAIT_STATUS_FILE && fs.existsSync(process.env.HERDR_FAKE_WAIT_STATUS_FILE)
+      && process.env.HERDR_FAKE_WAIT_STATUS !== undefined) {
+    ag.agent_status = process.env.HERDR_FAKE_WAIT_STATUS;
   }
   process.stdout.write(JSON.stringify({ id: 'cli:agent:get', result: { agent: ag, type: 'agent_info' } }) + '\\n');
   process.exit(0);
 }
 if (kind === 'agent/wait') {
   const res = process.env.HERDR_FAKE_WAIT_RESULT || 'ok';
-  if (res === 'ok') process.exit(0);
+  if (res === 'ok') {
+    if (process.env.HERDR_FAKE_WAIT_STATUS_FILE && process.env.HERDR_FAKE_WAIT_STATUS !== undefined) {
+      fs.writeFileSync(process.env.HERDR_FAKE_WAIT_STATUS_FILE, process.env.HERDR_FAKE_WAIT_STATUS);
+    }
+    process.exit(0);
+  }
   process.stderr.write(JSON.stringify({ id: 'cli:agent:wait', error: { code: res, message: 'fake wait error' } }) + '\\n');
   process.exit(1);
 }
@@ -105,7 +121,8 @@ if (kind === 'agent/read') {
   const sourceIdx = cmd.indexOf('--source');
   const source = sourceIdx !== -1 ? cmd[sourceIdx + 1] : 'visible';
   if (source === 'visible') {
-    if (process.env.HERDR_FAKE_VISIBLE_FAIL) {
+    const promptReceived = process.env.HERDR_FAKE_PROMPT_FILE && fs.existsSync(process.env.HERDR_FAKE_PROMPT_FILE);
+    if (process.env.HERDR_FAKE_VISIBLE_FAIL || (promptReceived && process.env.HERDR_FAKE_VISIBLE_FAIL_AFTER_PROMPT)) {
       process.stderr.write(JSON.stringify({ id: 'cli:agent:read', error: { code: 'visible_failed', message: 'fake visible read failure' } }) + '\\n');
       process.exit(1);
     }
@@ -115,12 +132,18 @@ if (kind === 'agent/read') {
       if (items.length > 0) {
         const next = items.shift();
         fs.writeFileSync(process.env.HERDR_FAKE_VISIBLE_SCREENS_FILE, items.join('\\n---SCREEN---\\n'));
-        process.stdout.write(next);
+        const promptText = process.env.HERDR_FAKE_PROMPT_FILE && fs.existsSync(process.env.HERDR_FAKE_PROMPT_FILE)
+          ? fs.readFileSync(process.env.HERDR_FAKE_PROMPT_FILE, 'utf8') : '';
+        const id = promptText.match(/\\[herdr-soho:peer\\] #([0-9a-f]{8})/)?.[1] ?? '';
+        process.stdout.write(next.replaceAll('{ID}', id));
         process.exit(0);
       }
     }
     if (process.env.HERDR_FAKE_VISIBLE_SCREEN !== undefined) {
-      process.stdout.write(process.env.HERDR_FAKE_VISIBLE_SCREEN);
+      const promptText = process.env.HERDR_FAKE_PROMPT_FILE && fs.existsSync(process.env.HERDR_FAKE_PROMPT_FILE)
+        ? fs.readFileSync(process.env.HERDR_FAKE_PROMPT_FILE, 'utf8') : '';
+      const id = promptText.match(/\\[herdr-soho:peer\\] #([0-9a-f]{8})/)?.[1] ?? '';
+      process.stdout.write(process.env.HERDR_FAKE_VISIBLE_SCREEN.replaceAll('{ID}', id));
       process.exit(0);
     }
     const prompted = process.env.HERDR_FAKE_PROMPT_FILE && fs.existsSync(process.env.HERDR_FAKE_PROMPT_FILE);
@@ -198,6 +221,8 @@ function makeFixture() {
     HERDR_SOCKET_PATH: isolatedSocket,
     HERDR_FAKE_LOG: logFile,
     HERDR_FAKE_PROMPT_FILE: promptFile,
+    HERDR_FAKE_TARGET_PANE: TARGET_PANE,
+    HERDR_FAKE_WAIT_STATUS_FILE: path.join(root, 'wait-status.txt'),
     HERDR_SOHO_SEND_WINDOW_MS: '200',
     HERDR_SOHO_SEND_POLL_MS: '20',
     HERDR_FAKE_AGENTS: JSON.stringify({
@@ -210,6 +235,7 @@ function makeFixture() {
   const run = (args, over = {}) => {
     try { fs.rmSync(promptFile, { force: true }); } catch {}
     try { fs.rmSync(path.join(root, 'enter.txt'), { force: true }); } catch {}
+    try { fs.rmSync(path.join(root, 'wait-status.txt'), { force: true }); } catch {}
     const r = spawnSync(nodeBin(), [JS_ENTRY, 'send', ...args], {
       cwd: senderCwd, env: { ...env, ...over }, encoding: 'utf8', timeout: 60000,
     });
@@ -250,6 +276,19 @@ function expectedHeader(role = 'implementer', id = '') {
 function expectedFooter(id = '') {
   return id ? `[herdr-soho:peer] #${id} end of message` : '[herdr-soho:peer] end of message';
 }
+
+function setVisibleSequence(fx, first, repeated) {
+  const file = path.join(fx.root, 'visible-sequence.txt');
+  const screens = [first, ...Array.from({ length: 40 }, () => repeated)];
+  fs.writeFileSync(file, screens.join('\n---SCREEN---\n'));
+  fx.env.HERDR_FAKE_VISIBLE_SCREENS_FILE = file;
+}
+
+// Mutation captured: leaving whitespace, wrapping or box-drawing characters breaks exact normalized footer comparison.
+test('normalizeScreen removes whitespace and U+2500–U+257F before comparison', () => {
+  const footer = '[herdr-soho:peer] #abcd1234 end of message';
+  assert.equal(normalizeScreen('┌ [herdr-soho:peer] # abcd1234 end of\nmessage ─'), normalizeScreen(footer));
+});
 
 const PROMPT_TAIL = ['--wait', '--until', 'working', '--until', 'blocked', '--until', 'idle', '--until', 'done', '--timeout', '15000'];
 
@@ -428,6 +467,10 @@ test('send to an agent by name resolves on the local server and prompts the pane
     fx.env.HERDR_FAKE_AGENTS = JSON.stringify({
       ...JSON.parse(fx.env.HERDR_FAKE_AGENTS),
       'soho-s1': {
+        pane_id: namedPane, workspace_id: 'w0test', name: 'soho-s1',
+        agent: 'grok', agent_status: 'idle', cwd: fx.targetProj,
+      },
+      [namedPane]: {
         pane_id: namedPane, workspace_id: 'w0test', name: 'soho-s1',
         agent: 'grok', agent_status: 'idle', cwd: fx.targetProj,
       },
@@ -851,10 +894,10 @@ test('arrival: id only in input box triggers one Enter and delivers when screen 
   const fx = makeFixture();
   try {
     fx.targetAgent('idle');
-    // Seq does not move initially.
+    // Seq does not move initially (fixed at 1).
     fx.env.HERDR_FAKE_SEQ = '1';
-    // First read: visible screen has end line in the last 15 lines (the input box)
-    const screen1 = 'Transcript\nUser: prompt\n[herdr-soho:peer] #{ID} end of message\n';
+    // The input-box marker is split by whitespace and box drawing; the last-15 test normalizes it.
+    const screen1 = 'Transcript\nUser: prompt\n┌ [herdr-soho:peer] # {ID} end of message ─\n';
     // Screen after Enter: visible screen cleared, seq moves or end line outside
     const screen2 = '[herdr-soho:peer] #{ID} Message\nLine 1\nLine 2\nLine 3\nLine 4\n';
     fx.env.HERDR_FAKE_READ_SCREEN = screen1;
@@ -862,6 +905,10 @@ test('arrival: id only in input box triggers one Enter and delivers when screen 
     fx.env.HERDR_FAKE_ENTER_SCREEN = screen2;
     fx.env.HERDR_FAKE_ENTER_FILE = path.join(fx.root, 'enter.txt');
     fx.env.HERDR_FAKE_ENTER_SEQ = '2';
+    // After Enter the agent starts working: proof (a) fires (preStatus=idle, curStatus=working).
+    // Mutation captured: HERDR_FAKE_ENTER_STATUS must be 'working'; keeping 'idle' makes
+    // proof (a) fail its preWasIdle && curIsWorking gate and leaves the message undelivered.
+    fx.env.HERDR_FAKE_ENTER_STATUS = 'working';
 
     const r = fx.run([TARGET_PANE, 'hello']);
     assert.equal(r.rc, 0, `rc ${r.rc}: ${r.err}`);
@@ -883,13 +930,15 @@ test('arrival: id only in input box triggers one Enter and delivers when screen 
 // Mutation captured: omitting the Enter when id is in the input box, or failing to deliver
 // on the second window, leaves the message undelivered or exits 15 lost.
 
-test('arrival: id never visible triggers one Enter and exits 15 lost', { timeout: 60000 }, () => {
+test('arrival: id never visible exits 15 lost without Enter (pre-Enter check: id not in last 15)', { timeout: 60000 }, () => {
   const fx = makeFixture();
   try {
     fx.targetAgent('idle');
     // Seq does not move.
     fx.env.HERDR_FAKE_SEQ = '1';
-    // Screen where id never appears (e.g. Codex opening screen)
+    // Screen where id never appears (e.g. Codex opening screen).
+    // With the new pre-Enter check (Decision 2, achado 2), when #id is absent
+    // from the last 15 non-empty visible lines the Enter is not sent: exit 15 lost.
     fx.env.HERDR_FAKE_READ_SCREEN = 'Context 0% used\nOpen file or type a prompt\nReady.\n';
     const r = fx.run([TARGET_PANE, 'hello']);
     assert.equal(r.rc, 15, `rc ${r.rc}: ${r.err}`);
@@ -898,7 +947,7 @@ test('arrival: id never visible triggers one Enter and exits 15 lost', { timeout
     const prompts = cs.filter((c) => c[1] === 'prompt');
     assert.equal(prompts.length, 1, 'exactly one prompt: no automatic resend');
     const sendKeys = cs.filter((c) => c[1] === 'send-keys');
-    assert.equal(sendKeys.length, 1, 'one Enter sent before second window');
+    assert.equal(sendKeys.length, 0, 'zero Enter: #id absent from visible means message was not typed into the box');
     const m = prompts[0][3].match(/^\[herdr-soho:peer\] #([0-9a-f]{8})/);
     const id = m[1];
     const line = fs.readFileSync(fx.peerLog, 'utf8').split('\n').filter(Boolean).pop();
@@ -908,7 +957,7 @@ test('arrival: id never visible triggers one Enter and exits 15 lost', { timeout
   } finally { fx.cleanup(); }
 });
 
-// Mutation captured: resending prompt on absent id instead of sending Enter and keeping 1 prompt fails prompt count.
+// Mutation captured: sending Enter when id is absent from the visible screen (blind keystroke).
 
 test('review probe: 57-line body delivered when seq moves triggers sent with exactly one prompt', { timeout: 60000 }, () => {
   const fx = makeFixture();
@@ -952,6 +1001,123 @@ test('review probe: recent read always failing exits 15 unverified with 1 prompt
 });
 
 // Mutation captured: sending Enter when reads fail or logging lost instead of unverified fails the assertion.
+
+// Mutation captured: allowing a state_change_seq from an already-working --now target to prove arrival
+// makes this report sent despite the peer id being absent from recent output.
+test('arrival: --now working target with moving seq but no id exits 15, not sent', { timeout: 60000 }, () => {
+  const fx = makeFixture();
+  try {
+    fx.targetAgent('working');
+    fx.env.HERDR_FAKE_READ_SCREEN = 'Transcript without the peer id\nReady.\n';
+    const r = fx.run([TARGET_PANE, '--now', 'hello']);
+    assert.equal(r.rc, 15, `rc ${r.rc}: ${r.err}`);
+    assert.equal(r.out, '');
+    const cs = fx.calls();
+    assert.equal(cs.filter((c) => c[1] === 'prompt').length, 1, 'one prompt, no resend');
+    assert.equal(cs.filter((c) => c[1] === 'send-keys').length, 0, 'no blind Enter');
+    assert.equal(fs.readFileSync(fx.peerLog, 'utf8').trim().split('\t')[3], 'lost');
+  } finally { fx.cleanup(); }
+});
+
+// Mutation captured: accepting a seq change with no transcript id while a trust dialog is on screen reports sent.
+test('arrival: moving seq with absent id and post-prompt dialog does not report sent', { timeout: 60000 }, () => {
+  const fx = makeFixture();
+  try {
+    fx.targetAgent('idle');
+    fx.env.HERDR_FAKE_POST_PROMPT_STATUS = 'blocked';
+    fx.env.HERDR_FAKE_READ_SCREEN = 'Transcript without the peer id\n';
+    setVisibleSequence(fx, 'Ready before prompt\n', 'Trust this workspace [a] Trust / [q] Quit\n');
+    const r = fx.run([TARGET_PANE, 'hello']);
+    assert.equal(r.rc, 17, `rc ${r.rc}: ${r.err}`);
+    const cs = fx.calls();
+    assert.equal(cs.filter((c) => c[1] === 'prompt').length, 1, 'one prompt');
+    assert.equal(cs.filter((c) => c[1] === 'send-keys').length, 0, 'dialog receives no Enter');
+  } finally { fx.cleanup(); }
+});
+
+// Mutation captured: omitting the post-prompt screen check lets Enter hit a newly appeared dialog.
+test('arrival: dialog after prompt exits 17 with zero Enter', { timeout: 60000 }, () => {
+  const fx = makeFixture();
+  try {
+    fx.targetAgent('idle');
+    fx.env.HERDR_FAKE_SEQ = '1';
+    setVisibleSequence(fx, 'Ready before prompt\n', 'Trust this workspace [a] Trust / [q] Quit\n');
+    const r = fx.run([TARGET_PANE, 'hello']);
+    assert.equal(r.rc, 17, `rc ${r.rc}: ${r.err}`);
+    const cs = fx.calls();
+    assert.equal(cs.filter((c) => c[1] === 'prompt').length, 1, 'one prompt');
+    assert.equal(cs.filter((c) => c[1] === 'send-keys').length, 0, 'zero Enter into dialog');
+    const line = fs.readFileSync(fx.peerLog, 'utf8').trim().split('\t');
+    assert.equal(line[3], 'dialog');
+  } finally { fx.cleanup(); }
+});
+
+// Mutation captured: ignoring a failed re-read before Enter sends a blind keystroke instead of unverified.
+test('arrival: failed pre-Enter visible read exits 15 unverified without Enter', { timeout: 60000 }, () => {
+  const fx = makeFixture();
+  try {
+    fx.targetAgent('idle');
+    fx.env.HERDR_FAKE_SEQ = '1';
+    fx.env.HERDR_FAKE_VISIBLE_FAIL_AFTER_PROMPT = '1';
+    const r = fx.run([TARGET_PANE, 'hello']);
+    assert.equal(r.rc, 15, `rc ${r.rc}: ${r.err}`);
+    assert.match(r.err, /could not confirm .*visible_failed/);
+    const cs = fx.calls();
+    assert.equal(cs.filter((c) => c[1] === 'prompt').length, 1);
+    assert.equal(cs.filter((c) => c[1] === 'send-keys').length, 0);
+    assert.equal(fs.readFileSync(fx.peerLog, 'utf8').trim().split('\t')[3], 'unverified');
+  } finally { fx.cleanup(); }
+});
+
+// Mutation captured: reusing the pre-wait idle status fails to recognize a blocked question dialog.
+test('dialog: question becomes blocked after wait and is checked before prompt', { timeout: 60000 }, () => {
+  const fx = makeFixture();
+  try {
+    fx.targetAgent('working', { agent: 'codex' });
+    fx.env.HERDR_FAKE_WAIT_STATUS = 'blocked';
+    fx.env.HERDR_FAKE_VISIBLE_SCREEN = 'Enter to submit answer\n';
+    const r = fx.run([TARGET_PANE, '--timeout', '50', 'hello']);
+    assert.equal(r.rc, 17, `rc ${r.rc}: ${r.err}`);
+    const cs = fx.calls();
+    assert.ok(cs.some((c) => c[1] === 'wait'), 'waited for the initially working target');
+    assert.equal(cs.filter((c) => c[1] === 'prompt').length, 0, 'no prompt to the newly blocked dialog');
+    assert.equal(cs.filter((c) => c[1] === 'send-keys').length, 0, 'no keys sent');
+  } finally { fx.cleanup(); }
+});
+
+for (const scenario of [
+  {
+    name: 'end line above last 15',
+    screen: '[herdr-soho:peer] #{ID} end of message\n' + Array.from({ length: 16 }, (_, i) => `chrome ${i}`).join('\n') + '\n',
+    enter: 0,
+  },
+  {
+    name: 'viewport clips end line while id remains visible',
+    screen: '[herdr-soho:peer] #{ID} Message\n' + Array.from({ length: 16 }, (_, i) => `paste ${i}`).join('\n') + '\n',
+    enter: 0,
+  },
+  {
+    name: 'wrapped end line',
+    screen: '[herdr-soho:peer] #{ID} end of\nmessage\n',
+    enter: 1,
+  },
+]) {
+  // Mutation captured: checking only the last 15 lines or comparing raw wrapped text reports these as sent.
+  test(`arrival: ${scenario.name} is not proof (b)`, { timeout: 60000 }, () => {
+    const fx = makeFixture();
+    try {
+      fx.targetAgent('idle');
+      fx.env.HERDR_FAKE_SEQ = '1';
+      setVisibleSequence(fx, 'Before prompt\\n', scenario.screen);
+      const r = fx.run([TARGET_PANE, 'hello']);
+      assert.equal(r.rc, 15, `rc ${r.rc}: ${r.err}`);
+      const cs = fx.calls();
+      assert.equal(cs.filter((c) => c[1] === 'prompt').length, 1, 'exactly one prompt');
+      assert.equal(cs.filter((c) => c[1] === 'send-keys').length, scenario.enter, 'Enter only when id is in the input area');
+      assert.notEqual(fs.readFileSync(fx.peerLog, 'utf8').trim().split('\t')[3], 'sent');
+    } finally { fx.cleanup(); }
+  });
+}
 
 test('review probe: citation of [y/N] above last 20 lines does not block send', { timeout: 60000 }, () => {
   const fx = makeFixture();
@@ -1071,6 +1237,10 @@ test('message stuck in input box: end line in last 15, seq unchanged -> one Ente
     fx.env.HERDR_FAKE_ENTER_SCREEN = screen2;
     fx.env.HERDR_FAKE_ENTER_FILE = path.join(fx.root, 'enter.txt');
     fx.env.HERDR_FAKE_ENTER_SEQ = '2';
+    // After Enter the agent transitions from idle to working: proof (a) fires.
+    // Mutation captured: removing HERDR_FAKE_ENTER_STATUS keeps status idle, so proof (a)
+    // fails its preWasIdle && curIsWorking gate and the message is not reported sent.
+    fx.env.HERDR_FAKE_ENTER_STATUS = 'working';
 
     const r = fx.run([TARGET_PANE, 'hello']);
     assert.equal(r.rc, 0, `rc ${r.rc}: ${r.err}`);

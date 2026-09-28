@@ -207,14 +207,11 @@ If the bottom 20 non-empty lines match folder/workspace trust patterns (`Trust t
 `trust this folder`, `Do you trust`, `Enter to confirm`, `[y/N]`, `(y/n)`) under any status,
 or question detectors from `dialog.mjs` when the target is `blocked`, it waits up to `--timeout`
 for the dialog to clear, exiting 17 `dialog` without sending or typing if it remains.
-Right before sending the prompt, `send` reads `state_change_seq` (preSeq) and captures the visible screen (preScreen).
+The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.
+Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).
 Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000`
-(no automatic resend). After prompt, a 15-second arrival proof window verifies delivery:
-arrival is proven if (a) `state_change_seq` moves (non-empty seq !== non-empty preSeq), or (b) `#<id>` appears in
-recent unwrapped output (`--lines <message lines + 60>`), visible screen differs from preScreen, and the closing line
-is not in the last 15 non-empty visible lines.
-If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys;
-otherwise it triggers Enter (`agent send-keys … enter`) and waits a second window with the same proofs.
+(no automatic resend). After prompt, a 15-second arrival proof window verifies delivery if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof).
+If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
 If still not verified, it exits 15 `lost` (`<ref> did not take the message (no sign of it in its state or transcript)`).
 
 The target project decides whether it accepts peer messages: `inbound=off`
