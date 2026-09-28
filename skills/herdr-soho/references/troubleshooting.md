@@ -503,6 +503,19 @@ without checking that generation succeeded and produced what you expect.
   a brief needs an in-place mutation, make the tree single-user first
   (release the other edit agents) or run the check in a copy.
 
+## A mutation copy reuses the source tree's build output
+
+- **Symptom:** a mutation check runs in a throwaway copy, but its build
+  reads or writes artifacts under the original project tree.
+- **Cause:** the copy inherited a shared build-output environment variable,
+  a Cargo `target-dir` setting, or a symlink into the source tree.
+- **Now:** give the copy its own build output (for example,
+  `CARGO_TARGET_DIR=<copy>/target`) and run
+  `herdr-soho mutation-guard <copy>` before mutating. If the guard fails,
+  do not mutate.
+- **Do:** report the shared-artifact configuration. Never automatically
+  clean a shared cache or the source tree's build output as recovery.
+
 ## The orchestrator cannot commit while workers edit the same tree
 
 - **Symptom:** a pre-commit hook that checks the whole tree (typecheck, related tests) fails on another worker's work in progress (a test in its red step, a half-made edit), not on the approved slice.

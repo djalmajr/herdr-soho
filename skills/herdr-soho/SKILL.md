@@ -226,7 +226,15 @@ repeat in every brief: the `implementer` runs a mutation check in a
 throwaway copy of the project outside the repository whenever other
 workers may share the tree (in place only when alone, and restored only
 after the file's sha256 still matches — a changed file is someone else's
-edit: not restored, and reported); the `implementer`, `tasker` and
+edit: not restored, and reported), gives that copy its own build output
+(`CARGO_TARGET_DIR=<copy>/target`, for example) and runs `$S
+mutation-guard <copy>` before mutating — the guard fails when the copy
+sits inside the source (or the source inside it), holds a symlink into
+the source, or when `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR`, a
+`--env NAME` or a `.cargo/config[.toml]` `target-dir` points into the
+source (a relative value resolved against the copy) (exit 1; 0 when isolated, 2 for bad usage; nothing is written, and
+a path it cannot resolve fails closed) — and never cleans a shared cache
+or the source's build output to recover; the `implementer`, `tasker` and
 `designer` stop every process they started before writing the report,
 by the PIDs they kept, checked by PID only (never a listing of every
 command line, which can hold credentials; a sandboxed codex blocks `ps`); and the `designer` reports how the UI was
@@ -645,6 +653,8 @@ $S run scouter <brief.md>                    # spawn + dispatch + collect in one
 $S wait a b [--any] [--timeout MS]         # block on report files
 $S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
 $S friction                                # errors/warnings of this workspace (review at end)
+$S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before sending; no dispatch, no state
+$S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation copy that shares source or build output (exit 1)
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
 $S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to
 $S regrid                                  # exact grids: caller's tab (split) + every herd tab
@@ -1131,6 +1141,32 @@ the section: the aliasable sections are `Goal`, `Expected result`,
 to alias); a malformed item is ignored with
 `brief_lint_aliases: ignored '<item>' (use Section=Heading|Heading)` and
 the valid items still apply.
+
+**Lint before you send.** `$S lint <brief.md> [--role <role>]` prints the
+same warnings the dispatch would print for that brief (the role defaults to
+`implementer`; a read-only role needs no `Owned files`), and creates no
+dispatch, no state and no friction line. It exits 0 when the brief is clean
+(`brief <path>: ok`), 1 with warnings, 2 when `brief_lint=strict` finds
+missing sections (the same message the dispatch dies with), and 3 for an
+unknown role; `brief_lint=off` prints `lint off` and exits 0.
+
+**Failure matrix, only for state that is published, retained or deleted.**
+A slice that publishes, retains, prunes or deletes state (backups, releases,
+caches, retention) gets the optional `Failure matrix` section of
+[templates/brief.md](templates/brief.md), with the three fixed markers
+`[crash]` (a crash between publish and prune/delete), `[retry]` (a step
+repeated or retried) and `[clock]` (a clock that goes backwards). The
+implementer writes one executable fixture per marker and the reviewer
+probes each one; both keep local fixture proof apart from operational
+proof. When the section is there, the lint (dispatch and `lint`) names the
+missing markers: `brief <path> failure matrix is missing: [clock] — a clock
+that goes backwards is not covered` (a warning in `warn` and `strict`).
+Any other slice leaves the section out and gets no matrix.
+
+**Stop after the gates.** The edit roles stop proving once every check the
+brief lists passes: a failure outside their files or caused by an external
+limit is a `[partial]` item with its evidence, and a test that would widen
+the scope goes to the report's open questions.
 
 ## Making the rule stick
 

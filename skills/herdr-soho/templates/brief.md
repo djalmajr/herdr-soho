@@ -29,6 +29,17 @@ behavior.
 1. <criterion> — proved by `<command>` → `<expected output>`
 2. …
 
+## Failure matrix (only when the slice publishes, retains, prunes or deletes state)
+
+<!-- Delete this section for any other slice. -->
+One executable fixture per step boundary of publish → prune/delete → retry:
+
+- [crash] a crash between publish and prune/delete: what must survive
+- [retry] the same step repeated or retried after a failure: the result converges
+- [clock] the clock goes backwards between runs: nothing still needed is pruned
+
+Say which items have local proof (fixtures) and which need operational proof.
+
 ## When the brief does not decide
 
 Do not choose. Mark the item `partial`, list the gap and the options you see
