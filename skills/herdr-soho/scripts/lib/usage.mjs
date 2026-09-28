@@ -85,9 +85,11 @@ Exit codes: 2 usage/env · 3 unknown role/agent · 4 Herdr failure (includes
 7 agent blocked (startup or approval) or asked a question · 8 max_workers reached ·
 9 wait timeout · 10 lane busy · 11 quota exhausted · 12 planner is the orchestrator ·
 13 lane kind-mismatch (set lane.<name>.kind, or release the lane) ·
-14 provider error or capacity · 15 prompt not received ·
+14 provider error or capacity · 15 prompt not received, or send not
+taken (lost / unverified) ·
 16 collect --verify: a reported file changed or is missing ·
-17 send: the target is still busy after the wait timeout; nothing was sent ·
+17 send: the target is still busy after the wait timeout, or shows a
+dialog; nothing was sent ·
 18 send: the target project refuses peer messages (inbound=off).
 `;
 
