@@ -176,20 +176,23 @@ test('paneTitle: a failing herdr changes nothing (best effort, no throw)', () =>
 });
 
 test('requireEnv: outside Herdr dies 2; herdr missing from PATH dies 2', () => {
-  const code = `import { requireEnv } from '${HERDR_URL}'; requireEnv(process.env); console.log('ok');`;
-  const r1 = spawnSync(nodeBin(), ['--input-type=module', '-e', code], {
-    env: { ...process.env, HERDR_ENV: '' },
-    encoding: 'utf8',
-  });
-  assert.equal(r1.status, 2);
-  assert.equal(r1.stderr, 'herdr-soho: not running inside Herdr (HERDR_ENV != 1); refusing to control a session from outside\n');
-  assert.ok(!r1.stdout.includes('ok'));
-  const r2 = spawnSync(nodeBin(), ['--input-type=module', '-e', code], {
-    env: { ...process.env, HERDR_ENV: '1', PATH: '/nonexistent' },
-    encoding: 'utf8',
-  });
-  assert.equal(r2.status, 2);
-  assert.equal(r2.stderr, 'herdr-soho: herdr CLI not found in PATH\n');
+  const root = tmp('ha-herdr-reqenv-');
+  try {
+    const code = `import { requireEnv } from '${HERDR_URL}'; requireEnv(process.env); console.log('ok');`;
+    const r1 = spawnSync(nodeBin(), ['--input-type=module', '-e', code], {
+      env: { ...process.env, HERDR_ENV: '', PATH: root },
+      encoding: 'utf8',
+    });
+    assert.equal(r1.status, 2);
+    assert.equal(r1.stderr, 'herdr-soho: not running inside Herdr (HERDR_ENV != 1); refusing to control a session from outside\n');
+    assert.ok(!r1.stdout.includes('ok'));
+    const r2 = spawnSync(nodeBin(), ['--input-type=module', '-e', code], {
+      env: { ...process.env, HERDR_ENV: '1', PATH: '/nonexistent' },
+      encoding: 'utf8',
+    });
+    assert.equal(r2.status, 2);
+    assert.equal(r2.stderr, 'herdr-soho: herdr CLI not found in PATH\n');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('liveAgents / paneList / tabList / agentRead: the JSON fields the roster reads', () => {
