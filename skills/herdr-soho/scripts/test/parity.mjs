@@ -107,7 +107,9 @@ export function goldenScenario(suite, name, opts) {
     for (const step of opts.steps) {
       const stepEnv = step.env ? { ...fix.env, ...step.env } : fix.env;
       const r = runImpl(step.args, { env: stepEnv, cwd: fix.repo });
-      steps.push({ args: step.args, rc: r.rc, out: r.out, err: normalizeErr(r.err) });
+      // An optional transform normalizes wall-clock values out of the
+      // stdout before the value is stored/checked.
+      steps.push({ args: step.args, rc: r.rc, out: opts.transform ? opts.transform(r.out) : r.out, err: normalizeErr(r.err) });
     }
     const files = (opts.files ?? []).map((rel) => ({ rel, content: readRel(fix.root, rel) }));
     const value = normalizeRoots({ steps, files }, { '<ROOT>': fix.root });

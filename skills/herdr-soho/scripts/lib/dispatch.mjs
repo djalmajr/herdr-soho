@@ -943,7 +943,7 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   fs.writeFileSync(path.join(sd, `last-report-${agent}`), `${report}\n`);
   for (const suf of ['size', 'screen', 'since', 'blocked', 'approvals', 'quota',
     'provider', 'provider-cause', 'capacity-retries', 'capacity-at',
-    'question', 'stuck-hash', 'stuck-since', 'stuck-warned',
+    'question', 'stuck-hash', 'stuck-since', 'stuck-warned', 'activity-at', 'probe-at',
     'not-received', 'enter-retry', 'approve-screen']) {
     fs.rmSync(path.join(sd, 'wait', `${agent}.${suf}`), { force: true });
   }

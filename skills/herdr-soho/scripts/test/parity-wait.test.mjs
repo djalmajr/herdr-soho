@@ -13,7 +13,7 @@
 // (the intermediate states matter: a refused release leaves the roster
 // row, a done wait leaves the task file with ✓), plus the task-* /
 // last-report-* files and the fake herdr log. Wall-clock values (the
-// .since and .stuck-since epochs, the friction and approvals-log timestamps) are normalized
+// .since, .stuck-since, .probe-at and .activity-at epochs, the friction and approvals-log timestamps) are normalized
 // before storing; the fixture root becomes <ROOT> in every string.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -150,7 +150,7 @@ function collectState(fix) {
   const put = (rel, content) => {
     if (content === null) return;
     const base = path.basename(rel);
-    if (base.endsWith('.since') || base.endsWith('.stuck-since')) { out[rel] = 'EPOCH'; return; }
+    if (base.endsWith('.since') || base.endsWith('.stuck-since') || base.endsWith('.probe-at') || base.endsWith('.activity-at')) { out[rel] = 'EPOCH'; return; }
     if (base.endsWith('.approvals.log')) {
       out[rel] = content.split('\n').map((l) => l.replace(/^\d{8}T\d{6}/, 'TS')).join('\n');
       return;
@@ -257,8 +257,10 @@ test('parity wait: a worker working until the timeout (test-quota.sh)', { timeou
   });
   assert.equal(r.steps[0].rc, 9);
   // The timeout line says how long this wait ran (normalized above) and the
-  // agent's state at that moment.
-  assert.deepEqual(lines(r.steps[0].out), [{ agent: 'build', status: 'timeout', elapsed_ms: '<ms>', state: 'working' }]);
+  // agent's state at that moment. A still screen that was only read is not
+  // activity: checkpoint false, null age, the old warn holds (the golden
+  // stderr is unchanged by the checkpoint feature).
+  assert.deepEqual(lines(r.steps[0].out), [{ agent: 'build', status: 'timeout', elapsed_ms: '<ms>', state: 'working', checkpoint: false, activity_age_s: null }]);
   assert.ok(!r.steps[0].out.includes('"status":"quota"'), 'a working agent never becomes quota');
 });
 

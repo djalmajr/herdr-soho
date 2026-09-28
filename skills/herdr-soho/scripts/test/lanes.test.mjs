@@ -216,6 +216,9 @@ test('status resolves state under its explicit cwd', () => {
     fs.mkdirSync(path.dirname(report), { recursive: true });
     fs.writeFileSync(report, 'done\n');
     fs.writeFileSync(path.join(sd, 'last-report-build'), `${report}\n`);
+    // The task ran 42 s: dispatch marker, then the report (task_s).
+    fs.utimesSync(path.join(sd, 'last-report-build'), 1000, 1000);
+    fs.utimesSync(report, 1042, 1042);
 
     process.chdir(caller);
     const output = [];
@@ -227,7 +230,7 @@ test('status resolves state under its explicit cwd', () => {
     } finally {
       process.stdout.write = oldWrite;
     }
-    assert.equal(output.join(''), `build\tdone\t${report}\n`);
+    assert.equal(output.join(''), `build\tdone\t${report}\t42\t-\n`);
   } finally {
     process.chdir(oldCwd);
     fs.rmSync(root, { recursive: true, force: true });

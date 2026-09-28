@@ -900,8 +900,11 @@ test('wait: the retry Enter unblocks the worker and the wait settles done', { ti
 
 // Timeout: a working agent never settles before the deadline → a
 // `timeout` line (with `elapsed_ms` since the start of this wait and the
-// agent's last probe state) and rc 9, plus the warn that suggests running
-// the wait again with double the timeout used.
+// agent's last probe state, plus `checkpoint` and `activity_age_s` after
+// `state`) and rc 9. Reading a still screen never proves activity (no
+// previous hash → no activity-at → `activity_age_s: null`,
+// `checkpoint: false`), so the wait keeps the warn that suggests running
+// it again with double the timeout used (the friction line).
 test('wait: timeout 9 for a working agent', { timeout: 60000 }, () => {
   const fix = makeFix('ha-wait-timeout-');
   try {
@@ -911,10 +914,15 @@ test('wait: timeout 9 for a working agent', { timeout: 60000 }, () => {
     const r = waitCmd(fix, ['w', '--timeout', '1000']);
     assert.equal(r.status, 9, r.stderr);
     const line = jsonLines(r.stdout)[0];
-    assert.deepEqual(Object.keys(line), ['agent', 'status', 'elapsed_ms', 'state']);
+    assert.deepEqual(Object.keys(line), ['agent', 'status', 'elapsed_ms', 'state', 'checkpoint', 'activity_age_s']);
     assert.equal(line.agent, 'w');
     assert.equal(line.status, 'timeout');
     assert.equal(line.state, 'working', 'the last probe state');
+    // A static screen that was only read is not activity: the old warn
+    // (and its friction line) holds.
+    assert.equal(line.checkpoint, false, 'a fresh read of a still screen is not active');
+    assert.equal(line.activity_age_s, null, 'no observed change → null age');
+    assert.ok(!fs.existsSync(path.join(fix.ws, 'wait', 'w.activity-at')), 'the first observation writes no activity-at');
     assert.ok(line.elapsed_ms > 0 && line.elapsed_ms < 1000 + 15000, `elapsed_ms ${line.elapsed_ms}`);
     assert.match(r.stderr, /timeout waiting for 'w'; it may still be working \(state: working\)\. Run: herdr-soho wait w --timeout 2000/);
   } finally { fix.cleanup(); }
@@ -1690,8 +1698,12 @@ test('wait: without --timeout the wait uses the role timeout (effort-scaled), th
     const lines = jsonLines(r.stdout);
     assert.deepEqual(lines.map((l) => [l.agent, l.status]), [['w1', 'timeout'], ['w2', 'timeout']]);
     for (const l of lines) {
-      assert.deepEqual(Object.keys(l), ['agent', 'status', 'elapsed_ms', 'state']);
+      // A still screen (counters aside) observed only by this wait is not
+      // activity: checkpoint false, null age, the old warn holds.
+      assert.deepEqual(Object.keys(l), ['agent', 'status', 'elapsed_ms', 'state', 'checkpoint', 'activity_age_s']);
       assert.equal(l.state, 'working');
+      assert.equal(l.checkpoint, false);
+      assert.equal(l.activity_age_s, null);
       // w2 (4000 × 1.5 = 6000) decides the deadline over w1 (3000): the
       // lower bound rules out an early deadline (no factor: w2 at 4000
       // times out below 5 s). No upper bound against the clock —

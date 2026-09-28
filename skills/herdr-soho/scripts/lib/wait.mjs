@@ -134,6 +134,44 @@ function readWaitFile(sd, agent, name) {
   try { return readTextFile(path.join(sd, 'wait', name)).replace(/\n+$/, ''); } catch { return null; }
 }
 
+// Age (seconds) of the last observed visible-screen change, or null when
+// nothing proves one. Reading a screen never proves activity: only a wait
+// that sees a previously recorded hash move writes <agent>.activity-at,
+// dated at the probe before the move (<agent>.probe-at, else
+// <agent>.stuck-since) — the oldest moment the change could have happened,
+// so a long gap between two waits never reads as a fresh change. The
+// current screen differing from <agent>.stuck-hash is a change since the
+// last probe: its age is nowS minus that probe. An equal hash is
+// nowS - activity-at. A failed (empty) read, a recorded empty-screen hash,
+// or a missing or invalid marker is null. Same hash as the stuck detection
+// (cksumField over normalizeScreen — counters and progress glyphs do not
+// count); status calls this read-only.
+export function activityAgeSeconds(sd, agent, screenText, nowS) {
+  const hashRaw = readWaitFile(sd, agent, `${agent}.stuck-hash`);
+  if (hashRaw === null || hashRaw.trim() === '') return null;
+  // A failed read comes back empty: it proves nothing, and neither does a
+  // recorded hash of an empty screen.
+  if (String(screenText ?? '').trim() === '' || hashRaw.trim() === EMPTY_SCREEN_HASH()) return null;
+  const h = String(cksumField(normalizeScreen(screenText)));
+  if (h !== String(hashRaw.trim())) {
+    const since = positiveInt(readWaitFile(sd, agent, `${agent}.probe-at`))
+      ?? positiveInt(readWaitFile(sd, agent, `${agent}.stuck-since`));
+    return since === null ? null : nowS - since;
+  }
+  const at = positiveInt(readWaitFile(sd, agent, `${agent}.activity-at`));
+  return at === null ? null : nowS - at;
+}
+
+// A marker's positive integer, or null (missing, empty, non-numeric, 0).
+function positiveInt(raw) {
+  const t = raw === null || raw === undefined ? '' : String(raw).trim();
+  return /^[0-9]+$/.test(t) && Number(t) > 0 ? Number(t) : null;
+}
+
+// The hash of an empty screen (what a failed `agent read` returns): moving
+// to or from it is not a real change.
+const EMPTY_SCREEN_HASH = () => String(cksumField(normalizeScreen('')));
+
 // The screen normalization shared by the stuck-worker detection and the
 // auto-approve dialog repetition: CRLF → LF, digit runs → '#', and the
 // Braille and spinner/progress glyphs (\u2800-\u28ff, \u25d0-\u25d3,
@@ -195,7 +233,7 @@ const ENTER_RETRY_LIMIT = 3;
 // provider-error | capacity | gone | not-received |
 // `unavailable\t<cause>` — per-agent screen/settled bookkeeping under
 // <state>/wait/ (the .size/.screen/.since/.blocked/.question/.stuck-hash/
-// .stuck-since/.stuck-warned/.quota/.provider/.provider-cause/
+// .stuck-since/.stuck-warned/.activity-at/.probe-at/.quota/.provider/.provider-cause/
 // .capacity-retries/.capacity-at files; a not-received dispatch adds
 // .not-received and the wait's Enter retries .enter-retry).
 // S5 items 2 and 11a: a confirmed blocked screen that matches the kind's
@@ -326,14 +364,29 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
   // one tool call: one friction line, once, nothing is sent and the status
   // stays working. 0 disables the check.
   const limitMin = Number(cfg(ctx, 'stuck_warn_minutes', '20', env));
-  if (st.state === 'working' && limitMin > 0) {
-    const h = String(cksumField(normalizeScreen(visibleScreen())));
+  // The hash markers follow every probe of a working agent, whatever
+  // stuck_warn_minutes says (0 only turns the stuck warning off): the
+  // activity age of the checkpoint and of `status` reads them.
+  if (st.state === 'working') {
+    const text = String(visibleScreen());
+    const h = String(cksumField(normalizeScreen(text)));
     const nowS = Math.floor(Date.now() / 1000);
-    if (readWaitFile(sd, agent, `${agent}.stuck-hash`) !== h) {
+    const prevHash = readWaitFile(sd, agent, `${agent}.stuck-hash`);
+    if (prevHash !== h) {
+      // A real observed change (a previous non-empty hash moved to a
+      // non-empty screen) is dated at the probe before it — the oldest
+      // moment it could have happened. The first observation of a screen
+      // only reads it, and a failed (empty) read is not a change.
+      const prevProbe = positiveInt(readWaitFile(sd, agent, `${agent}.probe-at`))
+        ?? positiveInt(readWaitFile(sd, agent, `${agent}.stuck-since`));
+      if (prevHash !== null && prevHash.trim() !== '' && prevHash.trim() !== EMPTY_SCREEN_HASH()
+        && text.trim() !== '' && prevProbe !== null) {
+        fs.writeFileSync(path.join(sd, 'wait', `${agent}.activity-at`), `${prevProbe}\n`);
+      }
       fs.writeFileSync(path.join(sd, 'wait', `${agent}.stuck-hash`), `${h}\n`);
       fs.writeFileSync(path.join(sd, 'wait', `${agent}.stuck-since`), `${nowS}\n`);
       fs.rmSync(path.join(sd, 'wait', `${agent}.stuck-warned`), { force: true });
-    } else if (!fs.existsSync(path.join(sd, 'wait', `${agent}.stuck-warned`))) {
+    } else if (limitMin > 0 && !fs.existsSync(path.join(sd, 'wait', `${agent}.stuck-warned`))) {
       const rawSince = readWaitFile(sd, agent, `${agent}.stuck-since`);
       // A .stuck-since that is missing, empty or non-numeric is treated as
       // now (and rewritten) — never as epoch 0, which would age the screen
@@ -347,6 +400,8 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
         fs.writeFileSync(path.join(sd, 'wait', `${agent}.stuck-warned`), '');
       }
     }
+    // Only a read that returned a screen counts as a probe of it.
+    if (text.trim() !== '') fs.writeFileSync(path.join(sd, 'wait', `${agent}.probe-at`), `${nowS}\n`);
   }
   if (st.state !== 'working') {
     const qtext = agentRead(env, agent, { source: 'visible', lines: 20 });
@@ -716,16 +771,35 @@ export function waitFor(agents, opts) {
     remaining = pending;
     if (remaining.length === 0) return rc;
     if (Math.floor(Date.now() / 1000) >= deadline) {
+      // Neutral checkpoint (#3 + amendment): a pending agent still working
+      // with an observed screen change under the stuck window (a real hash
+      // move, not a fresh read) gets one stderr line and no friction entry;
+      // anything else keeps today's timeout warn (the friction line). The
+      // visible screen is read once per pending agent, after the last probe.
+      const nowS = Math.floor(Date.now() / 1000);
+      const rawWin = cfg(ctx, 'stuck_warn_minutes', '20', env);
+      const winMin = Number(rawWin);
+      const windowS = (Number.isFinite(winMin) && winMin > 0 ? winMin : 20) * 60;
       for (const a of remaining) {
         const state = lastState.get(a) ?? 'working';
-        jsonLine({ agent: a, status: 'timeout', elapsed_ms: Date.now() - startedAt, state }, sink);
-        // The suggestion doubles the timeout this wait used (an explicit
-        // --timeout or the roles' timeouts); a non-numeric timeout has no
-        // value to double and drops the suggestion.
-        if (Number.isFinite(tm)) {
-          warn(`timeout waiting for '${a}'; it may still be working (state: ${state}). Run: herdr-soho wait ${a} --timeout ${tm * 2}`);
+        const age = activityAgeSeconds(sd, a, agentRead(env, a, { source: 'visible' }), nowS);
+        const active = state === 'working' && age !== null && age < windowS;
+        jsonLine({ agent: a, status: 'timeout', elapsed_ms: Date.now() - startedAt, state, checkpoint: active, activity_age_s: age }, sink);
+        if (active) {
+          // stderr only: a neutral checkpoint writes no friction line. A
+          // non-numeric timeout has no value to repeat and drops the
+          // suggestion.
+          const sug = Number.isFinite(tm) ? ` --timeout ${tm}` : '';
+          process.stderr.write(`herdr-soho: checkpoint: '${a}' is still working (screen changed ${age}s ago); wait again: herdr-soho wait ${a}${sug}\n`);
         } else {
-          warn(`timeout waiting for '${a}'; it may still be working (state: ${state})`);
+          // The suggestion doubles the timeout this wait used (an explicit
+          // --timeout or the roles' timeouts); a non-numeric timeout has no
+          // value to double and drops the suggestion.
+          if (Number.isFinite(tm)) {
+            warn(`timeout waiting for '${a}'; it may still be working (state: ${state}). Run: herdr-soho wait ${a} --timeout ${tm * 2}`);
+          } else {
+            warn(`timeout waiting for '${a}'; it may still be working (state: ${state})`);
+          }
         }
       }
       return 9;
