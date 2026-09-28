@@ -468,7 +468,13 @@ export async function loadEntries(state, opts = {}) {
   }
   state.loading = 0; // the local find is in
   state.loadingLocal = false;
-  state.entries.push(...local);
+  const seenRefs = new Set(state.entries.map((e) => e.ref));
+  for (const entry of local) {
+    if (!seenRefs.has(entry.ref)) {
+      seenRefs.add(entry.ref);
+      state.entries.push(entry);
+    }
+  }
   onChange();
 
   let machines = [];
@@ -490,7 +496,13 @@ export async function loadEntries(state, opts = {}) {
   onChange();
   await Promise.all(machines.map(async (m) => {
     try {
-      state.entries.push(...parseFindOutput(await find(m), { label: m }));
+      const remoteEntries = parseFindOutput(await find(m), { label: m }).filter((e) => e.machine === m);
+      for (const entry of remoteEntries) {
+        if (!seenRefs.has(entry.ref)) {
+          seenRefs.add(entry.ref);
+          state.entries.push(entry);
+        }
+      }
     } catch (e) {
       state.failures.push({ label: m, cause: e && e.message ? e.message : String(e) });
     } finally {
