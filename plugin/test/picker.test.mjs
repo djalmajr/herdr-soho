@@ -566,6 +566,35 @@ test('load: a find that overruns the per-machine timeout fails that machine as a
   // timeout) and the status line never appears.
 });
 
+test('load: remote find returning local and remote lines filters by machine and keeps each ref once', { timeout: 30000 }, async (t) => {
+  const dir = makeTmp(t);
+  const cli = writeFakeFindCli(dir, 'dedup', {
+    local: { lines: [LOCAL_1, LOCAL_1] },
+    windows: { lines: [LOCAL_1, LOCAL_2, WINDOWS_1, WINDOWS_1] },
+  });
+  const herdrBin = writeFakeHerdr(dir, 'dedup', {
+    machineList: machineListJson([{ label: 'windows', enabled: true }]),
+  });
+  const st = createState();
+  const r = await loadEntries(st, {
+    env: { HERDR_BIN_PATH: herdrBin },
+    nodeBin: process.execPath,
+    cliScript: cli,
+    herdrBin,
+  });
+  assert.equal(r.failures.length, 0);
+  assert.deepEqual(
+    st.entries.map((e) => e.ref),
+    ['local/w12:p1', 'windows/w3:p1'],
+    'the final list has each ref once and local panes from remote find are excluded',
+  );
+  assert.equal(st.entries.length, 2, 'the count matches exactly');
+  // Mutation captured: removing the machine filter (.filter((e) => e.machine === m))
+  // lets LOCAL_2 enter from the windows load, increasing entries from 2 to 3.
+  // Mutation captured: removing ref deduplication keeps the duplicate LOCAL_1
+  // and duplicate WINDOWS_1, increasing entries from 2 to 4.
+});
+
 // ---------- parseFindOutput / parseMachineList ----------
 
 test('parseFindOutput: good NDJSON, CRLF, and a malformed line rejects the whole load', () => {
