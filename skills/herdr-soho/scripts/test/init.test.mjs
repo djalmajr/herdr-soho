@@ -21,6 +21,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { JS_ENTRY, nodeBin, fixtureEnv } from './parity.mjs';
 import { writeFakeCli } from './fakes.mjs';
+import { linkTool } from './tools.mjs';
 import { findExecutable } from '../lib/platform.mjs';
 
 let ROOT;
@@ -106,7 +107,7 @@ test.before(() => {
   for (const d of [REPO, HOME, CONF, STATE, TMP, BIN]) fs.mkdirSync(d, { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: REPO, stdio: 'ignore', timeout: 20000 });
   const git = findExecutable('git');
-  if (git) fs.symlinkSync(git, path.join(BIN, 'git'));
+  if (git) linkTool(BIN, 'git', git);
   writeFakeCli(BIN, 'herdr', HERDR_FAKE);
   NAME_FILE = path.join(ROOT, 'caller-name');
   LIVE_FILE = path.join(ROOT, 'live-names');
@@ -116,7 +117,7 @@ test.before(() => {
   PANETITLEFAIL_FILE = path.join(ROOT, 'panefail');
   fs.writeFileSync(LIVE_FILE, 'build\n');
   ENV = fixtureEnv({
-    HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, HERDR_WORKSPACE_ID: 'ws', TMPDIR: TMP,
+    HOME, USERPROFILE: HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, HERDR_WORKSPACE_ID: 'ws', TMPDIR: TMP,
     HERDR_ENV: '1', HERDR_PANE_ID: 'p1', HERDR_TAB_ID: 't1',
     HERDR_LOG: LOG_FILE, HERDR_NAME: NAME_FILE, HERDR_LIVE: LIVE_FILE,
     HERDR_TITLE: TITLE_FILE, HERDR_METAFAIL: METAFAIL_FILE, HERDR_PANETITLEFAIL: PANETITLEFAIL_FILE,

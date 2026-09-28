@@ -73,9 +73,12 @@ function runEnv(fix, fakes, over = {}) {
   for (const [name, source] of Object.entries(fakes)) writeFakeCli(fix.bin, name, source);
   const env = {
     HOME: fix.home,
+    USERPROFILE: fix.home,
     XDG_CONFIG_HOME: fix.conf,
     TMPDIR: fix.tmp,
     PATH: fix.bin,
+    COMSPEC: process.env.COMSPEC,
+    PATHEXT: process.env.PATHEXT,
     HA_LOG: path.join(fix.root, 'calls.log'),
     HA_TTOP: fix.repo,
     HA_GIT_LOG: 'abc1234 2026-09-24',
