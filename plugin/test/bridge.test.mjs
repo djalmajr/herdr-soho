@@ -127,6 +127,14 @@ function baseEnv(herdrBin, { context = contextJson(), withBinPath = true, bin = 
   };
   if (withBinPath) env.HERDR_BIN_PATH = herdrBin || bin;
   if (context !== undefined) env.HERDR_PLUGIN_CONTEXT_JSON = context;
+  if (process.platform === 'win32') {
+    // What Herdr hands a Windows action anyway: cmd.exe and its lookup
+    // (a .cmd herdr runs through it), System32 on PATH, the temp dirs.
+    for (const k of ['SystemRoot', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP']) {
+      if (process.env[k]) env[k] = process.env[k];
+    }
+    env.PATH = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
+  }
   return env;
 }
 
