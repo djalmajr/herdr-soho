@@ -517,7 +517,7 @@ The recommended fix preserves what `core` already passes and adds `HERDR_*`:
 ```toml
 [shell_environment_policy]
 inherit = "all"
-include_only = ["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "USER", "USERNAME", "TMPDIR", "TEMP", "TMP", "HERDR_*"]
+include_only = ["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "USER", "TMPDIR", "HERDR_*"]
 ```
 
 Every key defined under `[shell_environment_policy.set]` must also be added to

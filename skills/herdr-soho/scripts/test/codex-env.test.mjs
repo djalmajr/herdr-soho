@@ -32,13 +32,16 @@ function tmp(prefix) {
 // Decision 1: Checagem estática (doctor)
 // ---------------------------------------------------------------------------
 
-test('globMatch: case-insensitive with *', () => {
+test('globMatch: case-insensitive with * and ?', () => {
   assert.equal(globMatch('HERDR_*', 'HERDR_ENV'), true);
   assert.equal(globMatch('herdr_*', 'HERDR_ENV'), true);
   assert.equal(globMatch('*', 'HERDR_ENV'), true);
   assert.equal(globMatch('HERDR_ENV', 'herdr_env'), true);
   assert.equal(globMatch('PATH', 'HERDR_ENV'), false);
   assert.equal(globMatch('*ENV', 'HERDR_ENV'), true);
+  assert.equal(globMatch('HERDR_EN?', 'HERDR_ENV'), true);
+  assert.equal(globMatch('HERDR_EN?', 'HERDR_EN'), false);
+  assert.equal(globMatch('HERDR_EN?', 'HERDR_ENV2'), false);
 });
 
 // Mutation captured: ignoring inherit="core" drops the warning when Codex config omits include_only.
@@ -91,7 +94,7 @@ test('Decision 1 case: include_only without HERDR_*', () => {
     const policy = parseCodexPolicy(fs.readFileSync(conf, 'utf8'));
     const evaluation = evaluateCodexPolicy(policy);
     assert.equal(evaluation.drops, true);
-    assert.equal(evaluation.reason, 'include_only without HERDR_*');
+    assert.equal(evaluation.reason, 'include_only does not match HERDR_ENV');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -126,7 +129,7 @@ test('Decision 1 case: exclude (exclude matches HERDR_ENV)', () => {
     const policy = parseCodexPolicy(fs.readFileSync(conf, 'utf8'));
     const evaluation = evaluateCodexPolicy(policy);
     assert.equal(evaluation.drops, true);
-    assert.equal(evaluation.reason, 'exclude matches HERDR_*');
+    assert.equal(evaluation.reason, 'exclude matches HERDR_ENV');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -181,7 +184,7 @@ include_only = [
   assert.equal(policyFail.inherit, 'all');
   assert.equal(policyFail.include_only.length, 3);
   assert.equal(evaluateCodexPolicy(policyFail).drops, true);
-  assert.equal(evaluateCodexPolicy(policyFail).reason, 'include_only without HERDR_*');
+  assert.equal(evaluateCodexPolicy(policyFail).reason, 'include_only does not match HERDR_ENV');
 });
 
 // Mutation captured: printing unparsed TOML sections leaks private tokens to stdout.
@@ -209,6 +212,167 @@ inherit = "core"
     for (const msg of captured) {
       assert.ok(!msg.includes('sk-super-secret-token-12345'), 'must never print secret token');
       assert.ok(!msg.includes('api_tokens'), 'must never print other sections');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Mutation captured: treating include_only as reviving variables dropped by inherit="core" silences the warning.
+test('Decision 1 case: core + include_only with HERDR_* warns inherit="core"', () => {
+  const root = tmp('ha-codex-core-inc-');
+  try {
+    const conf = path.join(root, 'config.toml');
+    fs.writeFileSync(conf, '[shell_environment_policy]\ninherit = "core"\ninclude_only = ["HERDR_*"]\n');
+    const say = new DoctorSay();
+    doctorCodexPolicyWarnings({ CODEX_HOME: root }, say);
+    assert.equal(say.warnCount, 1);
+    const policy = parseCodexPolicy(fs.readFileSync(conf, 'utf8'));
+    const evaluation = evaluateCodexPolicy(policy);
+    assert.equal(evaluation.drops, true);
+    assert.equal(evaluation.reason, 'inherit="core"');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Mutation captured: ignoring set keys under inherit="none" falsely warns that inherit="none" dropped HERDR_*.
+test('Decision 1 case: none + set with all three HERDR_* does not warn', () => {
+  const root = tmp('ha-codex-none-set-');
+  try {
+    const conf = path.join(root, 'config.toml');
+    fs.writeFileSync(conf, `[shell_environment_policy]
+inherit = "none"
+
+[shell_environment_policy.set]
+HERDR_ENV = "1"
+HERDR_PANE_ID = "2"
+HERDR_WORKSPACE_ID = "3"
+`);
+    const say = new DoctorSay();
+    doctorCodexPolicyWarnings({ CODEX_HOME: root }, say);
+    assert.equal(say.warnCount, 0);
+    const policy = parseCodexPolicy(fs.readFileSync(conf, 'utf8'));
+    const evaluation = evaluateCodexPolicy(policy);
+    assert.equal(evaluation.drops, false);
+    assert.equal(evaluation.reason, '');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Mutation captured: applying exclude after set removes reinstated variables and falsely warns.
+test('Decision 1 case: all + exclude=["HERDR_*"] + set with all three does not warn', () => {
+  const root = tmp('ha-codex-all-exc-set-');
+  try {
+    const conf = path.join(root, 'config.toml');
+    fs.writeFileSync(conf, `[shell_environment_policy]
+inherit = "all"
+exclude = ["HERDR_*"]
+set = { HERDR_ENV = "1", HERDR_PANE_ID = "2", HERDR_WORKSPACE_ID = "3" }
+`);
+    const say = new DoctorSay();
+    doctorCodexPolicyWarnings({ CODEX_HOME: root }, say);
+    assert.equal(say.warnCount, 0);
+    const policy = parseCodexPolicy(fs.readFileSync(conf, 'utf8'));
+    const evaluation = evaluateCodexPolicy(policy);
+    assert.equal(evaluation.drops, false);
+    assert.equal(evaluation.reason, '');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Mutation captured: applying set after include_only allows set to bypass include_only filtering.
+test('Decision 1 case: all + include_only=["PATH"] + set HERDR_ENV warns include_only does not match HERDR_ENV', () => {
+  const root = tmp('ha-codex-inc-set-');
+  try {
+    const conf = path.join(root, 'config.toml');
+    fs.writeFileSync(conf, `[shell_environment_policy]
+inherit = "all"
+include_only = ["PATH"]
+set = { HERDR_ENV = "1" }
+`);
+    const say = new DoctorSay();
+    doctorCodexPolicyWarnings({ CODEX_HOME: root }, say);
+    assert.equal(say.warnCount, 1);
+    const policy = parseCodexPolicy(fs.readFileSync(conf, 'utf8'));
+    const evaluation = evaluateCodexPolicy(policy);
+    assert.equal(evaluation.drops, true);
+    assert.equal(evaluation.reason, 'include_only does not match HERDR_ENV');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Mutation captured: treating ? as a regex quantifier instead of a single-character glob fails to match HERDR_ENV.
+test('Decision 1 case: exclude=["HERDR_EN?"] warns exclude matches HERDR_ENV', () => {
+  const root = tmp('ha-codex-qmark-');
+  try {
+    const conf = path.join(root, 'config.toml');
+    fs.writeFileSync(conf, '[shell_environment_policy]\ninherit = "all"\nexclude = ["HERDR_EN?"]\n');
+    const say = new DoctorSay();
+    doctorCodexPolicyWarnings({ CODEX_HOME: root }, say);
+    assert.equal(say.warnCount, 1);
+    const policy = parseCodexPolicy(fs.readFileSync(conf, 'utf8'));
+    const evaluation = evaluateCodexPolicy(policy);
+    assert.equal(evaluation.drops, true);
+    assert.equal(evaluation.reason, 'exclude matches HERDR_ENV');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Mutation captured: accepting duplicate keys in policy or set evaluates invalid TOML configs that Codex rejects.
+test('Decision 1 case: duplicate key in section or set table makes parse null (no warning)', () => {
+  const root = tmp('ha-codex-dup-');
+  try {
+    const confDupInherit = path.join(root, 'dup-inherit.toml');
+    fs.writeFileSync(confDupInherit, '[shell_environment_policy]\ninherit = "all"\ninherit = "core"\n');
+    assert.equal(parseCodexPolicy(fs.readFileSync(confDupInherit, 'utf8')), null);
+
+    const confDupSetTable = path.join(root, 'dup-set-table.toml');
+    fs.writeFileSync(confDupSetTable, '[shell_environment_policy.set]\nHERDR_ENV = "1"\nHERDR_ENV = "2"\n');
+    assert.equal(parseCodexPolicy(fs.readFileSync(confDupSetTable, 'utf8')), null);
+
+    const confDupSetInline = path.join(root, 'dup-set-inline.toml');
+    fs.writeFileSync(confDupSetInline, '[shell_environment_policy]\nset = { HERDR_ENV = "1", HERDR_ENV = "2" }\n');
+    assert.equal(parseCodexPolicy(fs.readFileSync(confDupSetInline, 'utf8')), null);
+
+    const confFile = path.join(root, 'config.toml');
+    fs.writeFileSync(confFile, '[shell_environment_policy]\ninherit = "all"\ninherit = "core"\n');
+    const say = new DoctorSay();
+    doctorCodexPolicyWarnings({ CODEX_HOME: root }, say);
+    assert.equal(say.warnCount, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Mutation captured: retaining or printing set values leaks private environment values.
+test('Decision 1 case: set values are never stored or printed', () => {
+  const root = tmp('ha-codex-set-secret-');
+  try {
+    const secret = 'SUPER_SECRET_TOKEN_VALUE_XYZ_987';
+    const conf = path.join(root, 'config.toml');
+    fs.writeFileSync(conf, `[shell_environment_policy]
+inherit = "core"
+set = { HERDR_ENV = "${secret}" }
+`);
+    const policy = parseCodexPolicy(fs.readFileSync(conf, 'utf8'));
+    assert.ok(policy.set.includes('HERDR_ENV'));
+    const policyJson = JSON.stringify(policy);
+    assert.ok(!policyJson.includes(secret), 'set value must never be retained in parsed policy');
+
+    const captured = [];
+    const say = {
+      warn(msg) { captured.push(msg); },
+      ok() {},
+    };
+    doctorCodexPolicyWarnings({ CODEX_HOME: root }, say);
+    assert.equal(captured.length, 1);
+    for (const msg of captured) {
+      assert.ok(!msg.includes(secret), 'set value must never appear in doctor warning');
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -450,6 +614,44 @@ test('Decision 2 case: nenhum painel casa', () => {
       msg,
       'not running inside Herdr (HERDR_ENV != 1); refusing to control a session from outside (a Codex ancestor was found, but no single Herdr pane matched it)',
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Mutation captured: adding the current process PID to ancestor set matches the pane and names it erroneously.
+test('Decision 2 case: own pid alone in a pane does not name the pane', () => {
+  const root = tmp('ha-d2-ownpid-alone-');
+  try {
+    const fakes = setupFakes(root, {
+      treeTable: {
+        '5000': { ppid: 4000, comm: 'node' },
+        '4000': { ppid: 3000, comm: 'bash' },
+        '3000': { ppid: 1, comm: 'codex' },
+      },
+      snapshotPanes: [
+        { pane_id: 'w14:pWRONG', agent: 'codex' },
+      ],
+      processInfos: {
+        'w14:pWRONG': {
+          foreground_processes: [
+            { pid: 5000, name: 'node' },
+          ],
+        },
+      },
+    });
+
+    const msg = diagnoseOutsideHerdr(
+      'not running inside Herdr (HERDR_ENV != 1); refusing to control a session from outside',
+      fakes.env,
+      'darwin',
+      { pid: 5000 },
+    );
+    assert.equal(
+      msg,
+      'not running inside Herdr (HERDR_ENV != 1); refusing to control a session from outside (a Codex ancestor was found, but no single Herdr pane matched it)',
+    );
+    assert.ok(!msg.includes('w14:pWRONG'), 'must not name pane when only current process pid matches');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
