@@ -22,6 +22,7 @@ import {
   entryLine,
   copyPayload,
   stripControls,
+  notifyCopied,
   FIND_TIMEOUT_MS,
   parseFindOutput,
   parseMachineList,
@@ -1043,4 +1044,23 @@ test('main: SIGHUP goes through the same finish as Esc — raw off, no copy', { 
   assert.equal(r.copied, null, 'no copy on SIGHUP');
   assert.deepEqual(sin.modes, [true, false], 'the raw mode was turned off');
   assert.ok(sin.destroyed, 'the stdin handle was released');
+});
+
+// ---------- notification ----------
+
+test('notifyCopied: hostile ref with CSI, OSC and \\r has controls stripped from notification argv', (t) => {
+  const dir = makeTmp(t);
+  const argvFile = path.join(dir, 'herdr-argv.jsonl');
+  const herdrBin = writeFakeHerdr(dir, 'notify', { argvFile });
+  const hostileRef = 'local/w1\x1b[2J\x1b[31m:p1\r\x1b]52;c;UEFO\x07';
+  const r = notifyCopied(herdrBin, hostileRef, { env: { PATH: dir } });
+  assert.equal(r.ok, true);
+  const argvs = fs.readFileSync(argvFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const note = argvs.find((a) => a[0] === 'notification');
+  assert.ok(note, 'notification command was invoked');
+  assert.deepEqual(note, ['notification', 'show', 'herdr-soho', '--body', 'copied local/w1:p1', '--sound', 'none']);
+  assert.ok(!note.some((arg) => arg.includes('\x1b')), 'no ESC in notification show argv');
+  assert.ok(!note.some((arg) => arg.includes('\r')), 'no \\r in notification show argv');
+  // Mutation captured: mounting the notification body with the raw ref
+  // (without stripControls) leaves ESC and \r in the notification show argv.
 });

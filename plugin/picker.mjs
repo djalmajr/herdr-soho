@@ -501,10 +501,11 @@ export async function loadEntries(state, opts = {}) {
 }
 
 // After a copy: `herdr notification show herdr-soho --body "copied <ref>"
-// --sound none`. A notification failure is not an error.
+// --sound none`. A notification failure is not an error. The ref is
+// third-party text: stripControls before mounting the body.
 export function notifyCopied(herdrBin, ref, { env = process.env, platform = process.platform, timeoutMs = HERDR_CALL_TIMEOUT_MS } = {}) {
   const bin = typeof herdrBin === 'string' && herdrBin !== '' ? herdrBin : (typeof env.HERDR_BIN_PATH === 'string' && env.HERDR_BIN_PATH !== '' ? env.HERDR_BIN_PATH : 'herdr');
-  const args = ['notification', 'show', 'herdr-soho', '--body', `copied ${ref}`, '--sound', 'none'];
+  const args = ['notification', 'show', 'herdr-soho', '--body', `copied ${stripControls(ref)}`, '--sound', 'none'];
   const inv = platform === 'win32' && /\.(bat|cmd)$/i.test(bin)
     ? cmdInvocation(bin, args, env)
     : { command: bin, args, windowsVerbatimArguments: false };
