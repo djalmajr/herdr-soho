@@ -430,9 +430,20 @@ other files; `Report` — the worker may never write one; the no-commit line
 — the worker may commit or push) and flags the empty-inline-code symptom
 (`brief_lint=warn|strict`; `off` silences it). `brief_lint_aliases`
 (`Section=Heading|Heading` items) lets an alternate heading prefix satisfy
-a section. `friction add "<text>" [--brief <path>]` records an observed
-friction the tools do not log themselves; every line of the log keeps its
-four columns (date, level, command, message).
+a section. Built-in prefixes also accept Portuguese headings: Goal
+(`Objetivo`, `Meta`), Expected result (`Resultado esperado`, `Critérios de
+aceitação`, `Critérios de aceite`, `Pronto quando`), Owned files (`Arquivos`,
+`Escopo`), Forbidden (`Proibido`, `Fora do escopo`, `Restrições`) and Report
+(`Relatório`), with case- and accent-insensitive matching. Portuguese
+built-in headings count only when, after the prefix and leading spaces, the
+title ends or continues with a non-letter, non-digit; English headings and
+configured aliases keep simple prefix matching. In `Owned files`, a line whose text starts after any list
+marker and leading spaces or `*`/`_` emphasis with `nenhum`, `nenhuma`, `não`,
+`nunca`, `exceto`, `not`, `never`, `none`, `except`,
+`excluding` or `outside` contributes no paths; a negation later in the line
+does not exclude its paths. `friction add "<text>" [--brief <path>]` records
+an observed friction the tools do not log themselves; every line of the log
+keeps its four columns (date, level, command, message).
 
 ## Waiting for workers
 

@@ -1226,7 +1226,19 @@ the section: the aliasable sections are `Goal`, `Expected result`,
 `Owned files`, `Forbidden` and `Report` (the no-commit line has no heading
 to alias); a malformed item is ignored with
 `brief_lint_aliases: ignored '<item>' (use Section=Heading|Heading)` and
-the valid items still apply.
+the valid items still apply. Built-in prefixes also accept Portuguese headings:
+Goal (`Objetivo`, `Meta`), Expected result (`Resultado esperado`, `Critérios
+de aceitação`, `Critérios de aceite`, `Pronto quando`), Owned files
+(`Arquivos`, `Escopo`), Forbidden (`Proibido`, `Fora do escopo`,
+`Restrições`) and Report (`Relatório`), with case- and accent-insensitive
+matching. Portuguese built-in headings count only when, after the prefix and
+leading spaces, the title ends or continues with a non-letter, non-digit;
+English headings and configured aliases keep simple prefix matching. In
+`Owned files`, a line
+whose text starts after any list marker and leading spaces or `*`/`_`
+emphasis with `nenhum`, `nenhuma`, `não`, `nunca`, `exceto`, `not`, `never`,
+`none`, `except`, `excluding` or `outside` contributes
+no paths; a negation later in the line does not exclude its paths.
 
 **Lint before you send.** `$S lint <brief.md> [--role <role>]` prints the
 same warnings the dispatch would print for that brief (the role defaults to
