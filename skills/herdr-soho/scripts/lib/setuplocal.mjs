@@ -46,12 +46,6 @@ export function setupTargetPath(root, target, platform = process.platform) {
   return hostPath.isAbsolute(target) ? hostPath.normalize(target) : hostPath.resolve(root, target);
 }
 
-export function isPathWithin(root, candidate, platform = process.platform) {
-  const hostPath = platform === 'win32' ? path.win32 : path;
-  const rel = hostPath.relative(root, candidate);
-  return rel !== '' && rel !== '..' && !rel.startsWith(`..${hostPath.sep}`) && !hostPath.isAbsolute(rel);
-}
-
 // gitDirFor <root>: the absolute git dir (`rev-parse --absolute-git-dir`,
 // so a worktree resolves to its own `<common>/.git/worktrees/<name>` and
 // not to an assumed `.git` directory), or '' when git cannot say (not a

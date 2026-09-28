@@ -12,11 +12,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { loadConfig, configKeyOk, configValueOk } from '../lib/config.mjs';
+import { loadConfig, configKeyOk, configValueOk, stateGitignoreRel } from '../lib/config.mjs';
 import { SETUP_START } from '../lib/setuptext.mjs';
 import {
   LOCAL_INSTRUCTION_FILE, assertSafeLocalRels, classifyStateDir, excludeAfterText, excludeEntry, excludePathFor, gitCommonDirFor, gitDirFor,
-  isPathWithin, localRels, localTarget, missingExcludeEntries, normalizeGitPath, resolveSetupMode, setupTargetPath, stateDirShown,
+  localRels, localTarget, missingExcludeEntries, normalizeGitPath, resolveSetupMode, setupTargetPath, stateDirShown,
 } from '../lib/setuplocal.mjs';
 import { cmdSetup, setupTargetExisting } from '../lib/commands/setup.mjs';
 import { cmdSetupPlan } from '../lib/commands/setup-plan.mjs';
@@ -164,9 +164,10 @@ test('Windows paths from Git and setup targets use native separators', () => {
   assert.equal(normalizeGitPath('C:/Users/test/repo/.git', 'win32'), path.win32.normalize('C:/Users/test/repo/.git'));
   assert.equal(setupTargetPath('C:/Users/test/repo', 'OTHER.md', 'win32'), path.win32.join('C:/Users/test/repo', 'OTHER.md'));
   const winRoot = path.win32.normalize('C:/Users/test/repo');
-  assert.equal(isPathWithin(winRoot, 'C:/Users/test/repo/.herdr-soho/ws/session.conf', 'win32'), true);
-  assert.equal(isPathWithin(winRoot, 'C:/Users/test/other/.herdr-soho', 'win32'), false);
-  assert.equal(isPathWithin(winRoot, 'C:/Users/test/repo', 'win32'), false);
+  assert.equal(stateGitignoreRel(winRoot, 'C:/Users/test/repo/.herdr-soho/ws', path.win32), '.herdr-soho/ws');
+  assert.equal(stateGitignoreRel('c:/users/test/repo', 'C:\\Users\\test\\repo\\.herdr-soho', path.win32), '.herdr-soho');
+  assert.equal(stateGitignoreRel(winRoot, 'C:/Users/test/other/.herdr-soho', path.win32), '');
+  assert.equal(stateGitignoreRel(winRoot, 'C:/Users/test/repo', path.win32), '');
   assert.equal(excludeEntry('deep\\cache'), '/deep/cache');
   assertSafeLocalRels(['deep\\cache'], 'setup', 'win32');
   // Mutation captured: raw Git paths, root + '/' target construction, or

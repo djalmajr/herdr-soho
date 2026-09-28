@@ -30,7 +30,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   DieError, configKeyOk, configValueOk, configWritePair, configFileFor,
-  fileKeyValue, gitignoreAfter, gitignoreNeeds, stateRootPath,
+  fileKeyValue, gitignoreAfter, gitignoreNeeds, stateGitignoreRel, stateRootPath,
 } from '../config.mjs';
 import { projectRoot, readTextFile } from '../platform.mjs';
 import { applyLaneFile, setupLaneSpec } from '../lanes.mjs';
@@ -38,7 +38,7 @@ import { effectiveConfigFile, legacyProjectConfigPath, legacyUserConfigPath } fr
 import { sessionConfPath } from '../session.mjs';
 import { setupBlockResult, settingsHooksResult } from '../setuptext.mjs';
 import { setupTargetExisting } from './setup.mjs';
-import { isPathWithin, localRels, localTarget, planLocalExcludes, preflightLocalExcludes, refuseTrackedLocal, refuseUnignorableStateDir, resolveSetupMode, setupTargetPath } from '../setuplocal.mjs';
+import { localRels, localTarget, planLocalExcludes, preflightLocalExcludes, refuseTrackedLocal, refuseUnignorableStateDir, resolveSetupMode, setupTargetPath } from '../setuplocal.mjs';
 
 // `[ -f ]` / `[ -L ]` ports (same as commands/setup.mjs, which does not
 // export them).
@@ -483,8 +483,8 @@ export function cmdSetupPlan(args, ctx, env = process.env, cwd = process.cwd()) 
     // setup (and session set) call state_root, which adds the state dir to
     // the repo's .gitignore once; show that write too when it would happen.
     const gd = stateRootPath(ctx, env, cwd);
-    if (isPathWithin(root, gd)) {
-      const rel = path.relative(root, gd);
+    const rel = stateGitignoreRel(root, gd);
+    if (rel !== '') {
       const wt = spawnSync('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], { env, stdio: 'ignore' });
       if (wt.status === 0 && gitignoreNeeds(root, rel, env)) {
         let gi = '';

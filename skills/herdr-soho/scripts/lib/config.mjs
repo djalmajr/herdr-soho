@@ -204,14 +204,21 @@ export function relativeStatePath(root, statePath, pathApi = path) {
   return rel;
 }
 
+// The state dir's .gitignore entry: its path under the root with '/'
+// separators (the form Git reads on every platform), or '' when the state
+// dir is not strictly inside the root. stateRoot writes it and setup
+// --plan shows the same line.
+export function stateGitignoreRel(root, statePath, pathApi = path) {
+  return relativeStatePath(root, statePath, pathApi).split(pathApi.sep).join('/');
+}
+
 // state_root() port: also keeps the .gitignore entry current (relative state
 // dir under a git work tree that does not ignore it yet).
 export function stateRoot(ctx, env = process.env, cwd = process.cwd()) {
   const root = projectRoot(env, cwd);
   const d = stateRootPath(ctx, env, cwd);
-  const rel = relativeStatePath(root, d);
-  if (rel && !nowrite(env)) {
-    const gitRel = rel.split(path.sep).join('/');
+  const gitRel = stateGitignoreRel(root, d);
+  if (gitRel && !nowrite(env)) {
     const wt = spawnSync('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], { env, stdio: 'ignore' });
     if (wt.status === 0 && gitignoreNeeds(root, gitRel, env)) {
       // Append (not rewrite): a symlinked .gitignore stays a link.
