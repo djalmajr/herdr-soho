@@ -7,11 +7,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { fixtureEnv, nodeBin } from './parity.mjs';
+import { canSymlink } from './tools.mjs';
 
 const ENTRY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'herdr-soho.mjs');
 
 function setup() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha mutation "guard" ')));
+  const prefix = process.platform === 'win32' ? 'ha mutation guard ' : 'ha mutation "guard" ';
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   const source = path.join(root, 'source');
   const copy = path.join(root, 'copy');
   fs.mkdirSync(path.join(source, 'target'), { recursive: true });
@@ -59,6 +61,7 @@ function treeHash(root) {
 test('rejects a target symlink into the source before any mutation', (t) => {
   const s = setup();
   try {
+    if (!canSymlink(s.root)) return t.skip('symlink creation is unavailable on this host');
     fs.symlinkSync(path.join(s.source, 'target'), path.join(s.copy, 'target'), 'dir');
     const mutateOnlyAfterGuard = () => {
       const result = s.run([s.copy, '--source', s.source]);
@@ -131,6 +134,7 @@ test('relative and single-quoted build destinations are resolved against the cop
 test('accepts an isolated copy, ignores broken links and does not descend into .git', (t) => {
   const s = setup();
   try {
+    if (!canSymlink(s.root)) return t.skip('symlink creation is unavailable on this host');
     fs.mkdirSync(path.join(s.copy, 'target'), { recursive: true });
     fs.mkdirSync(path.join(s.copy, '.cargo'), { recursive: true });
     fs.writeFileSync(path.join(s.copy, '.cargo', 'config.toml'), `target-dir = ${JSON.stringify(path.join(s.copy, 'target'))}\n`);

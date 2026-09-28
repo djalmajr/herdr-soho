@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { JS_ENTRY, fixtureEnv, nodeBin, normalizeErr } from './parity.mjs';
 import { golden, normalizeRoots } from './golden.mjs';
+import { writeFakeCli } from './fakes.mjs';
 
 // The fixture contract is POSIX (the sh fake CLIs), so the scenarios are
 // skipped on Windows.
@@ -179,6 +180,7 @@ function spawnValue(entry, name, script, opts = {}) {
     fs.writeFileSync(path.join(fix.bin, 'herdr'), FAKE_HERDR, { mode: 0o755 });
     fs.writeFileSync(path.join(fix.bin, 'grok'), '#!/bin/sh\n[ "${1:-}" = models ] && printf "%s\\n" grok-4.7\n', { mode: 0o755 });
     fs.writeFileSync(path.join(fix.bin, 'agy'), '#!/bin/sh\n[ "${1:-}" = models ] && printf "gemini-2.5 (latest)\\n"\n', { mode: 0o755 });
+    writeFakeCli(fix.bin, 'pi', '');
     fix.seed();
     const baseEnv = fix.env();
     const steps = [];

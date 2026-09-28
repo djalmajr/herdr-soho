@@ -18,8 +18,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { writeFakeCli } from './fakes.mjs';
 import { nodeBin } from './parity.mjs';
+import { fileURLToPath } from 'node:url';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
 
 // The fake herdr the code sees: `agent prompt <agent> <text>` appends
@@ -53,6 +54,7 @@ function makeFix(prefix) {
   writeFakeCli(fakes, 'herdr', HERDR_FAKE);
   const env = {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
@@ -175,7 +177,7 @@ test('feedback send: without feedback_to it files the report and prints the sent
     assert.equal(r.status, 0, r.stderr);
     const j = JSON.parse(r.stdout);
     assertName(fix, j.file);
-    assert.equal(r.stdout, `{"status":"sent","file":"${j.file}","notified":null}\n`, 'one JSON line, the exact field order, notified null');
+    assert.equal(r.stdout, JSON.stringify({ status: 'sent', file: j.file, notified: null }) + '\n', 'one JSON line, the exact field order, notified null');
     assert.equal(fs.readFileSync(j.file, 'utf8'), body, 'the report content, verbatim');
     assert.equal(fix.promptLines().length, 0, 'no prompt without feedback_to');
     const note = fix.logLines().filter((l) => l.split('\t')[1] === 'note');
@@ -195,7 +197,7 @@ test('feedback send: with feedback_to it prompts the one line to that pane', () 
     assert.equal(r.status, 0, r.stderr);
     const j = JSON.parse(r.stdout);
     assertName(fix, j.file);
-    assert.equal(r.stdout, `{"status":"sent","file":"${j.file}","notified":"w9:p2"}\n`);
+    assert.equal(r.stdout, JSON.stringify({ status: 'sent', file: j.file, notified: 'w9:p2' }) + '\n');
     assert.ok(fs.existsSync(j.file), 'the file was written');
     const lines = fix.promptLines();
     assert.equal(lines.length, 1, 'one prompt');
@@ -239,7 +241,7 @@ test('feedback send: \\r, \\n and \\t in the summary become spaces (one prompt l
     assert.equal(r.status, 0, r.stderr);
     const j = JSON.parse(r.stdout);
     assertName(fix, j.file);
-    assert.equal(r.stdout, `{"status":"sent","file":"${j.file}","notified":"w9:p2"}\n`, 'the JSON line carries no raw newline');
+    assert.equal(r.stdout, JSON.stringify({ status: 'sent', file: j.file, notified: 'w9:p2' }) + '\n', 'the JSON line carries no raw newline');
     const lines = fix.promptLines();
     assert.equal(lines.length, 1, 'one physical prompt line');
     const f = lines[0].split('\t');
@@ -260,7 +262,7 @@ test('feedback send: a failed prompt keeps the file, prints filed JSON and warns
     assert.equal(r.status, 4, `exit 4, stderr ${r.stderr}`);
     const j = JSON.parse(r.stdout);
     assertName(fix, j.file);
-    assert.equal(r.stdout, `{"status":"filed","file":"${j.file}","notified":null,"error":"prompt failed: the fake refused"}\n`);
+    assert.equal(r.stdout, JSON.stringify({ status: 'filed', file: j.file, notified: null, error: 'prompt failed: the fake refused' }) + '\n');
     assert.ok(fs.existsSync(j.file), 'the file stays on a failed notice');
     const warns = fix.logLines().filter((l) => l.split('\t')[1] === 'warning');
     assert.equal(warns.length, 1, 'one warn line');
@@ -291,7 +293,7 @@ test('feedback send: feedback_dir and feedback_to written by config set in a lay
     assert.equal(r.status, 0, r.stderr);
     const j = JSON.parse(r.stdout);
     assertName(fix, j.file);
-    assert.equal(r.stdout, `{"status":"sent","file":"${j.file}","notified":"w9:p2"}\n`);
+    assert.equal(r.stdout, JSON.stringify({ status: 'sent', file: j.file, notified: 'w9:p2' }) + '\n');
     assert.ok(fs.existsSync(j.file), 'the file was written under the config-set feedback_dir');
     const lines = fix.promptLines();
     assert.equal(lines.length, 1, 'one prompt');

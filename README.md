@@ -85,9 +85,12 @@ results from the CLI, run `herdr plugin log list`.
 
 ```sh
 node --test skills/herdr-soho/scripts/test/
-bun test skills/herdr-soho/scripts/test/
+bun test --timeout 60000 skills/herdr-soho/scripts/test/
 skills/herdr-soho/scripts/run-tests.sh
 ```
+
+Bun's default per-test timeout (5 s) is too short for the process-heavy
+tests on slower hosts such as Windows, hence `--timeout`.
 
 For configuration, commands, and the report contract, see the
 [guide](docs/guide.md) and the [skill](skills/herdr-soho/SKILL.md).

@@ -24,7 +24,7 @@ import {
 import { explainActivity, explainIdleParagraph, explainPrintRunning, explainRecommendation, explainStateDir } from '../lib/commands/explain.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import { DieError } from '../lib/config.mjs';
-import { configFileFor } from '../lib/config.mjs';
+import { configFileFor, stateRootPath } from '../lib/config.mjs';
 import { setupHookDoctor } from '../lib/setuptext.mjs';
 
 let ROOT;
@@ -51,9 +51,32 @@ let ENV;
   FAKES = path.join(root, 'fakes');
   for (const d of [REPO, HOME, CONF, STATE, TMP, FAKES]) fs.mkdirSync(d, { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: REPO, stdio: 'ignore', timeout: 30000 });
-  ENV = fixtureEnv({ HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, TMPDIR: TMP });
+  ENV = fixtureEnv({ HOME, USERPROFILE: HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, TMPDIR: TMP });
 })();
 test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
+
+function posixPermissionsEnforced() {
+  if (process.platform === 'win32' || process.getuid?.() === 0) return false;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-doctor-permission-probe-'));
+  const file = path.join(dir, 'file');
+  const child = path.join(dir, 'child');
+  fs.mkdirSync(child);
+  fs.writeFileSync(file, 'x');
+  let deniedRead = false;
+  let deniedWrite = false;
+  try {
+    fs.chmodSync(file, 0o000);
+    try { fs.readFileSync(file); } catch { deniedRead = true; }
+    fs.chmodSync(child, 0o000);
+    try { fs.writeFileSync(path.join(child, 'blocked'), 'x'); } catch { deniedWrite = true; }
+    return deniedRead && deniedWrite;
+  } finally {
+    fs.chmodSync(file, 0o600);
+    fs.chmodSync(child, 0o700);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+const POSIX_PERMISSION_APPLIES = posixPermissionsEnforced();
 
 const PROJ_CONF = path.join(REPO, '.agents', 'herdr-soho.conf');
 const USER_CONF = path.join(CONF, 'herdr-soho', 'config');
@@ -91,7 +114,7 @@ function capture() {
 
 // ---------- doctorLaneWarnings ----------
 
-test('doctorLaneWarnings: an invalid lanes value and panes outside 2/3/4', () => {
+test('doctorLaneWarnings: an invalid lanes value and panes outside 2/3/4', { timeout: 60_000 }, () => {
   cleanLayers();
   writeProj('lanes=bogus\n');
   const s1 = capture();
@@ -310,7 +333,7 @@ test('doctorModelPairs: an unresolvable kind+model pair warns; an unavailable li
   rmOwnFiles();
   // A grok listing fake (the same shape modelIds/spawn use).
   writeFakeCli(FAKES, 'grok', `if (process.argv[2] === 'models') process.stdout.write('grok-4.7\\ngrok-4\\ngrok-3\\n');\n`);
-  const env = { ...ENV, PATH: FAKES };
+  const env = { ...ENV, PATH: [FAKES].join(path.delimiter) };
   const lines = [];
   const say = { ok: () => {}, warn: (m) => lines.push(m) };
   // lanes on: the lane pair (kind and model from the project layer).
@@ -329,7 +352,7 @@ test('doctorModelPairs: an unresolvable kind+model pair warns; an unavailable li
   assert.ok(lines.includes("config: role 'reviewer' model 'not-a-model' (project) does not resolve for kind 'grok' (project)"), lines.join('\n'));
   // A kind whose model list is unavailable (no grok on PATH, no cache in a
   // fresh TMPDIR): the pair is skipped without a warn.
-  fs.rmSync(path.join(FAKES, 'grok'), { force: true });
+  for (const name of ['grok', 'grok.cmd']) fs.rmSync(path.join(FAKES, name), { force: true });
   const tmp2 = path.join(ROOT, 'tmp2');
   fs.mkdirSync(tmp2, { recursive: true });
   const env2 = { ...env, TMPDIR: tmp2 };
@@ -344,7 +367,7 @@ test('doctorModelPairs: an unresolvable kind+model pair warns; an unavailable li
   // A kind nobody uses is never listed: the grok fake records its calls
   // and none happens when the only pair is a claude kind (no list there).
   const mark = path.join(ROOT, 'grok-called');
-  writeFakeCli(FAKES, 'grok', `require('node:fs').appendFileSync(${JSON.stringify(mark)}, 'called\\n');\nif (process.argv[2] === 'models') process.stdout.write('grok-4.7\\n');\n`);
+  writeFakeCli(FAKES, 'grok', `import fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(mark)}, 'called\\n');\nif (process.argv[2] === 'models') process.stdout.write('grok-4.7\\n');\n`);
   writeProj('panes=4\nlane.build.kind=claude\nlane.build.model=any\n');
   lines.length = 0;
   doctorModelPairs(loadConfig(env, REPO), env, REPO, say);
@@ -455,7 +478,7 @@ test('doctorDiscardedModels: the frontmatter model is dropped when the kind come
   cleanLayers();
 });
 
-test('doctorLaneWarnings: per-role kind/model under a lane kind, divergent kinds, alignment warns', () => {
+test('doctorLaneWarnings: per-role kind/model under a lane kind, divergent kinds, alignment warns', { timeout: 60_000 }, () => {
   cleanLayers();
   // role.<r>.kind / role.<r>.model are explicit while the lane has its own kind.
   writeProj([
@@ -512,7 +535,7 @@ test('doctorLaneWarnings: per-role kind/model under a lane kind, divergent kinds
   cleanLayers();
 });
 
-test('doctorLaneWarnings: the old preset lanes and the orphan lane keys', () => {
+test('doctorLaneWarnings: the old preset lanes and the orphan lane keys', { timeout: 60_000 }, () => {
   cleanLayers();
   // The old 3-pane preset (build|read) still loads: the lanes are the old
   // ones, so the doctor points at the migration.
@@ -1060,7 +1083,7 @@ test('cmdDoctor: --fix --session rewrites the session.conf and re-runs the check
   writeSession('panes=4\nlane.ops.kind=codex\n');
   writeFakeCli(FAKES, 'herdr', 'process.exit(0);\n'); // no host herdr may be called
   const r = spawnSync(nodeBin(), [JS_ENTRY, 'doctor', '--fix', '--session', '--panes', '4'],
-    { cwd: REPO, env: { ...ENV, HERDR_WORKSPACE_ID: 'ws', PATH: FAKES }, encoding: 'utf8', timeout: 60000 });
+    { cwd: REPO, env: { ...ENV, HERDR_WORKSPACE_ID: 'ws', PATH: [FAKES].join(path.delimiter) }, encoding: 'utf8', timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes("removed lane.ops.kind=codex (no lane 'ops' in the panes=4 preset)"), r.stdout);
   assert.ok(r.stdout.includes(`doctor --fix: updated ${SESSION_CONF}`), r.stdout);
@@ -1083,6 +1106,15 @@ test('cmdDoctor: --fix --session rewrites the session.conf and re-runs the check
 
 // ---------- nowrite: the state-dir line of doctor ----------
 
+// Mutation captured: joining root and state_dir with `/` gives the wrong Windows spelling.
+test('stateRootPath: relative state dirs use the native path separator', () => {
+  cleanLayers();
+  const env = { ...ENV, HERDR_SOHO_DIR: '', HERDR_SOHO_STATE_DIR: '' };
+  const ctx = loadConfig(env, REPO);
+  assert.equal(stateRootPath(ctx, env, REPO), path.join(REPO, '.herdr-soho'));
+  cleanLayers();
+});
+
 // doctorCheck against an arbitrary cwd with the host herdr faked (the
 // doctorOut pattern, parameterized cwd).
 function runDoctorAt(cwd, env) {
@@ -1103,41 +1135,36 @@ test('nowrite: doctor reports an absent state dir as absent, never creates it, a
     fs.mkdirSync(project, { recursive: true });
     const envBase = { ...ENV, HERDR_SOHO_DIR: '' };
     const d = path.join(project, '.herdr-soho');
-    const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
     // A fresh project (no state dir): reported absent — and not created.
     let out = runDoctorAt(project, { ...envBase, HERDR_SOHO_NOWRITE: '1' });
     assert.ok(out.includes(`state dir absent (no-write mode, not created): ${d}`), out);
     assert.ok(!out.includes('state dir not writable'), out);
     assert.ok(!fs.existsSync(d), 'no-write mode never creates the state dir');
     assert.ok(!fs.existsSync(path.join(project, '.gitignore')));
-    if (isRoot) {
-      // root bypasses permission checks: the two permission cases below
-      // cannot be exercised honestly.
-      t.skip('root: permission-denied cases are not reachable');
-      return;
-    }
-    // An existing but unwritable dir keeps the genuine warning.
-    fs.mkdirSync(d, { recursive: true });
-    fs.chmodSync(d, 0o555);
-    try {
-      out = runDoctorAt(project, { ...envBase, HERDR_SOHO_NOWRITE: '1' });
-      assert.ok(out.includes(`state dir not writable: ${d}`), out);
-      assert.ok(!out.includes('state dir absent (no-write mode'), out);
-    } finally {
-      fs.chmodSync(d, 0o755);
-    }
-    // A permission error resolving the path (no traverse on the parent)
-    // keeps the warning too — absence is reported only for ENOENT.
-    const outer = path.join(root, 'outer');
-    const project2 = path.join(outer, 'inner');
-    fs.mkdirSync(project2, { recursive: true });
-    fs.chmodSync(outer, 0o600);
-    try {
-      out = runDoctorAt(project2, { ...envBase, HERDR_SOHO_NOWRITE: '1' });
-      assert.ok(out.includes('state dir not writable:'), out);
-      assert.ok(!out.includes('state dir absent (no-write mode'), out);
-    } finally {
-      fs.chmodSync(outer, 0o755);
+    if (POSIX_PERMISSION_APPLIES) {
+      // An existing but unwritable dir keeps the genuine warning.
+      fs.mkdirSync(d, { recursive: true });
+      fs.chmodSync(d, 0o555);
+      try {
+        out = runDoctorAt(project, { ...envBase, HERDR_SOHO_NOWRITE: '1' });
+        assert.ok(out.includes(`state dir not writable: ${d}`), out);
+        assert.ok(!out.includes('state dir absent (no-write mode'), out);
+      } finally {
+        fs.chmodSync(d, 0o755);
+      }
+      // A permission error resolving the path (no traverse on the parent)
+      // keeps the warning too — absence is reported only for ENOENT.
+      const outer = path.join(root, 'outer');
+      const project2 = path.join(outer, 'inner');
+      fs.mkdirSync(project2, { recursive: true });
+      fs.chmodSync(outer, 0o600);
+      try {
+        out = runDoctorAt(project2, { ...envBase, HERDR_SOHO_NOWRITE: '1' });
+        assert.ok(out.includes('state dir not writable:'), out);
+        assert.ok(!out.includes('state dir absent (no-write mode'), out);
+      } finally {
+        fs.chmodSync(outer, 0o755);
+      }
     }
     // Control: without the env the CLI creates the dir and reports it
     // writable (normal behavior unchanged).
@@ -1162,7 +1189,7 @@ test('cmdDoctor: unknown option dies 2; doctor --fix --user re-runs the check in
   cleanLayers();
   writeProj('panes=3\n');
   writeFakeCli(FAKES, 'herdr', 'process.exit(0);\n'); // no host herdr may be called
-  const r = spawnSync(nodeBin(), [JS_ENTRY, 'doctor', '--fix', '--panes', '4'], { cwd: REPO, env: { ...ENV, PATH: FAKES }, encoding: 'utf8', timeout: 60000 });
+  const r = spawnSync(nodeBin(), [JS_ENTRY, 'doctor', '--fix', '--panes', '4'], { cwd: REPO, env: { ...ENV, PATH: [FAKES].join(path.delimiter) }, encoding: 'utf8', timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes('set panes=4'), r.stdout);
   // The preset file freezes no roles or kinds, so the team choice is
@@ -1199,7 +1226,7 @@ if (sub === 'get') {
 }
 `;
   writeFakeCli(FAKES, 'herdr', fake);
-  const env = { ...ENV, PATH: `${FAKES}:/usr/bin:/bin` };
+  const env = { ...ENV, PATH: [FAKES, '/usr/bin', '/bin'].join(path.delimiter) };
   const ctx = ctxOf();
   // A finished report (the recorded path exists and is non-empty) is idle,
   // even over a working state; with the report still missing, working wins.
@@ -1217,7 +1244,7 @@ if (sub === 'get') {
   fs.writeFileSync(path.join(sd, 'last-report-report'), '/does/not/exist.md\n');
   assert.equal(explainActivity('report', sd, ctx, env, REPO), 'waiting for report');
   // No herdr on the PATH at all: the roster alone decides.
-  const envNoHerdr = { ...ENV, PATH: '/usr/bin:/bin' };
+  const envNoHerdr = { ...ENV, PATH: ['/usr/bin', '/bin'].join(path.delimiter) };
   assert.equal(explainActivity('report', sd, ctx, envNoHerdr, REPO), 'waiting for report', 'no herdr: the recorded report waits');
   assert.equal(explainActivity('idle', sd, ctx, envNoHerdr, REPO), 'idle', 'no herdr, no report: idle');
   cleanLayers();
@@ -1289,7 +1316,7 @@ test('explainPrintRunning: the panel count, the preset order and the idle paragr
 });
 
 test('explainStateDir: an unreadable state root lists nothing (bash find 2>/dev/null)', {
-  skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs POSIX permissions and a non-root user' : false,
+  skip: !POSIX_PERMISSION_APPLIES ? 'POSIX permission bits are not enforced here' : false,
 }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-explain-unreadable-'));
   const state = path.join(root, 'state');
@@ -1472,7 +1499,7 @@ test('doctor: the literal key value never appears on stdout/stderr', () => {
     providers: { 'my-provider': { apiKey: 'sk-test-secret', models: [{ id: 'my-model', maxTokens: 20000 }] } },
   }));
   writeFakeCli(FAKES, 'herdr', 'process.exit(0);\n'); // no host herdr may be called
-  const r = spawnSync(nodeBin(), [JS_ENTRY, 'doctor'], { cwd: REPO, env: { ...ENV, PATH: FAKES }, encoding: 'utf8', timeout: 30000 });
+  const r = spawnSync(nodeBin(), [JS_ENTRY, 'doctor'], { cwd: REPO, env: { ...ENV, PATH: [FAKES].join(path.delimiter) }, encoding: 'utf8', timeout: 30000 });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes(`own provider 'my-provider' (pi) has a literal apiKey in ${PI_MODELS_FILE}`), r.stdout);
   assert.ok(!r.stdout.includes('sk-test-secret'), 'stdout leaks the key:\n' + r.stdout);

@@ -926,7 +926,7 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   try {
     sharedTree = sharedTreeEditor(rosterRows(sd), liveAgents(env), agent, wcwd, (r) => roleIsEdit(r, env, cwd));
   } catch { sharedTree = false; }
-  const tmpReports = wcwd !== '' && wcwd !== projectRoot(env, cwd)
+  const tmpReports = wcwd !== '' && !samePath(wcwd, projectRoot(env, cwd))
     ? path.resolve(env.TMPDIR || os.tmpdir(), 'herdr-soho', workspaceId(ctx, env, cwd), 'reports')
     : null;
   const composedAt = (suf) => (tmpReports !== null
@@ -1417,4 +1417,11 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
       // done (or the no-wait `submitted`): waitFor's own rank code, 0 here.
       return wrc === 0 ? 0 : wrc;
   }
+}
+
+// Git and roster paths can use different slash styles on Windows. Compare
+// canonical paths with the selected platform's path rules before routing.
+export function samePath(left, right, platform = process.platform) {
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  return pathApi.relative(left, right) === '';
 }

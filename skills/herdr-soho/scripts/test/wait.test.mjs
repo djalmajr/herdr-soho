@@ -31,8 +31,9 @@ import {
   normalizeApproveScreen, normalizeScreen,
 } from '../lib/wait.mjs';
 import { briefTask, markTaskDone } from '../lib/tasks.mjs';
+import { fileURLToPath } from 'node:url';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
 
 // ---------- fake herdr (Node) ----------
@@ -133,6 +134,7 @@ function makeFix(prefix) {
   writeFakeCli(bin, 'herdr', HERDR_FAKE);
   const env = {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
@@ -1385,7 +1387,7 @@ test('wait: a clean done report keeps the exact line of today', { timeout: 60000
     // of the keys) breaks the byte-identical stdout below.
     const r = waitCmd(fix, ['w', '--timeout', '10000']);
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.stdout, `{"agent":"w","status":"done","report":"${p}"}\n`, 'byte-identical to the line of today');
+    assert.equal(r.stdout, JSON.stringify({ agent: 'w', status: 'done', report: p }) + '\n', 'byte-identical to the line of today');
     assert.ok(!r.stderr.includes('partial'), 'no partial warn for a clean report');
   } finally { fix.cleanup(); }
 });
@@ -1807,13 +1809,17 @@ test('wait: a done report under the $TMPDIR routing is mirrored into the state d
     // Best effort: the $TMPDIR routing is cleaned by the system (the report
     // unreadable) — the copy warns and the done still stands.
     fs.chmodSync(report, 0o000);
+    let unreadable = false;
+    try { fs.readFileSync(report); } catch (error) { unreadable = error.code === 'EACCES' || error.code === 'EPERM'; }
     try {
       const r3 = waitCmd(fix, ['w', '--timeout', '10000']);
       assert.equal(r3.status, 0, 'a copy failure does not change the done');
       assert.deepEqual(jsonLines(r3.stdout), [{ agent: 'w', status: 'done', report }]);
-      const friction = fs.readFileSync(path.join(fix.ws, 'friction.log'), 'utf8');
-      assert.match(friction, /warning\twait\tmirror: could not copy w-20260925T100000\.md of 'w' to the state dir/);
-      assert.ok(!friction.includes('mirror: could not copy w-20260925T100000.brief.md'), 'the readable prompt copy is not warned');
+      if (unreadable) {
+        const friction = fs.readFileSync(path.join(fix.ws, 'friction.log'), 'utf8');
+        assert.match(friction, /warning\twait\tmirror: could not copy w-20260925T100000\.md of 'w' to the state dir/);
+        assert.ok(!friction.includes('mirror: could not copy w-20260925T100000.brief.md'), 'the readable prompt copy is not warned');
+      }
     } finally {
       fs.chmodSync(report, 0o644);
     }
@@ -1851,8 +1857,10 @@ test('wait: the mirror keeps a different existing state file and warns', { timeo
     // kept-warn naming destination and source.
     assert.equal(fs.readFileSync(stateReport, 'utf8'), 'older report\n', 'the different report is kept');
     assert.equal(fs.readFileSync(stateBrief, 'utf8'), 'older brief\n', 'the different brief is kept');
-    assert.equal((friction().match(new RegExp(`kept ${stateReport.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: it differs from ${report}, which was not copied over it`, 'g')) || []).length, 1, friction());
-    assert.equal((friction().match(new RegExp(`kept ${stateBrief.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: it differs from ${composed}, which was not copied over it`, 'g')) || []).length, 1, friction());
+    const reportWarn = `kept ${stateReport}: it differs from ${report}, which was not copied over it`;
+    const briefWarn = `kept ${stateBrief}: it differs from ${composed}, which was not copied over it`;
+    assert.equal(friction().split(reportWarn).length - 1, 1, friction());
+    assert.equal(friction().split(briefWarn).length - 1, 1, friction());
     // The identical case: an earlier mirror already copied the report —
     // the second wait does not rewrite it (the mtime stands) and adds no
     // kept-warn for it.
@@ -1861,7 +1869,7 @@ test('wait: the mirror keeps a different existing state file and warns', { timeo
     const r2 = waitCmd(fix, ['w', '--timeout', '10000']);
     assert.equal(r2.status, 0, r2.stderr);
     assert.equal(fs.statSync(stateReport).mtimeMs, mR, 'the identical report is not rewritten');
-    assert.equal((friction().match(new RegExp(`kept ${stateReport.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'g')) || []).length, 1, 'no new kept-warn for the identical file');
+    assert.equal(friction().split(reportWarn).length - 1, 1, 'no new kept-warn for the identical file');
     // Mutation captured: copyOnce overwriting the different destination
     // (the earlier report lost), the warn missing or naming the wrong
     // paths, or the identical file rewritten (mtime bumped) fail the

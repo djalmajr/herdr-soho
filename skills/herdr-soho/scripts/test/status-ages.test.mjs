@@ -17,12 +17,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { writeFakeCli } from './fakes.mjs';
 import { nodeBin } from './parity.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import { cksumField, normalizeScreen } from '../lib/wait.mjs';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
 
 // ---------- fake herdr (the status tests' fake) ----------
@@ -88,6 +89,7 @@ function makeFix(prefix) {
   writeFakeCli(bin, 'herdr', HERDR_FAKE);
   const env = {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
@@ -100,6 +102,8 @@ function makeFix(prefix) {
     FAKE_SCREEN_DIR: screenDir,
     FAKE_LOG: path.join(root, 'herdr.log'),
     PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    COMSPEC: process.env.COMSPEC,
+    PATHEXT: process.env.PATHEXT,
   };
   fs.writeFileSync(env.FAKE_MODE, 'working\n');
   fs.writeFileSync(env.FAKE_SCREEN, '');

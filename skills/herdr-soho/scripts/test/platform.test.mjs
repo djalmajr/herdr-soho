@@ -9,6 +9,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { JS_ENTRY, nodeBin, fixtureEnv } from './parity.mjs';
 import { userConfigPath, homeDir, readTextFile, findExecutable, atomicWrite } from '../lib/platform.mjs';
+import { canSymlink } from './tools.mjs';
 
 test('userConfigPath: XDG_CONFIG_HOME wins on every platform (decision 4)', (t) => {
   const xdg = '/cfg/home';
@@ -26,10 +27,10 @@ test('userConfigPath: win32 without XDG uses %APPDATA%\\herdr-soho\\config', (t)
 });
 
 test('userConfigPath: Unix without XDG uses ~/.config/herdr-soho/config', (t) => {
-  assert.equal(userConfigPath('linux', { HOME: '/home/dev' }), '/home/dev/.config/herdr-soho/config');
-  assert.equal(userConfigPath('darwin', { HOME: '/Users/dev' }), '/Users/dev/.config/herdr-soho/config');
+  assert.equal(userConfigPath('linux', { HOME: '/home/dev' }), path.join('/home/dev', '.config', 'herdr-soho', 'config'));
+  assert.equal(userConfigPath('darwin', { HOME: '/Users/dev' }), path.join('/Users/dev', '.config', 'herdr-soho', 'config'));
   // An empty XDG_CONFIG_HOME behaves like unset (bash ${:-} semantics).
-  assert.equal(userConfigPath('linux', { XDG_CONFIG_HOME: '', HOME: '/home/dev' }), '/home/dev/.config/herdr-soho/config');
+  assert.equal(userConfigPath('linux', { XDG_CONFIG_HOME: '', HOME: '/home/dev' }), path.join('/home/dev', '.config', 'herdr-soho', 'config'));
 });
 
 test('homeDir: USERPROFILE on win32, HOME elsewhere', (t) => {
@@ -92,9 +93,7 @@ test('findExecutable: finds node on PATH, returns null for unknown names', (t) =
 // atomicWrite (backlog 12): a symlinked dest is written through to the
 // final target of the chain and the link stays a link; nothing is removed
 // before the rename, so an error leaves the links and no temp behind.
-const SYMLINK_SKIP = process.platform === 'win32'
-  ? 'symlink creation needs elevated privileges on Windows; POSIX fixture contract'
-  : false;
+const SYMLINK_SKIP = canSymlink(os.tmpdir()) ? false : 'symlinks need privilege on Windows';
 
 // Mutation captured: renaming over the unresolved `dest` replaces the link with a plain file.
 test('atomicWrite: a symlink to an existing file writes through, keeps the link and the target mode', { skip: SYMLINK_SKIP }, () => {

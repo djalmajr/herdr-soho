@@ -20,6 +20,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { JS_ENTRY, nodeBin, fixtureEnv } from './parity.mjs';
 import { writeFakeCli } from './fakes.mjs';
+import { linkTool } from './tools.mjs';
 import { findExecutable } from '../lib/platform.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import {
@@ -36,6 +37,7 @@ let TMP;
 let BIN;
 let ARGS;
 let MODES;
+let PIDS;
 let ENV;
 
 // The probe fake (Node source, per CLI name): logs its args + the stdin
@@ -64,7 +66,13 @@ function probeFakeSource(name) {
   L.push("  case 'quota2': process.stderr.write('Error: You have hit your usage limit. Try again in 10 minutes.\\n'); process.stdout.write('Error: You have hit your usage limit. Try again in 5 minutes.\\n'); process.exit(1); break;");
   L.push("  case 'quotatime': process.stderr.write('Error: You have hit your usage limit. Try again at 14:30.\\n'); process.exit(1); break;");
   L.push('  case \'hang\': {');
-  L.push("    spawn('sleep', ['10'], { stdio: ['ignore', 'inherit', 'inherit'] });");
+  // The child outlives both ceilings below (5 s unit, 8 s e2e), so a probe
+  // that waited for it would fail them.
+  L.push("    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], { stdio: ['ignore', 'inherit', 'inherit'] });");
+  // Both pids for the cleanup: the child outlives the suite otherwise, and
+  // on Windows the probe kills only cmd.exe behind the .cmd launcher, so
+  // this process outlives it too.
+  L.push("    fs.appendFileSync(process.env.PROBE_PID_DIR + '/pids', `${child.pid}\\n${process.pid}\\n`);");
   L.push('    setTimeout(() => {}, 30000);');
   L.push('    break;');
   L.push('  }');
@@ -94,21 +102,38 @@ test.before(() => {
   BIN = path.join(ROOT, 'bin');
   ARGS = path.join(ROOT, 'args');
   MODES = path.join(ROOT, 'modes');
-  for (const d of [REPO, HOME, CONF, STATE, TMP, BIN, ARGS, MODES]) fs.mkdirSync(d, { recursive: true });
+  PIDS = path.join(ROOT, 'pids');
+  for (const d of [REPO, HOME, CONF, STATE, TMP, BIN, ARGS, MODES, PIDS]) fs.mkdirSync(d, { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: REPO, stdio: 'ignore', timeout: 20000 });
   // git on the controlled PATH (the config loader and the state root shell
   // out to git); the four probe fakes of test-probe.sh — agy/opencode stay
   // absent for the not-installed cases.
   const git = findExecutable('git');
-  if (git) fs.symlinkSync(git, path.join(BIN, 'git'));
+  if (git) linkTool(BIN, 'git', git);
   for (const name of ['pi', 'codex', 'claude', 'grok']) writeFakeCli(BIN, name, probeFakeSource(name));
   ENV = fixtureEnv({
-    HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, HERDR_WORKSPACE_ID: 'ws', TMPDIR: TMP,
+    HOME, USERPROFILE: HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, HERDR_WORKSPACE_ID: 'ws', TMPDIR: TMP,
     PATH: `${BIN}${path.delimiter}/usr/bin${path.delimiter}/bin`,
-    PROBE_ARGS_DIR: ARGS, PROBE_MODE_DIR: MODES,
+    PROBE_ARGS_DIR: ARGS, PROBE_MODE_DIR: MODES, PROBE_PID_DIR: PIDS,
   });
 });
-test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
+// The hang fake's processes outlive the probe (the child always, the fake
+// itself on Windows): end them, then remove the fixture. On Windows a
+// file they held can stay locked briefly after they end, and rmSync's own
+// retries do not cover that there.
+test.after(async () => {
+  let pids = '';
+  try { pids = fs.readFileSync(path.join(PIDS, 'pids'), 'utf8'); } catch { /* no hang ran */ }
+  for (const pid of pids.split('\n').filter(Boolean)) {
+    try { process.kill(Number(pid)); } catch { /* already gone */ }
+  }
+  for (let attempt = 0; ; attempt++) {
+    try { fs.rmSync(ROOT, { recursive: true, force: true }); return; } catch (e) {
+      if (process.platform !== 'win32' || attempt >= 60 || !['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(e.code)) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+});
 
 // Run the entry as a child process (the e2e half); clears the args logs
 // first so "no CLI ran" is provable from their absence.

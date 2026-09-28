@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { nodeBin } from './parity.mjs';
 import { writeFakeCli, listingFake } from './fakes.mjs';
 import { loadConfig, DieError } from '../lib/config.mjs';
@@ -28,7 +28,7 @@ import {
   findReusable, resolvedRoleKind, resolveSpawnEffort, uniqueName,
 } from '../lib/spawn.mjs';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SPAWN_URL = pathToFileURL(path.join(SCRIPTS, 'lib', 'spawn.mjs')).href;
 const CONFIG_URL = pathToFileURL(path.join(SCRIPTS, 'lib', 'config.mjs')).href;
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
@@ -172,6 +172,7 @@ function makeFix(prefix) {
   writeFakeCli(bin, 'grok', `if (process.argv[2] === 'models') process.stdout.write('grok-4.7\\n');\n`);
   const env = {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
@@ -1428,7 +1429,7 @@ test('entry catch: empty-message DieError exits with the code only (herdr passth
   } finally { fix.cleanup(); }
 });
 
-test('spawn: the build lane — capacity 2: open build-2, busy 10 when full, --fresh, reuse', () => {
+test('spawn: the build lane — capacity 2: open build-2, busy 10 when full, --fresh, reuse', { timeout: 60_000 }, () => {
   const fix = makeFix('ha-spawn-cmd-8-');
   try {
     // (a) panes=4: the build lane holds 2 workers. One occupied worker
@@ -2009,7 +2010,7 @@ test('spawn: a relative --cwd is resolved to an absolute directory', { timeout: 
     assert.equal(f[6], path.join(fix.repo, 'wt', 'ai'), 'column 7 holds the absolute cwd');
     r = runSpawn(fix, ['scouter', '--cwd', 'no/such/dir'], { HERDR_SOHO_LANES: 'off' });
     assert.equal(r.status, 2, r.stderr);
-    assert.match(r.stderr, /spawn: --cwd .*no\/such\/dir is not a directory/);
+    assert.ok(r.stderr.includes(`spawn: --cwd ${path.join(fix.repo, 'no', 'such', 'dir')} is not a directory`), r.stderr);
     // Mutation captured: keeping the --cwd as written stores `wt/ai` in
     // column 7; dropping the directory check opens a pane for a missing
     // path.
@@ -2058,10 +2059,10 @@ test('spawn: scoped args stay with their kind; resume flags are refused; a faile
   } finally { fix.cleanup(); }
 });
 
-test('spawn: a session set after the spawn blocks the reuse', { timeout: 60000 }, (t) => {
+test('spawn: a session set after the spawn blocks the reuse', { timeout: 60000 }, async (t) => {
   // Same role: the worker opened without args; a session-layer role arg
   // afterwards makes the requested args differ → no reuse.
-  t.test('same role', { timeout: 60000 }, () => {
+  await t.test('same role', { timeout: 60000 }, () => {
     const { fix, proj } = confFix('ha-spawn-session-after-1-');
     try {
       proj('lanes=off\n');
@@ -2087,7 +2088,7 @@ test('spawn: a session set after the spawn blocks the reuse', { timeout: 60000 }
   });
   // Cross-role: the idle worker opened without args; a session-layer arg
   // for the requested role → no cross-role reuse.
-  t.test('cross-role', { timeout: 60000 }, () => {
+  await t.test('cross-role', { timeout: 60000 }, () => {
     const { fix, proj } = confFix('ha-spawn-session-after-2-');
     try {
       proj('lanes=off\n');
@@ -2110,7 +2111,7 @@ test('spawn: a session set after the spawn blocks the reuse', { timeout: 60000 }
   });
   // Lane: the idle lane worker opened without args; a session-layer lane
   // arg afterwards → kind-mismatch 13 on the next spawn of the lane.
-  t.test('lane', { timeout: 60000 }, () => {
+  await t.test('lane', { timeout: 60000 }, () => {
     const { fix, proj } = confFix('ha-spawn-session-after-3-');
     try {
       proj('lane.build.roles=implementer\nlane.build.kind=grok\n');

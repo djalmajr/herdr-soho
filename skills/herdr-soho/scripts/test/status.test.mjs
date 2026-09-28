@@ -17,8 +17,9 @@ import { spawnSync } from 'node:child_process';
 import { writeFakeCli } from './fakes.mjs';
 import { nodeBin } from './parity.mjs';
 import { loadConfig } from '../lib/config.mjs';
+import { fileURLToPath } from 'node:url';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
 
 // ---------- fake herdr (Node) ----------

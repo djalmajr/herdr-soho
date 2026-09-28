@@ -11,17 +11,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { nodeBin } from './parity.mjs';
 import { atomicWrite } from '../lib/platform.mjs';
 import { sanitizeCause } from '../lib/text.mjs';
+import { relativeStatePath } from '../lib/config.mjs';
 import {
   stateDir, rosterRows, rosterLine, withRosterLock, rosterAppend,
   rosterRemove, rosterSetRole, rosterReplacePane, lastReport, lastReportPath,
   warn, setFrictionLog, nowStamp, nowIso, frictionSafe,
 } from '../lib/state.mjs';
 
-const STATE_MJS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'lib', 'state.mjs');
+const STATE_MJS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'state.mjs');
 const STATE_URL = pathToFileURL(STATE_MJS).href;
 
 function tmp(prefix) {
@@ -175,9 +176,11 @@ test('roster rewrites: keep the 0640 mode of the existing file and leave no temp
     fs.writeFileSync(f, fs.readFileSync(f, 'utf8') + ROW('worker').join('\t') + '\n');
     fs.chmodSync(f, 0o640);
     rosterSetRole(sd, 'worker', 'reviewer');
-    assert.equal(fs.statSync(f).mode & 0o777, 0o640, 'mode kept by set_role rewrite');
+    if (process.platform === 'win32') fs.accessSync(f, fs.constants.W_OK);
+    else assert.equal(fs.statSync(f).mode & 0o777, 0o640, 'mode kept by set_role rewrite');
     rosterRemove(sd, 'worker');
-    assert.equal(fs.statSync(f).mode & 0o777, 0o640, 'mode kept by remove rewrite');
+    if (process.platform === 'win32') fs.accessSync(f, fs.constants.W_OK);
+    else assert.equal(fs.statSync(f).mode & 0o777, 0o640, 'mode kept by remove rewrite');
     assert.deepEqual(fs.readdirSync(sd).filter((n) => n.includes('.tmp')), [], 'no temp file left');
     assert.ok(!fs.existsSync(path.join(sd, 'agents.lock')));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -188,13 +191,15 @@ test('atomicWrite (platform): 0600 for a new file, existing mode kept, no temp',
   try {
     const fresh = path.join(root, 'fresh');
     atomicWrite(fresh, 'x\n');
-    assert.equal(fs.statSync(fresh).mode & 0o777, 0o600);
+    if (process.platform === 'win32') fs.accessSync(fresh, fs.constants.W_OK);
+    else assert.equal(fs.statSync(fresh).mode & 0o777, 0o600);
     const kept = path.join(root, 'kept');
     fs.writeFileSync(kept, 'old\n', { mode: 0o644 });
     fs.chmodSync(kept, 0o644);
     atomicWrite(kept, 'new\n');
     assert.equal(fs.readFileSync(kept, 'utf8'), 'new\n');
-    assert.equal(fs.statSync(kept).mode & 0o777, 0o644);
+    if (process.platform === 'win32') fs.accessSync(kept, fs.constants.W_OK);
+    else assert.equal(fs.statSync(kept).mode & 0o777, 0o644);
     assert.deepEqual(fs.readdirSync(root).filter((n) => n.includes('.tmp')), []);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
@@ -351,7 +356,7 @@ import { workspaceId } from '../lib/state.mjs';
 import { DieError } from '../lib/config.mjs';
 import { writeFakeCli } from './fakes.mjs';
 
-const CONFIG_TEST_URL = pathToFileURL(path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'lib', 'config.mjs')).href;
+const CONFIG_TEST_URL = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'config.mjs')).href;
 
 function wsFakeEnv(root, source) {
   const bin = path.join(root, 'bin');
@@ -418,16 +423,30 @@ test('nowrite: stateDir creates nothing; normal mode still creates the state tre
     // nowrite: the path is returned, nothing is created (no state tree,
     // no .gitignore entry — the gitignoreNeeds path is real here: a fresh
     // work tree that does not ignore .herdr-soho yet).
-    const sd = stateDir(ctx, { ...process.env, HERDR_WORKSPACE_ID: 'ws', HERDR_SOHO_NOWRITE: '1' }, project);
+    const nowriteEnv = { ...process.env, HERDR_WORKSPACE_ID: 'ws', HERDR_SOHO_NOWRITE: '1' };
+    delete nowriteEnv.HERDR_SOHO_DIR;
+    delete nowriteEnv.HERDR_SOHO_STATE_DIR;
+    const sd = stateDir(ctx, nowriteEnv, project);
     assert.equal(sd, path.join(project, '.herdr-soho', 'ws'));
     assert.ok(!fs.existsSync(path.join(project, '.herdr-soho')));
     assert.ok(!fs.existsSync(path.join(project, '.gitignore')));
+    // Mutation captured: checking `root + '/'` instead of path.relative
+    // excludes Windows child paths and omits the state directory from gitignore.
     // Control: without the env the state tree and the .gitignore entry
     // appear (normal CLI behavior is unchanged).
-    const sd2 = stateDir(ctx, { ...process.env, HERDR_WORKSPACE_ID: 'ws' }, project);
+    const normalEnv = { ...process.env, HERDR_WORKSPACE_ID: 'ws' };
+    delete normalEnv.HERDR_SOHO_DIR;
+    delete normalEnv.HERDR_SOHO_STATE_DIR;
+    const sd2 = stateDir(ctx, normalEnv, project);
     assert.ok(fs.statSync(path.join(sd2, 'briefs')).isDirectory());
     assert.match(fs.readFileSync(path.join(project, '.gitignore'), 'utf8'), /^\.herdr-soho\/$/m);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('relativeStatePath uses Windows separators and rejects sibling paths', () => {
+  const root = 'C:\\workspace\\repo';
+  assert.equal(relativeStatePath(root, 'C:\\workspace\\repo\\.herdr-soho\\ws', path.win32), path.win32.join('.herdr-soho', 'ws'));
+  assert.equal(relativeStatePath(root, 'C:\\workspace\\repo-copy\\.herdr-soho', path.win32), '');
 });
 
 test('nowrite: the entry guard rejects non-exact invocations before any project write', { timeout: 120000 }, () => {
@@ -437,7 +456,7 @@ test('nowrite: the entry guard rejects non-exact invocations before any project 
     fs.mkdirSync(project, { recursive: true });
     assert.equal(spawnSync('git', ['init', '--quiet'], { cwd: project, encoding: 'utf8' }).status, 0);
     const before = fs.readdirSync(project).sort();
-    const entry = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'herdr-soho.mjs');
+    const entry = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'herdr-soho.mjs');
     const env = { ...process.env, HERDR_SOHO_NOWRITE: '1', HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'ws' };
     // `doctor --fix` can still write: it is rejected, with every other
     // non-exact invocation, before any state write. The rejection names

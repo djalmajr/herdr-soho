@@ -16,6 +16,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { goldenScenario } from './parity.mjs';
+import { writeFakeCli } from './fakes.mjs';
 
 // The fixture contract is POSIX (the sh fake CLIs), so the scenarios are
 // skipped on Windows.
@@ -38,7 +39,7 @@ const CODEX_JSON = JSON.stringify({
 // run time (after the seed ran).
 const envState = { fakes: '' };
 const fakePathEnv = () => ({
-  get PATH() { return `${envState.fakes}${path.delimiter}${process.env.PATH}`; },
+  get PATH() { return `${envState.fakes}${path.delimiter}${path.dirname(process.execPath)}`; },
 });
 
 function seed(fix) {
@@ -49,6 +50,10 @@ function seed(fix) {
     const f = path.join(fakes, name);
     fs.writeFileSync(f, lines.join('\n') + '\n', { mode: 0o755 });
   };
+  // The kinds table's installed column is part of this golden: provide every
+  // CLI it marks installed without inheriting the invoking host's PATH.
+  writeFakeCli(fakes, 'claude', '');
+  writeFakeCli(fakes, 'codex', '');
   fake('grok', [
     '#!/bin/sh',
     'if [ "$1" = "models" ]; then',
@@ -67,6 +72,8 @@ function seed(fix) {
     '  printf "%s\\n" "grok-4.7-max - xAI Grok 4.7 (max)" "grok-4.7-high - xAI Grok 4.7 (high)" "grok-4.6 - xAI Grok 4.6" "claude-opus-4-8-max - Anthropic Claude Opus 4.8 (max)"',
     'fi',
   ]);
+  writeFakeCli(fakes, 'pi', '');
+  writeFakeCli(fakes, 'opencode', '');
   const codexDir = path.join(fix.home, '.codex');
   fs.mkdirSync(codexDir, { recursive: true });
   fs.writeFileSync(path.join(codexDir, 'models_cache.json'), CODEX_JSON);

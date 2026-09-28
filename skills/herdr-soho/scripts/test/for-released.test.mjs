@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { forSpecFamily } from '../lib/dispatch.mjs';
 import { DieError } from '../lib/config.mjs';
+import { writeFakeCli } from './fakes.mjs';
 
 const scripts = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ENTRY = path.join(scripts, 'herdr-soho.mjs');
@@ -15,10 +16,16 @@ function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-for-released-'));
   const sd = path.join(root, 'state', 'ws');
   const tmp = path.join(root, 'tmp', 'herdr-soho', 'ws', 'reports');
+  const bin = path.join(root, 'bin');
   fs.mkdirSync(path.join(sd, 'briefs'), { recursive: true });
   fs.mkdirSync(path.join(sd, 'reports'), { recursive: true });
   fs.mkdirSync(tmp, { recursive: true });
-  const env = { HERDR_WORKSPACE_ID: 'ws', HERDR_SOHO_DIR: path.dirname(sd), TMPDIR: path.join(root, 'tmp') };
+  fs.mkdirSync(bin, { recursive: true });
+  writeFakeCli(bin, 'herdr', '');
+  const env = {
+    HERDR_WORKSPACE_ID: 'ws', HERDR_SOHO_DIR: path.dirname(sd), TMPDIR: path.join(root, 'tmp'),
+    PATH: `${bin}${path.delimiter}${path.dirname(process.execPath)}`,
+  };
   const ctx = {};
   const add = (agent, ts, kind, model, submission = 'accepted', dir = path.join(sd, 'briefs')) => {
     const stem = `${agent}-${ts}`;
@@ -77,7 +84,7 @@ test('a reviewer is refused when a released author shares its family', () => {
     const brief = path.join(f.root, 'review.md');
     fs.writeFileSync(brief, '# Goal\n\nReview this.\n\n# Expected result\n\nReviewed.\n\n# Forbidden\n\nDo not commit or push.\n\n# Report\n\nDone.\n');
     const r = spawnSync(process.execPath, [ENTRY, 'dispatch', 'reviewer', brief, '--for', 'build', '--no-wait'], {
-      cwd: f.root, env: { ...f.env, HERDR_ENV: '1', PATH: process.env.PATH }, encoding: 'utf8', timeout: 30_000,
+      cwd: f.root, env: { ...f.env, HERDR_ENV: '1' }, encoding: 'utf8', timeout: 30_000,
     });
     // Mutation captured: bypassing released-author metadata lets a same-family review dispatch through instead of exit 5.
     assert.equal(r.status, 5, `${r.stdout}${r.stderr}`);

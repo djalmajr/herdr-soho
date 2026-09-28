@@ -12,9 +12,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { nodeBin } from './parity.mjs';
+import { writeFakeCli } from './fakes.mjs';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
 
 function makeFix(prefix) {
@@ -22,6 +24,9 @@ function makeFix(prefix) {
   root = fs.realpathSync(root);
   const state = path.join(root, 'state');
   fs.mkdirSync(state, { recursive: true });
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  writeFakeCli(bin, 'herdr', '');
   const env = {
     HOME: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
@@ -29,7 +34,7 @@ function makeFix(prefix) {
     HERDR_SOHO_DIR: state,
     HERDR_WORKSPACE_ID: 'ws',
     HERDR_ENV: '1',
-    PATH: process.env.PATH,
+    PATH: `${bin}${path.delimiter}${process.env.PATH}`,
   };
   const fix = {
     root,

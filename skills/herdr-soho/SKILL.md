@@ -1540,9 +1540,12 @@ issue on the skill's repo so the maintainer can improve it incrementally.
 The ported commands have JS tests that run under either runtime:
 
 ```bash
-node --test scripts/test/    # JS tests (Node 20+)
-bun test scripts/test/       # the same tests under Bun
+node --test scripts/test/                # JS tests (Node 20+)
+bun test --timeout 60000 scripts/test/   # the same tests under Bun
 ```
+
+Bun's default per-test timeout (5 s) is too short for the process-heavy
+tests on slower hosts such as Windows, hence `--timeout`.
 
 The regression matrix is every suite in `scripts/test-*.sh` — bash suites
 that exercise the JS through the POSIX `scripts/herdr-soho` launcher — each run

@@ -12,18 +12,46 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { loadConfig, configKeyOk, configValueOk } from '../lib/config.mjs';
+import { loadConfig, configKeyOk, configValueOk, stateGitignoreRel } from '../lib/config.mjs';
 import { SETUP_START } from '../lib/setuptext.mjs';
 import {
   LOCAL_INSTRUCTION_FILE, assertSafeLocalRels, classifyStateDir, excludeAfterText, excludeEntry, excludePathFor, gitCommonDirFor, gitDirFor,
-  localRels, localTarget, missingExcludeEntries, resolveSetupMode, stateDirShown,
+  localRels, localTarget, missingExcludeEntries, normalizeGitPath, resolveSetupMode, setupTargetPath, stateDirRelShown, stateDirShown,
 } from '../lib/setuplocal.mjs';
 import { cmdSetup, setupTargetExisting } from '../lib/commands/setup.mjs';
 import { cmdSetupPlan } from '../lib/commands/setup-plan.mjs';
 import { ENTRY_SCRIPT } from '../lib/commands/doctor.mjs';
 import { fixtureEnv, nodeBin, JS_ENTRY } from './parity.mjs';
+import { canSymlink } from './tools.mjs';
 
 const git = (repo, ...args) => spawnSync('git', args, { cwd: repo, env: process.env, encoding: 'utf8', timeout: 30000 });
+function posixPermissionsEnforced() {
+  if (process.platform === 'win32' || process.getuid?.() === 0) return false;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-permission-probe-'));
+  const file = path.join(dir, 'file');
+  const child = path.join(dir, 'child');
+  fs.mkdirSync(child);
+  fs.writeFileSync(file, 'x');
+  let deniedRead = false;
+  let deniedWrite = false;
+  try {
+    fs.chmodSync(file, 0o000);
+    try { fs.readFileSync(file); } catch { deniedRead = true; }
+    fs.chmodSync(child, 0o000);
+    try { fs.writeFileSync(path.join(child, 'blocked'), 'x'); } catch { deniedWrite = true; }
+    return deniedRead && deniedWrite;
+  } finally {
+    fs.chmodSync(file, 0o600);
+    fs.chmodSync(child, 0o700);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+const POSIX_PERMISSION_SKIP = posixPermissionsEnforced() ? false : 'POSIX permission bits are not enforced here';
+const skipIfSymlinksUnavailable = (t, dir) => {
+  if (canSymlink(dir)) return false;
+  t.skip('symlinks need privilege on Windows');
+  return true;
+};
 
 // A disposable fork fixture: git repo with an upstream-tracked CLAUDE.md
 // and .gitignore (committed, so ls-files sees them), plus isolated
@@ -40,7 +68,7 @@ function forkFixture() {
   git(repo, 'init', '-q');
   git(repo, 'config', 'user.name', 'test');
   git(repo, 'config', 'user.email', 'test@example.com');
-  const env = fixtureEnv({ HOME: home, XDG_CONFIG_HOME: conf, HERDR_SOHO_DIR: state, TMPDIR: tmp });
+  const env = fixtureEnv({ HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: conf, HERDR_SOHO_DIR: state, TMPDIR: tmp });
   return { dir, repo, home, conf, state, tmp, env };
 }
 
@@ -130,6 +158,21 @@ test('gitDirFor: real git dir, .git-as-file, and outside git', () => {
     assert.equal(gitDirFor(repo, process.env), real, 'the .git file is followed');
     assert.equal(gitDirFor(path.join(dir, 'home'), process.env), '', 'outside git: empty');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Windows paths from Git and setup targets use native separators', () => {
+  assert.equal(normalizeGitPath('C:/Users/test/repo/.git', 'win32'), path.win32.normalize('C:/Users/test/repo/.git'));
+  assert.equal(setupTargetPath('C:/Users/test/repo', 'OTHER.md', 'win32'), path.win32.join('C:/Users/test/repo', 'OTHER.md'));
+  const winRoot = path.win32.normalize('C:/Users/test/repo');
+  assert.equal(stateGitignoreRel(winRoot, 'C:/Users/test/repo/.herdr-soho/ws', path.win32), '.herdr-soho/ws');
+  assert.equal(stateGitignoreRel('c:/users/test/repo', 'C:\\Users\\test\\repo\\.herdr-soho', path.win32), '.herdr-soho');
+  assert.equal(stateGitignoreRel(winRoot, 'C:/Users/test/other/.herdr-soho', path.win32), '');
+  assert.equal(stateGitignoreRel(winRoot, 'C:/Users/test/repo', path.win32), '');
+  assert.equal(excludeEntry('deep\\cache'), '/deep/cache');
+  assertSafeLocalRels(['deep\\cache'], 'setup', 'win32');
+  // Mutation captured: raw Git paths, root + '/' target construction, or
+  // POSIX-only exclude validation leaves mixed separators or refuses the
+  // valid Windows relative path; root + '/' containment misses descendants.
 });
 
 test('excludePathFor: the file git reads — plain repo and linked worktree', () => {
@@ -339,6 +382,7 @@ test('setup_target=local makes plain setup and plan choose local; --target still
     const planTarget = run(repo, env, ['setup', '--plan', '--target', 'OTHER.md']);
     assert.equal(planTarget.status, 0, planTarget.stderr);
     assert.ok(planTarget.stdout.includes(path.join(repo, 'OTHER.md')), 'plan --target overrides too');
+    // Mutation captured: root + '/' construction prints mixed separators on Windows.
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -527,8 +571,8 @@ test('doctor: missing hooks point at setup --local for local setups, canonical o
 
 test('localRels: the instruction file plus the state dir only when it lives under the root', () => {
   const ctx = loadConfig(process.env, process.cwd());
-  const root = '/repo';
-  const outside = localRels(root, ctx, { ...process.env, HERDR_SOHO_DIR: '/tmp/state' }, root);
+  const root = path.resolve(os.tmpdir(), 'repo');
+  const outside = localRels(root, ctx, { ...process.env, HERDR_SOHO_DIR: path.join(os.tmpdir(), 'state') }, root);
   assert.deepEqual(outside, [LOCAL_INSTRUCTION_FILE], 'outside state: file only');
   assert.equal(localTarget(root), path.join(root, LOCAL_INSTRUCTION_FILE));
   // A trailing separator names the same directory (R28 review P2): the rel
@@ -538,7 +582,7 @@ test('localRels: the instruction file plus the state dir only when it lives unde
     const repo = path.join(dir, 'repo');
     fs.mkdirSync(repo, { recursive: true });
     git(repo, 'init', '-q');
-    for (const [value, rel] of [['cache/', 'cache'], ['cache//', 'cache'], ['deep/cache/', 'deep/cache']]) {
+    for (const [value, rel] of [['cache/', 'cache'], ['cache//', 'cache'], [`deep${path.sep}cache${path.sep}`, path.join('deep', 'cache')]]) {
       assert.deepEqual(
         localRels(repo, ctx, { ...process.env, HERDR_SOHO_DIR: value }, repo),
         [LOCAL_INSTRUCTION_FILE, rel],
@@ -555,9 +599,10 @@ test('localRels: the instruction file plus the state dir only when it lives unde
 
 // ---------- symlinked local target (R28 review P1) ----------
 
-test('setup --local refuses a symlinked CLAUDE.local.md (rc 4) before any mutation', { timeout: 120000 }, () => {
+test('setup --local refuses a symlinked CLAUDE.local.md (rc 4) before any mutation', { timeout: 120000 }, (t) => {
   const { dir, repo, env } = forkFixture();
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
     seedUpstream(repo);
     const beforeClaude = fs.readFileSync(path.join(repo, 'CLAUDE.md'), 'utf8');
     const beforeExclude = excludeOf(repo);
@@ -575,9 +620,10 @@ test('setup --local refuses a symlinked CLAUDE.local.md (rc 4) before any mutati
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --plan --local refuses a symlinked CLAUDE.local.md (rc 4) with no output or mutation', { timeout: 120000 }, () => {
+test('setup --plan --local refuses a symlinked CLAUDE.local.md (rc 4) with no output or mutation', { timeout: 120000 }, (t) => {
   const { dir, repo, env } = forkFixture();
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
     seedUpstream(repo);
     const beforeExclude = excludeOf(repo);
     fs.symlinkSync('CLAUDE.md', path.join(repo, 'CLAUDE.local.md'));
@@ -598,14 +644,29 @@ test('setup --plan --local refuses a symlinked CLAUDE.local.md (rc 4) with no ou
 
 // ---------- unsafe state-dir exclude patterns (R28 review P2) ----------
 
+test('stateDirRelShown uses Git separators for Windows relative state paths', () => {
+  // Mutation captured: retaining the native Windows separator prints a\\b/ instead of a/b/.
+  assert.equal(stateDirRelShown('a\\b', 'win32'), 'a/b/');
+  assert.equal(stateDirRelShown('a\\b', 'posix'), 'a\\b/');
+});
+
 test('assertSafeLocalRels: glob metas, injection and traversal die 4; plain, !/#-leading and trailing-slash names pass', () => {
-  for (const bad of ['*', '?', '[ab]', 'a[b', 'a]b', 'back\\slash', '../evil', 'a/../b', './x', 'a//b', 'x\n/y', 'x\ry']) {
+  for (const bad of ['*', '?', '[ab]', 'a[b', 'a]b', '../evil', 'a/../b', './x', 'a//b', 'x\n/y', 'x\ry']) {
     assert.throws(
       () => assertSafeLocalRels([LOCAL_INSTRUCTION_FILE, bad], 'setup'),
       (e) => e.name === 'DieError' && e.code === 4,
       `rejected: '${bad}'`,
     );
   }
+  assert.throws(
+    () => assertSafeLocalRels([LOCAL_INSTRUCTION_FILE, 'back\\slash'], 'setup', 'posix'),
+    (e) => e.name === 'DieError' && e.code === 4,
+    'backslash is not a POSIX separator',
+  );
+  assert.doesNotThrow(
+    () => assertSafeLocalRels([LOCAL_INSTRUCTION_FILE, 'back\\slash'], 'setup', 'win32'),
+    'Windows backslash is normalized to back/slash before validation',
+  );
   assert.doesNotThrow(() => assertSafeLocalRels(
     [LOCAL_INSTRUCTION_FILE, '.herdr-soho', 'foo/bar', 'my state', '!bang', '#hash'], 'setup',
   ), 'ordinary names and !/#-leading names pass');
@@ -690,7 +751,8 @@ test('setup --local accepts ordinary and !/#-leading state dirs; unrelated untra
 
 // ---------- unreadable exclude file (R28 review: ENOENT-only absence) ----------
 
-test('setup --local fails rc 4 on an unreadable exclude file, preserving bytes and writing nothing', { timeout: 120000 }, () => {
+test('setup --local fails rc 4 on an unreadable exclude file, preserving bytes and writing nothing', { timeout: 120000 }, (t) => {
+  if (POSIX_PERMISSION_SKIP) { t.skip(POSIX_PERMISSION_SKIP); return; }
   const { dir, repo, env } = forkFixture();
   try {
     seedUpstream(repo);
@@ -738,11 +800,12 @@ test('setup --local and --plan both fail rc 4 when the exclude path is a directo
 
 // ---------- exclude preflight before the panes preset (R28 review P2) ----------
 
-test('setup --local --panes refuses an unreadable exclude (rc 4) before the panes preset lands in the tracked config', { timeout: 180000 }, () => {
+test('setup --local --panes refuses an unreadable exclude (rc 4) before the panes preset lands in the tracked config', { timeout: 180000 }, async (t) => {
   // The project config is tracked upstream, so the refusal must leave it
   // byte-identical: the panes write used to land before the exclude read
   // failed.
-  for (const kind of ['directory', 'unreadable']) {
+  for (const kind of ['directory', 'unreadable']) await t.test(kind, async (t) => {
+    if (kind === 'unreadable' && POSIX_PERMISSION_SKIP) { t.skip(POSIX_PERMISSION_SKIP); return; }
     const { dir, repo, env } = forkFixture();
     try {
       fs.mkdirSync(path.join(repo, '.agents'), { recursive: true });
@@ -768,11 +831,12 @@ test('setup --local --panes refuses an unreadable exclude (rc 4) before the pane
       // Mutation captured: the panes preset written before the exclude
       // failure, or any block/hooks write, fails the asserts above.
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  }
+  });
 });
 
-test('setup --plan --local --panes refuses an unreadable exclude (rc 4) before showing a plan', { timeout: 180000 }, () => {
-  for (const kind of ['directory', 'unreadable']) {
+test('setup --plan --local --panes refuses an unreadable exclude (rc 4) before showing a plan', { timeout: 180000 }, async (t) => {
+  for (const kind of ['directory', 'unreadable']) await t.test(kind, async (t) => {
+    if (kind === 'unreadable' && POSIX_PERMISSION_SKIP) { t.skip(POSIX_PERMISSION_SKIP); return; }
     const { dir, repo, env } = forkFixture();
     try {
       seedUpstream(repo);
@@ -795,7 +859,7 @@ test('setup --plan --local --panes refuses an unreadable exclude (rc 4) before s
       // Mutation captured: the panes diff shown as a successful plan, or
       // any mutation, fails the asserts above.
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  }
+  });
 });
 
 test('setup --plan --local --panes on a healthy exclude still shows the panes and exclude diffs', { timeout: 120000 }, () => {
@@ -826,7 +890,8 @@ test('setup --plan --local --panes on a healthy exclude still shows the panes an
 
 // ---------- missing exclude under an unwritable parent (R28 review P2) ----------
 
-test('setup --local --panes refuses a missing exclude under an unwritable parent (rc 4) before the tracked config changes', { timeout: 180000 }, () => {
+test('setup --local --panes refuses a missing exclude under an unwritable parent (rc 4) before the tracked config changes', { timeout: 180000 }, (t) => {
+  if (POSIX_PERMISSION_SKIP) { t.skip(POSIX_PERMISSION_SKIP); return; }
   // The exclude is absent and its parent directory is read-only: the write
   // itself could never land, so the panes preset must not reach the tracked
   // config (it used to land before the atomicWrite failed with EACCES).
@@ -857,7 +922,8 @@ test('setup --local --panes refuses a missing exclude under an unwritable parent
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --plan --local --panes refuses a missing exclude under an unwritable parent (rc 4) with no plan output', { timeout: 120000 }, () => {
+test('setup --plan --local --panes refuses a missing exclude under an unwritable parent (rc 4) with no plan output', { timeout: 120000 }, (t) => {
+  if (POSIX_PERMISSION_SKIP) { t.skip(POSIX_PERMISSION_SKIP); return; }
   const { dir, repo, env } = forkFixture();
   try {
     seedUpstream(repo);
@@ -980,8 +1046,12 @@ test('setup --local refuses a state dir with a trailing-whitespace segment (rc 4
     const { dir, repo, env } = forkFixture();
     try {
       seedUpstream(repo);
-      fs.mkdirSync(path.join(repo, bad), { recursive: true });
-      fs.writeFileSync(path.join(repo, bad, 'state.txt'), 'state\n');
+      // Win32 trims trailing dots/spaces during path lookup, so this exact
+      // untracked directory cannot be represented on Windows.
+      if (process.platform !== 'win32') {
+        fs.mkdirSync(path.join(repo, bad), { recursive: true });
+        fs.writeFileSync(path.join(repo, bad, 'state.txt'), 'state\n');
+      }
       const before = snapshot(repo);
       const beforeExclude = excludeOf(repo);
       const r = run(repo, env, ['setup', '--local'], { HERDR_SOHO_DIR: bad });
@@ -998,8 +1068,10 @@ test('setup --local refuses a state dir with a trailing-whitespace segment (rc 4
       // visible: nothing was excluded, so check-ignore misses it and status
       // still shows it (the state the old code papered over with rc 0).
       assert.notEqual(git(repo, 'check-ignore', '-q', bad).status, 0, `the '${bad}' dir is not ignored`);
-      const st = git(repo, 'status', '--porcelain').stdout;
-      assert.ok(st.includes('??'), `git status still shows the untracked state dir: ${st}`);
+      if (process.platform !== 'win32') {
+        const st = git(repo, 'status', '--porcelain').stdout;
+        assert.ok(st.includes('??'), `git status still shows the untracked state dir: ${st}`);
+      }
       // Mutation captured: a `/cache `-style entry landing in the exclude,
       // any code but 4, or a mutation before the refusal, fails above.
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -1055,11 +1127,11 @@ test('localRels + stateDirShown: ./, interior . and relative-external spellings 
     const ctx = loadConfig(process.env, process.cwd());
     const envOf = (v) => ({ HERDR_SOHO_DIR: v });
     assert.deepEqual(localRels(repo, ctx, envOf('./cache'), repo), [LOCAL_INSTRUCTION_FILE, 'cache'], './cache resolves under the root');
-    assert.deepEqual(localRels(repo, ctx, envOf('a/./b'), repo), [LOCAL_INSTRUCTION_FILE, 'a/b'], 'interior dot resolves');
+    assert.deepEqual(localRels(repo, ctx, envOf('a/./b'), repo), [LOCAL_INSTRUCTION_FILE, path.join('a', 'b')], 'interior dot resolves');
     assert.deepEqual(localRels(repo, ctx, envOf('../outside-state'), repo), [LOCAL_INSTRUCTION_FILE], 'a relative external adds no state entry');
-    assert.deepEqual(localRels(repo, ctx, envOf('cache/'), repo), [LOCAL_INSTRUCTION_FILE, 'cache'], 'trailing separator still normalizes');
-    assert.equal(stateDirShown(repo, ctx, envOf('./cache'), repo), 'cache/', 'shown: ./cache reads cache/');
-    assert.equal(stateDirShown(repo, ctx, envOf('a/./b'), repo), 'a/b/', 'shown: interior dot resolves');
+    assert.deepEqual(localRels(repo, ctx, envOf(`cache${path.sep}`), repo), [LOCAL_INSTRUCTION_FILE, 'cache'], 'trailing separator still normalizes');
+    assert.equal(stateDirShown(repo, ctx, envOf(`.${path.sep}cache`), repo), 'cache/', 'shown: ./cache reads cache/');
+    assert.equal(stateDirShown(repo, ctx, envOf(path.join('a', '.', 'b')), repo), 'a/b/', 'shown: interior dot resolves');
     assert.equal(stateDirShown(repo, ctx, envOf('../outside-state'), repo), path.resolve(repo, '../outside-state'), 'shown: external is the resolved absolute path');
     // path.resolve is lexical: it cannot erase the actual-name risks, which
     // assertSafeLocalRels still refuses on the resolved name (explicit per
@@ -1147,13 +1219,14 @@ test('setup --plan --local and --dry-run accept the ./cache spelling without wri
 // ---------- symlinked root aliases, sibling work trees and worktree-root
 // state dirs (R28 review P1/P2) ----------
 
-test('classifyStateDir: ancestor symlink alias inside, sibling and nested work trees, root, symlink refusal and external', () => {
+test('classifyStateDir: ancestor symlink alias inside, sibling and nested work trees, root, symlink refusal and external', (t) => {
   const { dir, repo } = forkFixture();
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
     seedUpstream(repo);
     const ctx = loadConfig(process.env, process.cwd());
     // PATH so classifyStateDir can ask git for the worktree list.
-    const envOf = (v) => ({ HERDR_SOHO_DIR: v, PATH: process.env.PATH });
+    const envOf = (v) => fixtureEnv({ HERDR_SOHO_DIR: v, PATH: process.env.PATH });
     // A symlink alias in the parent path before the worktree root (the
     // /tmp -> /private/tmp shape): dir/alias/repo spells dir/repo and
     // classifies inside with the plain rel — the state dir need not exist.
@@ -1188,7 +1261,7 @@ test('classifyStateDir: ancestor symlink alias inside, sibling and nested work t
     // The benign counterpart: the interior alias alone (no in-repo
     // symlink in the path) reads inside with the root-relative physical
     // rel — even before the tail exists.
-    assert.deepEqual(classifyStateDir(repo, ctx, envOf(path.join(dir, 'sublink', 'newstate')), repo), { kind: 'inside', rel: 'sub/newstate', shown: 'sub/newstate/' }, 'an interior alias reads inside with the physical rel');
+    assert.deepEqual(classifyStateDir(repo, ctx, envOf(path.join(dir, 'sublink', 'newstate')), repo), { kind: 'inside', rel: path.join('sub', 'newstate'), shown: 'sub/newstate/' }, 'an interior alias reads inside with the physical rel');
     // A final symlink to another in-repo directory: the entry would name a
     // different path than the one the state lands in.
     fs.mkdirSync(path.join(repo, '.herdr-soho'), { recursive: true });
@@ -1228,7 +1301,7 @@ test('classifyStateDir: ancestor symlink alias inside, sibling and nested work t
     } finally { git(repo, 'worktree', 'remove', '--force', nested); }
     // A plain external path and a missing in-repo tail.
     assert.deepEqual(classifyStateDir(repo, ctx, envOf(path.join(dir, 'elsewhere')), repo), { kind: 'external', shown: path.join(dir, 'elsewhere') }, 'plain external');
-    assert.deepEqual(classifyStateDir(repo, ctx, envOf('deep/cache'), repo), { kind: 'inside', rel: 'deep/cache', shown: 'deep/cache/' }, 'missing tail is walked past');
+    assert.deepEqual(classifyStateDir(repo, ctx, envOf(path.join('deep', 'cache')), repo), { kind: 'inside', rel: path.join('deep', 'cache'), shown: 'deep/cache/' }, 'missing tail is walked past');
     // Mutation captured: following a symlink below the root (loop/cache
     // reads cache/), classifying a direct outside alias as external (no
     // entry), accepting an in-repo symlink reached through an outside
@@ -1238,11 +1311,12 @@ test('classifyStateDir: ancestor symlink alias inside, sibling and nested work t
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --local with a symlinked spelling of the in-repo state dir writes the root-anchored entry and says ignored', { timeout: 180000 }, () => {
+test('setup --local with a symlinked spelling of the in-repo state dir writes the root-anchored entry and says ignored', { timeout: 180000 }, (t) => {
   const { dir, repo, env } = forkFixture();
-  const link = path.join(dir, 'link');
-  fs.symlinkSync(repo, link);
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
+    const link = path.join(dir, 'link');
+    fs.symlinkSync(repo, link);
     seedUpstream(repo);
     // The alias is real: git reports the physical root, not the link
     // spelling, so the containment test must bridge the two.
@@ -1275,9 +1349,10 @@ test('setup --local with a symlinked spelling of the in-repo state dir writes th
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --local, --plan and --dry-run refuse an in-repo symlink state path (rc 4) before any mutation; an external-target link still works', { timeout: 240000 }, () => {
+test('setup --local, --plan and --dry-run refuse an in-repo symlink state path (rc 4) before any mutation; an external-target link still works', { timeout: 240000 }, (t) => {
   const { dir, repo, env } = forkFixture();
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
     seedUpstream(repo);
     // loop -> this worktree root (untracked, inside the checkout), plus
     // an unrelated cache/ dir: the old whole-path realpath miss wrote
@@ -1343,9 +1418,10 @@ test('setup --local, --plan and --dry-run refuse an in-repo symlink state path (
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --local, --plan and --dry-run refuse an in-repo symlink reached through an outside alias (rc 4) before any mutation', { timeout: 240000 }, () => {
+test('setup --local, --plan and --dry-run refuse an in-repo symlink reached through an outside alias (rc 4) before any mutation', { timeout: 240000 }, (t) => {
   const { dir, repo, env } = forkFixture();
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
     seedUpstream(repo);
     // parent/link -> repo (outside the checkout) plus repo/loop -> repo
     // (inside the checkout): the state path dir/link/loop/cache reaches
@@ -1393,9 +1469,10 @@ test('setup --local, --plan and --dry-run refuse an in-repo symlink reached thro
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --local, --plan and --dry-run refuse an in-repo symlink reached through an alias to an interior directory (rc 4) before any mutation', { timeout: 240000 }, () => {
+test('setup --local, --plan and --dry-run refuse an in-repo symlink reached through an alias to an interior directory (rc 4) before any mutation', { timeout: 240000 }, (t) => {
   const { dir, repo, env } = forkFixture();
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
     seedUpstream(repo);
     // sublink -> repo/sub (an alias to an INTERIOR directory) plus
     // repo/sub/loop -> repo (inside the checkout): the state path
@@ -1438,7 +1515,7 @@ test('setup --local, --plan and --dry-run refuse an in-repo symlink reached thro
     const r2 = run(repo, env, ['setup', '--local', '--no-hooks'], { HERDR_SOHO_DIR: path.join(dir, 'sublink', 'newstate') });
     assert.equal(r2.status, 0, `the interior alias reads inside, not external: ${r2.stderr}`);
     assert.ok(excludeOf(repo).split('\n').includes('/sub/newstate'), `the entry for the physical location: ${excludeOf(repo)}`);
-    assert.ok(r2.stdout.split('\n').includes('state dir ignored: sub/newstate/'), `the exact line: ${r2.stdout}`);
+      assert.ok(r2.stdout.split('\n').includes(`state dir ignored: ${path.join('sub', 'newstate')}/`), `the exact line: ${r2.stdout}`);
     fs.mkdirSync(path.join(repo, 'sub', 'newstate'), { recursive: true });
     fs.writeFileSync(path.join(repo, 'sub', 'newstate', 'file'), 'state\n');
     assert.equal(git(repo, 'check-ignore', '-q', 'sub/newstate/file').status, 0, 'real git: check-ignore matches after creation');
@@ -1634,9 +1711,10 @@ test('stateDirShown: relative and trailing-slash overrides, external absolute, d
   try {
     const ctx = loadConfig(env, repo);
     assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: 'cache' }, repo), 'cache/', 'relative override');
-    assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: 'cache/' }, repo), 'cache/', 'trailing separator reads the same');
-    assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: 'deep/my cache' }, repo), 'deep/my cache/', 'nested interior space');
-    assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: '/abs/elsewhere/state' }, repo), '/abs/elsewhere/state', 'external: the actual absolute path');
+    assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: `cache${path.sep}` }, repo), 'cache/', 'trailing separator reads the same');
+    assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: path.join('deep', 'my cache') }, repo), 'deep/my cache/', 'nested interior space');
+    const external = path.resolve(os.tmpdir(), 'abs', 'elsewhere', 'state');
+    assert.equal(stateDirShown(repo, ctx, { ...env, HERDR_SOHO_DIR: external }, repo), external, 'external: the actual absolute path');
     // Mutation captured: formatting the cfg default instead of the effective
     // path fails the override asserts above.
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -1776,9 +1854,10 @@ test('setup --plan --local, --dry-run and canonical setup refuse a bad --lane ki
 
 // ---------- symlinked git exclude (write-through onto tracked .gitignore) ----------
 
-test('setup --local refuses a symlinked git exclude (rc 4) before any mutation', { timeout: 120000 }, () => {
+test('setup --local refuses a symlinked git exclude (rc 4) before any mutation', { timeout: 120000 }, (t) => {
   const { dir, repo, env } = forkFixture();
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
     seedUpstream(repo);
     const beforeIgnore = fs.readFileSync(path.join(repo, '.gitignore'), 'utf8');
     const exclPath = path.join(repo, '.git', 'info', 'exclude');
@@ -1797,9 +1876,10 @@ test('setup --local refuses a symlinked git exclude (rc 4) before any mutation',
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --plan --local refuses a symlinked git exclude (rc 4) with no output or mutation', { timeout: 120000 }, () => {
+test('setup --plan --local refuses a symlinked git exclude (rc 4) with no output or mutation', { timeout: 120000 }, (t) => {
   const { dir, repo, env } = forkFixture();
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
     seedUpstream(repo);
     const beforeIgnore = fs.readFileSync(path.join(repo, '.gitignore'), 'utf8');
     const exclPath = path.join(repo, '.git', 'info', 'exclude');
@@ -1854,9 +1934,10 @@ function seedSymlinkedInfo(repo) {
   fs.symlinkSync('..', info); // .git/info -> the repo root
 }
 
-test('setup --local refuses a symlinked .git/info ancestor (rc 4) with the tracked exclude byte-identical', { timeout: 120000 }, () => {
+test('setup --local refuses a symlinked .git/info ancestor (rc 4) with the tracked exclude byte-identical', { timeout: 120000 }, (t) => {
   const { dir, repo, env } = forkFixture();
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
     seedUpstream(repo);
     seedSymlinkedInfo(repo);
     const tracked = path.join(repo, 'exclude');
@@ -1880,9 +1961,10 @@ test('setup --local refuses a symlinked .git/info ancestor (rc 4) with the track
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --plan --local refuses a symlinked .git/info ancestor (rc 4) with no output or mutation', { timeout: 120000 }, () => {
+test('setup --plan --local refuses a symlinked .git/info ancestor (rc 4) with no output or mutation', { timeout: 120000 }, (t) => {
   const { dir, repo, env } = forkFixture();
   try {
+    if (skipIfSymlinksUnavailable(t, dir)) return;
     seedUpstream(repo);
     seedSymlinkedInfo(repo);
     const tracked = path.join(repo, 'exclude');
@@ -2036,7 +2118,8 @@ test('setup --plan --local and setup --local --dry-run: no writeFileSync/unlinkS
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('setup --local --dry-run refuses a missing exclude under an unwritable parent (rc 4) with no output', { timeout: 120000 }, () => {
+test('setup --local --dry-run refuses a missing exclude under an unwritable parent (rc 4) with no output', { timeout: 120000 }, (t) => {
+  if (POSIX_PERMISSION_SKIP) { t.skip(POSIX_PERMISSION_SKIP); return; }
   // The dry-run preflight is read-only (no write probe) but must refuse the
   // same unwritable parent the plan and the real setup refuse, with empty
   // stdout — the would-lines are printed only after the refusal passes.

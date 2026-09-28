@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { writeFakeCli } from './fakes.mjs';
 
 const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -36,10 +36,11 @@ function makeFix(prefix) {
   writeFakeCli(bin, 'herdr', HERDR);
   const fail = path.join(root, 'fail-prompt');
   const env = {
-    HOME: path.join(root, 'home'), XDG_CONFIG_HOME: path.join(root, 'conf'), TMPDIR: tmp,
+    HOME: path.join(root, 'home'), USERPROFILE: path.join(root, 'home'), XDG_CONFIG_HOME: path.join(root, 'conf'), TMPDIR: tmp,
     HERDR_SOHO_DIR: stateRoot, HERDR_WORKSPACE_ID: 'ws', HERDR_ENV: '1',
     HERDR_SOHO_PROMPT_CHECK_SECONDS: '0', HERDR_SOHO_WAIT_POLL_MS: '20',
     FAKE_PROMPT_FAIL: fail, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    COMSPEC: process.env.COMSPEC, PATHEXT: process.env.PATHEXT,
   };
   fs.writeFileSync(path.join(ws, 'agents.tsv'), H12 + `build\tp-build\tclaude\timplementer\tanthropic\t1\t${repo}\tnow\tclaude-3\tfull\timplementer\t\n`);
   const stub = path.join(root, 'deny-symlink.mjs');
@@ -49,7 +50,9 @@ function makeFix(prefix) {
   fs.writeFileSync(brief, BRIEF);
   fs.writeFileSync(amend, AMEND);
   const run = (args, { noSymlink = false } = {}) => {
-    const preload = noSymlink ? (process.versions.bun ? ['--preload', stub] : ['--import', stub]) : [];
+    const preload = noSymlink
+      ? (process.versions.bun ? ['--preload', stub] : ['--import', pathToFileURL(stub).href])
+      : [];
     return spawnSync(process.execPath, [...preload, ENTRY, ...args], { cwd: repo, env, encoding: 'utf8', timeout: 60_000 });
   };
   return { root, repo, ws, env, fail, stub, brief, amend, run, cleanup() { fs.rmSync(root, { recursive: true, force: true }); } };

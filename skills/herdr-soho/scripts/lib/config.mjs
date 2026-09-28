@@ -173,7 +173,7 @@ export function configFileFor(where, env = process.env, cwd = process.cwd()) {
 export function stateRootPath(ctx, env = process.env, cwd = process.cwd()) {
   const root = projectRoot(env, cwd);
   let d = env.HERDR_SOHO_DIR || stateDirSetting(ctx, env, cwd);
-  if (!path.isAbsolute(d)) d = root + '/' + d;
+  if (!path.isAbsolute(d)) d = path.resolve(root, d);
   return d;
 }
 
@@ -198,21 +198,34 @@ export function nowrite(env = process.env) {
   return env.HERDR_SOHO_NOWRITE === '1';
 }
 
+export function relativeStatePath(root, statePath, pathApi = path) {
+  const rel = pathApi.relative(root, statePath);
+  if (rel === '' || rel === '..' || rel.startsWith(`..${pathApi.sep}`) || pathApi.isAbsolute(rel)) return '';
+  return rel;
+}
+
+// The state dir's .gitignore entry: its path under the root with '/'
+// separators (the form Git reads on every platform), or '' when the state
+// dir is not strictly inside the root. stateRoot writes it and setup
+// --plan shows the same line.
+export function stateGitignoreRel(root, statePath, pathApi = path) {
+  return relativeStatePath(root, statePath, pathApi).split(pathApi.sep).join('/');
+}
+
 // state_root() port: also keeps the .gitignore entry current (relative state
 // dir under a git work tree that does not ignore it yet).
 export function stateRoot(ctx, env = process.env, cwd = process.cwd()) {
   const root = projectRoot(env, cwd);
   const d = stateRootPath(ctx, env, cwd);
-  const prefix = root + '/';
-  if (d.startsWith(prefix) && !nowrite(env)) {
-    const rel = d.slice(prefix.length);
+  const gitRel = stateGitignoreRel(root, d);
+  if (gitRel && !nowrite(env)) {
     const wt = spawnSync('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], { env, stdio: 'ignore' });
-    if (wt.status === 0 && gitignoreNeeds(root, rel, env)) {
+    if (wt.status === 0 && gitignoreNeeds(root, gitRel, env)) {
       // Append (not rewrite): a symlinked .gitignore stays a link.
       const gi = path.join(root, '.gitignore');
       let text = '';
       try { text = readTextFile(gi); } catch { /* absent */ }
-      fs.appendFileSync(gi, gitignoreAfter(text, rel).slice(text.length));
+      fs.appendFileSync(gi, gitignoreAfter(text, gitRel).slice(text.length));
     }
   }
   return d;

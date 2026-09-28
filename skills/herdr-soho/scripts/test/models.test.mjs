@@ -31,7 +31,7 @@ function setup() {
   const fakes = path.join(root, 'fakes');
   for (const d of [repo, home, conf, state, tmp, fakes]) fs.mkdirSync(d, { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: repo, stdio: 'ignore' });
-  const env = fixtureEnv({ HOME: home, XDG_CONFIG_HOME: conf, HERDR_SOHO_DIR: state, TMPDIR: tmp });
+  const env = fixtureEnv({ HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: conf, HERDR_SOHO_DIR: state, TMPDIR: tmp });
   return {
     root, repo, home, conf, state, tmp, fakes, env,
     fakeEnv: () => ({ ...env, PATH: `${fakes}${path.delimiter}${process.env.PATH}` }),

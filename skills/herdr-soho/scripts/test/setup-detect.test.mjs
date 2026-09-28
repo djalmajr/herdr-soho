@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { writeFakeCli, listingFake } from './fakes.mjs';
+import { fixtureEnv } from './parity.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import {
   piCustomModelsJson, opencodeCustomModelsJson, effectiveBuildFamily,
@@ -32,14 +33,15 @@ function isoRoot(prefix) {
   const root = tmp(prefix);
   for (const d of ['repo/.agents', 'home', 'conf', 'tmp', 'state']) fs.mkdirSync(path.join(root, d), { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: path.join(root, 'repo'), stdio: 'ignore', timeout: 30000 });
-  const env = {
+  const env = fixtureEnv({
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: path.join(root, 'state'),
     HERDR_WORKSPACE_ID: 'ws-test',
     PATH: path.join(root, 'no-such-dir'),
-  };
+  });
   return {
     root,
     repo: path.join(root, 'repo'),
