@@ -1,5 +1,6 @@
 .agents/
 .herdr-agents/
+.herdr-soho/
 .worktrees/
 node_modules/
 coverage/

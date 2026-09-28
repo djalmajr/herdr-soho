@@ -1,4 +1,4 @@
-# herdr-agents
+# herdr-soho
 
 Give the calling agent an **omp-style team**: one CLI agent per role
 (`scouter`, `researcher`, `designer`, `implementer`, `tasker`, `reviewer`,
@@ -130,7 +130,7 @@ it could not verify goes to open questions, not into the text.
 ## Commands
 
 ```bash
-S=~/.agents/skills/herdr-agents/scripts/herdr-agents   # Windows: herdr-agents.cmd
+S=~/.agents/skills/herdr-soho/scripts/herdr-soho   # Windows: herdr-soho.cmd
 $S init                              # you become `orchestrator`; an untitled pane gets one
 $S title "slice 2"                   # this pane: `orchestrator: slice 2`
 $S roles
@@ -176,7 +176,7 @@ task. A busy worker reads it when its CLI delivers a message sent
 mid-task (most queue it). Never send an amendment with `herdr agent
 prompt` by hand: `wait` would keep watching the old report.
 
-`HERDR_AGENTS_NOWRITE=1` is a read-only inspection mode. The optional
+`HERDR_SOHO_NOWRITE=1` is a read-only inspection mode. The optional
 plugin runs `doctor` and `roster` with it: the CLI still inspects the
 focused project, but only the exact `doctor` and `roster` invocations
 run — no extra arguments, so `doctor --fix` cannot write — and the CLI
@@ -201,7 +201,7 @@ the env, the CLI behaves exactly as before.
 - `--approvals full` removes tool and MCP prompts (each CLI's own flags,
   inside its sandbox). Hook-trust and first-visit trust dialogs are left
   to you; pass the native flag after `--` if you want them gone.
-- State lives in `<repo>/.herdr-agents/` (gitignored) so sandboxed workers
+- State lives in `<repo>/.herdr-soho/` (gitignored) so sandboxed workers
   can write their reports. Codex denies writes under `.agents/` and
   `.codex/`, so the state deliberately avoids those. `clean` removes old
   briefs and reports. The codex `workspace-write` sandbox is narrower than
@@ -230,7 +230,7 @@ the env, the CLI behaves exactly as before.
   `spawn` warns (new and reused workers alike) to give each a git worktree
   (`spawn --cwd <worktree>`), and the worker's composed prompt adds a line
   telling it to report failures in files it does not own as outside its
-  slice. A `done` report routed through `$TMPDIR/herdr-agents/<ws>/reports/`
+  slice. A `done` report routed through `$TMPDIR/herdr-soho/<ws>/reports/`
   is mirrored back into the state dir (best effort).
 - One agent name is one growing session. After several briefs, or when a
   report includes unrelated prior work, close the completed worker with
@@ -242,13 +242,19 @@ the env, the CLI behaves exactly as before.
 
 ## Configuration
 
-`key=value` files layered as skill defaults → `~/.config/herdr-agents/config`
-(user) → `<repo>/.agents/herdr-agents.conf` (project) →
+`key=value` files layered as skill defaults → `~/.config/herdr-soho/config`
+(user) → `<repo>/.agents/herdr-soho.conf` (project) →
 `<state>/session.conf` (this Herdr workspace, via `session set`, never
-versioned) → `HERDR_AGENTS_<KEY>` → flags. `herdr-agents config` shows the
+versioned) → `HERDR_SOHO_<KEY>` → flags. `herdr-soho config` shows the
 effective values and where each came from (scalar keys, then the dotted
 `args.*`/`role.*`/`model.*`/`effort.*`/`lane.*` keys in the file's own
 spelling). `brief_lint_aliases` sets alternate brief section headings.
+Projects and machines set up under the former name `herdr-agents` keep
+working: the CLI reads `HERDR_AGENTS_*`, the `herdr-agents` config files and
+the `.herdr-agents/` state directory while the new names are absent,
+`setup` renames the old block in place (keeping its text) and replaces the
+old hooks, and `doctor` names every
+old name still in use (see the README's migration section).
 For a third-party fork, `setup --plan --local` previews a local
 `CLAUDE.local.md` block and Claude hooks; `setup --local` writes them. Local
 setup keeps the block and state directory out of Git through `info/exclude`,
@@ -304,7 +310,7 @@ alias, or a regex over the ids the CLI lists that resolves to the
 `model.codex.worker=sol|gpt-5`, `model.cursor.worker=grok|muse`,
 `model.agy.worker=gemini|opus`). Projects override any of it, per kind or
 per role (`role.reviewer.model=…`, `role.reviewer.effort=…`,
-`role.reviewer.kind=…`), in `.agents/herdr-agents.conf`.
+`role.reviewer.kind=…`), in `.agents/herdr-soho.conf`.
 
 The one rule that does not move: the reviewer of a slice comes from
 **another model family** than its implementer (`dispatch` enforces it for
@@ -313,7 +319,7 @@ so the check compares with it). For `cursor`, `pi` and `opencode`
 the family comes from the model id. The generic kinds (`pi`, `opencode`)
 ship no default model: set a `provider/id` yourself in the user or project
 file; with none set, the CLI uses its own default
-(`skills/herdr-agents/references/kinds.md`).
+(`skills/herdr-soho/references/kinds.md`).
 
 ## Token budget
 
@@ -340,7 +346,7 @@ by default: a blocked worker is reported and a person decides.
 Lessons from real runs are enforced by the script, not just documented:
 `release --close` refuses to kill a worker mid-task, `dispatch` lints the
 brief structure (read-only roles need no `Owned files`), the reviewer family check is strict by default, and every
-error or warning lands in `herdr-agents friction` for review at the end of
+error or warning lands in `herdr-soho friction` for review at the end of
 a run.
 The brief lint names the reason of every missing section in the warning
 (`Goal` — the worker does not know what the slice is for; `Expected
@@ -458,12 +464,12 @@ start clean.
 
 When the skill itself causes friction, the orchestrator files an issue on
 `feedback_repo` (the skill's own repository) using `templates/issue.md`,
-with the scenario, the exact error, the environment (`herdr-agents env`)
+with the scenario, the exact error, the environment (`herdr-soho env`)
 and the effective config. `feedback=ask|on|off` decides whether it asks
 first.
 
 With `feedback=local`, a maintainer of the skill works on the same
-machine, and no issue is filed. `herdr-agents feedback send <report.md>
+machine, and no issue is filed. `herdr-soho feedback send <report.md>
 "<summary>"` saves the report in `feedback_dir` as
 `from-<project>-<date>.md` (never over an existing file). When
 `feedback_to` names a pane or an agent, that maintainer also gets one line
@@ -476,21 +482,21 @@ still has to: ask direction before planning, keep slices on disjoint files,
 deliver shared resources ready in the brief, run the full gates once at
 integration, review with a different family before push, and say only what
 was proved. The full contract is in
-`skills/herdr-agents/references/orchestration-contract.md`.
+`skills/herdr-soho/references/orchestration-contract.md`.
 
 ## Which assistant for which role
 
-`skills/herdr-agents/references/agent-profiles.md` records what each
+`skills/herdr-soho/references/agent-profiles.md` records what each
 assistant did well and badly in each role in real use (speed, rounds back,
 false positives, and what the sandbox kept it from proving), with a
 recommendation per role. The orchestrator reads it when it proposes a team
 in the guided setup, and when a slice falls on a known weak spot of the
 configured assistant. It is evidence, not a benchmark: check it against
-`herdr-agents stats` in your own project.
+`herdr-soho stats` in your own project.
 
 ## When something goes wrong
 
-`skills/herdr-agents/references/troubleshooting.md` lists every failure
+`skills/herdr-soho/references/troubleshooting.md` lists every failure
 seen while validating the skill (sandbox denials — including `.git` and
 network — premature `done`, Cursor model syntax, startup dialogs, a codex
 CLI that updates itself at start, focus, command guards, stale roster

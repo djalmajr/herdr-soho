@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// herdr-agents optional plugin — read-only bridge (slice 1).
+// herdr-soho optional plugin — read-only bridge (slice 1).
 //
 // Herdr launches one action command per invocation
 // (`node bridge.mjs doctor` / `node bridge.mjs roster`) with the plugin
@@ -14,9 +14,9 @@
 //   2. validate the focused pane with `HERDR_BIN_PATH pane get <id>`
 //      (JSON) and refuse when the call fails, the output is malformed,
 //      or the pane's workspace diverges from the context's;
-//   3. run `node ../skills/herdr-agents/scripts/herdr-agents.mjs
+//   3. run `node ../skills/herdr-soho/scripts/herdr-soho.mjs
 //      <doctor|roster>` with the pane's cwd, the context ids kept in the
-//      CLI environment and HERDR_AGENTS_NOWRITE=1 (read-only: the CLI
+//      CLI environment and HERDR_SOHO_NOWRITE=1 (read-only: the CLI
 //      inspects the focused project without writing .gitignore or its
 //      state tree there), printing the target and the CLI result.
 //
@@ -133,7 +133,7 @@ export function getPane(herdrBin, paneId, { timeoutMs = HERDR_PANE_GET_TIMEOUT_M
 // The skill CLI entry, resolved relative to this file: the plugin never
 // targets its own cwd and never copies the CLI's rules.
 export function defaultCliScript(bridgeFile = fileURLToPath(import.meta.url)) {
-  return path.resolve(path.dirname(bridgeFile), '../skills/herdr-agents/scripts/herdr-agents.mjs');
+  return path.resolve(path.dirname(bridgeFile), '../skills/herdr-soho/scripts/herdr-soho.mjs');
 }
 
 // Run one action: <doctor|roster>. Returns { code, out, err }; a pre-CLI
@@ -173,19 +173,19 @@ export function run(subcommand, opts = {}) {
   // context without tab_id drops the shell's stale HERDR_TAB_ID. The
   // herdr binary's directory is prepended to PATH so the CLI's own
   // `herdr` calls resolve the running binary (HERDR_BIN_PATH portability,
-  // herdr.dev/docs/plugins/). HERDR_AGENTS_NOWRITE=1 makes the CLI
+  // herdr.dev/docs/plugins/). HERDR_SOHO_NOWRITE=1 makes the CLI
   // read-only: both actions only inspect the focused project, so the CLI
   // must not append .gitignore or create its state tree there.
   const childEnv = { ...env };
   childEnv.HERDR_WORKSPACE_ID = ctx.workspaceId;
   childEnv.HERDR_PANE_ID = ctx.paneId;
-  childEnv.HERDR_AGENTS_NOWRITE = '1';
+  childEnv.HERDR_SOHO_NOWRITE = '1';
   if (ctx.tabId !== '') childEnv.HERDR_TAB_ID = ctx.tabId;
   else delete childEnv.HERDR_TAB_ID;
   const pathKey = Object.keys(childEnv).find((k) => k === 'PATH' || k === 'Path') ?? 'PATH';
   childEnv[pathKey] = `${path.dirname(herdrBin)}${path.delimiter}${childEnv[pathKey] ?? ''}`;
 
-  const out = `herdr-agents plugin: target workspace=${ctx.workspaceId} pane=${ctx.paneId} cwd=${pane.cwd}\n`;
+  const out = `herdr-soho plugin: target workspace=${ctx.workspaceId} pane=${ctx.paneId} cwd=${pane.cwd}\n`;
   let r;
   try {
     r = spawnSync(opts.nodeBin ?? process.execPath, [cli, subcommand], {
@@ -200,13 +200,13 @@ export function run(subcommand, opts = {}) {
     throw new BridgeError(EXIT_HERDR_FAILURE, `failed to run the CLI (${e.message})`);
   }
   if (r.error && r.error.code === 'ETIMEDOUT') {
-    return { code: EXIT_HERDR_FAILURE, out, err: `herdr-agents plugin: CLI ${subcommand} timed out after ${cliMs / 1000}s\n` };
+    return { code: EXIT_HERDR_FAILURE, out, err: `herdr-soho plugin: CLI ${subcommand} timed out after ${cliMs / 1000}s\n` };
   }
   if (r.error) {
     throw new BridgeError(EXIT_HERDR_FAILURE, `CLI not executable (${cli}): ${r.error.message}`);
   }
   if (r.status === null && r.signal != null) {
-    return { code: EXIT_HERDR_FAILURE, out, err: `herdr-agents plugin: CLI ${subcommand} timed out after ${cliMs / 1000}s\n` };
+    return { code: EXIT_HERDR_FAILURE, out, err: `herdr-soho plugin: CLI ${subcommand} timed out after ${cliMs / 1000}s\n` };
   }
   return { code: r.status ?? 1, out: out + (r.stdout ?? ''), err: r.stderr ?? '' };
 }
@@ -222,7 +222,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exitCode = r.code;
   } catch (e) {
     if (e instanceof BridgeError) {
-      process.stderr.write(`herdr-agents plugin: ${e.message}\n`);
+      process.stderr.write(`herdr-soho plugin: ${e.message}\n`);
       process.exitCode = e.code;
     } else throw e;
   }
