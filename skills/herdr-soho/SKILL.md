@@ -1170,10 +1170,13 @@ Goal (`Objetivo`, `Meta`), Expected result (`Resultado esperado`, `Critérios
 de aceitação`, `Critérios de aceite`, `Pronto quando`), Owned files
 (`Arquivos`, `Escopo`), Forbidden (`Proibido`, `Fora do escopo`,
 `Restrições`) and Report (`Relatório`), with case- and accent-insensitive
-matching for built-ins and configured aliases. In `Owned files`, a line
+matching. Portuguese built-in headings count only when, after the prefix and
+leading spaces, the title ends or continues with a non-letter, non-digit;
+English headings and configured aliases keep simple prefix matching. In
+`Owned files`, a line
 whose text starts after any list marker and leading spaces or `*`/`_`
-emphasis with `nenhum`, `nenhuma`, `não`, `nunca`, `exceto`, `fora`, `sem`,
-`no`, `not`, `never`, `none`, `except`, `excluding` or `outside` contributes
+emphasis with `nenhum`, `nenhuma`, `não`, `nunca`, `exceto`, `not`, `never`,
+`none`, `except`, `excluding` or `outside` contributes
 no paths; a negation later in the line does not exclude its paths.
 
 **Lint before you send.** `$S lint <brief.md> [--role <role>]` prints the

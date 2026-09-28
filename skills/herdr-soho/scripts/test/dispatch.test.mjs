@@ -445,6 +445,31 @@ test('lint: built-in Portuguese section headings and accentless headings pass', 
   } finally { fix.cleanup(); }
 });
 
+test('lint and ownership: Portuguese section prefixes reject word continuations', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-dispatch-ptbr-prefix-boundary-');
+  try {
+    const withOwnedHeading = (heading) => FULL_BRIEF.replace('# Owned files', `## ${heading}`);
+    // Mutation captured: allowing Portuguese prefix words to continue as letters treats excluded headings as real ownership and hides the actual section.
+    for (const heading of ['Arquivos proibidos', 'Escopo fora']) {
+      const brief = fix.brief(`${heading}.md`, withOwnedHeading(heading));
+      assert.equal(briefMissingSections(brief), ' [Owned files]', heading);
+    }
+    assert.deepEqual(ownedPaths('## Arquivos proibidos\n\n- src/secret.ts\n\n## Arquivos — donos\n\n- src/mine.ts\n'), ['src/mine.ts']);
+    assert.deepEqual(ownedPaths('## Escopo fora\n\n- src/secret.ts\n\n## Escopo:\n\n- src/mine.ts\n'), ['src/mine.ts']);
+  } finally { fix.cleanup(); }
+});
+
+test('lint: Meta is a Portuguese Goal heading but Metadata and Metadados are not', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-dispatch-ptbr-meta-boundary-');
+  try {
+    const withGoalHeading = (heading) => FULL_BRIEF.replace('# Goal\n', '').replace('# Expected result', `## ${heading}\n\n# Expected result`);
+    // Mutation captured: accepting a Portuguese prefix followed by letters lets Metadata or Metadados satisfy Goal.
+    assert.equal(briefMissingSections(fix.brief('meta.md', withGoalHeading('Meta'))), '');
+    assert.equal(briefMissingSections(fix.brief('metadata.md', withGoalHeading('Metadata'))), ' [Goal]');
+    assert.equal(briefMissingSections(fix.brief('metadados.md', withGoalHeading('Metadados'))), ' [Goal]');
+  } finally { fix.cleanup(); }
+});
+
 test('lint: header level 1-3 only, case-insensitive, a word mid-paragraph does not count', { timeout: 60000 }, () => {
   const fix = makeFix('ha-dispatch-lint-level-');
   try {
@@ -2667,6 +2692,12 @@ test('dispatch: the owned-files overlap warn fires for a file-name glob of the p
     assert.equal(r2.status, 0, r2.stderr);
     assert.ok(!r2.stderr.includes('is still editing'), r2.stderr);
   } finally { fix.cleanup(); }
+});
+
+test('ownedPaths: common Portuguese No, Sem, and Fora openers keep their paths', () => {
+  // Mutation captured: treating common Portuguese sentence openers as exclusions drops files the worker was asked to edit.
+  assert.deepEqual(ownedPaths('# Owned files\n\n- No arquivo `ok.ts`\n- Sem mudar a API, edite `x.ts`\n- Fora de testes: `src/y.ts`\n'), ['ok.ts', 'x.ts', 'src/y.ts']);
+  assert.deepEqual(ownedPaths('# Owned files\n\n- Nenhum `z.ts`\n'), []);
 });
 
 // The pending brief of a recorded report: the same timestamp pair under
