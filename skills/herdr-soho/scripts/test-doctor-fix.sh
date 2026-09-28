@@ -2,6 +2,11 @@
 # doctor --fix on a legacy config, and setup --panes / setup --detect.
 set -euo pipefail
 
+if ! command -v jq >/dev/null 2>&1; then
+  printf '%s\n' 'test-doctor-fix.sh: needs jq' >&2
+  exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_SCRIPT="$SCRIPT_DIR/herdr-soho"
 TEST_ROOT="$(mktemp -d)"

@@ -43,8 +43,12 @@ function makeFix(prefix) {
     HERDR_SOHO_DIR: state,
     HERDR_WORKSPACE_ID: 'ws',
     HERDR_ENV: '1',
-    PATH: process.env.PATH,
+    PATH: '',
   };
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  writeFakeCli(bin, 'herdr', `process.stderr.write('{"error":{"code":"server_not_running","message":"no server"}}\\n');\nprocess.exit(1);\n`);
+  env.PATH = [bin, '/usr/bin', '/bin', path.dirname(nodeBin())].join(path.delimiter);
   const fix = {
     root, ws, workerCwd, env,
     // The worker's files: a.mjs and b.bin under the worker cwd (relative
@@ -160,8 +164,12 @@ test('collect --verify: a relative worker cwd resolves against the project root,
       HERDR_SOHO_DIR: state,
       HERDR_WORKSPACE_ID: 'ws',
       HERDR_ENV: '1',
-      PATH: process.env.PATH,
+      PATH: '',
     };
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    writeFakeCli(bin, 'herdr', `process.stderr.write('{"error":{"code":"server_not_running","message":"no server"}}\\n');\nprocess.exit(1);\n`);
+    env.PATH = [bin, '/usr/bin', '/bin', path.dirname(nodeBin())].join(path.delimiter);
     // Column 7 (cwd) is RELATIVE, as spawn --cwd may store it.
     fs.writeFileSync(path.join(ws, 'agents.tsv'),
       H12 + `b\tp-b\tgrok\timplementer\txai\t1\twork\tnow\t\tfull\t\t\n`);
@@ -192,7 +200,7 @@ test('collect --verify: a report that exists but cannot be read is an error (exi
     // A fake herdr on PATH: the friction log is only live with herdr on
     // PATH, and the verify error must land there as a collect entry.
     const bin = path.join(fix.root, 'bin');
-    fs.mkdirSync(bin);
+    fs.mkdirSync(bin, { recursive: true });
     writeFakeCli(bin, 'herdr', `process.stdout.write('{"result":{"agent":{"name":"b","agent_status":"working"}}}\\n');\n`);
     const env = { ...fix.env, PATH: `${bin}${path.delimiter}${fix.env.PATH}` };
     const r = spawnSync(nodeBin(), [JS_ENTRY, 'collect', 'b', '--verify'], { cwd: fix.root, env, encoding: 'utf8', timeout: 30_000 });
@@ -281,7 +289,7 @@ test('collect: a working agent without a report gets the wait pointer, not the t
     // A fake herdr: `agent get` reports the state from FAKE_STATE;
     // `agent read` prints a marker so a fallback is detectable.
     const bin = path.join(fix.root, 'bin');
-    fs.mkdirSync(bin);
+    fs.mkdirSync(bin, { recursive: true });
     writeFakeCli(bin, 'herdr', `const a = process.argv.slice(2).join(' ');
 if (a.startsWith('agent get')) process.stdout.write(JSON.stringify({ result: { agent: { name: 'b', agent_status: process.env.FAKE_STATE || 'working' } } }) + '\\n');
 else if (a.startsWith('agent read')) process.stdout.write('terminal-output\\n');
