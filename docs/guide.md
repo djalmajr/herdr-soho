@@ -184,6 +184,18 @@ never writes to the project (no `.gitignore` entry, no state directory,
 no friction log); every other invocation exits 2 with a message. Without
 the env, the CLI behaves exactly as before.
 
+The optional plugin also opens a session picker: the `pick` action
+("Find a session and copy its reference") lists the panes of the local
+server and of the enabled machines, with a type-to-filter over
+reference, name, kind, status, workspace/tab labels, cwd and machine
+(local first, remotes appended as they arrive; a machine that fails to
+load shows a status line). `Enter` copies the selected reference to the
+clipboard — the first token is the reference, e.g. `local/w12:p1
+(orchestrator-10, claude, working) /Users/…`, with `-` where a field is
+missing — for pasting into the chat; `Esc`/`Ctrl-C` close without
+copying. Bind it with a `[[keys.command]]` entry of
+`type = "plugin_action"` and `command = "djalmajr.herdr-soho.pick"`.
+
 ## Good to know
 
 - The role prompt is the worker's first message; the project's
