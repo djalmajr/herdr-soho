@@ -1,24 +1,28 @@
 #!/usr/bin/env node
-// herdr-soho optional plugin — read-only bridge (slice 1).
+// herdr-soho optional plugin — read-only bridge and the session picker
+// (slice S3 adds `pick`).
 //
 // Herdr launches one action command per invocation
-// (`node bridge.mjs doctor` / `node bridge.mjs roster`) with the plugin
-// directory as cwd, injecting HERDR_BIN_PATH, HERDR_ENV=1 and
-// HERDR_PLUGIN_CONTEXT_JSON (herdr.dev/docs/plugins/, "Commands and
+// (`node bridge.mjs doctor` / `node bridge.mjs roster` /
+// `node bridge.mjs pick`) with the plugin directory as cwd, injecting
+// HERDR_BIN_PATH, HERDR_ENV=1 and HERDR_PLUGIN_CONTEXT_JSON
+// (herdr.dev/docs/plugins/, "Commands and
 // environment"). The bridge resolves the effective target from that
 // context JSON — the UI focus, which can differ from the invoking
-// shell's HERDR_* env — and only then runs the skill CLI:
+// shell's HERDR_* env — and only then acts:
 //
 //   1. parse HERDR_PLUGIN_CONTEXT_JSON (workspace_id + focused_pane_id,
 //      tab_id when present);
 //   2. validate the focused pane with `HERDR_BIN_PATH pane get <id>`
 //      (JSON) and refuse when the call fails, the output is malformed,
 //      or the pane's workspace diverges from the context's;
-//   3. run `node ../skills/herdr-soho/scripts/herdr-soho.mjs
+//   3. doctor/roster: run `node ../skills/herdr-soho/scripts/herdr-soho.mjs
 //      <doctor|roster>` with the pane's cwd, the context ids kept in the
 //      CLI environment and HERDR_SOHO_NOWRITE=1 (read-only: the CLI
 //      inspects the focused project without writing .gitignore or its
 //      state tree there), printing the target and the CLI result.
+//      pick: open the picker pane (`herdr plugin pane open … --focus`);
+//      it does not run the CLI or touch the project, so no cwd check.
 //
 // Read-only slice: no worker, regrid, setup or layout change. Every
 // failure before step 3 exits non-zero without invoking the CLI.
@@ -42,8 +46,13 @@ export const CLI_TIMEOUT_MS = 300_000;
 export const EXIT_INVALID_TARGET = 2;
 export const EXIT_HERDR_FAILURE = 4;
 
-// The read-only slice exposes exactly these subcommands.
+// The read-only slice exposes exactly these subcommands (which run the
+// CLI); `pick` (below) only opens the picker pane.
 export const ACTIONS = new Set(['doctor', 'roster']);
+
+// `pick` opens the picker pane with exactly these herdr arguments (the
+// pane entrypoint declared in herdr-plugin.toml), over the focused pane.
+export const PICK_OPEN_ARGS = ['plugin', 'pane', 'open', '--plugin', 'djalmajr.herdr-soho', '--entrypoint', 'picker', '--placement', 'overlay', '--focus'];
 
 // Pre-CLI failure: code + operator message (English).
 export class BridgeError extends Error {
@@ -145,17 +154,64 @@ export function defaultCliScript(bridgeFile = fileURLToPath(import.meta.url)) {
   return path.resolve(path.dirname(bridgeFile), '../skills/herdr-soho/scripts/herdr-soho.mjs');
 }
 
-// Run one action: <doctor|roster>. Returns { code, out, err }; a pre-CLI
-// failure throws BridgeError. opts (tests): env, cliScript,
+// Run the `pick` action: open the picker pane. Same context and pane
+// validation as doctor/roster (the action follows the UI focus and the
+// overlay changes the UI state), but no CLI run and no cwd check — the
+// picker lists every pane and never touches the focused project.
+export function runPick(opts = {}) {
+  const env = opts.env ?? process.env;
+  const timeouts = opts.timeouts ?? {};
+  const paneGetMs = timeouts.paneGetMs ?? HERDR_PANE_GET_TIMEOUT_MS;
+  const ctx = parseContext(env);
+  const herdrBin = typeof env.HERDR_BIN_PATH === 'string' && env.HERDR_BIN_PATH !== '' ? env.HERDR_BIN_PATH : '';
+  if (herdrBin === '') {
+    throw new BridgeError(EXIT_INVALID_TARGET, 'HERDR_BIN_PATH missing; the action must run inside Herdr');
+  }
+  const pane = getPane(herdrBin, ctx.paneId, { timeoutMs: paneGetMs });
+  if (pane.workspaceId !== ctx.workspaceId) {
+    throw new BridgeError(EXIT_INVALID_TARGET, `workspace divergence: the context points to '${ctx.workspaceId}' and pane ${ctx.paneId} belongs to '${pane.workspaceId}'; target rejected`);
+  }
+  const args = PICK_OPEN_ARGS;
+  const inv = process.platform === 'win32' && /\.(bat|cmd)$/i.test(herdrBin)
+    ? cmdInvocation(herdrBin, args, env)
+    : { command: herdrBin, args, windowsVerbatimArguments: false };
+  let r;
+  try {
+    r = spawnSync(inv.command, inv.args, {
+      encoding: 'utf8',
+      timeout: paneGetMs,
+      killSignal: 'SIGTERM',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsVerbatimArguments: inv.windowsVerbatimArguments,
+    });
+  } catch (e) {
+    throw new BridgeError(EXIT_HERDR_FAILURE, `failed to run herdr (${e.message})`);
+  }
+  if (r.error && r.error.code === 'ETIMEDOUT') {
+    throw new BridgeError(EXIT_HERDR_FAILURE, `herdr plugin pane open timed out after ${paneGetMs / 1000}s`);
+  }
+  if (r.error) {
+    throw new BridgeError(EXIT_HERDR_FAILURE, `herdr binary not executable (${herdrBin}): ${r.error.message}`);
+  }
+  if (r.status === null && r.signal != null) {
+    throw new BridgeError(EXIT_HERDR_FAILURE, `herdr plugin pane open timed out after ${paneGetMs / 1000}s`);
+  }
+  const out = `herdr-soho plugin: target workspace=${ctx.workspaceId} pane=${ctx.paneId} cwd=${pane.cwd}\n`;
+  return { code: r.status ?? 1, out: out + (r.stdout ?? ''), err: r.stderr ?? '' };
+}
+
+// Run one action: <doctor|roster|pick>. Returns { code, out, err };
+// a pre-CLI failure throws BridgeError. opts (tests): env, cliScript,
 // timeouts { paneGetMs, cliMs }, nodeBin.
 export function run(subcommand, opts = {}) {
+  if (subcommand === 'pick') return runPick(opts);
   const env = opts.env ?? process.env;
   const timeouts = opts.timeouts ?? {};
   const paneGetMs = timeouts.paneGetMs ?? HERDR_PANE_GET_TIMEOUT_MS;
   const cliMs = timeouts.cliMs ?? CLI_TIMEOUT_MS;
 
   if (!ACTIONS.has(subcommand)) {
-    throw new BridgeError(EXIT_INVALID_TARGET, `unknown subcommand '${subcommand}' (use 'doctor' or 'roster')`);
+    throw new BridgeError(EXIT_INVALID_TARGET, `unknown subcommand '${subcommand}' (use 'doctor', 'roster' or 'pick')`);
   }
   const ctx = parseContext(env);
   const herdrBin = typeof env.HERDR_BIN_PATH === 'string' && env.HERDR_BIN_PATH !== '' ? env.HERDR_BIN_PATH : '';
@@ -220,8 +276,8 @@ export function run(subcommand, opts = {}) {
   return { code: r.status ?? 1, out: out + (r.stdout ?? ''), err: r.stderr ?? '' };
 }
 
-// Entry: Herdr runs `node bridge.mjs <doctor|roster>`; direct runs behave
-// the same.
+// Entry: Herdr runs `node bridge.mjs <doctor|roster|pick>`; direct runs
+// behave the same.
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const sub = process.argv[2] ?? '';
   try {

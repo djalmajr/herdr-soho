@@ -215,6 +215,15 @@ report_language=
 # ignores it).
 setup_target=canonical
 
+# Peer messages (`herdr-soho send`): whether this project accepts messages
+# delivered to its agents by another agent: auto (default) | off. The sending
+# side reads this key in the target's directory — a local target only, with
+# the target's session layer and none of the sender's HERDR_SOHO_*/
+# HERDR_AGENTS_* variables; a remote target's policy is not consulted — and
+# off refuses the message with exit 18. Every attempt is recorded in
+# <state>/peer-messages.tsv (never the message body).
+inbound=auto
+
 # Herdr toast when a report lands: on | off.
 notify=off
 

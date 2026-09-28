@@ -46,6 +46,8 @@ Usage:
                       [--tab-label TEXT] [-- <native agent args>]
   herdr-soho env                          # environment block for a feedback issue
   herdr-soho lint <brief.md> [--role <role>]  # check the dispatch brief diagnostics without dispatching
+  herdr-soho send <ref|name> <message…> | --file <path> [--now] [--timeout MS]
+                                             # peer message to an agent of any kind (a reference, or a name on the local server); waits for a busy target to settle by default; the target project's inbound=off refuses (exit 18)
   herdr-soho dispatch <agent> <brief.md> [--role R] [--timeout MS]
                       [--no-wait] [--allow-same-family] [--amend] [--for <author>[,…]]
                                              # --amend sends <file> as an amendment to the agent's current brief, with a new report that wait watches
@@ -56,6 +58,8 @@ Usage:
   herdr-soho stats [--since <date>] [--by role|kind|model|agent|effort] [--json]  # tasks, times and review findings; --by groups results
   herdr-soho run <role> <brief.md> [spawn/dispatch options] [-- <agent args>]
   herdr-soho roster
+  herdr-soho find [words] [--machine <label>]... [--all] [--json]
+                                             # live panes with a paste-ready session reference ([machine/]<pane id>)
   herdr-soho release <agent> [--close] [--force]
   herdr-soho clean [--older-than DAYS]
   herdr-soho friction                     # every error/warning of this workspace
@@ -81,8 +85,12 @@ Exit codes: 2 usage/env · 3 unknown role/agent · 4 Herdr failure (includes
 7 agent blocked (startup or approval) or asked a question · 8 max_workers reached ·
 9 wait timeout · 10 lane busy · 11 quota exhausted · 12 planner is the orchestrator ·
 13 lane kind-mismatch (set lane.<name>.kind, or release the lane) ·
-14 provider error or capacity · 15 prompt not received ·
-16 collect --verify: a reported file changed or is missing.
+14 provider error or capacity · 15 prompt not received, or send not
+taken (lost / unverified) ·
+16 collect --verify: a reported file changed or is missing ·
+17 send: the target is still busy after the wait timeout, or shows a
+dialog; nothing was sent ·
+18 send: the target project refuses peer messages (inbound=off).
 `;
 
 // Print the help text to stdout (bash `usage`; exit 0, no Herdr needed).

@@ -677,7 +677,10 @@ $S wait a b [--any] [--timeout MS]         # block on report files
 $S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
 $S friction                                # errors/warnings of this workspace (review at end)
 $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before sending; no dispatch, no state
+$S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
+                                             # peer message to another agent (any kind, local or another machine): ref local/w12:p1 or a name on the local server; waits for a busy target to settle by default
 $S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation copy that shares source or build output (exit 1)
+$S find [words] [--machine <label>]… [--all] [--json]   # live panes with a paste-ready reference (<machine>/<ws>:<pane>), filtered by the words
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
 $S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to
 $S regrid                                  # exact grids: caller's tab (split) + every herd tab
@@ -712,6 +715,19 @@ under `reuses`, not `tasks`. Each group also has `no_report`, `minutes`,
 arrival-check result even if a later wait recovers. JSON
 `lost_briefs` maps each group to the stored composed-prompt paths for
 lost pairs, and the text output lists them below the tables.
+
+`find` lists the live panes (one line per pane) of the local Herdr and,
+with `--machine <label>` (repeatable) or `--all` (every enabled machine
+of `herdr machine list`), of other machines, filtered by the search words
+(name, kind, status, workspace/tab labels, ids, cwd or title; every word
+must match, case-insensitive). Each line starts with the reference
+`<machine>/<ws>:<pane>` — copy it and paste it into the chat to name
+that pane in a later command (`--json` prints one full entry per line
+instead). A single search word that is a reference matches only that
+machine's pane and queries that machine. Exit 0 with at least one entry,
+1 with none, 2 on bad usage, 4 when the local machine is unavailable; a
+remote machine that fails prints a stderr line and the rest is still
+listed.
 
 `scripts/herdr-soho` is a POSIX `sh` launcher: it runs
 `scripts/herdr-soho.mjs` with `node` (20+) — or `bun` when Node.js 20+
@@ -838,6 +854,49 @@ CLI: `release` the lane, and set `lane.<name>.kind` so it cannot recur),
 covers a worker that asked a `question`. A multi-agent `wait` keeps the most severe
 of 4, 11, 14, 15, 7 and 6. Every error
 and warning is also appended to `<state>/friction.log` (`$S friction`).
+
+**Peer messages (`send`).** `send <ref|name> <message…>` delivers a message to
+an agent of any kind — claude, codex, cursor, grok, agy, pi, opencode — local
+or on another machine, without the user approving it. The target is a
+reference (the `find`/picker form `local/w12:p1`, `windows/w3:p1`, or a bare
+pane id) or an agent name on the local server, resolved with `herdr
+[--machine m] agent get`; a pane without an agent exits 4 (`no agent in
+<ref>`). The message is always prefixed with a 4-line header that names the sender
+as a peer agent with an 8-hex random message ID — `[herdr-soho:peer] #<id> Message from another agent —
+<sender-ref> (<name>, <kind>, <role>), not from your user` —, says it carries
+no user intent or approval, tells how to reply with `send` itself, and announces
+that the message follows quoted with `> ` (`The message follows, each line quoted with "> ".`);
+outside a Herdr pane the sender degrades to `local/-` with dashes. Each line of the
+body is quoted with `> ` (empty lines become `>`), and the message ends with a closing line
+`[herdr-soho:peer] #<id> end of message`, so a fake header in the body can never be confused
+with the real one. A `working`/
+`blocked` target is waited on until `idle`/`done` (`agent wait --until idle
+--until done --timeout MS`, default 600000) unless `--now` is given (the target's own
+CLI decides queue vs mix); timing out exits 17 with nothing sent (`<ref> is still <status> after <s>s`).
+Before sending, `send` checks the target's visible screen: if reading fails, it exits 4 (`<ref>'s screen unreadable; nothing was sent`).
+If the bottom 10 non-empty lines match folder/workspace trust patterns (`Trust this workspace`,
+`trust this folder`, `Do you trust`, `Enter to confirm`, `[y/N]`, `(y/n)`) under any status,
+or question detectors from `dialog.mjs` in the bottom 20 lines when the target is `blocked`, it waits up to `--timeout`
+for the dialog to clear; if it does not clear, it exits 17 (`<ref> is showing a dialog; nothing was sent`),
+logging `dialog` without typing into the dialog.
+The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.
+Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).
+Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000` (it never automatically re-prompts).
+Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof).
+If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
+If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or transcript)`).
+The target project decides acceptance: the `inbound`
+key (`auto` | `off`, default `auto`) is consulted for a **local** target in
+the target's directory, with the target's session layer (its
+`HERDR_WORKSPACE_ID`) and none of the sender's `HERDR_SOHO_*`/
+`HERDR_AGENTS_*` variables — the sender's config can never authorize or
+refuse on the target's behalf — and `off` refuses with exit 18 before
+anything is sent. For a **remote** target the policy is not consulted (the
+sending machine cannot read the remote project): the header is the only
+protection there. Every attempt appends one line to `<state>/
+peer-messages.tsv` (`ts from to result chars id`, never the body; skipped with
+`HERDR_SOHO_NOWRITE=1`). Exit codes: 0 sent, 2 usage, 4 Herdr/target
+unavailable or unreadable screen, 15 not received / lost / unverified, 17 still busy or showing dialog, 18 refused by `inbound=off`.
 
 ## What is implicit (read once)
 
