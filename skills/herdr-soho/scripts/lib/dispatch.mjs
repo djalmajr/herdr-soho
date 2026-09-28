@@ -1421,5 +1421,5 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
 // canonical paths with the selected platform's path rules before routing.
 export function samePath(left, right, platform = process.platform) {
   const pathApi = platform === 'win32' ? path.win32 : path;
-  return pathApi.resolve(left) === pathApi.resolve(right);
+  return pathApi.relative(left, right) === '';
 }
