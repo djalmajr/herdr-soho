@@ -278,7 +278,7 @@ test('agentState: a kill by a signal (exit 137) is retried before unavailable', 
     assert.equal(gets(), 3, 'three agent get calls');
     // Our own timeout is not retried.
     fs.writeFileSync(fake.log, '');
-    const slow = agentState('slow', fake.env, 300, [10, 10]);
+    const slow = agentState('slow', fake.env, 2_000, [10, 10]);
     assert.equal(slow.state, 'unavailable');
     assert.match(slow.cause, /timed out/);
     assert.equal(gets(), 1, 'one call for our own timeout');

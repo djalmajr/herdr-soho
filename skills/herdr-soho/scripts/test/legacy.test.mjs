@@ -23,7 +23,7 @@ import { canSymlink, linkTool } from './tools.mjs';
 import { cmdInvocation, findExecutable } from '../lib/platform.mjs';
 import {
   applyLegacyEnv, defaultStateDirName, effectiveConfigFile,
-  legacyEnvCopied, legacyProjectConfigPath, legacyUserConfigPath, migrateLegacyConfigFile,
+  legacyEnvCopied, legacyProjectConfigPath, legacyStatePath, legacyUserConfigPath, migrateLegacyConfigFile,
 } from '../lib/legacy.mjs';
 
 const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -132,6 +132,12 @@ test('legacy config paths: the old directory and file names next to the new ones
   assert.equal(legacyProjectConfigPath('/r'), path.join('/r', '.agents', 'herdr-agents.conf'));
 });
 
+test('legacyStatePath uses Windows separators', () => {
+  // Mutation captured: interpolating `${root}/.herdr-agents` prints a path
+  // the Windows doctor tests cannot match or use.
+  assert.equal(legacyStatePath('C:\\workspace\\repo', path.win32), path.win32.join('C:\\workspace\\repo', '.herdr-agents'));
+});
+
 test('effectiveConfigFile: the new file wins, the legacy one wins over an absent new one, absent both gives the new path', (t) => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-legacy-eff-'));
   t.after(() => fs.rmSync(d, { recursive: true, force: true }));
@@ -195,7 +201,7 @@ test('config (launcher): the legacy user file is read under the user layer, show
   const herd = row(r.out, 'herd_label ').split(/\s+/).filter(Boolean);
   assert.deepEqual(herd.slice(1), ['crew', 'user']);
   assert.ok(row(r.out, 'user file:').endsWith(`${s.legacyUser} (legacy)`), `user file line:\n${r.out}`);
-  assert.ok(row(r.out, 'project file:').endsWith('.agents/herdr-soho.conf'), r.out);
+  assert.ok(row(r.out, 'project file:').endsWith(path.join('.agents', 'herdr-soho.conf')), r.out);
   assert.ok(!row(r.out, 'project file:').includes('(legacy)'), r.out);
   assert.ok(!fs.existsSync(s.user), 'a read must not create the new file');
 });
@@ -243,7 +249,7 @@ test('config set --user (launcher): the first write copies the legacy user file 
   assert.equal(r1.rc, 0, r1.err);
   assert.ok(r1.err.includes(`herdr-soho: warning: copied legacy config ${s.legacyUser} to ${s.user}; the legacy file is no longer read\n`), `stderr:\n${r1.err}`);
   assert.equal(fs.readFileSync(s.user, 'utf8'), '# keep this comment\nherd_label=crew\nlayout=tab\n');
-  assert.equal(fs.statSync(s.user).mode & 0o777, 0o640);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(s.user).mode & 0o777, 0o640);
   assert.deepEqual(fs.readFileSync(s.legacyUser), legacyBytes); // intact
   const r2 = s.run(['config', 'set', '--user', 'max_workers', '4']);
   assert.equal(r2.rc, 0, r2.err);
@@ -420,8 +426,9 @@ test('doctor (launcher): the legacy state dir in use is named when nothing pins 
   fs.mkdirSync(path.join(s.repo, '.herdr-agents'));
   const r = s.doctorRun();
   assert.equal(r.rc, 0, r.err);
-  assert.ok(r.out.split('\n').some((l) => l.startsWith('ok     state dir writable: ') && l.endsWith(`${s.repo}/.herdr-agents`)), r.out);
-  assert.ok(warnLine(r.out, `legacy state dir in use: ${s.repo}/.herdr-agents (once no worker is live, rename it to .herdr-soho and ignore .herdr-soho/ in git)`), r.out);
+  const legacyState = path.join(s.repo, '.herdr-agents');
+  assert.ok(r.out.split('\n').some((l) => l.startsWith('ok     state dir writable: ') && l.endsWith(legacyState)), r.out);
+  assert.ok(warnLine(r.out, `legacy state dir in use: ${legacyState} (once no worker is live, rename it to .herdr-soho and ignore .herdr-soho/ in git)`), r.out);
 });
 
 test('doctor (launcher): the legacy state dir next to the new one is no longer used', (t) => {
@@ -433,7 +440,7 @@ test('doctor (launcher): the legacy state dir next to the new one is no longer u
   fs.mkdirSync(path.join(s.repo, '.herdr-soho'));
   const r = s.doctorRun();
   assert.equal(r.rc, 0, r.err);
-  assert.ok(warnLine(r.out, `legacy state dir ${s.repo}/.herdr-agents is no longer used (${s.repo}/.herdr-soho exists); clean it once its reports are no longer needed`), r.out);
+  assert.ok(warnLine(r.out, `legacy state dir ${path.join(s.repo, '.herdr-agents')} is no longer used (${path.join(s.repo, '.herdr-soho')} exists); clean it once its reports are no longer needed`), r.out);
 });
 
 test('setup --plan (launcher): the before side seeds from the legacy project file when the new one is absent', (t) => {

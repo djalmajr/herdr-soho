@@ -198,21 +198,27 @@ export function nowrite(env = process.env) {
   return env.HERDR_SOHO_NOWRITE === '1';
 }
 
+export function relativeStatePath(root, statePath, pathApi = path) {
+  const rel = pathApi.relative(root, statePath);
+  if (rel === '' || rel === '..' || rel.startsWith(`..${pathApi.sep}`) || pathApi.isAbsolute(rel)) return '';
+  return rel;
+}
+
 // state_root() port: also keeps the .gitignore entry current (relative state
 // dir under a git work tree that does not ignore it yet).
 export function stateRoot(ctx, env = process.env, cwd = process.cwd()) {
   const root = projectRoot(env, cwd);
   const d = stateRootPath(ctx, env, cwd);
-  const prefix = root + '/';
-  if (d.startsWith(prefix) && !nowrite(env)) {
-    const rel = d.slice(prefix.length);
+  const rel = relativeStatePath(root, d);
+  if (rel && !nowrite(env)) {
+    const gitRel = rel.split(path.sep).join('/');
     const wt = spawnSync('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], { env, stdio: 'ignore' });
-    if (wt.status === 0 && gitignoreNeeds(root, rel, env)) {
+    if (wt.status === 0 && gitignoreNeeds(root, gitRel, env)) {
       // Append (not rewrite): a symlinked .gitignore stays a link.
       const gi = path.join(root, '.gitignore');
       let text = '';
       try { text = readTextFile(gi); } catch { /* absent */ }
-      fs.appendFileSync(gi, gitignoreAfter(text, rel).slice(text.length));
+      fs.appendFileSync(gi, gitignoreAfter(text, gitRel).slice(text.length));
     }
   }
   return d;
