@@ -61,8 +61,9 @@ herd_label_max=16
 # Reuse an idle worker of the same role, kind and cwd whose last report is
 # already written instead of opening a new pane: on (default) | off.
 # `spawn --reuse` / `--fresh` override per call. A reused worker keeps its
-# earlier briefs in context; pass `--fresh` (or set `off`) when slices must
-# not share context. Reuse never counts against max_workers.
+# earlier briefs in context: compact or clear its session before an
+# unrelated slice (SKILL.md, "One agent, one growing session"); `--fresh`
+# opens another pane. Reuse never counts against max_workers.
 reuse_workers=on
 
 # How many panes the team uses, counting the orchestrator: 4 (default) =
