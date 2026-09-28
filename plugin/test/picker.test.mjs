@@ -12,6 +12,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { Writable, PassThrough } from 'node:stream';
 import {
   createState,
@@ -991,14 +993,29 @@ test('main: SIGTERM goes through the same finish as Esc — raw off, children ki
   const herdrBin = writeFakeHerdr(dir, 'sig', { machineList: machineListJson([{ label: 'windows', enabled: true }]) });
   const sin = fakeTtyStdin();
   const sout = captureStream();
+  const events = [];
+  sin.destroy = () => { events.push('destroy'); sin.destroyed = true; };
+  const children = new Set();
+  const origAdd = children.add.bind(children);
+  children.add = (c) => {
+    const origKill = c.kill.bind(c);
+    c.kill = (...args) => {
+      events.push('kill');
+      return origKill(...args);
+    };
+    return origAdd(c);
+  };
+  let exitCode = null;
   const p = pickerMain({
     env: { PATH: dir, HERDR_BIN_PATH: herdrBin },
     nodeBin: process.execPath,
     cliScript: cli,
     herdrBin,
+    children,
     stdin: sin,
     stdout: sout,
     width: 100,
+    exit: (code) => { exitCode = code; },
   });
   await waitUntil(() => sout.text().includes('carregando windows…'), { timeoutMs: 5000 });
   const started = Date.now();
@@ -1006,17 +1023,26 @@ test('main: SIGTERM goes through the same finish as Esc — raw off, children ki
   const r = await p;
   assert.ok(Date.now() - started < 5000, 'the exit is not held by the stuck load');
   assert.equal(r.action, 'esc');
+  assert.equal(r.state.exit, 'esc', 'state.exit is marked in finish on signal');
   assert.equal(r.copied, null, 'no copy on SIGTERM');
   assert.equal(r.clipboard, null);
   assert.equal(r.notification, null);
+  assert.equal(exitCode, 0, 'exit(0) was invoked on signal');
   assert.deepEqual(sin.modes, [true, false], 'the raw mode was turned off');
   assert.ok(sin.destroyed, 'the stdin handle was released');
+  assert.ok(events.includes('kill'), 'child was killed');
+  assert.ok(events.includes('destroy'), 'stdin was destroyed');
+  assert.ok(events.indexOf('kill') < events.indexOf('destroy'), 'children are killed before stdin is destroyed');
+  assert.doesNotMatch(sout.text(), /falhou/, 'no late redraw on signal after children are killed');
   await sleep(1000);
   assert.ok(!fs.existsSync(doneFile), 'the find child was killed on SIGTERM');
   // Mutation captured: without the SIGTERM listener the process dies
   // before the asserts (or the load keeps running and the raw mode is
   // left on); with the listener but without the kill the fake find
-  // writes doneFile.
+  // writes doneFile; removing exit(0) from the handler leaves exitCode null;
+  // moving stdin.destroy() before kill fails the order assert; not setting
+  // state.exit in finish lets the killed child trigger a late redraw
+  // with a failure line.
 });
 
 test('main: SIGHUP goes through the same finish as Esc — raw off, no copy', { timeout: 30000 }, async (t) => {
@@ -1028,6 +1054,7 @@ test('main: SIGHUP goes through the same finish as Esc — raw off, no copy', { 
   const herdrBin = writeFakeHerdr(dir, 'hup', { machineList: machineListJson([]) });
   const sin = fakeTtyStdin();
   const sout = captureStream();
+  let exitCode = null;
   const p = pickerMain({
     env: { PATH: dir, HERDR_BIN_PATH: herdrBin },
     nodeBin: process.execPath,
@@ -1036,15 +1063,178 @@ test('main: SIGHUP goes through the same finish as Esc — raw off, no copy', { 
     stdin: sin,
     stdout: sout,
     width: 100,
+    exit: (code) => { exitCode = code; },
   });
   await waitUntil(() => sout.text().includes('1 pane'), { timeoutMs: 5000 });
   process.kill(process.pid, 'SIGHUP');
   const r = await p;
   assert.equal(r.action, 'esc');
   assert.equal(r.copied, null, 'no copy on SIGHUP');
+  assert.equal(exitCode, 0, 'exit(0) was invoked on signal');
   assert.deepEqual(sin.modes, [true, false], 'the raw mode was turned off');
   assert.ok(sin.destroyed, 'the stdin handle was released');
 });
+
+for (const sigName of ['SIGTERM', 'SIGHUP']) {
+  test(`main: ${sigName} in the first frame on a real pty exits in <1s, kills find, draws nothing after signal`, { timeout: 30000 }, (t) => {
+    if (process.platform === 'win32') {
+      // Real PTY tests require termios/pty, not available on Windows.
+      return;
+    }
+    const dir = makeTmp(t);
+    const doneFile = path.join(dir, 'local-done');
+    const pidFile = path.join(dir, 'local-find-pid');
+    const cli = path.join(dir, 'fake-cli.mjs');
+    fs.writeFileSync(cli, `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid) + '\\n');
+setTimeout(() => {
+  fs.writeFileSync(${JSON.stringify(doneFile)}, 'done\\n');
+  process.exit(0);
+}, 10000);
+`, { mode: 0o755 });
+    const herdrBin = writeFakeHerdr(dir, 'pty', { machineList: machineListJson([]) });
+    const pickerPath = path.resolve(fileURLToPath(import.meta.url), '../../picker.mjs');
+    const runner = path.join(dir, 'runner.mjs');
+    fs.writeFileSync(runner, `import { main } from ${JSON.stringify(pickerPath)};
+await main({
+  env: process.env,
+  cliScript: ${JSON.stringify(cli)},
+  herdrBin: ${JSON.stringify(herdrBin)},
+  width: 80,
+});
+`);
+
+    const pyScript = `
+import json, os, pty, select, signal, subprocess, time, sys
+
+runner = sys.argv[1]
+pid_file = sys.argv[2]
+node_bin = sys.argv[3]
+sig_name = sys.argv[4]
+sig = getattr(signal, sig_name)
+env = os.environ.copy()
+
+master, slave = pty.openpty()
+proc = subprocess.Popen(
+    [node_bin, runner],
+    stdin=slave,
+    stdout=slave,
+    stderr=slave,
+    env=env,
+    start_new_session=True,
+)
+os.close(slave)
+
+buf = b""
+t0 = time.time()
+while time.time() - t0 < 5.0:
+    r, _, _ = select.select([master], [], [], 0.05)
+    if r:
+        try:
+            chunk = os.read(master, 4096)
+            if not chunk:
+                break
+            buf += chunk
+        except OSError:
+            break
+    if b"carregando local" in buf:
+        break
+
+t_wait = time.time()
+while time.time() - t_wait < 1.0 and not os.path.exists(pid_file):
+    time.sleep(0.01)
+
+t_sig = time.time()
+try:
+    os.kill(proc.pid, sig)
+except ProcessLookupError:
+    pass
+
+try:
+    proc.wait(timeout=2.0)
+    exit_s = time.time() - t_sig
+    rc = proc.returncode
+except subprocess.TimeoutExpired:
+    exit_s = time.time() - t_sig
+    rc = None
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+time.sleep(0.2)
+after_buf = b""
+while True:
+    r, _, _ = select.select([master], [], [], 0.05)
+    if not r:
+        break
+    try:
+        chunk = os.read(master, 4096)
+        if not chunk:
+            break
+        after_buf += chunk
+    except OSError:
+        break
+os.close(master)
+
+find_pid = None
+if os.path.exists(pid_file):
+    try:
+        find_pid = int(open(pid_file).read().strip())
+    except Exception:
+        pass
+
+find_alive = None
+if find_pid:
+    try:
+        os.kill(find_pid, 0)
+        find_alive = True
+    except OSError:
+        find_alive = False
+
+if find_alive:
+    try:
+        os.kill(find_pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+print(json.dumps({
+    "saw_first_frame": b"carregando local" in buf,
+    "returncode": rc,
+    "exit_s": exit_s,
+    "find_pid": find_pid,
+    "find_alive": find_alive,
+    "after_text": after_buf.decode("utf-8", "replace"),
+}))
+`;
+
+    const res = spawnSync('python3', ['-c', pyScript, runner, pidFile, process.execPath, sigName], {
+      env: { ...process.env, HERDR_BIN_PATH: herdrBin, HERDR_SOCKET_PATH: '/tmp/herdr-soho-no-such-socket' },
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 0, `python probe exited 0: ${res.stderr}`);
+    const r = JSON.parse(res.stdout);
+    assert.ok(r.saw_first_frame, 'the first frame was rendered before signal');
+    assert.equal(r.returncode, 0, 'the picker process exited with code 0');
+    assert.ok(r.exit_s < 1.0, `the picker exited in < 1 s (took ${r.exit_s}s)`);
+    assert.ok(r.find_pid !== null, 'the fake find recorded its pid');
+    assert.equal(r.find_alive, false, 'the find child process does not exist anymore');
+    assert.ok(!fs.existsSync(doneFile), 'the find child was killed before finishing');
+    // Nothing was written to the screen after the signal besides terminal restoration (\x1b[?25h).
+    const allowedRestoration = ['', '\x1b[?25h'];
+    assert.ok(
+      allowedRestoration.includes(r.after_text) || r.after_text.replaceAll('\x1b[?25h', '') === '',
+      `nothing written to screen after signal besides terminal restoration (got ${JSON.stringify(r.after_text)})`,
+    );
+    assert.doesNotMatch(r.after_text, /\x1b\[H/, 'no redraw occurred after the signal');
+    assert.doesNotMatch(r.after_text, /falhou/, 'no failure status was drawn after the signal');
+    // Mutation captured: putting stdin.destroy() before kill prevents the
+    // in-flight find from being killed in a pty; removing process.exit(0)
+    // from the handler leaves the selector alive (> 1s); omitting
+    // state.exit in finish lets a late redraw print a failure line after the signal.
+  });
+}
 
 // ---------- notification ----------
 

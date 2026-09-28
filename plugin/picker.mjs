@@ -452,14 +452,15 @@ export async function loadEntries(state, opts = {}) {
     onChange();
   };
 
-  // The local find is marked in flight before it starts: the first frame
-  // already says "carregando local…", not "nenhum pane".
+  // The local find is spawned and registered into children before the
+  // first frame is drawn, so a signal in the first frame reaches it.
   state.loading = 1;
   state.loadingLocal = true;
+  const localPromise = find(null);
   onChange();
   let local;
   try {
-    local = parseFindOutput(await find(null), { label: 'local' });
+    local = parseFindOutput(await localPromise, { label: 'local' });
   } catch (e) {
     state.loadingLocal = false;
     fail('local', e instanceof FindError ? e : new FindError(String(e)));
@@ -556,24 +557,31 @@ export async function main(opts = {}) {
 
   let done = null;
   let escTimer = null;
-  // A SIGTERM/SIGHUP (e.g. Herdr closing the pane) goes through the same
-  // finish as Esc/Ctrl-C: raw mode off, the find children killed, no
-  // copy — and the process only leaves after main resolves.
-  const onSignal = () => finish('esc');
+  const exit = opts.exit ?? process.exit;
+  // A SIGTERM/SIGHUP (e.g. Herdr closing the pane) forces an immediate
+  // exit: state.exit is set so no late redraw draws to the screen, all
+  // find children are killed, the terminal is restored, and process.exit(0)
+  // terminates without waiting for load or main.
+  const onSignal = () => {
+    finish('esc');
+    exit(0);
+  };
   const finish = (action) => {
     if (done) return;
+    state.exit = state.exit ?? action;
     done = { action };
     if (escTimer) { clearTimeout(escTimer); escTimer = null; }
     process.removeListener('SIGTERM', onSignal);
     process.removeListener('SIGHUP', onSignal);
     stdin.off('data', onData);
     stdin.off('end', onEnd);
+    for (const c of children) { try { c.kill(); } catch { /* already gone */ } }
     if (stdin.isTTY) { try { stdin.setRawMode(false); } catch { /* not a tty */ } }
+    try { stdout.write('\x1b[?25h'); } catch { /* already closed */ }
     // Release the stdin handle: a pty slave keeps the event loop alive
     // while the handle is open, so the picker must destroy it or the
     // process (and the pane) lingers after the exit.
     try { stdin.destroy(); } catch { /* already gone */ }
-    for (const c of children) { try { c.kill(); } catch { /* already gone */ } }
     if (action === 'copy' && state.copied) {
       // Copy (native tool or OSC 52 to this terminal, which Herdr
       // forwards to the user's terminal), then the notification.
@@ -618,14 +626,10 @@ export async function main(opts = {}) {
   if (typeof stdin.on === 'function') stdin.on('end', onEnd);
   process.once('SIGTERM', onSignal);
   process.once('SIGHUP', onSignal);
-  // The local find is in flight before the first frame (loadEntries also
-  // marks it; the two marks are the same value).
-  state.loading = 1;
-  state.loadingLocal = true;
-  redraw();
 
   // Local first, remotes appended as they arrive; the user can already
-  // type and select while the remotes load.
+  // type and select while the remotes load. The local find is spawned
+  // and entered into children before the first frame is drawn.
   const load = loadEntries(state, {
     env,
     nodeBin: opts.nodeBin,
