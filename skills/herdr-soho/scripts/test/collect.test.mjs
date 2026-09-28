@@ -17,7 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { nodeBin } from './parity.mjs';
 import { writeFakeCli } from './fakes.mjs';
-import { findExecutable } from '../lib/platform.mjs';
+import { findExecutable, runCli } from '../lib/platform.mjs';
 import { linkTool } from './tools.mjs';
 
 const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -287,6 +287,26 @@ test('collect --verify: no report keeps the error collect already gives', { time
     assert.match(r.stderr, /no report file yet for 'b'/);
     assert.equal(r.stdout, '', 'nothing is verified without a report');
   } finally { fix.cleanup(); }
+});
+
+// Mutation captured: removing runCliTreeKill's TMPDIR mkdir makes the
+// Windows timeout path throw ENOENT before the child helper can run.
+test('Windows .cmd timeout creates a missing TMPDIR before writing its spec', { timeout: 30000 }, (t) => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-treekill-tmpdir-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const bin = path.join(root, 'bin');
+  const tmpdir = path.join(root, 'created-on-run');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'fixture.cmd'), '');
+  const comspec = writeFakeCli(bin, 'comspec', 'process.exit(0);\n');
+  const env = { PATH: bin, PATHEXT: '.cmd', COMSPEC: comspec, TMPDIR: tmpdir };
+  assert.equal(fs.existsSync(tmpdir), false, 'the temp directory starts absent');
+
+  const result = runCli('fixture', ['agent', 'get'], { env, platform: 'win32', timeoutMs: 10_000 });
+
+  assert.equal(result.status, 0, JSON.stringify(result));
+  assert.equal(result.error, null);
+  assert.equal(fs.existsSync(tmpdir), true, 'runCliTreeKill creates the configured temp directory');
 });
 
 // An agent still working (or blocked) with no report gets the short

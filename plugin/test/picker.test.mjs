@@ -699,6 +699,7 @@ function withFakeDir(dir) {
 // ---------- clipboard ----------
 
 test('clipboard: darwin uses pbcopy from a controlled PATH, text on stdin', (t) => {
+  if (process.platform === 'win32') t.skip('Windows cannot execute the extensionless pbcopy tool used by the darwin fixture');
   const dir = makeTmp(t);
   const out = path.join(dir, 'clip.txt');
   writeFakeTool(dir, 'pbcopy', { out });
@@ -711,6 +712,7 @@ test('clipboard: darwin uses pbcopy from a controlled PATH, text on stdin', (t) 
 });
 
 test('clipboard: linux tries wl-copy, then xclip, then xsel — a failing tool yields the next', (t) => {
+  if (process.platform === 'win32') t.skip('Windows cannot execute the extensionless wl-copy and xclip tools used by the linux fixture');
   const dir = makeTmp(t);
   const outWl = path.join(dir, 'wl.txt');
   const outXc = path.join(dir, 'xc.txt');
@@ -1272,7 +1274,7 @@ test('notifyCopied: hostile ref with CSI, OSC and \\r has controls stripped from
   const argvFile = path.join(dir, 'herdr-argv.jsonl');
   const herdrBin = writeFakeHerdr(dir, 'notify', { argvFile });
   const hostileRef = 'local/w1\x1b[2J\x1b[31m:p1\r\x1b]52;c;UEFO\x07';
-  const r = notifyCopied(herdrBin, hostileRef, { env: { PATH: dir } });
+  const r = notifyCopied(herdrBin, hostileRef, { env: withFakeDir(dir) });
   assert.equal(r.ok, true);
   const argvs = fs.readFileSync(argvFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const note = argvs.find((a) => a[0] === 'notification');

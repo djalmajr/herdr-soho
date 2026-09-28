@@ -330,6 +330,7 @@ export function runCli(exe, args, opts = {}) {
 // kill.
 function runCliTreeKill(resolved, command, argv, verbatim, opts, env) {
   const tmpdir = env.TMPDIR || os.tmpdir();
+  fs.mkdirSync(tmpdir, { recursive: true });
   const suffix = `${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
   const specFile = path.join(tmpdir, `.herdr-soho-tk-${suffix}.spec`);
   const resultFile = path.join(tmpdir, `.herdr-soho-tk-${suffix}.result`);
