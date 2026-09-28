@@ -24,13 +24,24 @@ import {
   briefMissingSections, lintBrief, composePrompt, composeAmendment, cmdDispatch, dispatchPairSuffix, familyConflicts, forSpecFamily,
   parseBriefLintAliases, missingSectionsReasons, emptyCodeLines, ownedPaths, pathsCross,
   pendingBriefPath, composedBriefSection, sandboxNotes, pendingBriefSection, globMatches,
-  sharedTreeEditor,
+  samePath, sharedTreeEditor,
 } from '../lib/dispatch.mjs';
 import { splitRunArgs } from '../lib/commands/run.mjs';
 import { roleBody } from '../lib/roles.mjs';
 
 const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
+
+function sidecarForPrompt(prompt) {
+  const basename = path.basename(prompt);
+  const suffix = basename.endsWith('.brief.md') ? '.brief.md' : '.md';
+  return path.join(path.dirname(prompt), `${basename.slice(0, -suffix.length)}.dispatch.json`);
+}
+
+test('dispatch workspace path comparison accepts Windows slash variants', () => {
+  assert.equal(samePath('C:/work/repo', 'C:\\work\\repo', 'win32'), true);
+  assert.equal(samePath('C:/work/repo', 'C:\\work\\other', 'win32'), false);
+});
 
 // ---------- fake herdr (Node) ----------
 
@@ -200,6 +211,7 @@ function makeFix(prefix) {
   writeFakeCli(bin, 'herdr', HERDR_FAKE);
   const env = {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
@@ -633,8 +645,8 @@ test('dispatch: --no-wait happy path, task title, prompt text, state files', { t
     assert.equal(j.auto_approved, 0);
     assert.ok(!('lane' in j) && !('match' in j), 'quota keys only on a quota');
     const composed = j.composed_prompt;
-    assert.match(composed, new RegExp(`^${fix.state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/ws/briefs/build-\\d{8}T\\d{6}\\.md$`));
-    assert.equal(j.report, composed.replace('/briefs/', '/reports/'));
+    assert.equal(composed, path.join(fix.ws, 'briefs', path.basename(composed)));
+    assert.equal(j.report, path.join(fix.ws, 'reports', path.basename(composed)));
     // The state files.
     assert.equal(fs.readFileSync(path.join(fix.ws, 'task-build'), 'utf8'), 'implementer: porte da config\n');
     assert.equal(fs.readFileSync(path.join(fix.ws, 'last-report-build'), 'utf8'), j.report + '\n');
@@ -735,7 +747,7 @@ test('dispatch: the attempt sidecar records the roster metadata and the accepted
     const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait']);
     assert.equal(r.status, 0, r.stderr);
     const j = parsePretty(r.stdout);
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.equal(sidecar, path.join(fix.ws, 'briefs', path.basename(j.composed_prompt).slice(0, -3) + '.dispatch.json'), 'the sidecar sits next to the composed prompt');
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: 'high', submission: 'accepted' }, 'the accepted sidecar');
@@ -745,7 +757,7 @@ test('dispatch: the attempt sidecar records the roster metadata and the accepted
     const r2 = cmd(fix, ['dispatch', 'scout', brief, '--no-wait']);
     assert.equal(r2.status, 0, r2.stderr);
     const j2 = parsePretty(r2.stdout);
-    assert.deepEqual(JSON.parse(fs.readFileSync(`${j2.composed_prompt.slice(0, -3)}.dispatch.json`, 'utf8')),
+    assert.deepEqual(JSON.parse(fs.readFileSync(sidecarForPrompt(j2.composed_prompt), 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' }, 'no column 15 → empty effort');
     // $TMPDIR routing (a worker whose cwd is not the repo root): the
     // sidecar sits next to the prompt under the tmp reports dir, same
@@ -776,7 +788,7 @@ test('dispatch: a refused prompt leaves the sidecar at failed and keeps the exit
     assert.equal(r.status, 4, r.stdout);
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'error', 'the error JSON stands');
-    assert.deepEqual(JSON.parse(fs.readFileSync(`${j.composed_prompt.slice(0, -3)}.dispatch.json`, 'utf8')),
+    assert.deepEqual(JSON.parse(fs.readFileSync(sidecarForPrompt(j.composed_prompt), 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: 'xhigh', submission: 'failed' }, 'the failed sidecar');
     // Mutation captured: the sidecar never written (the refusal leaves no
     // attempt record) or left at `attempted` after the refusal fails the
@@ -905,7 +917,7 @@ test('dispatch: an accepted prompt with a failed outcome write keeps the result 
     assert.equal(j.report_exists, false);
     // The sidecar keeps the valid `attempted` (the previous write is not
     // truncated), and the warn says the transport accepted the prompt.
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: 'high', submission: 'attempted' }, 'the attempted sidecar stands');
     assert.match(errOut, /could not record the accepted submission in the attempt sidecar .*: write failed: simulated EIO; the prompt went out/);
@@ -958,7 +970,7 @@ test('dispatch: a transport error with a failed outcome write keeps the error JS
     const j = JSON.parse(out.trim());
     assert.equal(j.wait_status, 'error', 'the error JSON stands');
     assert.equal(j.raw, 'prompt failed: the fake refused');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: 'xhigh', submission: 'attempted' }, 'the attempted sidecar stands (not truncated)');
     assert.match(errOut, /could not record the failed submission in the attempt sidecar .*: write failed: simulated EIO/);
@@ -1000,8 +1012,8 @@ test('dispatch: a collision-suffixed pair takes the suffixed sidecar', { timeout
     assert.equal(j1.composed_prompt, path.join(fix.ws, 'briefs', `build-${ts}-2.md`), 'the first dispatch takes -2');
     assert.equal(j2.composed_prompt, path.join(fix.ws, 'briefs', `build-${ts}-3.md`), 'the second dispatch takes -3');
     // Each sidecar carries the suffixed stem of its own prompt.
-    const sc1 = JSON.parse(fs.readFileSync(`${j1.composed_prompt.slice(0, -3)}.dispatch.json`, 'utf8'));
-    const sc2 = JSON.parse(fs.readFileSync(`${j2.composed_prompt.slice(0, -3)}.dispatch.json`, 'utf8'));
+    const sc1 = JSON.parse(fs.readFileSync(sidecarForPrompt(j1.composed_prompt), 'utf8'));
+    const sc2 = JSON.parse(fs.readFileSync(sidecarForPrompt(j2.composed_prompt), 'utf8'));
     assert.equal(sc1.submission, 'accepted', 'the sidecar of the -2 pair');
     assert.equal(sc1.effort, 'high');
     assert.equal(sc2.submission, 'accepted', 'the sidecar of the -3 pair');
@@ -1029,7 +1041,7 @@ test('dispatch --amend: the amendment attempt gets its own sidecar; the earlier 
     const first = cmd(fix, ['dispatch', 'build', brief, '--no-wait']);
     assert.equal(first.status, 0, first.stderr);
     const j1 = parsePretty(first.stdout);
-    assert.equal(JSON.parse(fs.readFileSync(`${j1.composed_prompt.slice(0, -3)}.dispatch.json`, 'utf8')).submission, 'accepted', 'the first attempt');
+    assert.equal(JSON.parse(fs.readFileSync(sidecarForPrompt(j1.composed_prompt), 'utf8')).submission, 'accepted', 'the first attempt');
     // The worker finished; the amendment goes out.
     fs.writeFileSync(j1.report, 'first report\n');
     const amend = fix.brief('amend.md', '# Amend — retry with the right flag\n\nDo it.\n');
@@ -1040,10 +1052,10 @@ test('dispatch --amend: the amendment attempt gets its own sidecar; the earlier 
     assert.equal(j.wait_status, 'submitted', 'the amendment result stands');
     assert.equal(j.report_exists, false, '--no-wait: the amendment report is not written yet');
     assert.notEqual(j.composed_prompt, j1.composed_prompt, 'the amendment gets its own prompt pair');
-    assert.deepEqual(JSON.parse(fs.readFileSync(`${j.composed_prompt.slice(0, -3)}.dispatch.json`, 'utf8')),
+    assert.deepEqual(JSON.parse(fs.readFileSync(sidecarForPrompt(j.composed_prompt), 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: 'high', submission: 'accepted' }, 'the amendment attempt');
     // The first attempt's sidecar is not rewritten by the amendment.
-    assert.equal(JSON.parse(fs.readFileSync(`${j1.composed_prompt.slice(0, -3)}.dispatch.json`, 'utf8')).submission, 'accepted');
+    assert.equal(JSON.parse(fs.readFileSync(sidecarForPrompt(j1.composed_prompt), 'utf8')).submission, 'accepted');
   } finally { fix.cleanup(); }
 });
 
@@ -1536,7 +1548,7 @@ test('dispatch: a not-received dispatch marks the sidecar arrival without changi
     assert.equal(r.status, 15, r.stderr);
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'not-received', 'the result stands');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: 'high', submission: 'accepted', arrival: 'not-received' },
       'the accepted outcome stands; the arrival mark is added to the same sidecar');
@@ -1561,7 +1573,7 @@ test('dispatch: a delivered prompt leaves no arrival mark in the sidecar', { tim
     assert.equal(j1.wait_status, 'submitted');
     // Mutation captured: the mark written on a received dispatch (or the
     // accepted submission lost to it) fails the exact-object assert below.
-    assert.deepEqual(JSON.parse(fs.readFileSync(`${j1.composed_prompt.slice(0, -3)}.dispatch.json`, 'utf8')),
+    assert.deepEqual(JSON.parse(fs.readFileSync(sidecarForPrompt(j1.composed_prompt), 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: 'high', submission: 'accepted' },
       'no arrival key on a received delivery');
     // And the one-shot dispatch with the check off: accepted, no mark.
@@ -1569,7 +1581,7 @@ test('dispatch: a delivered prompt leaves no arrival mark in the sidecar', { tim
       { HERDR_SOHO_PROMPT_CHECK_SECONDS: '0' });
     assert.equal(r2.status, 0, r2.stderr);
     const j2 = parsePretty(r2.stdout);
-    assert.equal(JSON.parse(fs.readFileSync(`${j2.composed_prompt.slice(0, -3)}.dispatch.json`, 'utf8')).arrival, undefined,
+    assert.equal(JSON.parse(fs.readFileSync(sidecarForPrompt(j2.composed_prompt), 'utf8')).arrival, undefined,
       'no arrival key with the check off');
   } finally { fix.cleanup(); }
 });
@@ -1620,7 +1632,7 @@ test('dispatch: a not-received sidecar mark that fails warns and keeps the resul
     assert.equal(lines.length, 1, 'the dispatch JSON line stands');
     const j = lines[0];
     assert.equal(j.wait_status, 'not-received', 'the result stands');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: 'high', submission: 'accepted' },
       'the sidecar keeps the valid accepted outcome (no arrival mark)');
@@ -3152,7 +3164,7 @@ test('dispatch --no-wait: a newly visible auth failure exits 14 with the redacte
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved', 'lane', 'model', 'cause'],
       'the existing provider-error key order');
     assert.match(r.stderr, /agent 'build' stopped on a provider error: Error: 401 Unauthorized: Incorrect API key provided \[redacted\]\. It is idle without a report; ask the user whether to resend the brief, switch the assistant, or wait\./);
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' },
       'the accepted attempt sidecar stays accepted (no arrival key)');
@@ -3185,7 +3197,7 @@ test('dispatch --no-wait: an auth screen that predates the prompt is not attribu
     assert.deepEqual(Object.keys(j),
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
       'no lane/model/cause without a new auth attempt');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' },
       'no arrival mark on a received delivery');
@@ -3219,7 +3231,7 @@ test('dispatch --no-wait: a completed report wins over a retained auth screen (R
       'no lane/model/cause on a completed report');
     assert.ok(!r.stderr.includes('sending it once more'), `no resend warning: ${r.stderr}`);
     assert.ok(!r.stderr.includes('provider error'), `no provider warning: ${r.stderr}`);
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' },
       'the accepted attempt sidecar stays accepted (no arrival key)');
@@ -3371,7 +3383,7 @@ test('dispatch --no-wait: a prompt that never arrives ends not-received despite 
     assert.deepEqual(Object.keys(j),
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists'],
       'the error-case keys without raw');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted', arrival: 'not-received' },
       'the accepted outcome stands; the arrival mark is added');
@@ -3399,7 +3411,7 @@ test('dispatch --no-wait: prompt_check_seconds=0 observes nothing on an auth scr
     assert.equal(log.filter((l) => l.startsWith('agent get ')).length, 0, 'no arrival probes');
     assert.equal(log.filter((l) => l.startsWith('agent read ')).length, 0, 'no screen reads (not even the H0)');
     assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'build.not-received')), false, 'no marker with the check off');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.equal(JSON.parse(fs.readFileSync(sidecar, 'utf8')).arrival, undefined, 'no arrival key with the check off');
   } finally { fix.cleanup(); }
 });
@@ -3426,7 +3438,7 @@ test('dispatch --no-wait: a completed report wins during stale-auth arrival (R11
     assert.deepEqual(Object.keys(j),
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved']);
     assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'build.not-received')), false);
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' });
     const log = fix.log().split('\n').filter((l) => l !== '');
@@ -3463,7 +3475,7 @@ test('dispatch: a stale blocked auth screen ends not-received, never provider-er
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists'],
       'the error-case keys without raw');
     assert.match(r.stderr, /prompt to 'build' was not received after its block on a provider auth error/);
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted', arrival: 'not-received' },
       'the accepted outcome stands; the arrival mark is added');
@@ -3511,7 +3523,7 @@ test('dispatch --no-wait: an identical auth failure across a 40-line rollover re
     assert.deepEqual(Object.keys(j),
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
       'no attribution for ambiguous identical evidence');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' },
       'the accepted attempt sidecar stays accepted (no arrival key)');
@@ -3625,7 +3637,7 @@ test('dispatch --no-wait: a redrawn old auth line remains submitted (R11/D58)', 
     assert.deepEqual(Object.keys(j),
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
       'no lane/model/cause for ambiguous evidence');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' },
       'the accepted attempt sidecar stays accepted (no arrival key)');
@@ -3676,7 +3688,7 @@ test('dispatch: a newly observed auth screen reports provider-error on the first
       'the existing provider-error key order');
     assert.equal(j.report_exists, false);
     assert.match(r.stderr, /agent 'build' stopped on a provider error: Error: 401 Unauthorized: Incorrect API key provided\. It is idle without a report; ask the user whether to resend the brief, switch the assistant, or wait\./);
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' },
       'no arrival mark on a received delivery');
@@ -3708,7 +3720,7 @@ test('dispatch --no-wait: a scrollback-only append does not attribute the old au
     assert.deepEqual(Object.keys(j),
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
       'no lane/model/cause for a pre-existing failure');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' },
       'the accepted attempt sidecar stays accepted (no arrival key)');
@@ -3743,7 +3755,7 @@ test('dispatch --no-wait: an old auth error plus a new auth line still exits 14 
     assert.deepEqual(Object.keys(j),
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved', 'lane', 'model', 'cause'],
       'the existing provider-error key order');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' },
       'no arrival mark on a received delivery');
@@ -3773,7 +3785,7 @@ test('dispatch --no-wait: an appended identical auth line remains unconfirmed (R
     assert.deepEqual(Object.keys(j),
       ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
       'no lane/model/cause for ambiguous identical evidence');
-    const sidecar = `${j.composed_prompt.slice(0, -3)}.dispatch.json`;
+    const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
       { version: 1, kind: 'grok', model: 'grok-4.7', effort: '', submission: 'accepted' },
       'the accepted attempt sidecar stays accepted (no arrival key)');

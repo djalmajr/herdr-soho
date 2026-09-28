@@ -175,9 +175,11 @@ test('roster rewrites: keep the 0640 mode of the existing file and leave no temp
     fs.writeFileSync(f, fs.readFileSync(f, 'utf8') + ROW('worker').join('\t') + '\n');
     fs.chmodSync(f, 0o640);
     rosterSetRole(sd, 'worker', 'reviewer');
-    assert.equal(fs.statSync(f).mode & 0o777, 0o640, 'mode kept by set_role rewrite');
+    if (process.platform === 'win32') fs.accessSync(f, fs.constants.W_OK);
+    else assert.equal(fs.statSync(f).mode & 0o777, 0o640, 'mode kept by set_role rewrite');
     rosterRemove(sd, 'worker');
-    assert.equal(fs.statSync(f).mode & 0o777, 0o640, 'mode kept by remove rewrite');
+    if (process.platform === 'win32') fs.accessSync(f, fs.constants.W_OK);
+    else assert.equal(fs.statSync(f).mode & 0o777, 0o640, 'mode kept by remove rewrite');
     assert.deepEqual(fs.readdirSync(sd).filter((n) => n.includes('.tmp')), [], 'no temp file left');
     assert.ok(!fs.existsSync(path.join(sd, 'agents.lock')));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -188,13 +190,15 @@ test('atomicWrite (platform): 0600 for a new file, existing mode kept, no temp',
   try {
     const fresh = path.join(root, 'fresh');
     atomicWrite(fresh, 'x\n');
-    assert.equal(fs.statSync(fresh).mode & 0o777, 0o600);
+    if (process.platform === 'win32') fs.accessSync(fresh, fs.constants.W_OK);
+    else assert.equal(fs.statSync(fresh).mode & 0o777, 0o600);
     const kept = path.join(root, 'kept');
     fs.writeFileSync(kept, 'old\n', { mode: 0o644 });
     fs.chmodSync(kept, 0o644);
     atomicWrite(kept, 'new\n');
     assert.equal(fs.readFileSync(kept, 'utf8'), 'new\n');
-    assert.equal(fs.statSync(kept).mode & 0o777, 0o644);
+    if (process.platform === 'win32') fs.accessSync(kept, fs.constants.W_OK);
+    else assert.equal(fs.statSync(kept).mode & 0o777, 0o644);
     assert.deepEqual(fs.readdirSync(root).filter((n) => n.includes('.tmp')), []);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

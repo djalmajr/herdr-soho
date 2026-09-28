@@ -63,6 +63,7 @@ function makeFix(prefix) {
   }
   const env = {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: tmp,
     HERDR_SOHO_DIR: state,
@@ -744,7 +745,11 @@ test('stats: only an ENOENT sidecar is legacy; present-but-unreadable or field-l
     const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
     fix.prompt('e', '20260925T100000', 'implementer', { mtime: T0 });
     const eSide = fix.sidecar('e', '20260925T100000', { version: 1, kind: 'grok', model: 'RAW-EAC-SECRET', effort: 'full', submission: 'accepted' });
-    if (!asRoot) fs.chmodSync(eSide, 0);
+    let unreadable = false;
+    if (!asRoot) {
+      fs.chmodSync(eSide, 0);
+      try { fs.readFileSync(eSide); } catch (error) { unreadable = error.code === 'EACCES' || error.code === 'EPERM'; }
+    }
     // g: a v1 sidecar missing a required field (no effort): malformed.
     fix.prompt('g', '20260925T100000', 'implementer', { mtime: T0 });
     fix.sidecar('g', '20260925T100000', { version: 1, kind: 'grok', model: 'm-g', submission: 'accepted' });
@@ -753,7 +758,7 @@ test('stats: only an ENOENT sidecar is legacy; present-but-unreadable or field-l
     const r = fix.stats(['--json']);
     assert.equal(r.status, 0, 'an unreadable sidecar never dies the stats run');
     assert.match(r.stderr, /d-20260925T100000\.dispatch\.json is not a valid attempt sidecar/, 'the directory sidecar warns');
-    if (!asRoot) {
+    if (unreadable) {
       assert.match(r.stderr, /e-20260925T100000\.dispatch\.json is not a valid attempt sidecar/, 'the unreadable file warns');
       assert.ok(!r.stderr.includes('RAW-EAC-SECRET'), 'the unreadable contents are never printed');
     }
@@ -763,8 +768,8 @@ test('stats: only an ENOENT sidecar is legacy; present-but-unreadable or field-l
     // field-less v1 accepted) counts the pair below (and, as a reportless
     // last dispatch of a live agent, makes it pending).
     assert.deepEqual(o.roles.implementer, {
-      tasks: asRoot ? 2 : 1, amendments: 0, reuses: 0,
-      no_report: { pending: asRoot ? 2 : 1, lost: 0 },
+      tasks: unreadable ? 1 : 2, amendments: 0, reuses: 0,
+      no_report: { pending: unreadable ? 1 : 2, lost: 0 },
       not_received: 0, minutes: null, partials: 0,
     }, `only the legacy pair l counts (root: e's sidecar is readable too): ${JSON.stringify(o.roles)}`);
   } finally { fix.cleanup(); }

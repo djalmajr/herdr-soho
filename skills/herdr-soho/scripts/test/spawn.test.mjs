@@ -172,6 +172,7 @@ function makeFix(prefix) {
   writeFakeCli(bin, 'grok', `if (process.argv[2] === 'models') process.stdout.write('grok-4.7\\n');\n`);
   const env = {
     HOME: path.join(root, 'home'),
+    USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'conf'),
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
@@ -2009,7 +2010,7 @@ test('spawn: a relative --cwd is resolved to an absolute directory', { timeout: 
     assert.equal(f[6], path.join(fix.repo, 'wt', 'ai'), 'column 7 holds the absolute cwd');
     r = runSpawn(fix, ['scouter', '--cwd', 'no/such/dir'], { HERDR_SOHO_LANES: 'off' });
     assert.equal(r.status, 2, r.stderr);
-    assert.match(r.stderr, /spawn: --cwd .*no\/such\/dir is not a directory/);
+    assert.ok(r.stderr.includes(`spawn: --cwd ${path.join(fix.repo, 'no', 'such', 'dir')} is not a directory`), r.stderr);
     // Mutation captured: keeping the --cwd as written stores `wt/ai` in
     // column 7; dropping the directory check opens a pane for a missing
     // path.
