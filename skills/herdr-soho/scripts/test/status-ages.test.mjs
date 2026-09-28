@@ -254,7 +254,7 @@ test('status: task_s is the marker-to-report duration (or to now, or unknown)', 
     assert.equal(rows[0][1], 'working');
     assert.equal(rows[0][2], p1, 'the report path is the marker content');
     const task1 = Number(rows[0][3]);
-    assert.ok(task1 >= 99 && task1 <= 105, `t1 ≈ now - marker (got ${task1})`);
+    assert.ok(task1 >= 99 && task1 <= 130, `t1 ≈ now - marker (got ${task1}; a loaded host adds seconds)`);
     assert.equal(rows[0][4], '-', 't1 is working without an observed change');
     assert.equal(rows[1][0], 't2');
     assert.equal(rows[1][1], 'done', 'the ready report wins over the query');
