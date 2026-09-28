@@ -284,25 +284,35 @@ export function runCli(exe, args, opts = {}) {
 
 // runCliTreeKill — the Windows .cmd/.bat + timeout path of runCli (issue
 // #20). The spec JSON (command/args/windowsVerbatimArguments/timeoutMs/
-// resultFile) goes through a 0600 temp file — never through a command line
-// — in the same TMPDIR as the mode's own output files, and both temp files
-// are removed at the end. The helper is spawned with the mode's own
-// stdio/input/encoding/env/cwd so the command's streams reach exactly the
-// same places as today; the only difference from the command's own call is
-// the timeout: the helper arms it (and kills the tree), so the outer
-// spawnSync gets no command timeout — only a safety cap of timeoutMs + 15 s
-// against a stuck taskkill or a tree that ignores the kill.
+// resultFile/ownPipes) goes through a 0600 temp file — never through a
+// command line — in the same TMPDIR as the mode's own output files, and
+// both temp files are removed at the end. The helper is spawned with the
+// mode's own stdio/input/encoding/env/cwd; the command then runs on the
+// mode's file fds (mergeOutput, outputFiles — stdio 'inherit') or, in the
+// default mode (ownPipes: true), on the helper's own pipes replayed onto
+// the helper's stdout/stderr — the command's output reaches exactly the
+// same places as today, and a grandchild that outlives the command cannot
+// hold the outer pipes open. The only other difference from the command's
+// own call is the timeout: the helper arms it (and kills the tree), so the
+// outer spawnSync gets no command timeout — only a safety cap of
+// timeoutMs + 15 s against a stuck taskkill or a tree that ignores the
+// kill.
 function runCliTreeKill(resolved, command, argv, verbatim, opts, env) {
   const tmpdir = env.TMPDIR || os.tmpdir();
   const suffix = `${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
   const specFile = path.join(tmpdir, `.herdr-soho-tk-${suffix}.spec`);
   const resultFile = path.join(tmpdir, `.herdr-soho-tk-${suffix}.result`);
+  // Default mode only: the helper carries the command's streams on its own
+  // pipes (replayed onto the helper's streams in finish); mergeOutput and
+  // outputFiles keep the command on the mode's file fds (inherit).
+  const ownPipes = !opts.mergeOutput && !opts.outputFiles;
   fs.writeFileSync(specFile, JSON.stringify({
     command,
     args: argv,
     windowsVerbatimArguments: verbatim,
     timeoutMs: opts.timeoutMs,
     resultFile,
+    ownPipes,
   }), { mode: 0o600 });
   const cap = opts.timeoutMs + 15_000;
   const helper = [TREEKILL_HELPER, specFile];

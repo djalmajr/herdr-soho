@@ -7,23 +7,34 @@
 // runCli spawns the treekill helper (the same runtime running the CLI) with
 // exactly the stdio/input/encoding/env/cwd of the mode in use, without the
 // command's timeout — only a safety cap of timeoutMs + 15 s. The helper
-// spawns the command with stdio 'inherit', arms the timeout, and on it
-// firing kills the whole tree (taskkill /PID <pid> /T /F while the tree
-// root is alive); it writes { status, signal, timedOut, error } to a temp
-// resultFile that runCli maps back to today's spawnSync shape (timeout →
-// status null, signal SIGTERM, timedOut, error ETIMEDOUT).
+// arms the timeout, and on it firing kills the whole tree (taskkill
+// /PID <pid> /T /F while the tree root is alive); it writes
+// { status, signal, timedOut, error } to a temp resultFile that runCli
+// maps back to today's spawnSync shape (timeout → status null, signal
+// SIGTERM, timedOut, error ETIMEDOUT). The command's streams: mergeOutput
+// and outputFiles run it with stdio 'inherit' over the mode's file fds;
+// the default mode (spec ownPipes: true) runs it on the helper's own
+// pipes, replayed onto the helper's stdout/stderr in finish — a grandchild
+// that outlives the command holds only those internal pipes, so the call
+// cannot be held open until the safety cap. The HERDR_SOHO_TREEKILL_TEST_KILLER
+// injection replaces taskkill only when it is an absolute path inside the
+// (resolved) system temp dir; any other value is ignored.
 //
 // What runs where:
 //  - portable tests: the helper directly with a Node command (a) finished
 //    before the timeout (status 3, streams) and (b) past it, with
 //    taskkill replaced by the HERDR_SOHO_TREEKILL_TEST_KILLER injection
-//    (the killer receives the child pid); and runCli's win32 path simulated
-//    end-to-end on POSIX with a fake COMSPEC (the "cmd.exe") and the
-//    injected killer — every mode (mergeOutput, outputFiles, default with
-//    input) × (finishes before the timeout, times out).
-//  - the Windows-only test (taskkill /T /F on a real .cmd → node →
-//    grandchild tree, both pids gone) skips with a reason elsewhere; the
-//    orchestrator runs it.
+//    (the killer receives the child pid); (c) a killer outside the temp
+//    dir (a relative path, a system executable) is never called; and
+//    runCli's win32 path simulated end-to-end on POSIX with a fake
+//    COMSPEC (the "cmd.exe") and the injected killer — every mode
+//    (mergeOutput, outputFiles, default with input) × (finishes before
+//    the timeout, times out), plus a default-mode grandchild that holds
+//    the pipes: the call must return at the command's exit, not the cap.
+//  - the simulated tests and the killer tests run with POSIX fakes (sh
+//    killers) and skip on Windows with a reason; the Windows-only test
+//    (taskkill /T /F on a real .cmd → node → grandchild tree, both pids
+//    gone) runs there instead; the orchestrator runs it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -82,11 +93,13 @@ test('treekill helper: a command that finishes before the timeout keeps its stat
       windowsVerbatimArguments: false,
       timeoutMs: 15_000,
       resultFile,
+      ownPipes: true,
     }), { mode: 0o600 });
     const outer = spawnSync(process.execPath, [HELPER, specFile], { encoding: 'utf8', timeout: 30_000, cwd: root });
     assert.equal(outer.status, 0, `the helper itself exits 0: ${outer.stderr}`);
-    // stdio 'inherit': the child's streams pass through the helper's own
-    // (here: pipes) — the shape the runCli modes rely on.
+    // ownPipes (the default-mode shape): the child's streams are replayed
+    // on the helper's own streams — the shape the runCli default mode
+    // relies on.
     assert.equal(outer.stdout, 'a-out\n', 'the child stdout reached the caller');
     assert.equal(outer.stderr, 'a-err\n', 'the child stderr reached the caller');
     assert.ok(fs.existsSync(resultFile), 'the helper wrote the resultFile');
@@ -101,7 +114,12 @@ test('treekill helper: a command that finishes before the timeout keeps its stat
 // `killTree(child.pid)` mutated to `killTree(child.pid + 1)`) leaves the
 // child alive — the killer log no longer matches the child pid and the
 // helper only ends when the outer cap kills it (run on a throwaway copy).
-test('treekill helper: past the timeout the killer receives the child pid and the result marks the timeout', { timeout: 60_000 }, () => {
+test('treekill helper: past the timeout the killer receives the child pid and the result marks the timeout', {
+  skip: process.platform === 'win32'
+    ? 'simulates win32 with POSIX fakes; on Windows the real .cmd test runs'
+    : false,
+  timeout: 60_000,
+}, () => {
   const root = tmpRoot('ha-tk-b-');
   const pidsFile = path.join(root, 'pids');
   const killerLog = path.join(root, 'killed');
@@ -128,6 +146,7 @@ setTimeout(() => {}, 60000);
       windowsVerbatimArguments: false,
       timeoutMs: 800,
       resultFile,
+      ownPipes: true,
     }), { mode: 0o600 });
     const t0 = Date.now();
     const outer = spawnSync(process.execPath, [HELPER, specFile], {
@@ -159,14 +178,96 @@ setTimeout(() => {}, 60000);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+// Mutation captured: honoring any HERDR_SOHO_TREEKILL_TEST_KILLER value
+// (the helper's testKiller validation mutated to return the raw value)
+// makes the helper run the killer it is handed: the relative killer logs
+// the child pid and SIGKILLs it (the helper then exits 0 early instead of
+// being ended by the outer timeout), and the system executable leaves a
+// trace file named after the child pid — the asserts below fail (run on a
+// throwaway copy).
+test('treekill helper: a killer outside the temp dir (relative, or a system executable) is ignored and taskkill runs', {
+  skip: process.platform === 'win32'
+    ? 'simulates win32 with POSIX fakes; on Windows the real .cmd test runs'
+    : false,
+  timeout: 60_000,
+}, () => {
+  const root = tmpRoot('ha-tk-c-');
+  const killerLog = path.join(root, 'killed');
+  // In a subdir: the relative value below then carries a slash, so a
+  // (buggy) helper would resolve it against its cwd and run it.
+  const killer = path.join(root, 'killer', 'killer.sh');
+  const pidsFile = path.join(root, 'pids');
+  try {
+    // The logging killer: only its absolute inside-tmp path is honored
+    // (proven by the test above); the same file is reached here by an
+    // invalid relative path.
+    fs.mkdirSync(path.dirname(killer), { recursive: true });
+    fs.writeFileSync(killer, `#!/bin/sh\nprintf '%s\\n' "$1" >> "${killerLog}"\nkill -9 "$1" 2>/dev/null || true\n`, { mode: 0o755 });
+    // A Node child that records its pid and hangs long past the timeout:
+    // nothing but a killer the helper actually runs can end it, so the
+    // helper is still waiting when the outer 5 s timeout ends it.
+    const src = `import fs from 'node:fs';
+fs.writeFileSync(${JSON.stringify(pidsFile)}, String(process.pid) + '\\n');
+setTimeout(() => {}, 60000);
+`;
+    const run = (label, value) => {
+      const specFile = path.join(root, `spec-${label}.json`);
+      const resultFile = path.join(root, `result-${label}.json`);
+      fs.writeFileSync(specFile, JSON.stringify({
+        command: process.execPath,
+        args: ['-e', src],
+        windowsVerbatimArguments: false,
+        timeoutMs: 800,
+        resultFile,
+        ownPipes: false,
+      }), { mode: 0o600 });
+      const outer = spawnSync(process.execPath, [HELPER, specFile], {
+        encoding: 'utf8',
+        timeout: 5_000,
+        cwd: root,
+        env: { ...process.env, HERDR_SOHO_TREEKILL_TEST_KILLER: value },
+      });
+      const pid = Number(fs.readFileSync(pidsFile, 'utf8').trim());
+      return { outer, resultFile, pid };
+    };
+    // A system executable outside the temp dir (touch): if the helper
+    // called it with the child pid, it would create a file named after the
+    // pid in the helper's cwd.
+    const touchPath = ((spawnSync('sh', ['-c', 'command -v touch'], { encoding: 'utf8' }).stdout) || '').trim() || '/usr/bin/touch';
+    assert.ok(path.isAbsolute(touchPath), 'the system executable resolves to an absolute path');
+
+    // Relative killer (it resolves to the logging killer from the
+    // helper's cwd): the helper must ignore it and fall back to taskkill.
+    const rel = run('rel', path.relative(root, killer));
+    assert.equal(rel.outer.signal, 'SIGTERM', 'the helper was ended by the outer timeout, not the child exit');
+    assert.ok(!fs.existsSync(killerLog), 'the relative killer was never called');
+    assert.ok(!fs.existsSync(rel.resultFile), 'the helper never reached the child exit (nothing killed the child)');
+    assert.ok(isAlive(rel.pid), 'the relative killer did not kill the child');
+    killSilently(rel.pid);
+    assertGone(rel.pid, 'the child was cleaned up');
+
+    // Absolute system-executable killer (outside the temp dir): same
+    // fallback, and the executable itself never runs (no trace file).
+    const abs = run('abs', touchPath);
+    assert.equal(abs.outer.signal, 'SIGTERM', 'the helper was ended by the outer timeout, not the child exit');
+    assert.ok(!fs.existsSync(path.join(root, String(abs.pid))), 'the system executable was never called with the child pid');
+    assert.ok(!fs.existsSync(abs.resultFile), 'the helper never reached the child exit (nothing killed the child)');
+    assert.ok(isAlive(abs.pid), 'the system executable did not kill the child');
+    killSilently(abs.pid);
+    assertGone(abs.pid, 'the child was cleaned up');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 // ---------- runCli's win32 path, simulated on POSIX ----------
 
 // A fake "cmd.exe" (the COMSPEC of the simulation): writes one line to each
 // stream, records the stdin it saw, and behaves per TK_CMD_MODE — `hang`
-// starts a grandchild and stays alive past the timeout; `exit3` exits 3.
-// The grandchild uses stdio 'ignore': the injected POSIX killer cannot kill
-// the tree (no /T), and the default-mode pipes would otherwise stay open
-// behind it. On Windows taskkill /T kills it (Windows-only test).
+// starts a grandchild and stays alive past the timeout; `exit3` exits 3;
+// `hold` starts a grandchild that inherits the cmd's stdout/stderr and
+// exits 0 right away. The `hang` grandchild uses stdio 'ignore': the
+// injected POSIX killer cannot kill the tree (no /T), and the default-mode
+// pipes would otherwise stay open behind it. On Windows taskkill /T kills
+// it (Windows-only test).
 function cmdFakeSource() {
   return `import fs from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -180,6 +281,11 @@ if (process.env.TK_CMD_MODE === 'hang') {
   const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
   fs.writeFileSync(process.env.TK_PIDS_FILE, String(process.pid) + '\\n' + String(g.pid) + '\\n');
   setTimeout(() => {}, 60000);
+}
+if (process.env.TK_CMD_MODE === 'hold') {
+  const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: ['ignore', 'inherit', 'inherit'] });
+  fs.writeFileSync(process.env.TK_PIDS_FILE, String(process.pid) + '\\n' + String(g.pid) + '\\n');
+  process.exit(0);
 }
 `;
 }
@@ -197,7 +303,10 @@ function simSetup() {
   fs.writeFileSync(path.join(bin, 'slow.cmd'), '@echo fake\r\n');
   const fakeCmd = writeFakeCli(bin, 'cmd', cmdFakeSource());
   const killerLog = path.join(log, 'killed');
-  const killer = path.join(bin, 'killer.sh');
+  // Inside the test's TMPDIR: the helper honors the killer only when it
+  // is inside its own os.tmpdir(), and runCliTreeKill hands the helper the
+  // test's TMPDIR (the helper process sees it as its temp dir).
+  const killer = path.join(tmp, 'killer.sh');
   fs.writeFileSync(killer, `#!/bin/sh\nprintf '%s\\n' "$1" >> "${killerLog}"\nkill -9 "$1" 2>/dev/null || true\n`, { mode: 0o755 });
   return {
     root, bin, tmp, cwd, fakeCmd, killer, killerLog,
@@ -235,7 +344,12 @@ function simRun(s, modeOpts, envOver, cliOpts) {
 // mode's fds (the mergeOutput branch's `stdio: ['ignore', fd, fd]` mutated
 // to `stdio: ['ignore', 'pipe', 'pipe']`) empties the mode's file and the
 // merged text assert below fails (run on a throwaway copy).
-test('runCli win32 (simulated): mergeOutput mode — finishes before the timeout and times out', { timeout: 60_000 }, () => {
+test('runCli win32 (simulated): mergeOutput mode — finishes before the timeout and times out', {
+  skip: process.platform === 'win32'
+    ? 'simulates win32 with POSIX fakes; on Windows the real .cmd test runs'
+    : false,
+  timeout: 60_000,
+}, () => {
   const s = simSetup();
   try {
     // Finishes before the timeout: the child's status and the merged
@@ -274,7 +388,12 @@ test('runCli win32 (simulated): mergeOutput mode — finishes before the timeout
 // instead of the fixed shape (the timedOut branch's `signal: 'SIGTERM'`
 // mutated to `signal: null`) breaks the SIGTERM/ETIMEDOUT asserts below
 // (run on a throwaway copy).
-test('runCli win32 (simulated): outputFiles mode — finishes before the timeout and times out', { timeout: 60_000 }, () => {
+test('runCli win32 (simulated): outputFiles mode — finishes before the timeout and times out', {
+  skip: process.platform === 'win32'
+    ? 'simulates win32 with POSIX fakes; on Windows the real .cmd test runs'
+    : false,
+  timeout: 60_000,
+}, () => {
   const s = simSetup();
   try {
     const ok = simRun(s, 'outputFiles', {}, { timeoutMs: 15_000 });
@@ -307,7 +426,12 @@ test('runCli win32 (simulated): outputFiles mode — finishes before the timeout
 // (the helper spawn's `input: opts.input` mutated to `input: undefined`)
 // empties the stdin file and the stdin assert below fails (run on a
 // throwaway copy).
-test('runCli win32 (simulated): default mode with input — finishes before the timeout and times out', { timeout: 60_000 }, () => {
+test('runCli win32 (simulated): default mode with input — finishes before the timeout and times out', {
+  skip: process.platform === 'win32'
+    ? 'simulates win32 with POSIX fakes; on Windows the real .cmd test runs'
+    : false,
+  timeout: 60_000,
+}, () => {
   const s = simSetup();
   try {
     const ok = simRun(s, null, { TK_STDIN_FILE: s.stdinFile }, { timeoutMs: 15_000, input: 'stdin-bytes\n' });
@@ -339,6 +463,47 @@ test('runCli win32 (simulated): default mode with input — finishes before the 
     assert.equal(to.stdout, 'out-from-cmd\n');
     assert.equal(to.stderr, 'err-from-cmd\n');
     assertSimKill(s, 'default');
+  } finally { s.cleanup(); }
+});
+
+// Mutation captured: running the default-mode command with stdio 'inherit'
+// instead of the helper's own pipes (the helper's ownPipes spawn mutated
+// back to `spawn(command, args, { stdio: 'inherit', … })`) lets the
+// grandchild hold the outer pipes open: the call only ends at the
+// timeoutMs + 15 s safety cap (~15.8 s here) and the ms < 5000 assert
+// below fails (run against the pre-fix helper on a throwaway copy).
+test('runCli win32 (simulated): default mode — a grandchild holding the pipes cannot hold the call past the timeout', {
+  skip: process.platform === 'win32'
+    ? 'simulates win32 with POSIX fakes; on Windows the real .cmd test runs'
+    : false,
+  timeout: 60_000,
+}, () => {
+  const s = simSetup();
+  try {
+    // The fake cmd starts a grandchild that inherits its stdout/stderr
+    // (and hangs), then exits 0 well before the timeout. In default mode
+    // the helper's own pipes carry the cmd's streams, so the grandchild
+    // holds only those internal pipes — the call returns at the cmd's
+    // exit, with the output written before it, long before the cap.
+    const t0 = Date.now();
+    const r = simRun(s, null, {
+      TK_CMD_MODE: 'hold',
+      TK_PIDS_FILE: s.pidsFile,
+    }, { timeoutMs: 800 });
+    const ms = Date.now() - t0;
+    assert.ok(ms < 5000, `the call ends at the command's exit, not the safety cap (took ${ms} ms)`);
+    assert.equal(r.status, 0, 'the command exited 0 before the timeout');
+    assert.equal(r.signal, null);
+    assert.equal(r.timedOut, false);
+    assert.equal(r.error, null);
+    assert.equal(r.stdout, 'out-from-cmd\n', 'the output written before the exit is still captured');
+    assert.equal(r.stderr, 'err-from-cmd\n');
+    const pids = fs.readFileSync(s.pidsFile, 'utf8').trim().split('\n').map(Number);
+    assert.equal(pids.length, 2, 'the fake recorded the cmd pid and the grandchild pid');
+    // The grandchild outlives the call (holding the helper's internal
+    // pipes); the test cleans it up.
+    killSilently(pids[1]);
+    assertGone(pids[1], 'the grandchild was cleaned up by the test');
   } finally { s.cleanup(); }
 });
 
