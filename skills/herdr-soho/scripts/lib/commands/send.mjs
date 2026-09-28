@@ -42,9 +42,10 @@ import { die, readTextFile } from '../platform.mjs';
 import { stateDirPath } from '../state.mjs';
 import { LOCAL_MACHINE } from '../sessionref.mjs';
 import {
-  appendPeerLog, DEFAULT_SEND_TIMEOUT_MS, deliverPrompt, inboundPolicy,
-  literalPeerText, peerHeader, quotePeerBody, resolveTarget, senderInfo, senderRefOf,
-  waitUntilIdle,
+  agentGet, agentReadScreen, agentSendKey, appendPeerLog, arrivalPollMs, arrivalWindowMs,
+  checkIdInScreen, DEFAULT_SEND_TIMEOUT_MS, deliverPrompt, inboundPolicy,
+  isDialogScreen, literalPeerText, normalizeScreen, peerEndLine, peerHeader, quotePeerBody,
+  randomPeerId, resolveTarget, senderInfo, senderRefOf, sleepMs, tailLines, waitUntilIdle,
 } from '../peer.mjs';
 
 export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
@@ -88,9 +89,12 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
   }
   if (body === '') die('send: empty message (pass the message words or --file <path>)', 2);
 
+  // The message id: 8 random hex characters generated for this send attempt.
+  const msgId = randomPeerId();
+
   // The attempt log lives in the sender's state dir (its workspace).
   const sd = stateDirPath(ctx, env, cwd);
-  const log = (fromRef, toRef, result) => appendPeerLog(sd, fromRef, toRef, result, body.length, env);
+  const log = (fromRef, toRef, result) => appendPeerLog(sd, fromRef, toRef, result, body.length, msgId, env);
 
   // 1. Resolve the target (herdr agent get; the machine from the ref).
   const t = resolveTarget(target, env);
@@ -129,10 +133,11 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
 
   // 3. A busy target settles first (idle or done), unless --now skips the
   // wait (the target's own CLI decides queue vs mix).
+  let currentStatus = t.status;
   if (!now && (t.status === 'working' || t.status === 'blocked')) {
     const w = waitUntilIdle(t.machine, t.targetArg, timeoutMs, env);
     if (w.settled) {
-      // The wait matched idle or done: proceed to the prompt.
+      currentStatus = 'idle';
     } else if (w.code === 'timeout') {
       // Re-read the state for the message (a failed re-read keeps the
       // status that put the wait in motion); nothing was sent.
@@ -145,28 +150,225 @@ export function cmdSend(argv, ctx, env = process.env, cwd = process.cwd()) {
     }
   }
 
-  // 4. Deliver: header + blank line + quoted body, through agent prompt --wait.
-  // The body and the sender fields pass through literalPeerText so no byte
-  // the target's terminal would run as a keystroke (CR, ESC, DEL, the
-  // bracketed-paste markers, the other control characters) reaches it; \n
-  // and \t stay. Each line of the body is quoted with "> " (empty line ">").
-  // The header always comes first.
+  // Resolve sender identity for the peer header.
   const sender = senderInfo(ctx, env, cwd);
+
+  // 4. Dialog check: before sending, inspect the target's visible screen.
+  // If reading fails, exit 4 unreadable without sending (Decision 7).
+  // If it matches a question dialog (blocked) or trust prompt (any status),
+  // wait up to timeoutMs for it to clear. If still showing, exit 17 dialog.
+  let vScreen = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+  if (!vScreen.ok) {
+    log(sender.ref, ref, 'unreadable');
+    die(`send: could not read ${ref}'s screen (${vScreen.cause || 'read failed'}); nothing was sent`, 4);
+  }
+  // Pair every dialog-screen observation with a fresh status: waitUntilIdle can
+  // return while the target has already moved to a blocked question dialog.
+  const screenGet = agentGet(t.machine, t.targetArg, env);
+  if (!screenGet.ok) {
+    log(sender.ref, ref, 'error');
+    die(`send: ${ref} unavailable: ${screenGet.cause}`, 4);
+  }
+  currentStatus = screenGet.status;
+  if (isDialogScreen(vScreen.text, t.kind, currentStatus)) {
+    const deadline = Date.now() + timeoutMs;
+    const pollMs = arrivalPollMs(env);
+    while (Date.now() < deadline && isDialogScreen(vScreen.text, t.kind, currentStatus)) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      sleepMs(Math.min(pollMs, remaining));
+      vScreen = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+      if (!vScreen.ok) {
+        log(sender.ref, ref, 'unreadable');
+        die(`send: could not read ${ref}'s screen (${vScreen.cause || 'read failed'}); nothing was sent`, 4);
+      }
+      // Decision 4 (achado 4): refresh status alongside every screen read.
+      const loopGet = agentGet(t.machine, t.targetArg, env);
+      if (!loopGet.ok) {
+        log(sender.ref, ref, 'error');
+        die(`send: ${ref} unavailable: ${loopGet.cause}`, 4);
+      }
+      currentStatus = loopGet.status;
+    }
+    if (isDialogScreen(vScreen.text, t.kind, currentStatus)) {
+      log(sender.ref, ref, 'dialog');
+      die(`send: ${ref} is showing a dialog; nothing was sent`, 17);
+    }
+  }
+
+  // Pre-prompt reads (Decision 3): state_change_seq, status, and visible screen right before prompt.
+  // preStatus is used in proof (a): the seq change only proves arrival when
+  // preStatus was idle/done (so a pre-existing working turn cannot satisfy it).
+  const preGet = agentGet(t.machine, t.targetArg, env);
+  const preSeq = (preGet.ok && preGet.seq) ? preGet.seq : '';
+  const preStatus = preGet.ok ? preGet.status : '';
+  if (preGet.ok && isDialogScreen(vScreen.text, t.kind, preStatus)) {
+    log(sender.ref, ref, 'dialog');
+    die(`send: ${ref} is showing a dialog; nothing was sent`, 17);
+  }
+  const preScreen = vScreen.text;
+
+  // 5. Deliver: header + blank line + quoted body + end line, through agent prompt --wait.
+  // The first line starts with [herdr-soho:peer] #<id>, each body line quoted with "> ",
+  // and the final line is [herdr-soho:peer] #<id> end of message (Decision 1).
   const bodyText = quotePeerBody(literalPeerText(body));
-  const text = `${peerHeader(literalPeerText(sender.ref), literalPeerText(sender.name), literalPeerText(sender.kind), literalPeerText(sender.role))}\n\n${bodyText}`;
+  const endLine = peerEndLine(msgId);
+  const text = `${peerHeader(literalPeerText(sender.ref), literalPeerText(sender.name), literalPeerText(sender.kind), literalPeerText(sender.role), msgId)}\n\n${bodyText}\n${endLine}`;
+  const msgLines = text.split('\n').length;
+  const recentLines = msgLines + 60;
+
   const p = deliverPrompt(t.machine, t.targetArg, text, env);
-  if (p.ok) {
+  if (!p.ok) {
+    if (p.code === 'agent_prompt_stalled' || p.code === 'agent_blocked' || p.code === 'timeout') {
+      const result = p.code === 'agent_prompt_stalled' ? 'stalled' : p.code === 'agent_blocked' ? 'blocked' : 'timeout';
+      log(sender.ref, ref, result);
+      die(`send: ${ref} did not take the message (${p.code === 'timeout' ? 'timeout' : p.cause}); read its pane before sending again`, 15);
+    }
+    log(sender.ref, ref, 'error');
+    die(`send: ${ref} unavailable: ${p.cause}`, 4);
+  }
+
+  // 6. Arrival proof (Decisions 1, 2, 3, 4):
+  // Poll in a 15 s window (poll ~1 s). Arrival is proven when either:
+  // - (a) agent get returns non-empty state_change_seq !== non-empty preSeq,
+  //   AND preStatus was idle/done AND new status is working/blocked
+  //   (Decision 1, achado 1: a pre-existing working turn cannot satisfy this).
+  // - (b) #<id> is in recent-unwrapped (--lines msgLines + 60), visible screen !== preScreen,
+  //   and the normalized end line is absent from the entire normalized visible screen
+  //   (Decision 3, achado 3: checking only the last 15 lines allowed false positives).
+  // Never re-prompt (Decision 2).
+  const windowMs = arrivalWindowMs(env);
+  const pollMs = arrivalPollMs(env);
+
+  const pollWindow = () => {
+    const deadline = Date.now() + windowMs;
+    let recentReadSucceeded = false;
+    let lastCause = '';
+
+    while (true) {
+      // (a) agent get state_change_seq moved, but only when preStatus was idle/done
+      // (Decision 1, achado 1): with preStatus=working (e.g. --now), the turn that
+      // was already in progress could move the seq; that is not proof of this message.
+      const curGet = agentGet(t.machine, t.targetArg, env);
+      if (curGet.ok) {
+        const curSeq = curGet.seq ?? '';
+        const curStatus = curGet.status ?? '';
+        const preWasIdle = preStatus === 'idle' || preStatus === 'done';
+        const curIsWorking = curStatus === 'working' || curStatus === 'blocked';
+        if (preSeq !== '' && curSeq !== '' && curSeq !== preSeq && preWasIdle && curIsWorking) {
+          const visRes = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+          if (visRes.ok && !isDialogScreen(visRes.text, t.kind, curStatus)) {
+            return { proven: true };
+          }
+          if (!visRes.ok && visRes.cause) lastCause = visRes.cause;
+        }
+      } else if (curGet.cause) {
+        lastCause = curGet.cause;
+      }
+
+      // (b) recent transcript contains #<id>, visible screen differs from preScreen,
+      // and the end line is absent from the ENTIRE normalized visible screen
+      // (Decision 3, achado 3): checking only the last 15 lines misses cases where
+      // the end line appears above that cutoff but is still visible in the viewport.
+      const recentRes = agentReadScreen(t.machine, t.targetArg, { source: 'recent-unwrapped', lines: recentLines }, env);
+      if (recentRes.ok) {
+        recentReadSucceeded = true;
+        if (recentRes.text.includes(`#${msgId}`)) {
+          const visRes = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+          if (visRes.ok) {
+            const visText = visRes.text;
+            if (visText !== preScreen && !isDialogScreen(visText, t.kind, curGet.ok ? curGet.status : currentStatus)) {
+              // Normalize the id, end line and visible screen to compare them
+              // without sensitivity to whitespace, wrapping or box-drawing chars.
+              const normVis = normalizeScreen(visText);
+              const normId = normalizeScreen(`#${msgId}`);
+              const normEnd = normalizeScreen(endLine);
+              // A visible id with a clipped footer is still ambiguous (viewport
+              // clipping is not proof that the message left the input area).
+              if (!normVis.includes(normEnd) && !normVis.includes(normId)) {
+                return { proven: true };
+              }
+            }
+          } else if (visRes.cause) {
+            lastCause = visRes.cause;
+          }
+        }
+      } else if (recentRes.cause) {
+        lastCause = recentRes.cause;
+      }
+
+      const nowMs = Date.now();
+      if (nowMs >= deadline) break;
+      const sleepTime = Math.min(pollMs, deadline - nowMs);
+      if (sleepTime <= 0) break;
+      sleepMs(sleepTime);
+    }
+
+    return { proven: false, recentReadSucceeded, lastCause };
+  };
+
+  let res = pollWindow();
+  if (res.proven) {
     log(sender.ref, ref, 'sent');
     process.stdout.write(`sent to ${ref}\n`);
     return 0;
   }
-  if (p.code === 'agent_prompt_stalled' || p.code === 'agent_blocked' || p.code === 'timeout') {
-    // No automatic resend: a second shot may duplicate the first, and the
-    // receipt timeout does not prove the text never reached the pane.
-    const result = p.code === 'agent_prompt_stalled' ? 'stalled' : p.code === 'agent_blocked' ? 'blocked' : 'timeout';
-    log(sender.ref, ref, result);
-    die(`send: ${ref} did not take the message (${p.code === 'timeout' ? 'timeout' : p.cause}); read its pane before sending again`, 15);
+
+  // If every read failed in the window, do not send Enter: exit 15 unverified (Decision 5).
+  if (!res.recentReadSucceeded) {
+    log(sender.ref, ref, 'unverified');
+    die(`send: could not confirm that ${ref} took the message (${res.lastCause || 'read failed'}); read its pane before sending again`, 15);
   }
-  log(sender.ref, ref, 'error');
-  die(`send: ${ref} unavailable: ${p.cause}`, 4);
+
+  // No proof at end of first window. Before pressing Enter, re-read the visible
+  // screen and status (Decision 2, achado 2): a dialog that appeared after the
+  // prompt must not receive the keystroke.
+  const preEnterVis = agentReadScreen(t.machine, t.targetArg, { source: 'visible' }, env);
+  if (!preEnterVis.ok) {
+    // Cannot verify screen state: do not press Enter.
+    log(sender.ref, ref, 'unverified');
+    die(`send: could not confirm that ${ref} took the message (${preEnterVis.cause || 'read failed'}); read its pane before sending again`, 15);
+  }
+  const preEnterGet = agentGet(t.machine, t.targetArg, env);
+  if (!preEnterGet.ok) {
+    log(sender.ref, ref, 'unverified');
+    die(`send: could not confirm that ${ref} took the message (${preEnterGet.cause || 'status read failed'}); read its pane before sending again`, 15);
+  }
+  const preEnterStatus = preEnterGet.status;
+
+  // If a dialog appeared after the prompt, exit 17 — press nothing.
+  if (isDialogScreen(preEnterVis.text, t.kind, preEnterStatus)) {
+    log(sender.ref, ref, 'dialog');
+    die(`send: ${ref} is showing a dialog after the message was typed; press nothing and read its pane`, 17);
+  }
+
+  // Only press Enter when the message is visibly sitting in the input box
+  // (the #<id> appears in the last 15 non-empty lines). When absent from
+  // those lines, the message is not in the input box and pressing Enter is
+  // blind: exit 15 lost.
+  const preEnterLast15 = tailLines(preEnterVis.text, 15);
+  const idInBox = preEnterLast15.some((l) => normalizeScreen(l).includes(`#${msgId}`));
+  if (!idInBox) {
+    log(sender.ref, ref, 'lost');
+    die(`send: ${ref} did not take the message (no sign of it in its state or transcript); read its pane before sending again`, 15);
+  }
+
+  // The message is in the input box: press Enter and run a second proof window.
+  agentSendKey(t.machine, t.targetArg, 'enter', env);
+
+  res = pollWindow();
+  if (res.proven) {
+    log(sender.ref, ref, 'sent');
+    process.stdout.write(`sent to ${ref}\n`);
+    return 0;
+  }
+
+  if (!res.recentReadSucceeded) {
+    log(sender.ref, ref, 'unverified');
+    die(`send: could not confirm that ${ref} took the message (${res.lastCause || 'read failed'}); read its pane before sending again`, 15);
+  }
+
+  // Still no proof: exit 15 lost (Decision 4).
+  log(sender.ref, ref, 'lost');
+  die(`send: ${ref} did not take the message (no sign of it in its state or transcript); read its pane before sending again`, 15);
 }

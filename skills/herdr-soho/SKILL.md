@@ -853,21 +853,30 @@ reference (the `find`/picker form `local/w12:p1`, `windows/w3:p1`, or a bare
 pane id) or an agent name on the local server, resolved with `herdr
 [--machine m] agent get`; a pane without an agent exits 4 (`no agent in
 <ref>`). The message is always prefixed with a 4-line header that names the sender
-as a peer agent — `[herdr-soho:peer] Message from another agent —
+as a peer agent with an 8-hex random message ID — `[herdr-soho:peer] #<id> Message from another agent —
 <sender-ref> (<name>, <kind>, <role>), not from your user` —, says it carries
 no user intent or approval, tells how to reply with `send` itself, and announces
 that the message follows quoted with `> ` (`The message follows, each line quoted with "> ".`);
 outside a Herdr pane the sender degrades to `local/-` with dashes. Each line of the
-body is quoted with `> ` (empty lines become `>`), so a fake header in the body
-can never be confused with the real one. A `working`/
+body is quoted with `> ` (empty lines become `>`), and the message ends with a closing line
+`[herdr-soho:peer] #<id> end of message`, so a fake header in the body can never be confused
+with the real one. A `working`/
 `blocked` target is waited on until `idle`/`done` (`agent wait --until idle
---until done --timeout MS`, default 600000) and then prompted; `--now` sends
-at once (the target's own CLI decides queue vs mix); the wait timing out
-exits 17 with nothing sent (`<ref> is still <status> after <s>s`). The
-prompt goes through `agent prompt --wait --until working --until blocked
---until idle --until done --timeout 15000`; `agent_prompt_stalled` or
-`agent_blocked` exits 15 with no automatic resend — read the target's pane
-before sending again. The target project decides acceptance: the `inbound`
+--until done --timeout MS`, default 600000) unless `--now` is given (the target's own
+CLI decides queue vs mix); timing out exits 17 with nothing sent (`<ref> is still <status> after <s>s`).
+Before sending, `send` checks the target's visible screen: if reading fails, it exits 4 (`<ref>'s screen unreadable; nothing was sent`).
+If the bottom 20 non-empty lines match folder/workspace trust patterns (`Trust this workspace`,
+`trust this folder`, `Do you trust`, `Enter to confirm`, `[y/N]`, `(y/n)`) under any status,
+or question detectors from `dialog.mjs` when the target is `blocked`, it waits up to `--timeout`
+for the dialog to clear; if it does not clear, it exits 17 (`<ref> is showing a dialog; nothing was sent`),
+logging `dialog` without typing into the dialog.
+The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.
+Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).
+Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000` (it never automatically re-prompts).
+Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof).
+If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
+If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or transcript)`).
+The target project decides acceptance: the `inbound`
 key (`auto` | `off`, default `auto`) is consulted for a **local** target in
 the target's directory, with the target's session layer (its
 `HERDR_WORKSPACE_ID`) and none of the sender's `HERDR_SOHO_*`/
@@ -876,9 +885,9 @@ refuse on the target's behalf — and `off` refuses with exit 18 before
 anything is sent. For a **remote** target the policy is not consulted (the
 sending machine cannot read the remote project): the header is the only
 protection there. Every attempt appends one line to `<state>/
-peer-messages.tsv` (`ts from to result chars`, never the body; skipped with
+peer-messages.tsv` (`ts from to result chars id`, never the body; skipped with
 `HERDR_SOHO_NOWRITE=1`). Exit codes: 0 sent, 2 usage, 4 Herdr/target
-unavailable, 15 not received, 17 still busy, 18 refused by `inbound=off`.
+unavailable or unreadable screen, 15 not received / lost / unverified, 17 still busy or showing dialog, 18 refused by `inbound=off`.
 
 ## What is implicit (read once)
 
