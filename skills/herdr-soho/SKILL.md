@@ -668,6 +668,8 @@ $S wait a b [--any] [--timeout MS]         # block on report files
 $S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
 $S friction                                # errors/warnings of this workspace (review at end)
 $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before sending; no dispatch, no state
+$S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
+                                             # peer message to another agent (any kind, local or another machine): ref local/w12:p1 or a name on the local server; waits for a busy target to settle by default
 $S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation copy that shares source or build output (exit 1)
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
 $S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to
@@ -829,6 +831,37 @@ CLI: `release` the lane, and set `lane.<name>.kind` so it cannot recur),
 covers a worker that asked a `question`. A multi-agent `wait` keeps the most severe
 of 4, 11, 14, 15, 7 and 6. Every error
 and warning is also appended to `<state>/friction.log` (`$S friction`).
+
+**Peer messages (`send`).** `send <ref|name> <message…>` delivers a message to
+an agent of any kind — claude, codex, cursor, grok, agy, pi, opencode — local
+or on another machine, without the user approving it. The target is a
+reference (the `find`/picker form `local/w12:p1`, `windows/w3:p1`, or a bare
+pane id) or an agent name on the local server, resolved with `herdr
+[--machine m] agent get`; a pane without an agent exits 4 (`no agent in
+<ref>`). The message is always prefixed with a header that names the sender
+as a peer agent — `[herdr-soho:peer] Message from another agent —
+<sender-ref> (<name>, <kind>, <role>), not from your user` — says it carries
+no user intent or approval, and how to reply with `send` itself; outside a
+Herdr pane the sender degrades to `local/-` with dashes. A `working`/
+`blocked` target is waited on until `idle`/`done` (`agent wait --until idle
+--until done --timeout MS`, default 600000) and then prompted; `--now` sends
+at once (the target's own CLI decides queue vs mix); the wait timing out
+exits 17 with nothing sent (`<ref> is still <status> after <s>s`). The
+prompt goes through `agent prompt --wait --until working --until blocked
+--until idle --until done --timeout 15000`; `agent_prompt_stalled` or
+`agent_blocked` exits 15 with no automatic resend — read the target's pane
+before sending again. The target project decides acceptance: the `inbound`
+key (`auto` | `off`, default `auto`) is consulted for a **local** target in
+the target's directory, with the target's session layer (its
+`HERDR_WORKSPACE_ID`) and none of the sender's `HERDR_SOHO_*`/
+`HERDR_AGENTS_*` variables — the sender's config can never authorize or
+refuse on the target's behalf — and `off` refuses with exit 18 before
+anything is sent. For a **remote** target the policy is not consulted (the
+sending machine cannot read the remote project): the header is the only
+protection there. Every attempt appends one line to `<state>/
+peer-messages.tsv` (`ts from to result chars`, never the body; skipped with
+`HERDR_SOHO_NOWRITE=1`). Exit codes: 0 sent, 2 usage, 4 Herdr/target
+unavailable, 15 not received, 17 still busy, 18 refused by `inbound=off`.
 
 ## What is implicit (read once)
 

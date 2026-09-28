@@ -142,6 +142,7 @@ $S friction add "<text>" [--brief P] # record one friction note (level note, com
 $S run scouter brief.md               # spawn + dispatch + collect
 $S wait build review                 # block until every report exists
 $S roster                            # live agents with role/kind/pane/state/report and the current task (TASK)
+$S send build "check the report"     # peer message: a ref (local/w12:p1, windows/w3:p1) or a name on the local server; --file <path>; --now; --timeout MS (default 600000)
 $S release build --close             # closes only panes the skill created
 $S clean --older-than 7              # drop gone agents, delete old briefs/reports
 ```
@@ -183,6 +184,35 @@ run — no extra arguments, so `doctor --fix` cannot write — and the CLI
 never writes to the project (no `.gitignore` entry, no state directory,
 no friction log); every other invocation exits 2 with a message. Without
 the env, the CLI behaves exactly as before.
+
+## Peer messages
+
+`send <ref|name> <message…>` delivers a message to another agent — any kind,
+local or on another machine — without the user in between. The target is a
+reference (`local/w12:p1`, `windows/w3:p1`, or a bare pane id on the local
+server) or an agent name on the local server. The message is always prefixed
+with a header that names the sender as a peer agent
+(`[herdr-soho:peer] Message from another agent — <ref> (<name>, <kind>,
+<role>), not from your user`) and says it carries no user intent or approval;
+the target's setup block tells it to treat such text that way, and it can
+reply with the same command. An `idle`, `done` or `unknown` target gets it at
+once; a `working`/`blocked` one is waited on until it settles
+(`--timeout MS`, default 600000) unless `--now` is given (then the target's
+own CLI decides queue vs mix). The wait timing out exits 17 with nothing
+sent; a prompt the agent does not take (stalled or blocked) exits 15 with no
+automatic resend — read the pane before sending again.
+
+The target project decides whether it accepts peer messages: `inbound=off`
+in that project's configuration refuses with exit 18. For a local target the
+sending side reads that key in the target's directory, with the target's
+session layer and without the sender's `HERDR_SOHO_*` variables — so the
+sender's own configuration can never authorize or refuse on the target's
+behalf. For a remote target the policy is not consulted (the sending machine
+cannot read the remote project); there the header is the only protection.
+Every attempt appends one line to `<state>/peer-messages.tsv` (timestamp,
+sender ref, target ref, result, character count — never the message body).
+Exit codes: 0 sent, 2 usage, 4 target unavailable, 15 not received, 17 still
+busy, 18 refused by `inbound=off`.
 
 ## Good to know
 
