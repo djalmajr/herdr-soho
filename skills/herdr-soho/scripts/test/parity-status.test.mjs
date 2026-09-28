@@ -219,6 +219,11 @@ test('parity: roster table (rows, role history, tabs, other live agents)', { tim
       S(['status', 'task']),
     ],
     files: ['state/ws/agents.tsv'],
+    // The `status task` step: task_s is now - last-report mtime while the
+    // report is empty (wall clock), so the last two TSV columns are
+    // normalized like the .since epochs, keeping the golden stable. The
+    // roster table has no tab columns, so it is untouched by the transform.
+    transform: (out) => out.replace(/\t(-|\d+)\t(-|\d+)\n/g, '\t<N>\t<N>\n'),
   });
   // Empty roster: header, the (empty) other-live section, the footer.
   goldenScenario(SUITE, 'roster-empty', {
@@ -286,21 +291,33 @@ test('node semantics: status columns, cause, no stray herdr queries, quota JSON'
     let r = run(fix, ['status', 'worker']);
     assert.equal(r.rc, 4);
     const f = r.out.trim().split('\t');
-    assert.equal(f.length, 4, 'four columns with a cause');
+    // Six columns: name, state, report, cause, task_s, activity_s (both
+    // unknown here: no last-report marker, not the working state).
+    assert.equal(f.length, 6, 'six columns with a cause');
     assert.equal(f[1], 'unavailable');
     assert.match(f[3], /PermissionDenied/);
     assert.match(f[3], /Permission denied/);
+    assert.equal(f[4], '-', 'no last-report marker → task_s unknown');
+    assert.equal(f[5], '-', 'not working → activity_s unknown');
     assert.ok(!r.err.includes('gone'), 'stderr must not classify the failure as gone');
     assert.ok(!r.err.includes('\u001b'), 'no control characters leaked');
 
-    // Report wins: done, and no `agent get` in the herdr log.
+    // Report wins: done, and no `agent get` in the herdr log. task_s is
+    // the report mtime - marker mtime (both seeded microseconds apart: 0
+    // or 1 by the clock), activity_s unknown (the done state is not
+    // working).
     fs.rmSync(path.join(fix.root, 'herdr.log'), { force: true });
     fs.writeFileSync(path.join(ws, 'last-report-worker'), path.join(ws, 'reports', 'worker.md') + '\n');
     fs.mkdirSync(path.join(ws, 'reports'), { recursive: true });
     fs.writeFileSync(path.join(ws, 'reports', 'worker.md'), 'report body\n');
     r = run(fix, ['status', 'worker']);
     assert.equal(r.rc, 0);
-    assert.equal(r.out.trim(), `worker\tdone\t${path.join(ws, 'reports', 'worker.md')}`);
+    const f2 = r.out.trim().split('\t');
+    assert.equal(f2[0], 'worker');
+    assert.equal(f2[1], 'done');
+    assert.equal(f2[2], path.join(ws, 'reports', 'worker.md'));
+    assert.match(f2[3], /^(0|1)$/, 'task_s is the seeded mtime difference');
+    assert.equal(f2[4], '-', 'activity_s unknown on the done state');
     assert.equal(fs.existsSync(path.join(fix.root, 'herdr.log')), false, 'no herdr call with a ready report');
 
     // Quota: JSON line, rc 11.

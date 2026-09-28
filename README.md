@@ -43,8 +43,10 @@ bunx skills add djalmajr/herdr-soho --skill herdr-soho -g -y
 ```
 
 Then run `herdr-soho setup` (or `setup --local` in a fork) once in each
-project set up with `herdr-agents`. It replaces the old instruction block
-and the old Claude hooks in place and keeps the rest of those files. Until
+project set up with `herdr-agents`. It renames the old instruction block in
+place — markers and `herdr-agents` names — keeping the block's text,
+including lines the project added, replaces the old Claude hooks, and keeps
+the rest of those files. Until
 then, the old `SessionStart` hook prints `herdr-agents doctor: skill script
 not found` and exits 0, and the old block names a skill that is no longer
 installed.
@@ -61,8 +63,9 @@ project configuration or state is lost:
 
 ## Optional Herdr plugin
 
-The plugin supports Herdr 0.9.1+ on macOS. From a local checkout of this
-repository, link it once:
+The plugin supports Herdr 0.9.1+ on Linux, macOS and Windows (it runs the
+CLI with the `node` on the Herdr host's `PATH`). From a local checkout of
+this repository, link it once:
 
 ```sh
 herdr plugin link "$PWD/plugin"

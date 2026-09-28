@@ -11,7 +11,7 @@ name = "herdr-soho"
 version = "0.1.0"
 min_herdr_version = "0.9.1"
 description = "Read-only actions to diagnose and list the agents of the focused workspace (doctor and roster), reusing the herdr-soho skill CLI. Actions run the CLI in read-only mode: they inspect the focused project and never write to it (no .gitignore entry, no state directory)."
-platforms = ["macos"]
+platforms = ["linux", "macos", "windows"]
 
 [[actions]]
 id = "doctor"

@@ -60,7 +60,7 @@ export function cmdClean(argv, ctx, env = process.env, cwd = process.cwd()) {
     for (const e of entries) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walk(p, out);
-      else if (e.isFile()) out.push(p);
+      else if (e.isFile() && !e.name.endsWith('.current.md')) out.push(p);
     }
   };
   const files = [];

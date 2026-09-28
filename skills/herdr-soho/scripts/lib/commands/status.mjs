@@ -23,7 +23,7 @@ import { laneOfRole } from '../lanes.mjs';
 import { quotaDetect } from '../quota.mjs';
 import { providerDetect } from '../provider.mjs';
 import { dialogKind, questionText } from '../dialog.mjs';
-import { waitRank } from '../wait.mjs';
+import { waitRank, activityAgeSeconds } from '../wait.mjs';
 import { markerSeqChanged } from '../arrival.mjs';
 
 // True when a live agent with this name exists and none of them sits in
@@ -152,16 +152,35 @@ export function cmdStatus(argv, ctx, env = process.env, cwd = process.cwd()) {
         }
       }
     }
+    // The current task duration and the last observed screen movement
+    // (#4): the task runs from the last-report marker's mtime (written on
+    // every dispatch) to the report's mtime when it exists and is
+    // non-empty, else to now — no marker is unknown. The age is only for
+    // the working state, with the visible screen read once. Read-only:
+    // no marker is written here.
+    let taskS = null;
+    let taskStartMs;
+    try { taskStartMs = fs.statSync(path.join(sd, `last-report-${a}`)).mtimeMs; } catch { /* unknown */ }
+    if (taskStartMs !== undefined) {
+      const endMs = reportNonEmpty(r) ? fs.statSync(r).mtimeMs : Date.now();
+      taskS = Math.round((endMs - taskStartMs) / 1000);
+    }
+    let activityS = null;
+    if (state === 'working') {
+      activityS = activityAgeSeconds(sd, a, agentRead(env, a, { source: 'visible' }), Math.floor(Date.now() / 1000));
+    }
+    const taskCol = taskS === null ? '-' : String(taskS);
+    const activityCol = activityS === null ? '-' : String(activityS);
     if (quota) {
-      process.stdout.write(JSON.stringify({ agent: a, status: 'quota', report: r, lane, kind, model, match, renewal }) + '\n');
+      process.stdout.write(JSON.stringify({ agent: a, status: 'quota', report: r, lane, kind, model, match, renewal, task_s: taskS, activity_s: activityS }) + '\n');
     } else if (provider) {
-      process.stdout.write(JSON.stringify({ agent: a, status: provider.status, report: r, cause: provider.cause }) + '\n');
+      process.stdout.write(JSON.stringify({ agent: a, status: provider.status, report: r, cause: provider.cause, task_s: taskS, activity_s: activityS }) + '\n');
     } else if (question !== '') {
-      process.stdout.write(JSON.stringify({ agent: a, status: 'question', report: r, question }) + '\n');
+      process.stdout.write(JSON.stringify({ agent: a, status: 'question', report: r, question, task_s: taskS, activity_s: activityS }) + '\n');
     } else if (cause) {
-      process.stdout.write(`${a}\t${state}\t${r}\t${cause}\n`);
+      process.stdout.write(`${a}\t${state}\t${r}\t${cause}\t${taskCol}\t${activityCol}\n`);
     } else {
-      process.stdout.write(`${a}\t${state}\t${r}\n`);
+      process.stdout.write(`${a}\t${state}\t${r}\t${taskCol}\t${activityCol}\n`);
     }
   }
   return rc;

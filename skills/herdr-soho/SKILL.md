@@ -226,7 +226,15 @@ repeat in every brief: the `implementer` runs a mutation check in a
 throwaway copy of the project outside the repository whenever other
 workers may share the tree (in place only when alone, and restored only
 after the file's sha256 still matches — a changed file is someone else's
-edit: not restored, and reported); the `implementer`, `tasker` and
+edit: not restored, and reported), gives that copy its own build output
+(`CARGO_TARGET_DIR=<copy>/target`, for example) and runs `$S
+mutation-guard <copy>` before mutating — the guard fails when the copy
+sits inside the source (or the source inside it), holds a symlink into
+the source, or when `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR`, a
+`--env NAME` or a `.cargo/config[.toml]` `target-dir` points into the
+source (a relative value resolved against the copy) (exit 1; 0 when isolated, 2 for bad usage; nothing is written, and
+a path it cannot resolve fails closed) — and never cleans a shared cache
+or the source's build output to recover; the `implementer`, `tasker` and
 `designer` stop every process they started before writing the report,
 by the PIDs they kept, checked by PID only (never a listing of every
 command line, which can hold credentials; a sandboxed codex blocks `ps`); and the `designer` reports how the UI was
@@ -383,6 +391,20 @@ by hand. The amendment gets a new report that `wait` watches, and the pane
 keeps its current task. For a busy worker the message arrives when the CLI
 delivers it (most queue it).
 
+**One stable report path per task.** Every attempt still writes its own
+versioned report, but a task (a dispatch and its amendments) also has
+`task_report`: `<state>/reports/<agent>-<ts>.current.md`, named in the
+`dispatch` and `wait` JSON right after `report`, and on a
+`<!-- task report: … -->` line from `collect`. It is a regular file (no
+symlink) with the content of the task's current report: absent while
+that report is pending, written by `wait` when it reports `done` and by
+`collect`. An accepted `--amend` makes the amendment's report the current
+one (the earlier ones stay, listed in `<state>/task-report-<agent>.json`
+under `history`) and removes the copy until the amendment reports. A
+dispatch or amendment the transport refused restores `last-report-<agent>`,
+the pointer and the copy as they were, so the wait never follows a report
+that will not come.
+
 `wait` prints one JSON line per agent (`done`, `blocked`, `question`,
 `settled-no-report`, `gone`, `unavailable`, `quota`, `provider-error`,
 `capacity`, `not-received`, `timeout`) and exits 0 only when all reports
@@ -390,12 +412,24 @@ exist (7 blocked/`question`, 6 settled/`gone`, 4 `unavailable`, 9 timeout,
 11 quota, 14 `provider-error`/`capacity`, 15 `not-received`). When
 several agents finish in one `wait`, the exit is the most severe of those:
 4, then 11, then 14, then 15, then 7, then 6. Argument order does not
-change it. A `timeout` line carries `elapsed_ms` (this wait's own) and
-`state` (the last probe tag, `working` or `pending`), and each timed-out
-agent gets a friction line naming the state and doubling the timeout this
-wait used: `timeout waiting for '<agent>'; it may still be working
-(state: <state>). Run: herdr-soho wait <agent> --timeout <2×>` (a
-non-numeric timeout drops the suggestion). Every composed prompt asks for each item's state as `[done]`,
+change it. A `timeout` line carries `elapsed_ms` (this wait's own),
+`state` (the last probe tag, `working` or `pending`), `checkpoint` and
+`activity_age_s`. A worker still `working` whose screen really changed
+within the stuck window (`stuck_warn_minutes`, 20 min when 0 or not a
+number) is a **neutral checkpoint**: `checkpoint: true`, no friction line,
+only `herdr-soho: checkpoint: '<agent>' is still working (screen changed
+<N>s ago); wait again: herdr-soho wait <agent> --timeout <t>` on stderr.
+Reading a screen is not activity: a change counts only when the
+normalized screen (counters and progress glyphs do not count) moves away
+from the hash an earlier probe recorded, a failed (empty) read counts for
+nothing, and the change is dated at that earlier probe
+(`wait/<agent>.probe-at`), the oldest moment it could have happened — a
+long gap between two waits never reads as fresh. Any other timed-out
+agent (`checkpoint: false`) gets a friction line naming the state and
+doubling the timeout this wait used: `timeout waiting for '<agent>'; it
+may still be working (state: <state>). Run: herdr-soho wait <agent>
+--timeout <2×>` (a non-numeric timeout drops the suggestion). The exit is
+9 either way. Every composed prompt asks for each item's state as `[done]`,
 `[partial]` or `[skipped]`. A `done` line gains `partial: N` (only when
 N > 0, after `report`) when N lines of the report outside code blocks
 carry `[partial]`, and the wait warns:
@@ -509,7 +543,15 @@ error is transient: one more try after 1 s, then 2 s, before counting; if
 it persists, the cause is
 `herdr agent get was killed (exit <rc>, <signal>: memory pressure or an
 external kill)`. A report counts as done
-once its size stops changing between two polls. `notify=on` in the config raises a Herdr toast
+once its size stops changing between two polls.
+
+`status` ends every TSV line with `task_s` (seconds from the dispatch —
+the mtime of `last-report-<agent>` — to the report, or to now while it is
+missing; `-` with no dispatch) and `activity_s` (for a `working` agent,
+seconds since the last screen change a wait observed, dated as above; `-`
+in any other state or with no observed change), and adds both as the last
+keys of its JSON lines (`null` when unknown). It writes no marker and
+prints no screen text. `notify=on` in the config raises a Herdr toast
 per finished worker. `roster` shows a `REPORT` column (`none | pending |
 ready`) for a quick glance.
 
@@ -533,9 +575,11 @@ project or machine still has only the old names, the CLI reads them:
 file is absent (the first write to that file — `config set`,
 `setup --panes`, `doctor --fix` — copies the old file to the new
 name and leaves it in place), and the `.herdr-agents/` state directory
-while `.herdr-soho/` does not exist. `setup` replaces an old `<!-- herdr-agents:start/end -->` block and the old
-Claude hooks in place, and `doctor` prints one `legacy …` warning for each
-old name still in use.
+while `.herdr-soho/` does not exist. `setup` migrates an old
+`<!-- herdr-agents:start/end -->` block in place — it renames the markers
+and the `herdr-agents` names inside it and keeps the rest of its text, a
+project's own lines included — and replaces the old Claude hooks; `doctor`
+prints one `legacy …` warning for each old name still in use.
 
 **Session layer.** `session set <key> <value>` writes the workspace's
 `<state>/session.conf`: it overrides the project and user files, but flags
@@ -623,6 +667,8 @@ $S run scouter <brief.md>                    # spawn + dispatch + collect in one
 $S wait a b [--any] [--timeout MS]         # block on report files
 $S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
 $S friction                                # errors/warnings of this workspace (review at end)
+$S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before sending; no dispatch, no state
+$S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation copy that shares source or build output (exit 1)
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
 $S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to
 $S regrid                                  # exact grids: caller's tab (split) + every herd tab
@@ -688,7 +734,12 @@ of the roster is not scanned. Each author is one of:
 - an agent in the roster (its family column);
 - a family: `anthropic`, `openai`, `xai` or `google`;
 - a kind with a fixed family (`claude`, `codex`, `grok`, `agy`, `gemini`).
-  `cursor`, `pi` and `opencode` have a family per model: name the family.
+  `cursor`, `pi` and `opencode` have a family per model: name the family;
+- an agent already released from the roster: its family comes from the
+  kind and model recorded in its accepted dispatches in this workspace.
+  No accepted dispatch, or dispatches that disagree on one known family,
+  fail (exit 2) and ask for the family instead. A live roster entry of
+  the same name wins, and the name must match exactly.
 
 An agent whose family is unknown cannot narrow the check. The family is
 first derived from its kind and model; when it is still unknown, the
@@ -1109,6 +1160,32 @@ the section: the aliasable sections are `Goal`, `Expected result`,
 to alias); a malformed item is ignored with
 `brief_lint_aliases: ignored '<item>' (use Section=Heading|Heading)` and
 the valid items still apply.
+
+**Lint before you send.** `$S lint <brief.md> [--role <role>]` prints the
+same warnings the dispatch would print for that brief (the role defaults to
+`implementer`; a read-only role needs no `Owned files`), and creates no
+dispatch, no state and no friction line. It exits 0 when the brief is clean
+(`brief <path>: ok`), 1 with warnings, 2 when `brief_lint=strict` finds
+missing sections (the same message the dispatch dies with), and 3 for an
+unknown role; `brief_lint=off` prints `lint off` and exits 0.
+
+**Failure matrix, only for state that is published, retained or deleted.**
+A slice that publishes, retains, prunes or deletes state (backups, releases,
+caches, retention) gets the optional `Failure matrix` section of
+[templates/brief.md](templates/brief.md), with the three fixed markers
+`[crash]` (a crash between publish and prune/delete), `[retry]` (a step
+repeated or retried) and `[clock]` (a clock that goes backwards). The
+implementer writes one executable fixture per marker and the reviewer
+probes each one; both keep local fixture proof apart from operational
+proof. When the section is there, the lint (dispatch and `lint`) names the
+missing markers: `brief <path> failure matrix is missing: [clock] — a clock
+that goes backwards is not covered` (a warning in `warn` and `strict`).
+Any other slice leaves the section out and gets no matrix.
+
+**Stop after the gates.** The edit roles stop proving once every check the
+brief lists passes: a failure outside their files or caused by an external
+limit is a `[partial]` item with its evidence, and a test that would widen
+the scope goes to the report's open questions.
 
 ## Making the rule stick
 

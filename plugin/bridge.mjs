@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { cmdInvocation } from '../skills/herdr-soho/scripts/lib/platform.mjs';
 
 // Timeouts (ms). HERDR_PANE_GET_TIMEOUT_MS mirrors the skill CLI's herdr
 // ceiling (scripts/lib/herdr.mjs HERDR_TIMEOUT_MS); CLI_TIMEOUT_MS is a
@@ -86,14 +87,22 @@ export function parseContext(env) {
 // Every failure is a herdr failure (exit 4): the pane is the target, so an
 // unverifiable pane is never substituted with the plugin cwd or another
 // workspace. Malformed output is rejected as a whole.
-export function getPane(herdrBin, paneId, { timeoutMs = HERDR_PANE_GET_TIMEOUT_MS } = {}) {
+export function getPane(herdrBin, paneId, { timeoutMs = HERDR_PANE_GET_TIMEOUT_MS, platform = process.platform } = {}) {
+  // On Windows a .cmd/.bat herdr (a wrapper, or a test fake) cannot be
+  // spawned without a shell: it runs through cmd.exe with every argument
+  // escaped, by the skill CLI's own rule (cmdInvocation), never `shell: true`.
+  const args = ['pane', 'get', paneId];
+  const inv = platform === 'win32' && /\.(bat|cmd)$/i.test(herdrBin)
+    ? cmdInvocation(herdrBin, args, process.env)
+    : { command: herdrBin, args, windowsVerbatimArguments: false };
   let r;
   try {
-    r = spawnSync(herdrBin, ['pane', 'get', paneId], {
+    r = spawnSync(inv.command, inv.args, {
       encoding: 'utf8',
       timeout: timeoutMs,
       killSignal: 'SIGTERM',
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsVerbatimArguments: inv.windowsVerbatimArguments,
     });
   } catch (e) {
     throw new BridgeError(EXIT_HERDR_FAILURE, `failed to run herdr (${e.message})`);

@@ -147,10 +147,12 @@ test('status: a capacity worker prints the JSON line with the cause, rc 14', { t
     const r = cmd(fix, ['status', 'w']);
     assert.equal(r.status, 14, r.stderr);
     const line = JSON.parse(r.stdout.trim());
-    assert.deepEqual(Object.keys(line), ['agent', 'status', 'report', 'cause']);
+    assert.deepEqual(Object.keys(line), ['agent', 'status', 'report', 'cause', 'task_s', 'activity_s']);
     assert.equal(line.agent, 'w');
     assert.equal(line.status, 'capacity');
     assert.equal(line.report, '');
+    assert.equal(line.task_s, null, 'no last-report marker → null');
+    assert.equal(line.activity_s, null, 'not the working state → null');
     assert.match(line.cause, /529.*Overloaded/);
     // One probe only: no wait double-confirm state is left behind.
     assert.equal(fix.waitExists('w', 'provider'), false);
@@ -221,7 +223,7 @@ test('status: the rc rank 11 > 4 > 14 > 0 across agents', { timeout: 30000 }, ()
     assert.match(r14.stdout, /plain\tno-report-yet\t/m);
     const r0 = cmd(fix, ['status', 'plain']);
     assert.equal(r0.status, 0, r0.stderr);
-    assert.equal(r0.stdout, 'plain\tno-report-yet\t\n', 'the exact TSV line, trailing report field empty');
+    assert.equal(r0.stdout, 'plain\tno-report-yet\t\t-\t-\n', 'the exact TSV line with the two age columns unknown');
   } finally { fix.cleanup(); }
 });
 
@@ -241,10 +243,12 @@ test('status: a blocked worker on a question screen reports question, rc 7', { t
     const r = cmd(fix, ['status', 'w']);
     assert.equal(r.status, 7, r.stderr);
     const line = JSON.parse(r.stdout.trim());
-    assert.deepEqual(Object.keys(line), ['agent', 'status', 'report', 'question']);
+    assert.deepEqual(Object.keys(line), ['agent', 'status', 'report', 'question', 'task_s', 'activity_s']);
     assert.equal(line.agent, 'w');
     assert.equal(line.status, 'question');
     assert.equal(line.report, '');
+    assert.equal(line.task_s, null);
+    assert.equal(line.activity_s, null, 'the blocked state is not working');
     assert.equal(line.question, '  1. Use the local cache\n  2. Fetch from remote\nEnter to submit answer, esc to cancel');
   } finally { fix.cleanup(); }
 });
@@ -259,7 +263,7 @@ test('status: a blocked worker on an approval screen keeps the old TSV line', { 
     fix.screenOf('w', 'Allow command? rm -rf build\n\nPress enter to confirm or esc to cancel\n');
     const r = cmd(fix, ['status', 'w']);
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.stdout, 'w\tblocked\t\n', 'the exact old TSV line');
+    assert.equal(r.stdout, 'w\tblocked\t\t-\t-\n', 'the old TSV line plus the two unknown age columns');
   } finally { fix.cleanup(); }
 });
 
@@ -281,7 +285,7 @@ test('status: a not-received marker reports not-received, rc 15, no key sent', {
     // /log asserts below (this command's fake herdr refuses send-keys).
     const r = cmd(fix, ['status', 'w']);
     assert.equal(r.status, 15, r.stderr);
-    assert.equal(r.stdout, 'w\tnot-received\t\n', 'the TSV line with the new state');
+    assert.equal(r.stdout, 'w\tnot-received\t\t-\t-\n', 'the TSV line with the new state and unknown ages');
     // The same seq as the marker (the agent did nothing in the meantime)
     // keeps not-received.
     fs.writeFileSync(path.join(fix.ws, 'wait', 'w.not-received'), `${Math.floor(Date.now() / 1000) - 120} 7\n`);
@@ -290,7 +294,7 @@ test('status: a not-received marker reports not-received, rc 15, no key sent', {
     fs.writeFileSync(fix.env.FAKE_SEQ, '7\n');
     const r2 = cmd(fix, ['status', 'w']);
     assert.equal(r2.status, 15, r2.stderr);
-    assert.equal(r2.stdout, 'w\tnot-received\t\n', 'the same seq keeps not-received');
+    assert.equal(r2.stdout, 'w\tnot-received\t\t-\t-\n', 'the same seq keeps not-received');
     assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), [], 'read-only: no key');
   } finally { fix.cleanup(); }
 });
@@ -307,12 +311,12 @@ test('status: the marker changes nothing while the agent is working or blocked',
     fix.modeOf('w', 'working');
     const rw = cmd(fix, ['status', 'w']);
     assert.equal(rw.status, 0, rw.stderr);
-    assert.equal(rw.stdout, 'w\tworking\t\n', 'working is untouched');
+    assert.equal(rw.stdout, 'w\tworking\t\t-\t-\n', 'working is untouched, ages unknown');
     fix.modeOf('w', 'blocked');
     fix.screenOf('w', 'Allow command? git push\n\nPress enter to confirm or esc to cancel\n');
     const rb = cmd(fix, ['status', 'w']);
     assert.equal(rb.status, 0, rb.stderr);
-    assert.equal(rb.stdout, 'w\tblocked\t\n', 'blocked is untouched');
+    assert.equal(rb.stdout, 'w\tblocked\t\t-\t-\n', 'blocked is untouched');
     assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), [], 'read-only across both');
   } finally { fix.cleanup(); }
 });
@@ -334,7 +338,7 @@ test('status: a state change since the marker is the normal status, marker kept'
     fs.writeFileSync(fix.env.FAKE_SEQ, '7\n');
     const r = cmd(fix, ['status', 'w']);
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.stdout, 'w\tno-report-yet\t\n', 'the normal status holds');
+    assert.equal(r.stdout, 'w\tno-report-yet\t\t-\t-\n', 'the normal status holds');
     assert.equal(fs.readFileSync(path.join(fix.ws, 'wait', 'w.not-received'), 'utf8'),
       `${now - 120} 5\n`, 'the marker is kept');
     assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), [], 'read-only: no key');
@@ -451,10 +455,11 @@ test('roster: a TASK column shows the task file (no newline, dash, 40-char cut)'
     assert.equal(r2.status, 0, r2.stderr);
     assert.ok(r2.stdout.split('\n').find((l) => l.startsWith('b ')).trimEnd().endsWith('y'.repeat(40)),
       'a 40-character task is whole: ' + r2.stdout);
-    // The status is unchanged: the TSV keeps its own columns.
+    // The status is unchanged: the TSV gains only the two age columns,
+    // both unknown here (no last-report marker, no observed activity).
     const s = cmd(fix, ['status', 'a']);
     assert.equal(s.status, 0, s.stderr);
-    assert.equal(s.stdout, 'a\tworking\t\n', 'the status line has no task: ' + JSON.stringify(s.stdout));
+    assert.equal(s.stdout, 'a\tworking\t\t-\t-\n', 'the status line has no task: ' + JSON.stringify(s.stdout));
     // Mutation captured: the task shown with its newline (a stray blank
     // line in the table), a task over 40 left whole, the dash missing
     // when the file does not exist, or the status TSV gaining the column.
@@ -509,10 +514,12 @@ test('status: an auth screen reports provider-error on the first call, rc 14', {
     const r = cmd(fix, ['status', 'w']);
     assert.equal(r.status, 14, r.stderr);
     const line = JSON.parse(r.stdout.trim());
-    assert.deepEqual(Object.keys(line), ['agent', 'status', 'report', 'cause']);
+    assert.deepEqual(Object.keys(line), ['agent', 'status', 'report', 'cause', 'task_s', 'activity_s']);
     assert.equal(line.agent, 'w');
     assert.equal(line.status, 'provider-error');
     assert.equal(line.report, '');
+    assert.equal(line.task_s, null);
+    assert.equal(line.activity_s, null);
     assert.match(line.cause, /401.*Incorrect API key/);
     // One probe only: no wait double-confirm state is left behind.
     assert.equal(fix.waitExists('w', 'provider'), false);
@@ -581,7 +588,7 @@ test('status: a current question wins over an older 401 in the screen history, r
     const r = cmd(fix, ['status', 'w']);
     assert.equal(r.status, 7, r.stderr);
     const line = JSON.parse(r.stdout.trim());
-    assert.deepEqual(Object.keys(line), ['agent', 'status', 'report', 'question']);
+    assert.deepEqual(Object.keys(line), ['agent', 'status', 'report', 'question', 'task_s', 'activity_s']);
     assert.equal(line.agent, 'w');
     assert.equal(line.status, 'question');
     assert.equal(line.report, '');

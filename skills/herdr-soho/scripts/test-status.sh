@@ -120,7 +120,8 @@ printf '%s\n' denied > "$MODE"
 run_cmd status worker
 expect 'denied exit' "$RUN_RC" 4
 expect 'denied state' "$(field worker 2)" unavailable
-expect 'denied columns' "$(nf worker)" 4
+# 6 columns: name, state, report, cause, task_s, activity_s (unknowns are dashes).
+expect 'denied columns' "$(nf worker)" 6
 cause="$(field worker 4)"
 case "$cause" in *PermissionDenied*) ;; *) fail "denied cause missing PermissionDenied: $cause" ;; esac
 case "$cause" in *"Permission denied"*) ;; *) fail "denied cause missing message: $cause" ;; esac
@@ -133,7 +134,7 @@ run_cmd status worker
 expect 'multi exit' "$RUN_RC" 4
 expect 'multi state' "$(field worker 2)" unavailable
 expect 'multi one record' "$(printf '%s\n' "$RUN_OUT" | awk 'END{print NR}')" 1
-expect 'multi columns' "$(nf worker)" 4
+expect 'multi columns' "$(nf worker)" 6
 case "$(field worker 4)" in *PermissionDenied*second-line*red*) ;; *) fail "multi cause: $(field worker 4)" ;; esac
 case "$RUN_OUT" in *$'\033'*|*$'\tred'*) fail "multi leaked a control character: $(field worker 4)" ;; esac
 
@@ -142,7 +143,8 @@ printf '%s\n' missing > "$MODE"
 run_cmd status worker
 expect 'missing exit' "$RUN_RC" 0
 expect 'missing state' "$(field worker 2)" gone
-expect 'missing columns' "$(nf worker)" 3
+# 5 columns: name, state, report, task_s, activity_s (both unknown here).
+expect 'missing columns' "$(nf worker)" 5
 case "$RUN_ERR" in *unavailable*) fail "real absence warned as unavailable: $RUN_ERR" ;; esac
 
 reset_roster

@@ -1,0 +1,7 @@
+export function transfer({ actor, account, amount, ledger }) {
+  if (!actor || !account) throw new TypeError('actor and account are required');
+  if (!Number.isFinite(amount) || amount <= 0) throw new RangeError('amount must be positive');
+  if (account.ownerId !== actor.id) throw new Error('not authorized');
+  ledger.debit(actor.id, amount);
+  ledger.credit(account.id, amount);
+}

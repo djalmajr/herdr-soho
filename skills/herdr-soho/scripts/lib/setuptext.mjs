@@ -56,10 +56,11 @@ export function legacyHookDoctor() {
 //     LEGACY_SETUP_START and the line holding SETUP_END or
 //     LEGACY_SETUP_END are consumed; a second start repeats the block; a
 //     line holding both counts as a start; everything after the last
-//     consumed start line that is not an end line is dropped); the legacy
-//     markers read exactly like the current ones, so a pre-rename block is
-//     replaced by the current block in the same position, and a file with
-//     no legacy markers is byte-identical to the pre-migration result;
+//     consumed start line that is not an end line is dropped); when both
+//     marker kinds are present the legacy ones read like the current ones;
+//   - with only a pre-rename (legacy) block: renameLegacyBlock above — the
+//     names inside it change, its text stays; a file with no legacy
+//     markers is byte-identical to the pre-migration result;
 //   - without it: append the block, guaranteeing the missing final newline
 //     first and a blank line before the block (an absent or empty file just
 //     gains the block, possibly after a blank line when the file exists).
@@ -67,7 +68,31 @@ export function legacyHookDoctor() {
 // (bash: the write is refused with exit 4, file left untouched). `content`
 // is the file content ('' when the file is empty) or null when it does not
 // exist; CRLF is normalized by the reader before it gets here (decision 7).
+// A pre-rename block (legacy markers, no current ones) is migrated, not
+// regenerated: its markers and every herdr-agents / HERDR_AGENTS name inside
+// it are renamed in place, and the rest of its text — a project's own lines
+// included — is kept. A later `setup` finds the current markers and
+// refreshes the block as usual. An unterminated legacy block is refused
+// (null), like any incomplete result.
+function renameLegacyBlock(content) {
+  const lines = content.split('\n');
+  const trailingNewline = content.endsWith('\n');
+  if (trailingNewline) lines.pop();
+  let inside = false;
+  const out = lines.map((line) => {
+    if (line.includes(LEGACY_SETUP_START)) inside = true;
+    const mapped = inside ? line.replaceAll('herdr-agents', 'herdr-soho').replaceAll('HERDR_AGENTS', 'HERDR_SOHO') : line;
+    if (line.includes(LEGACY_SETUP_END)) inside = false;
+    return mapped;
+  });
+  const result = out.join('\n') + (trailingNewline ? '\n' : '');
+  return result.includes(SETUP_START) && result.includes(SETUP_END) ? result : null;
+}
+
 export function setupBlockResult(content) {
+  if (content !== null && content.includes(LEGACY_SETUP_START) && !content.includes(SETUP_START)) {
+    return renameLegacyBlock(content);
+  }
   const block = setupBlock();
   // bash awk: the blockfile is read line by line and joined WITHOUT a final
   // newline; `print block` adds exactly one. setupBlock() keeps the heredoc's

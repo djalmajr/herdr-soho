@@ -18,7 +18,7 @@ import { homeDir, projectRoot, readTextFile, atomicWrite } from '../platform.mjs
 import { warn } from '../state.mjs';
 import { applyLaneFile, setupLaneSpec } from '../lanes.mjs';
 import { effectiveConfigFile, legacyProjectConfigPath } from '../legacy.mjs';
-import { SETUP_START, LEGACY_SETUP_START, setupBlock, setupBlockResult, settingsHooksResult } from '../setuptext.mjs';
+import { SETUP_START, SETUP_END, LEGACY_SETUP_START, setupBlock, setupBlockResult, settingsHooksResult } from '../setuptext.mjs';
 import {
   ensureLocalExcludes, localRels, localTarget, planLocalExcludes,
   preflightLocalExcludes, refuseTrackedLocal, refuseUnignorableStateDir, resolveSetupMode, stateDirShown,
@@ -35,6 +35,19 @@ function isFile(p) {
 // `[ ! -L ]` port: the path itself is a symlink.
 function isSymlink(p) {
   try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; }
+}
+
+// The marked block lines of a setup result (every block, markers included),
+// for the dry-run preview of a legacy block renamed in place.
+function markedLines(text) {
+  const out = [];
+  let inside = false;
+  for (const line of text.split('\n')) {
+    if (line.includes(SETUP_START)) inside = true;
+    if (inside) out.push(line);
+    if (line.includes(SETUP_END)) inside = false;
+  }
+  return `${out.join('\n')}\n`;
 }
 
 // setup_target_existing <root>: the instruction file that already carries
@@ -234,6 +247,19 @@ export function cmdSetup(args, ctx, env, cwd = process.cwd()) {
       }
     }
   };
+  // The dry run previews the block the write would produce: a legacy-only
+  // file is renamed in place (its text kept), and a file the write would
+  // refuse dies 4 here too, before any would-line.
+  let dryBlock = '';
+  if (dry === 1) {
+    const dest = mode === 'local' ? localFile : target;
+    let content = null;
+    try { content = readTextFile(dest); } catch { /* absent */ }
+    const result = setupBlockResult(content);
+    if (result === null) throw new DieError(`setup: produced an incomplete file for ${dest} (file left untouched)`, 4);
+    const legacyOnly = content !== null && content.includes(LEGACY_SETUP_START) && !content.includes(SETUP_START);
+    dryBlock = legacyOnly ? markedLines(result) : setupBlock();
+  }
   if (panes !== '') {
     if (dry === 1) {
       process.stdout.write(`# would set panes=${panes} and the preset lanes in ${conf}\n`);
@@ -244,7 +270,7 @@ export function cmdSetup(args, ctx, env, cwd = process.cwd()) {
   }
   if (dry === 1) {
     process.stdout.write(`# would write to ${mode === 'local' ? localFile : target}\n`);
-    process.stdout.write(setupBlock());
+    process.stdout.write(dryBlock);
     if (hooks === 1) process.stdout.write(`\n# would merge into ${root}/.claude/settings.json: UserPromptSubmit + SessionStart hooks\n`);
     if (mode === 'local') {
       const planned = planLocalExcludes(root, localRels(root, ctx, env, cwd), env, 'setup');

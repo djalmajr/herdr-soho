@@ -45,6 +45,7 @@ Usage:
                       [--approvals ask|edits|full] [--reuse|--fresh]
                       [--tab-label TEXT] [-- <native agent args>]
   herdr-soho env                          # environment block for a feedback issue
+  herdr-soho lint <brief.md> [--role <role>]  # check the dispatch brief diagnostics without dispatching
   herdr-soho dispatch <agent> <brief.md> [--role R] [--timeout MS]
                       [--no-wait] [--allow-same-family] [--amend] [--for <author>[,…]]
                                              # --amend sends <file> as an amendment to the agent's current brief, with a new report that wait watches
@@ -61,6 +62,7 @@ Usage:
   herdr-soho friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction)
   herdr-soho feedback send <report.md> "<one-line summary>"
                                              # feedback=local: file the report in feedback_dir; one line to feedback_to when set
+  herdr-soho mutation-guard <copy-dir> [--source <dir>] [--env NAME]...
 
 Completion contract: a worker is finished when its report file exists. Use
 \`dispatch\` (waits by default), \`wait\` (one or many agents), or \`status\`

@@ -60,7 +60,7 @@
           "task"
         ],
         "err": "",
-        "out": "task\tworking\t<ROOT>/state/ws/reports/task.md\n",
+        "out": "task\tworking\t<ROOT>/state/ws/reports/task.md\t<N>\t<N>\n",
         "rc": 0
       }
     ]
@@ -80,7 +80,7 @@
           "dead"
         ],
         "err": "PROG: warning: agent 'stuck': herdr agent get failed: Error: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" }\n",
-        "out": "stuck\tunavailable\t\tError: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" }\ndead\tgone\t\n",
+        "out": "stuck\tunavailable\t\tError: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" }\t-\t-\ndead\tgone\t\t-\t-\n",
         "rc": 4
       }
     ]
@@ -94,7 +94,7 @@
           "worker"
         ],
         "err": "",
-        "out": "worker\tblocked\t\n",
+        "out": "worker\tblocked\t\t-\t-\n",
         "rc": 0
       }
     ]
@@ -108,7 +108,7 @@
           "worker"
         ],
         "err": "PROG: warning: agent 'worker': herdr agent get failed: Error: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" }\n",
-        "out": "worker\tunavailable\t\tError: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" }\n",
+        "out": "worker\tunavailable\t\tError: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" }\t-\t-\n",
         "rc": 4
       }
     ]
@@ -126,7 +126,7 @@
           "worker"
         ],
         "err": "PROG: warning: agent 'worker': herdr agent get failed: Error: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" } second-line [31mred\n",
-        "out": "worker\tunavailable\t\tError: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" } second-line [31mred\n",
+        "out": "worker\tunavailable\t\tError: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" } second-line [31mred\t-\t-\n",
         "rc": 4
       }
     ]
@@ -140,7 +140,7 @@
           "worker"
         ],
         "err": "PROG: warning: agent 'worker': herdr agent get failed: server_not_running: no herdr server is running\n",
-        "out": "worker\tunavailable\t\tserver_not_running: no herdr server is running\n",
+        "out": "worker\tunavailable\t\tserver_not_running: no herdr server is running\t-\t-\n",
         "rc": 4
       }
     ]
@@ -185,7 +185,7 @@
           "worker"
         ],
         "err": "",
-        "out": "worker\tno-report-yet\t\n",
+        "out": "worker\tno-report-yet\t\t-\t-\n",
         "rc": 0
       }
     ]
@@ -199,7 +199,7 @@
           "worker"
         ],
         "err": "PROG: warning: agent 'worker': herdr agent get failed: {\"error\":{\"code\":\"agent_not_found\",\"message\":\"agent target \"$target\" not found\"},\"id\":\"cli:agent:get\"}\n",
-        "out": "worker\tunavailable\t\t{\"error\":{\"code\":\"agent_not_found\",\"message\":\"agent target \"$target\" not found\"},\"id\":\"cli:agent:get\"}\n",
+        "out": "worker\tunavailable\t\t{\"error\":{\"code\":\"agent_not_found\",\"message\":\"agent target \"$target\" not found\"},\"id\":\"cli:agent:get\"}\t-\t-\n",
         "rc": 4
       }
     ]
@@ -213,7 +213,7 @@
           "build"
         ],
         "err": "PROG: warning: quota: agent 'build' lane=build kind=grok model=grok-4.7 : Error: quota exceeded for this account\n",
-        "out": "{\"agent\":\"build\",\"status\":\"quota\",\"report\":\"\",\"lane\":\"build\",\"kind\":\"grok\",\"model\":\"grok-4.7\",\"match\":\"Error: quota exceeded for this account\",\"renewal\":\"\"}\n",
+        "out": "{\"agent\":\"build\",\"status\":\"quota\",\"report\":\"\",\"lane\":\"build\",\"kind\":\"grok\",\"model\":\"grok-4.7\",\"match\":\"Error: quota exceeded for this account\",\"renewal\":\"\",\"task_s\":null,\"activity_s\":null}\n",
         "rc": 11
       }
     ]
@@ -227,7 +227,7 @@
           "worker"
         ],
         "err": "",
-        "out": "worker\tdone\t<ROOT>/state/ws/reports/worker.md\n",
+        "out": "worker\tdone\t<ROOT>/state/ws/reports/worker.md\t0\t-\n",
         "rc": 0
       }
     ]
@@ -241,7 +241,7 @@
           "nosuch"
         ],
         "err": "",
-        "out": "nosuch\tunknown-agent\t\n",
+        "out": "nosuch\tunknown-agent\t\t-\t-\n",
         "rc": 0
       }
     ]
@@ -255,7 +255,7 @@
           "worker"
         ],
         "err": "",
-        "out": "worker\tworking\t\n",
+        "out": "worker\tworking\t\t-\t-\n",
         "rc": 0
       }
     ]

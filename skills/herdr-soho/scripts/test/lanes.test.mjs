@@ -216,6 +216,9 @@ test('status resolves state under its explicit cwd', () => {
     fs.mkdirSync(path.dirname(report), { recursive: true });
     fs.writeFileSync(report, 'done\n');
     fs.writeFileSync(path.join(sd, 'last-report-build'), `${report}\n`);
+    // The task ran 42 s: dispatch marker, then the report (task_s).
+    fs.utimesSync(path.join(sd, 'last-report-build'), 1000, 1000);
+    fs.utimesSync(report, 1042, 1042);
 
     process.chdir(caller);
     const output = [];
@@ -227,7 +230,7 @@ test('status resolves state under its explicit cwd', () => {
     } finally {
       process.stdout.write = oldWrite;
     }
-    assert.equal(output.join(''), `build\tdone\t${report}\n`);
+    assert.equal(output.join(''), `build\tdone\t${report}\t42\t-\n`);
   } finally {
     process.chdir(oldCwd);
     fs.rmSync(root, { recursive: true, force: true });
@@ -974,6 +977,32 @@ test('enforceWorkerCap: at the cap (code 8, the bash message) and below it', () 
     fs.writeFileSync(live, JSON.stringify({ result: { agents: [{ name: 'w1', pane_id: 'p-w1' }] } }) + '\n');
     const c4 = loadConfig(full, repoCwd(root));
     assert.doesNotThrow(() => enforceWorkerCap(c4, full, repoCwd(root)));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// Regression for djalmajr/skills#13 (ported from the bash fix in
+// djalmajr/skills#14): a roster that still lists workers whose panes are
+// all gone must count no live worker and let the next spawn through. The
+// bash port died silently under `set -e` there.
+test('enforceWorkerCap: a roster whose workers are all gone counts none live and does not cap', () => {
+  const root = tmp('ha-lanes-cap-gone-');
+  try {
+    const env = isoEnv(root);
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    writeFakeCli(bin, 'herdr', FAKE_LIVE);
+    const live = path.join(root, 'live.json');
+    fs.writeFileSync(live, JSON.stringify({ result: { agents: [] } }) + '\n');
+    const full = { ...env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`, HA_LIVE: live };
+    const sd = path.join(root, 'state', 'ws-test');
+    fs.mkdirSync(sd, { recursive: true });
+    fs.writeFileSync(path.join(sd, 'agents.tsv'),
+      ROSTER + [row('w1', 'implementer', 'build'), row('w2', 'scouter', 'explore'), row('w3', 'reviewer', 'review')].map((r) => r.join('\t')).join('\n') + '\n');
+    // Mutation captured: counting a roster row without a live agent in its
+    // pane (a gone worker) lists w1..w3 and caps the spawn at 3.
+    assert.deepEqual(liveWorkerNames(sd, full), []);
+    const c = loadConfig(full, repoCwd(root));
+    assert.doesNotThrow(() => enforceWorkerCap(c, full, repoCwd(root)));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

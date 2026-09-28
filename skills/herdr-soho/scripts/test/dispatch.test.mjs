@@ -1110,7 +1110,7 @@ test('forSpecFamily: roster agent (col 5, derived when unknown), family name, fi
     // By-model kinds and garbage: a DieError 2 with the exact message.
     for (const spec of ['cursor', 'pi', 'bogus', '']) {
       assert.throws(() => forSpecFamily(spec, fix.ws, fix.env, fix.repo),
-        (e) => e.code === 2 && e.message === `dispatch: --for '${spec}': not an agent in the roster, a family (anthropic|openai|xai|google) or a kind with a fixed family`);
+        (e) => e.code === 2 && e.message === `dispatch: --for '${spec}': not an agent in the roster, a family (anthropic|openai|xai|google), a kind with a fixed family, or an agent with an accepted dispatch recorded in this workspace`);
     }
   } finally { fix.cleanup(); }
 });
@@ -1148,7 +1148,7 @@ test('dispatch: --for compares the reviewer with the slice author(s) (pass, stri
     // A spec that does not resolve: exit 2.
     const bad = cmd(fix, ['dispatch', 'rev', brief, '--no-wait', '--for', 'bogus']);
     assert.equal(bad.status, 2, bad.stderr);
-    assert.match(bad.stderr, /dispatch: --for 'bogus': not an agent in the roster, a family \(anthropic\|openai\|xai\|google\) or a kind with a fixed family/);
+    assert.match(bad.stderr, /dispatch: --for 'bogus': not an agent in the roster, a family \(anthropic\|openai\|xai\|google\), a kind with a fixed family, or an agent with an accepted dispatch recorded in this workspace/);
     // --for with --amend: exit 2 (the amendment already skips the check).
     fs.writeFileSync(path.join(fix.ws, 'last-report-rev'), brief + '\n');
     const amended = cmd(fix, ['dispatch', 'rev', brief, '--amend', '--for', 'codex']);
@@ -1372,7 +1372,7 @@ test('dispatch: an ignored prompt is resent once and the JSON carries resent', {
     assert.equal(j.wait_status, 'submitted');
     assert.equal(j.resent, true, 'the resend is reported');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved', 'resent']);
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved', 'resent']);
     const log = fix.log().split('\n').filter((l) => l !== '');
     assert.equal(log.filter((l) => l.startsWith('agent prompt build ')).length, 2, 'exactly two prompts');
     assert.match(r.stderr, /prompt to 'build' did not arrive \(screen unchanged, agent not working\); sending it once more/);
@@ -1400,7 +1400,7 @@ test('dispatch: a prompt ignored twice ends not-received with exit 15', { timeou
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'not-received');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists'],
       'the error-case keys without raw');
     assert.equal(j.report_exists, false);
     // Mutation captured: not recording the not-received moment (or writing
@@ -1461,7 +1461,7 @@ test('dispatch: a prompt sitting in the input box gets one Enter (enter_sent)', 
     assert.equal(j.enter_sent, true, 'the Enter is reported');
     assert.ok(!('resent' in j), 'no resend in the input-box case');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved', 'enter_sent']);
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved', 'enter_sent']);
     const log = fix.log().split('\n').filter((l) => l !== '');
     assert.equal(log.filter((l) => l.startsWith('agent prompt build ')).length, 1, 'no second prompt');
     assert.deepEqual(log.filter((l) => l.startsWith('agent send-keys')),
@@ -1490,7 +1490,7 @@ test('dispatch: an input-box prompt that ignores the Enter ends not-received (ex
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'not-received');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists']);
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists']);
     // The same marker as the resend path: the wait retries the Enter from
     // this moment. No FAKE_SEQ file here: the fake returns no seq, so the
     // marker stays epoch-only (the older format, still valid).
@@ -1765,7 +1765,7 @@ test('dispatch: a worker that ends in a question exits 7 with the question in th
     assert.equal(j.wait_status, 'question');
     assert.equal(j.question, '  1. Use the local cache\n  2. Fetch from remote\nEnter to submit answer, esc to cancel');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved', 'question']);
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved', 'question']);
     assert.ok(fs.existsSync(path.join(fix.ws, 'wait', 'build.question')), 'the .question file is kept for the next wait');
   } finally { fix.cleanup(); }
 });
@@ -1936,7 +1936,7 @@ test('dispatch --amend: new report, wait markers cleared, title keeps the task w
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'amend', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'amend', 'auto_approved'],
       'the amend key sits right after report_exists');
     assert.equal(j.amend, true);
     assert.equal(j.report_exists, false, '--no-wait: the amendment report is not written yet');
@@ -2160,7 +2160,7 @@ test('dispatch: a done report with partial items gets the partial key after repo
     assert.equal(j.report_exists, true);
     assert.equal(j.partial, 2);
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'partial', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'partial', 'auto_approved'],
       'partial right after report_exists, before auto_approved');
     assert.equal(r.stderr.split(`${warnLine}`).length - 1, 1,
       `the warn is the wait's own and is not repeated: ${r.stderr}`);
@@ -2183,7 +2183,7 @@ test('dispatch: a clean done report keeps the key set of today', { timeout: 6000
     assert.equal(j.wait_status, 'done');
     assert.equal(j.report_exists, true);
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved']);
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved']);
     assert.ok(!r.stderr.includes('partial'), 'no partial warn for a clean report');
   } finally { fix.cleanup(); }
 });
@@ -2213,7 +2213,7 @@ test('dispatch --amend: the amendment report with partial items gets amend then 
     assert.equal(j.amend, true);
     assert.equal(j.partial, 1, 'the count is the amendment report, not the finished brief\'s');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'amend', 'partial', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'amend', 'partial', 'auto_approved'],
       'amend right after report_exists, partial right after amend');
     assert.equal(r.stderr.split("herdr-soho: warning: report of 'build' marks 1 item(s) partial").length - 1, 1,
       `the warn is the wait's own and is not repeated: ${r.stderr}`);
@@ -2929,7 +2929,7 @@ test('dispatch: a blocked worker ends 7 and the final JSON carries the wait dial
     assert.equal(j.wait_status, 'blocked');
     assert.equal(j.dialog, 'Approve write to scripts/x.mjs?\n1. Yes\n2. No', 'the dialog is the visible screen (lines trimmed)');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'dialog', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'dialog', 'auto_approved'],
       'dialog right after report_exists, before the review fields and auto_approved');
     assert.equal(j.auto_approved, 0, 'auto_approve off: nothing was sent');
     assert.match(r.stderr, /agent 'build' is blocked on an approval or question; run: herdr agent read build --source recent-unwrapped --lines 80/);
@@ -2957,7 +2957,7 @@ test('dispatch: a done review report lands verdict, findings and severity before
     assert.deepEqual(j.severity, { P0: 1, P1: 1, P2: 1, P3: 0 });
     assert.equal(j.partial, 1);
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'verdict', 'findings', 'severity', 'partial', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'verdict', 'findings', 'severity', 'partial', 'auto_approved'],
       'verdict, findings and severity after report_exists, before partial');
     // A plain done report (no header): none of the three keys.
     const c = cmd(fix, ['dispatch', 'build', brief, '--timeout', '10000'],
@@ -3110,8 +3110,8 @@ test('dispatch: a mid-wait amendment that re-points the report settles on it (D3
     assert.equal(fs.readFileSync(path.join(fix.ws, 'last-report-build'), 'utf8').trim(), j.settled_report, 'the pointer moved to the settled report');
     assert.equal(j.report_exists, true, 'report_exists qualifies the settled report, not the absent own one');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'settled_report', 'report_exists', 'auto_approved'],
-      'settled_report right after report, before report_exists');
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'settled_report', 'report_exists', 'auto_approved'],
+      'task_report right after report; settled_report next, before report_exists');
     // No re-point (the fake worker writes the report named in the prompt):
     // the wait followed the dispatch's own report — no settled_report key.
     fs.rmSync(fix.env.FAKE_SETTLE, { force: true });
@@ -3123,7 +3123,7 @@ test('dispatch: a mid-wait amendment that re-points the report settles on it (D3
     assert.equal(j2.report_exists, true);
     assert.ok(!('settled_report' in j2), `no settled_report when the wait followed the own report: ${r2.stdout}`);
     assert.deepEqual(Object.keys(j2),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved']);
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved']);
     // Mutation captured: report_exists still qualifying the dispatch's own
     // report (or settled_report dropped / placed after report_exists)
     // breaks case A (report_exists false without the key, or the key order)
@@ -3161,7 +3161,7 @@ test('dispatch --no-wait: a newly visible auth failure exits 14 with the redacte
       'provider-error adds lane, model, cause only');
     assert.ok(!('enter_sent' in j) && !('resent' in j), 'no key was sent and nothing was resent');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved', 'lane', 'model', 'cause'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved', 'lane', 'model', 'cause'],
       'the existing provider-error key order');
     assert.match(r.stderr, /agent 'build' stopped on a provider error: Error: 401 Unauthorized: Incorrect API key provided \[redacted\]\. It is idle without a report; ask the user whether to resend the brief, switch the assistant, or wait\./);
     const sidecar = sidecarForPrompt(j.composed_prompt);
@@ -3195,7 +3195,7 @@ test('dispatch --no-wait: an auth screen that predates the prompt is not attribu
     assert.equal(j.wait_status, 'submitted');
     assert.equal(j.report_exists, true);
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause without a new auth attempt');
     const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
@@ -3227,7 +3227,7 @@ test('dispatch --no-wait: a completed report wins over a retained auth screen (R
     assert.equal(j.wait_status, 'submitted');
     assert.equal(j.report_exists, true);
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause on a completed report');
     assert.ok(!r.stderr.includes('sending it once more'), `no resend warning: ${r.stderr}`);
     assert.ok(!r.stderr.includes('provider error'), `no provider warning: ${r.stderr}`);
@@ -3258,7 +3258,7 @@ test('dispatch --no-wait: a completed report wins over a new auth line (R11/D58)
     assert.equal(j.wait_status, 'submitted');
     assert.equal(j.report_exists, true);
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause on a completed report');
   } finally { fix.cleanup(); }
 });
@@ -3282,7 +3282,7 @@ test('dispatch --no-wait: a completed report wins over quota (R11/D58)', { timeo
     assert.equal(j.wait_status, 'submitted');
     assert.equal(j.report_exists, true);
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/match/renewal on a completed report');
   } finally { fix.cleanup(); }
 });
@@ -3310,7 +3310,7 @@ test('dispatch --no-wait: quota wins over an auth failure on the same screen (R1
     assert.match(j.renewal, /try again in 2 hours/);
     assert.ok(!('cause' in j), 'no provider cause on a quota');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved', 'lane', 'model', 'match', 'renewal'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved', 'lane', 'model', 'match', 'renewal'],
       'the existing quota key order');
   } finally { fix.cleanup(); }
 });
@@ -3334,7 +3334,7 @@ test('dispatch --no-wait: a current decision question skips the auth attribution
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause on a question screen');
   } finally { fix.cleanup(); }
 });
@@ -3358,7 +3358,7 @@ test('dispatch --no-wait: a transient provider failure is not attributed (R11/D5
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause on a transient failure');
   } finally { fix.cleanup(); }
 });
@@ -3381,7 +3381,7 @@ test('dispatch --no-wait: a prompt that never arrives ends not-received despite 
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'not-received');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists'],
       'the error-case keys without raw');
     const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
@@ -3436,7 +3436,7 @@ test('dispatch --no-wait: a completed report wins during stale-auth arrival (R11
     assert.equal(j.wait_status, 'submitted');
     assert.equal(j.report_exists, true);
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved']);
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved']);
     assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'build.not-received')), false);
     const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
@@ -3472,7 +3472,7 @@ test('dispatch: a stale blocked auth screen ends not-received, never provider-er
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'not-received');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists'],
       'the error-case keys without raw');
     assert.match(r.stderr, /prompt to 'build' was not received after its block on a provider auth error/);
     const sidecar = sidecarForPrompt(j.composed_prompt);
@@ -3521,7 +3521,7 @@ test('dispatch --no-wait: an identical auth failure across a 40-line rollover re
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no attribution for ambiguous identical evidence');
     const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
@@ -3551,7 +3551,7 @@ test('dispatch --no-wait: repeated retained old auth lines plus echo remain subm
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause for retained repetitions');
   } finally { fix.cleanup(); }
 });
@@ -3579,7 +3579,7 @@ test('dispatch --no-wait: source-like auth text does not count as new evidence (
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause for source-like text');
   } finally { fix.cleanup(); }
 });
@@ -3607,7 +3607,7 @@ test('dispatch --no-wait: shifted repeated old auth lines remain submitted (R11/
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause when every occurrence only moved up');
   } finally { fix.cleanup(); }
 });
@@ -3635,7 +3635,7 @@ test('dispatch --no-wait: a redrawn old auth line remains submitted (R11/D58)', 
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause for ambiguous evidence');
     const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
@@ -3684,7 +3684,7 @@ test('dispatch: a newly observed auth screen reports provider-error on the first
     assert.equal(j.model, 'grok-4.7');
     assert.equal(j.cause, 'Error: 401 Unauthorized: Incorrect API key provided');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved', 'lane', 'model', 'cause'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved', 'lane', 'model', 'cause'],
       'the existing provider-error key order');
     assert.equal(j.report_exists, false);
     assert.match(r.stderr, /agent 'build' stopped on a provider error: Error: 401 Unauthorized: Incorrect API key provided\. It is idle without a report; ask the user whether to resend the brief, switch the assistant, or wait\./);
@@ -3718,7 +3718,7 @@ test('dispatch --no-wait: a scrollback-only append does not attribute the old au
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause for a pre-existing failure');
     const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
@@ -3753,7 +3753,7 @@ test('dispatch --no-wait: an old auth error plus a new auth line still exits 14 
     assert.equal(j.model, 'grok-4.7');
     assert.match(j.cause, /refresh token was revoked/);
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved', 'lane', 'model', 'cause'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved', 'lane', 'model', 'cause'],
       'the existing provider-error key order');
     const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),
@@ -3783,7 +3783,7 @@ test('dispatch --no-wait: an appended identical auth line remains unconfirmed (R
     const j = parsePretty(r.stdout);
     assert.equal(j.wait_status, 'submitted');
     assert.deepEqual(Object.keys(j),
-      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'report_exists', 'auto_approved'],
+      ['wait_status', 'agent', 'role', 'kind', 'composed_prompt', 'report', 'task_report', 'report_exists', 'auto_approved'],
       'no lane/model/cause for ambiguous identical evidence');
     const sidecar = sidecarForPrompt(j.composed_prompt);
     assert.deepEqual(JSON.parse(fs.readFileSync(sidecar, 'utf8')),

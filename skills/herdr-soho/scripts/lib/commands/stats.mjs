@@ -115,7 +115,7 @@ function parseSince(value) {
 // <agent>-<ts> pair: it is counted once, the state-dir copy (scanned first)
 // wins over the $TMPDIR original — and uses its own sidecar (the
 // .dispatch.json next to the winning prompt), never the tmp original's.
-function collectPrompts(sd, tmpDir) {
+export function collectPrompts(sd, tmpDir) {
   const pairs = [];
   const seen = new Set();
   const scan = (dir, kind) => {
@@ -171,7 +171,7 @@ function badSidecar(p) {
   p.counted = false;
   warn(`stats: ${path.basename(p.sidecarPath)} is not a valid attempt sidecar; the pair is not counted as accepted`);
 }
-function readSidecar(p) {
+export function readSidecar(p) {
   let raw;
   try { raw = fs.readFileSync(p.sidecarPath, 'utf8'); }
   catch (e) {

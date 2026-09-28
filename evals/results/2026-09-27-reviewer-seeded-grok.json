@@ -1,0 +1,64 @@
+{
+  "fixture": "reviewer-seeded",
+  "role": "reviewer",
+  "kind": "cursor",
+  "model": "grok-4.7-high",
+  "effort": "high",
+  "brief_sha256": "c76231103df11475e782006ce92bd8d44c4fe5c8781bd8ab4b799ca1fa5731ef",
+  "dispatched_at": "2026-09-28T00:54:13Z",
+  "first_patch_at": null,
+  "report_at": null,
+  "amendments": 0,
+  "probes": null,
+  "review": {
+    "seeded": 3,
+    "found": 3,
+    "false_positives": 0,
+    "severity_ok": 1
+  },
+  "cost": "not observable",
+  "observations": [
+    {
+      "claim": "Found all three seeded defects at the expected lines (4 authorization inversion, 3 zero amount accepted, 6 credit rounding) with the same mechanisms",
+      "evidence": "reviewer report findings 1-3 vs ANSWER-KEY.md"
+    },
+    {
+      "claim": "No finding outside the seeded defects",
+      "evidence": "reviewer report: 'No additional finding'"
+    },
+    {
+      "claim": "Severities given: P0 (line 4, key P1), P1 (line 6, key P3), P2 (line 3, key P2); one exact match",
+      "evidence": "reviewer report header 'findings: 3 (P0 1, P1 1, P2 1, P3 0)' and ANSWER-KEY.md"
+    },
+    {
+      "claim": "Every finding marked 'Verification: executed' with pasted node output from a throwaway copy of the patched module",
+      "evidence": "reviewer report, Evidence and checks"
+    },
+    {
+      "claim": "Final mtime of the report file: 2026-09-28T00:57:42Z; first report write not observed separately",
+      "evidence": "stat -f %Sm on the report path"
+    },
+    {
+      "claim": "The reviewer pointed out that the answer key's scenarios did not follow the order of the checks (defect 2 with the owner; review R5 found the same for defect 3); both scenario texts were corrected after the run, with location, mechanism and severity unchanged, so scoring is unaffected",
+      "evidence": "reviewer report finding 3; ANSWER-KEY.md diff in this branch"
+    },
+    {
+      "claim": "Timeout applied: 1200000 ms; fresh reviewer session with no other brief; same fixture copy prepared by evals/prepare.mjs (manifest_ok true)",
+      "evidence": "dispatch command and prepare output"
+    }
+  ],
+  "inferences": [
+    {
+      "claim": "Reviewer rubric score 2 for this run",
+      "basis": "all three seeded defects found, no false positive, two severities differ from the fixed key (docs/evaluation-protocol.md, reviewer score 2)"
+    },
+    {
+      "claim": "Severity calibration differs from the fixture's fixed key on two of three findings; with n=1 this says nothing about calibration in general",
+      "basis": "severity_ok 1/3 on one run of one fixture"
+    },
+    {
+      "claim": "Approximate time to report: 3.5 min",
+      "basis": "report mtime minus dispatched_at; first write not observed"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import { die, runCli, projectRoot } from '../platform.mjs';
 import { stateDir, rosterLine, lastReport, warn, dieFriction } from '../state.mjs';
 import { agentState, HERDR_TIMEOUT_MS } from '../herdr.mjs';
+import { readTaskReportPointer, syncTaskReport } from '../taskreport.mjs';
 
 // `done` requires the recorded report file to exist and be non-empty
 // (bash `[ -s "$r" ]`), not just the path to be recorded.
@@ -108,6 +109,8 @@ export function cmdCollect(argv, ctx, env = process.env, cwd = process.cwd()) {
     }
   }
   const sd = stateDir(ctx, env, cwd);
+  const taskPointer = readTaskReportPointer(sd, agent);
+  if (taskPointer !== null) syncTaskReport(sd, agent);
   // D54: the original report under the tmp routing dir may be gone ($TMPDIR
   // is cleaned by the system): when the pointer path no longer exists and
   // the mirror the wait made sits at <state>/reports/<same name>, read that
@@ -122,6 +125,7 @@ export function cmdCollect(argv, ctx, env = process.env, cwd = process.cwd()) {
   if (report !== '' && reportNonEmpty(report)) {
     if (verify) return verifyReport(sd, agent, report, env, cwd);
     process.stdout.write(`<!-- report: ${report} -->\n`);
+    if (taskPointer !== null && fs.existsSync(taskPointer.task_report)) process.stdout.write(`<!-- task report: ${taskPointer.task_report} -->\n`);
     process.stdout.write(fs.readFileSync(report, 'utf8')); // `cat`
     return 0;
   }
