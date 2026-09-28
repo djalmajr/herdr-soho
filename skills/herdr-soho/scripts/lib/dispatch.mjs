@@ -994,7 +994,9 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
   const priorPointer = snapshot(pointerPath);
   const priorValue = readTaskReportPointer(sd, agent);
   const oldReport = priorLast.exists ? priorLast.content.toString('utf8').trim() : '';
-  const taskReport = priorValue?.task_report
+  // An amendment keeps the task's stable copy; a new dispatch is a new
+  // task with its own (the previous task's copy stays as it was).
+  const taskReport = (amend === 1 ? priorValue?.task_report : undefined)
     ?? path.join(sd, 'reports', `${path.basename(report, '.md')}.current.md`);
   const pointer = amend === 1
     ? {

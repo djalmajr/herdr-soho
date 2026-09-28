@@ -62,7 +62,7 @@ function dispatch(fix, amendment = false, noSymlink = false) {
   const r = fix.run(['dispatch', 'build', amendment ? fix.amend : fix.brief, '--no-wait', ...(amendment ? ['--amend'] : [])], { noSymlink });
   assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
   const value = JSON.parse(r.stdout.trim());
-  const existing = fs.existsSync(pointer(fix)) ? readPointer(fix).task_report : null;
+  const existing = amendment && fs.existsSync(pointer(fix)) ? readPointer(fix).task_report : null;
   const expected = existing ?? path.join(fix.ws, 'reports', `${path.basename(value.report, '.md')}.current.md`);
   assert.equal(value.task_report, expected);
   return value;
@@ -134,6 +134,28 @@ test('task report is stable across two amendments, wait and collect; clean and s
     assert.equal(report.roles.implementer.tasks, 1);
     assert.equal(report.roles.implementer.amendments, 2);
     // Mutation captured: admitting .current.md as a report/prompt pair changes stats or clean's preservation assertion.
+  } finally { f.cleanup(); }
+});
+
+test('a new dispatch after a finished task gets its own stable copy and leaves the previous one', { timeout: 60_000 }, () => {
+  const f = makeFix('ha-task-report-next-');
+  try {
+    const first = dispatch(f);
+    writeReport(first.report, '# task one\n');
+    waitDone(f);
+    const next = dispatch(f);
+    // Mutation captured: reusing the previous pointer's task_report for a
+    // new (non-amend) dispatch makes both tasks share one stable copy and
+    // the second overwrites the first.
+    assert.notEqual(next.task_report, first.task_report);
+    assert.deepEqual(readPointer(f), { version: 1, task_report: next.task_report, current: next.report, history: [] });
+    assert.equal(fs.readFileSync(first.task_report, 'utf8'), '# task one\n');
+    assert.equal(fs.existsSync(next.task_report), false, 'the new task has no copy until it is done');
+    writeReport(next.report, '# task two\n');
+    const done = waitDone(f);
+    assert.equal(done.task_report, next.task_report);
+    assert.equal(fs.readFileSync(next.task_report, 'utf8'), '# task two\n');
+    assert.equal(fs.readFileSync(first.task_report, 'utf8'), '# task one\n');
   } finally { f.cleanup(); }
 });
 
