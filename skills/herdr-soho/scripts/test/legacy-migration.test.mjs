@@ -108,3 +108,25 @@ test('after setup, the new SessionStart hook runs the new doctor with no legacy 
   assert.ok(d.stdout.includes('Claude hooks present in .claude/settings.json'), d.stdout);
   assert.ok(!fs.readFileSync(path.join(f.proj, 'AGENTS.md'), 'utf8').includes(SETUP_START.replace('soho', 'agents')));
 });
+
+test('setup --dry-run previews the in-place rename and refuses an unterminated legacy block, writing nothing', (t) => {
+  const f = fixture();
+  t.after(f.cleanup);
+  const file = path.join(f.proj, 'AGENTS.md');
+  const before = fs.readFileSync(file, 'utf8');
+  // Mutation captured: printing setupBlock() for a legacy-only file hides
+  // the project's own `old block body` line the write keeps.
+  const r = f.cli(['setup', '--dry-run', '--no-hooks']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `# would write to ${file}\n${SETUP_START}\nold block body\n${SETUP_END}\n`);
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+  // Mutation captured: skipping setupBlockResult in the dry run prints the
+  // canonical block and exits 0 where the write dies 4.
+  const open = `# Project\n\n${LEGACY_SETUP_START}\nno end\n`;
+  fs.writeFileSync(file, open);
+  const u = f.cli(['setup', '--dry-run', '--no-hooks']);
+  assert.equal(u.status, 4, u.stderr);
+  assert.equal(u.stdout, '');
+  assert.match(u.stderr, /produced an incomplete file for .*AGENTS\.md \(file left untouched\)/);
+  assert.equal(fs.readFileSync(file, 'utf8'), open);
+});
