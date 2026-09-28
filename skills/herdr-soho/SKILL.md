@@ -69,7 +69,9 @@ test "${HERDR_ENV:-}" = 1 && command -v herdr >/dev/null && { command -v node >/
 ```
 
 If the check fails, say you are not inside Herdr (or Node.js 20+/Bun is
-missing) and stop. Never control a Herdr session from outside Herdr. The `herdr` skill
+missing) and stop. If the check fails and you are running under Codex, run
+`herdr-soho doctor` before concluding you are outside Herdr. Never control a
+Herdr session from outside Herdr. The `herdr` skill
 (`herdr --skill`) is the authority for CLI syntax; this skill adds the role
 layer on top of it and never replaces it.
 
@@ -517,11 +519,17 @@ friction line ("may be stuck in one tool call"); the wait goes on. A
 missing, empty or non-numeric screen-age marker counts from now (rewritten
 in place), never from the Unix epoch.
 
-`dispatch` also checks that the prompt arrived: within
-`prompt_check_seconds` (15) the agent must start working or block, or the
+`dispatch` also checks that the prompt arrived: before sending, it waits
+up to `prompt_settle_seconds` (20, 0 off) for the target to settle —
+`interactive_ready` true in `herdr agent get` (when present) and two
+consecutive identical visible screen reads 500 ms apart; passing the
+deadline warns and sends anyway. Within `prompt_check_seconds` (15, 0 off)
+the agent must start working or block with a moved `state_change_seq`, or the
 report must appear. If the prompt text sits in the agent's input box, it
-sends one Enter (JSON `enter_sent`); if the screen never moved, it resends
-the prompt once (`resent`); if nothing works, it returns `not-received`
+sends one Enter (JSON `enter_sent`); if the screen never moved, or moved
+without the composed prompt path visible in recent screen outside the last
+3 non-empty lines, it resends the prompt once (`resent`) followed by a fresh
+window with the strict rules; if nothing works, it returns `not-received`
 (exit 15) — read the pane before sending anything else. A
 `not-received` `dispatch` records the moment and the agent's
 `state_change_seq`, and a `wait` afterwards

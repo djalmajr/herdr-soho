@@ -43,6 +43,7 @@ import { configNativeArgs } from '../spawn.mjs';
 import { setupTargetExisting, projectNeedsConfigPrompt } from './setup.mjs';
 import { unifiedDiff } from './setup-plan.mjs';
 import { effectiveConfigFile, legacyDoctorWarnings, legacyProjectConfigPath, legacyUserConfigPath } from '../legacy.mjs';
+import { diagnoseOutsideHerdr, doctorCodexPolicyWarnings } from '../codex-env.mjs';
 
 // Where the user runs the program from — the launcher (switch-to-JS
 // decision 4), where the bash prints `$0` (decision 2b): scripts/herdr-soho
@@ -690,10 +691,10 @@ function settingsHasDoctorHook(file) {
 // returns 0. Decision 5: the jq line is gone (the ok count drops by one);
 // decision 2b: the entry's path where the bash prints `$0` (switch-to-JS
 // decision 4: the launcher).
-export function doctorCheck(ctx, env = process.env, cwd = process.cwd()) {
+export function doctorCheck(ctx, env = process.env, cwd = process.cwd(), opts = {}) {
   const s = new DoctorSay();
   if (env.HERDR_ENV === '1') s.ok('inside Herdr (HERDR_ENV=1)');
-  else s.warn('HERDR_ENV != 1: not inside a Herdr pane');
+  else s.warn(diagnoseOutsideHerdr('HERDR_ENV != 1: not inside a Herdr pane', env, process.platform, opts));
   // jq: not a requirement any more (orchestrator decision 5).
   const herdrFound = findExecutable('herdr', env);
   if (herdrFound) {
@@ -807,6 +808,7 @@ export function doctorCheck(ctx, env = process.env, cwd = process.cwd()) {
   doctorModelPairs(ctx, env, cwd, s);
   laneArgsIgnoredWarnings(ctx, env, cwd, s);
   doctorCodexNetworkWarnings(ctx, env, cwd, s);
+  doctorCodexPolicyWarnings(env, s, process.platform);
   doctorFeedbackWarnings(ctx, env, cwd, s);
   const minRaw = cfg(ctx, 'split_min_pane', '0.18', env);
   if (!/^0?\.[0-9]+$/.test(minRaw)) s.warn(`config: split_min_pane='${minRaw}' must be a fraction like 0.18 (using 0.18)`);

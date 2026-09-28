@@ -26,7 +26,7 @@ export const CONFIG_SCALAR_KEYS = [
   'worker_context', 'brief_lint', 'brief_lint_aliases', 'approvals',
   'auto_approve', 'max_auto_approvals', 'max_effort', 'family_check',
   'settled_grace', 'spawn_timeout', 'dispatch_timeout', 'provider_retries',
-  'provider_retry_delay', 'prompt_check_seconds', 'stuck_warn_minutes', 'state_dir',
+  'provider_retry_delay', 'prompt_check_seconds', 'prompt_settle_seconds', 'stuck_warn_minutes', 'state_dir',
   'report_language', 'notify', 'feedback', 'feedback_repo', 'feedback_dir', 'feedback_to',
   'setup_target', 'inbound',
 ];
@@ -144,7 +144,7 @@ export function configValueOk(key, value, env = process.env, cwd = process.cwd()
   if (value.includes('\n') || value.includes('\t') || value.includes('#')) return false;
   if (key === 'approvals' || /^lane\..*\.approvals$/.test(key)) return ['ask', 'edits', 'full'].includes(value);
   if (key === 'max_workers' || key === 'provider_retries' || key === 'provider_retry_delay'
-    || key === 'prompt_check_seconds' || key === 'stuck_warn_minutes') return /^[0-9]+$/.test(value);
+    || key === 'prompt_check_seconds' || key === 'prompt_settle_seconds' || key === 'stuck_warn_minutes') return /^[0-9]+$/.test(value);
   if (key === 'multi_role' || key === 'reuse_workers' || key === 'lanes') return ['on', 'off'].includes(value);
   if (key === 'setup_target') return ['canonical', 'local'].includes(value);
   if (key === 'inbound') return ['auto', 'off'].includes(value);
