@@ -144,6 +144,7 @@ $S wait build review                 # block until every report exists
 $S roster                            # live agents with role/kind/pane/state/report and the current task (TASK)
 $S release build --close             # closes only panes the skill created
 $S clean --older-than 7              # drop gone agents, delete old briefs/reports
+$S find [words] [--machine <label>]… [--all] [--json]  # live panes with a paste-ready reference, filtered by the words
 ```
 
 `stats` scans composed prompts and reports in the workspace state and
@@ -183,6 +184,25 @@ run — no extra arguments, so `doctor --fix` cannot write — and the CLI
 never writes to the project (no `.gitignore` entry, no state directory,
 no friction log); every other invocation exits 2 with a message. Without
 the env, the CLI behaves exactly as before.
+
+## Finding a session
+
+`$S find [words]` lists the live panes of the local Herdr — with
+`--machine <label>` (repeatable) or `--all` (every enabled machine of
+`herdr machine list`), of other machines too — one line per pane: the
+reference `<machine>/<ws>:<pane>`, the agent name, kind, status,
+workspace and tab labels, and the cwd. Every word must match (name, kind,
+status, labels, ids, cwd or title, case-insensitive); a single word that
+is a reference matches only that machine's pane and queries that machine
+even without `--machine`. `--json` prints the full entry per line.
+
+The reference is the handle for a pane: copy it from a `find` line and
+paste it into the chat to name the pane (a later command or the
+orchestrator resolves it). `find` is read-only — it reads one
+`herdr api snapshot` per machine (30 s each) and changes nothing. Exit
+0 with at least one entry, 1 with none (like `grep`), 2 on bad usage,
+4 when the local machine is unavailable; a remote machine that fails
+prints a stderr line and the rest is still listed.
 
 ## Good to know
 

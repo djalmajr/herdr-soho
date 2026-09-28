@@ -669,6 +669,7 @@ $S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, 
 $S friction                                # errors/warnings of this workspace (review at end)
 $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before sending; no dispatch, no state
 $S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation copy that shares source or build output (exit 1)
+$S find [words] [--machine <label>]… [--all] [--json]   # live panes with a paste-ready reference (<machine>/<ws>:<pane>), filtered by the words
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
 $S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to
 $S regrid                                  # exact grids: caller's tab (split) + every herd tab
@@ -703,6 +704,19 @@ under `reuses`, not `tasks`. Each group also has `no_report`, `minutes`,
 arrival-check result even if a later wait recovers. JSON
 `lost_briefs` maps each group to the stored composed-prompt paths for
 lost pairs, and the text output lists them below the tables.
+
+`find` lists the live panes (one line per pane) of the local Herdr and,
+with `--machine <label>` (repeatable) or `--all` (every enabled machine
+of `herdr machine list`), of other machines, filtered by the search words
+(name, kind, status, workspace/tab labels, ids, cwd or title; every word
+must match, case-insensitive). Each line starts with the reference
+`<machine>/<ws>:<pane>` — copy it and paste it into the chat to name
+that pane in a later command (`--json` prints one full entry per line
+instead). A single search word that is a reference matches only that
+machine's pane and queries that machine. Exit 0 with at least one entry,
+1 with none, 2 on bad usage, 4 when the local machine is unavailable; a
+remote machine that fails prints a stderr line and the rest is still
+listed.
 
 `scripts/herdr-soho` is a POSIX `sh` launcher: it runs
 `scripts/herdr-soho.mjs` with `node` (20+) — or `bun` when Node.js 20+
