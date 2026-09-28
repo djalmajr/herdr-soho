@@ -5,6 +5,10 @@ coding agents run in [Herdr](https://herdr.dev). The calling agent
 orchestrates workers in Herdr panes, sends self-contained briefs, waits for
 file-based reports, and owns integration and Git operations.
 
+The name *soho* comes from **SO**ftware **HO**use: the calling agent runs a
+small software house of role agents — builders, reviewers, researchers —
+and keeps the planning, integration and release work to itself.
+
 The repository contains:
 
 - [`skills/herdr-soho/`](skills/herdr-soho/) — the agent skill, roles,
