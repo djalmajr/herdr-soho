@@ -9,7 +9,8 @@
 // `find [search words]... [--machine <label>]... [--all] [--json]`,
 // `status <agent>…`, `roster`, `friction`,
 // `feedback send <report.md> "<one-line summary>"`, `tab-label`, `layout-plan`, `wait <agent>…`, `collect <agent>`,
-// `release <agent>`, `clean`, `doctor [--fix] [--panes 2|3|4] [--user]`,
+// `send <ref|name> <message…> | --file <path> [--now] [--timeout MS]` (a peer
+// message to an agent of any kind, local or remote), `release <agent>`, `clean`, `doctor [--fix] [--panes 2|3|4] [--user]`,
 // `explain`, `init`, `title` (the orchestrator pane's current objective),
 // `setup [--target FILE] [--no-hooks]
 // [--dry-run] [--panes 2|3|4] [--lane name=kind[:model[:effort]]]` — its
@@ -58,6 +59,7 @@ import { cmdDoctor } from './lib/commands/doctor.mjs';
 import { cmdExplain } from './lib/commands/explain.mjs';
 import { cmdInit } from './lib/commands/init.mjs';
 import { cmdTitle } from './lib/commands/title.mjs';
+import { cmdSend } from './lib/commands/send.mjs';
 import { cmdMutationGuard } from './lib/commands/mutation-guard.mjs';
 import { die, findExecutable } from './lib/platform.mjs';
 
@@ -160,6 +162,11 @@ try {
     }
     case 'collect': {
       const rc = cmdCollect(argv.slice(1), ctx, env);
+      if (rc) process.exitCode = rc;
+      break;
+    }
+    case 'send': {
+      const rc = cmdSend(argv.slice(1), ctx, env);
       if (rc) process.exitCode = rc;
       break;
     }
