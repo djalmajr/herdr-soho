@@ -56,6 +56,8 @@ Usage:
   herdr-soho stats [--since <date>] [--by role|kind|model|agent|effort] [--json]  # tasks, times and review findings; --by groups results
   herdr-soho run <role> <brief.md> [spawn/dispatch options] [-- <agent args>]
   herdr-soho roster
+  herdr-soho find [words] [--machine <label>]... [--all] [--json]
+                                             # live panes with a paste-ready session reference ([machine/]<pane id>)
   herdr-soho release <agent> [--close] [--force]
   herdr-soho clean [--older-than DAYS]
   herdr-soho friction                     # every error/warning of this workspace

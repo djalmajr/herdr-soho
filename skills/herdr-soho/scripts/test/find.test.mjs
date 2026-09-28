@@ -35,7 +35,7 @@ const LOCAL_SNAP = {
   ],
   panes: [
     { pane_id: 'w1:p1', terminal_id: 't1', workspace_id: 'w1', tab_id: 'w1:t1', focused: true, agent_status: 'working', revision: 1,
-      agent: 'pi', cwd: '/Users/x/soho', foreground_cwd: '/Users/x/soho', terminal_title: 'raw title', title: 'pane title S2' },
+      agent: 'pi', cwd: '/Users/x', foreground_cwd: '/Users/x/soho', terminal_title: 'raw title', title: 'pane title S2' },
     { pane_id: 'w1:p2', terminal_id: 't2', workspace_id: 'w1', tab_id: 'w1:t1', focused: false, agent_status: 'unknown', revision: 1,
       cwd: '/srv/agents/jobs', terminal_title_stripped: 'shell on /srv/agents/jobs' },
     { pane_id: 'w2:p1', terminal_id: 't3', workspace_id: 'w2', tab_id: 'w2:t1', focused: false, agent_status: 'idle', revision: 1,
@@ -43,7 +43,7 @@ const LOCAL_SNAP = {
   ],
   agents: [
     { terminal_id: 't1', agent_status: 'working', workspace_id: 'w1', tab_id: 'w1:t1', pane_id: 'w1:p1', focused: true, revision: 1,
-      agent: 'pi', name: 'build', cwd: '/Users/x/soho', foreground_cwd: '/Users/x/soho', title: 'implementer: S2' },
+      agent: 'pi', name: 'build', cwd: '/Users/x', foreground_cwd: '/Users/x/soho', title: 'implementer: S2' },
     { terminal_id: 't3', agent_status: 'idle', workspace_id: 'w2', tab_id: 'w2:t1', pane_id: 'w2:p1', focused: false, revision: 1,
       agent: 'claude', name: 'review', cwd: '/repo/docs' },
   ],
@@ -371,7 +371,7 @@ test('sessions: sessionEntries joins pane + agent with the documented fallbacks'
   const entries = sessionEntries(LOCAL_SNAP, 'local');
   assert.equal(entries.length, 3);
   const [p1, p2, p3] = entries;
-  assert.equal(p1.cwd, '/Users/x/soho');
+  assert.equal(p1.cwd, '/Users/x/soho'); // foreground_cwd, not the launch cwd '/Users/x'
   assert.equal(p1.title, 'implementer: S2'); // the agent's title, over the pane's
   assert.equal(p2.cwd, '/srv/agents/jobs'); // the pane's cwd (no foreground_cwd, no agent)
   assert.equal(p2.title, 'shell on /srv/agents/jobs'); // terminal_title_stripped fallback
