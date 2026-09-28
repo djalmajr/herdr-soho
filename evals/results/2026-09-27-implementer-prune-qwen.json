@@ -48,6 +48,10 @@
     {
       "claim": "The report states that the hidden-probe command was not runnable in the prepared copy; that item was not marked [done]",
       "evidence": "worker report, AC4/hidden-probe item"
+    },
+    {
+      "claim": "After review R5 strengthened two hidden probes (valid-argument duplicate sequence; .tmp and symlink survival), the same completed copy was probed again: 6/6, no scope violation",
+      "evidence": "node evals/run-probes.mjs evals/fixtures/implementer-prune /tmp/herdr-soho-pilot/qwen (rerun after the probe fix)"
     }
   ],
   "inferences": [

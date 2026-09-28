@@ -59,7 +59,7 @@ When more than one condition applies, use the lowest applicable score.
 
 - **0:** no actionable seeded defect is found, or no usable review report is returned.
 - **1:** at least one seeded defect is found, but fewer than half of seeded defects are found, or false positives outnumber true findings.
-- **2:** at least half of seeded defects are found and false positives do not outnumber true findings, but one or more found defects have incorrect severity or claimed execution is unsupported.
+- **2:** at least half of the seeded defects are found and false positives do not outnumber the hits, but a seeded defect is missing, a false positive remains, a severity does not match, or a claimed execution is not supported.
 - **3:** all seeded defects are found, there are no false positives, every found severity matches the key, and execution/inference claims are accurately separated.
 
 For a zero-defect fixture, recall and severity calibration are undefined; do not score it with this rubric. When conditions conflict, use the lowest applicable score.
@@ -112,7 +112,7 @@ This category includes specialist variants such as `security-reviewer` and `desi
 
 - **0:** no usable report or no seeded vulnerability found.
 - **1:** at least one vulnerability found, but fewer than half are found, or false positives outnumber true findings.
-- **2:** at least half are found and false positives do not outnumber true findings, but at least one material vulnerability is missed.
+- **2:** at least half are found and false positives do not outnumber the hits, but a seeded vulnerability is missing or a false positive remains.
 - **3:** all seeded vulnerabilities are found and there are no false positives.
 
 Use the lowest applicable score. This rubric measures only the seeded fixture, not general security or design quality.

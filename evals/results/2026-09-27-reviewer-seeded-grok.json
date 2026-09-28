@@ -39,7 +39,7 @@
       "evidence": "stat -f %Sm on the report path"
     },
     {
-      "claim": "The reviewer pointed out that the answer key's scenario for defect 2 (valid owner with amount 0) cannot run because defect 1 rejects the owner first; the scenario text was corrected after the run (location and mechanism unchanged, so scoring is unaffected)",
+      "claim": "The reviewer pointed out that the answer key's scenarios did not follow the order of the checks (defect 2 with the owner; review R5 found the same for defect 3); both scenario texts were corrected after the run, with location, mechanism and severity unchanged, so scoring is unaffected",
       "evidence": "reviewer report finding 3; ANSWER-KEY.md diff in this branch"
     },
     {
@@ -48,6 +48,10 @@
     }
   ],
   "inferences": [
+    {
+      "claim": "Reviewer rubric score 2 for this run",
+      "basis": "all three seeded defects found, no false positive, two severities differ from the fixed key (docs/evaluation-protocol.md, reviewer score 2)"
+    },
     {
       "claim": "Severity calibration differs from the fixture's fixed key on two of three findings; with n=1 this says nothing about calibration in general",
       "basis": "severity_ok 1/3 on one run of one fixture"

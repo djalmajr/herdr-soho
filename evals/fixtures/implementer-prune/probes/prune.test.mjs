@@ -79,7 +79,9 @@ test('ignores malformed names, temporary files, directories, and symlinks', asyn
   assert.equal(fs.existsSync(path.join(dir, latest)), true);
   assert.equal(fs.readFileSync(outside, 'utf8'), 'leave');
   assert.equal(fs.existsSync(path.join(dir, 'backup-final.json')), true);
+  assert.equal(fs.existsSync(path.join(dir, 'backup-0000000000000003-20260101T000000000Z.json.tmp')), true);
   assert.equal(fs.existsSync(path.join(dir, 'backup-0000000000000004-20260101T000000000Z.json')), true);
+  assert.equal(fs.lstatSync(path.join(dir, 'backup-0000000000000005-20260101T000000000Z.json')).isSymbolicLink(), true);
 });
 
 test('invalid arguments and duplicate sequence fail before mutation', async (t) => {
@@ -97,4 +99,7 @@ test('invalid arguments and duplicate sequence fail before mutation', async (t) 
     await assert.rejects(async () => pruneBackups(args));
     assert.deepEqual(names(dir), [first, duplicate].sort());
   }
+  const rejected = await assert.rejects(async () => pruneBackups({ dir, keep: 1, now })).then(() => true, () => false);
+  assert.deepEqual(names(dir), [first, duplicate].sort());
+  assert.equal(rejected, true);
 });

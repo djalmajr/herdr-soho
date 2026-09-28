@@ -13,6 +13,8 @@ const fixture = path.join(root, 'evals/fixtures/implementer-prune');
 const prepareScript = path.join(root, 'evals/prepare.mjs');
 const probeScript = path.join(root, 'evals/run-probes.mjs');
 const reference = path.join(testDir, 'fixtures/reference-prune.mjs');
+const duplicateMutation = path.join(testDir, 'fixtures/mutation-duplicate-prune.mjs');
+const unrelatedMutation = path.join(testDir, 'fixtures/mutation-unrelated-prune.mjs');
 
 function run(args) {
   return spawnSync(process.execPath, args, {
@@ -101,6 +103,24 @@ test('run-probes passes every hidden probe on the reference implementation', (t)
   assert.deepEqual(result.probes.failed, []);
   assert.deepEqual(result.scope_violations, []);
   assert.equal(result.manifest_ok, true);
+});
+
+test('run-probes rejects duplicate backups before pruning with valid arguments', (t) => {
+  // Mutation captured: removing duplicate-sequence rejection lets a valid prune delete one duplicate.
+  const { destination } = prepare(t);
+  fs.copyFileSync(duplicateMutation, path.join(destination, 'src', 'prune.mjs'));
+  const result = measure(fixture, destination);
+  assert.ok(result.probes.passed < result.probes.total);
+  assert.ok(result.probes.failed.includes('invalid arguments and duplicate sequence fail before mutation'));
+});
+
+test('run-probes rejects pruning temporary files and symlinks', (t) => {
+  // Mutation captured: deleting .tmp entries and symlinks before selecting regular backups removes unrelated directory entries.
+  const { destination } = prepare(t);
+  fs.copyFileSync(unrelatedMutation, path.join(destination, 'src', 'prune.mjs'));
+  const result = measure(fixture, destination);
+  assert.ok(result.probes.passed < result.probes.total);
+  assert.ok(result.probes.failed.includes('ignores malformed names, temporary files, directories, and symlinks'));
 });
 
 test('run-probes reports skeleton failures and preserves quoted destination paths', (t) => {
