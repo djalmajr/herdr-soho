@@ -65,7 +65,9 @@ function probeFakeSource(name) {
   L.push("  case 'quota2': process.stderr.write('Error: You have hit your usage limit. Try again in 10 minutes.\\n'); process.stdout.write('Error: You have hit your usage limit. Try again in 5 minutes.\\n'); process.exit(1); break;");
   L.push("  case 'quotatime': process.stderr.write('Error: You have hit your usage limit. Try again at 14:30.\\n'); process.exit(1); break;");
   L.push('  case \'hang\': {');
-  L.push("    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1500)'], { stdio: ['ignore', 'inherit', 'inherit'] });");
+  // The child outlives both ceilings below (5 s unit, 8 s e2e), so a probe
+  // that waited for it would fail them.
+  L.push("    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], { stdio: ['ignore', 'inherit', 'inherit'] });");
   // On Windows the probe kills only cmd.exe behind the .cmd launcher and
   // this node process outlives it, holding the fixture directory: it hangs
   // 4 s there (still far past the 1 s limit) so the cleanup can finish.
@@ -112,7 +114,7 @@ test.before(() => {
     PROBE_ARGS_DIR: ARGS, PROBE_MODE_DIR: MODES,
   });
 });
-test.after(() => fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }));
+test.after(() => fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 40, retryDelay: 500 }));
 
 // Run the entry as a child process (the e2e half); clears the args logs
 // first so "no CLI ran" is provable from their absence.
