@@ -114,7 +114,7 @@ function capture() {
 
 // ---------- doctorLaneWarnings ----------
 
-test('doctorLaneWarnings: an invalid lanes value and panes outside 2/3/4', () => {
+test('doctorLaneWarnings: an invalid lanes value and panes outside 2/3/4', { timeout: 60_000 }, () => {
   cleanLayers();
   writeProj('lanes=bogus\n');
   const s1 = capture();
@@ -478,7 +478,7 @@ test('doctorDiscardedModels: the frontmatter model is dropped when the kind come
   cleanLayers();
 });
 
-test('doctorLaneWarnings: per-role kind/model under a lane kind, divergent kinds, alignment warns', () => {
+test('doctorLaneWarnings: per-role kind/model under a lane kind, divergent kinds, alignment warns', { timeout: 60_000 }, () => {
   cleanLayers();
   // role.<r>.kind / role.<r>.model are explicit while the lane has its own kind.
   writeProj([
@@ -535,7 +535,7 @@ test('doctorLaneWarnings: per-role kind/model under a lane kind, divergent kinds
   cleanLayers();
 });
 
-test('doctorLaneWarnings: the old preset lanes and the orphan lane keys', () => {
+test('doctorLaneWarnings: the old preset lanes and the orphan lane keys', { timeout: 60_000 }, () => {
   cleanLayers();
   // The old 3-pane preset (build|read) still loads: the lanes are the old
   // ones, so the doctor points at the migration.

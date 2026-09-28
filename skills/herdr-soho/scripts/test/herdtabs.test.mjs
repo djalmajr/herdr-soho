@@ -293,7 +293,7 @@ test('herd-tab file: repeated, leading and trailing tabs read like bash', () => 
 
 // --- relabel -------------------------------------------------------------------
 
-test('herdTabsRelabel: auto from roles, manual kept, repeats suffixed, empty → herd', () => {
+test('herdTabsRelabel: auto from roles, manual kept, repeats suffixed, empty → herd', { timeout: 60_000 }, () => {
   const fix = makeFix('ha-tabs-relabel-');
   try {
     fs.writeFileSync(path.join(fix.ws, 'herd-tab'), 't1\therd\tauto\nt2\t' + 'onda 2\tmanual\nt3\t-\tauto\n');

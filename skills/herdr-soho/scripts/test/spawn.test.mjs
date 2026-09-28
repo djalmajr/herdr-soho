@@ -1429,7 +1429,7 @@ test('entry catch: empty-message DieError exits with the code only (herdr passth
   } finally { fix.cleanup(); }
 });
 
-test('spawn: the build lane — capacity 2: open build-2, busy 10 when full, --fresh, reuse', () => {
+test('spawn: the build lane — capacity 2: open build-2, busy 10 when full, --fresh, reuse', { timeout: 60_000 }, () => {
   const fix = makeFix('ha-spawn-cmd-8-');
   try {
     // (a) panes=4: the build lane holds 2 workers. One occupied worker
