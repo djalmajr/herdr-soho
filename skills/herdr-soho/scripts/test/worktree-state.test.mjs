@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { writeFakeCli } from './fakes.mjs';
 import { nodeBin } from './parity.mjs';
-import { stateProjectRoot } from '../lib/platform.mjs';
+import { stateProjectRoot, projectRoot, _resetRootCacheForTests, _hasGitPathSegmentForTests } from '../lib/platform.mjs';
 import { stateRootPath } from '../lib/config.mjs';
 
 const ENTRY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'herdr-soho.mjs');
@@ -36,6 +36,29 @@ function git(root, args) {
   const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   return (r.stdout || '').trim();
+}
+
+function linkedSubmoduleFixture() {
+  const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-state-submodule-')));
+  const superRepo = path.join(temp, 'super');
+  const subSource = path.join(temp, 'sub-source');
+  const submodule = path.join(superRepo, 'submodule');
+  const subWorktree = path.join(temp, 'sub-worktree');
+  initRepo(superRepo);
+  initRepo(subSource);
+  const added = spawnSync('git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', subSource, 'submodule'], { cwd: superRepo, encoding: 'utf8' });
+  assert.equal(added.status, 0, added.stderr);
+  git(superRepo, ['add', '.gitmodules', 'submodule']);
+  git(superRepo, ['commit', '-qm', 'add submodule']);
+  git(fs.realpathSync(submodule), ['worktree', 'add', '-q', '-b', 'linked', subWorktree, 'HEAD']);
+  return { temp, superRepo, submodule, subWorktree, env: { ...process.env } };
+}
+
+function setSubmoduleCoreWorktree(fixture, value) {
+  const commonPath = path.resolve(fixture.subWorktree, git(fixture.subWorktree, ['rev-parse', '--git-common-dir']));
+  const r = spawnSync('git', ['--git-dir', commonPath, 'config', 'core.worktree', value], { cwd: fixture.subWorktree, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  _resetRootCacheForTests();
 }
 
 // Mutation captured: resolving linked-worktree state under the worker creates
@@ -133,27 +156,101 @@ test('a linked worktree of a bare repository keeps state in that worktree', () =
 // Mutation captured: treating the parent .git/modules directory as a project
 // root stores a linked submodule worktree's state inside Git metadata.
 test('linked and ordinary submodule checkouts use the submodule checkout as state root', () => {
-  const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ha-state-submodule-')));
-  const superRepo = path.join(temp, 'super');
-  const subSource = path.join(temp, 'sub-source');
-  const submodule = path.join(superRepo, 'submodule');
-  const subWorktree = path.join(temp, 'sub-worktree');
+  const fixture = linkedSubmoduleFixture();
+  const { temp, submodule, subWorktree, env } = fixture;
   try {
-    initRepo(superRepo);
-    initRepo(subSource);
-    const added = spawnSync('git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', subSource, 'submodule'], { cwd: superRepo, encoding: 'utf8' });
-    assert.equal(added.status, 0, added.stderr);
-    git(superRepo, ['add', '.gitmodules', 'submodule']);
-    git(superRepo, ['commit', '-qm', 'add submodule']);
-
-    const env = { ...process.env };
     const realSubmodule = fs.realpathSync(submodule);
     // Mutation captured: redirecting a submodule with identical git/common dirs to their parent moves state into Git metadata.
     assert.equal(stateProjectRoot(env, realSubmodule), realSubmodule);
     assert.equal(stateRootPath({ entries: new Map() }, env, realSubmodule), path.join(realSubmodule, '.herdr-soho'));
 
-    git(realSubmodule, ['worktree', 'add', '-q', '-b', 'linked', subWorktree, 'HEAD']);
     assert.equal(stateProjectRoot(env, subWorktree), realSubmodule);
     assert.equal(stateRootPath({ entries: new Map() }, env, subWorktree), path.join(realSubmodule, '.herdr-soho'));
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});
+
+// Mutation captured: accepting core.worktree=../.. points shared state at the
+// superproject's .git directory (core-up-to-super-git).
+test('core.worktree that resolves up to the superproject .git falls back to projectRoot', () => {
+  const fixture = linkedSubmoduleFixture();
+  try {
+    setSubmoduleCoreWorktree(fixture, '../..');
+    const actual = stateProjectRoot(fixture.env, fixture.subWorktree);
+    assert.equal(actual, projectRoot(fixture.env, fixture.subWorktree));
+    assert.equal(_hasGitPathSegmentForTests(actual), false);
+  } finally { fs.rmSync(fixture.temp, { recursive: true, force: true }); }
+});
+
+// Mutation captured: accepting an absolute core.worktree under the
+// superproject .git directory leaks state into Git metadata (core-abs-git).
+test('absolute core.worktree under superproject .git falls back to projectRoot', () => {
+  const fixture = linkedSubmoduleFixture();
+  try {
+    setSubmoduleCoreWorktree(fixture, path.join(fixture.superRepo, '.git'));
+    const actual = stateProjectRoot(fixture.env, fixture.subWorktree);
+    assert.equal(actual, projectRoot(fixture.env, fixture.subWorktree));
+    assert.equal(_hasGitPathSegmentForTests(actual), false);
+  } finally { fs.rmSync(fixture.temp, { recursive: true, force: true }); }
+});
+
+// Mutation captured: checking path.basename alone misses a Windows `.git`
+// ancestor when the candidate is expressed with backslashes.
+test('state-root metadata guard recognizes .git path segments on Win32', () => {
+  assert.equal(_hasGitPathSegmentForTests('C:\\repo\\.git', path.win32), true);
+  assert.equal(_hasGitPathSegmentForTests('C:\\repo\\.gitmodules', path.win32), false);
+});
+
+// Mutation captured: without per-process root caching, the roster command
+// repeatedly invokes git for identical project and state roots.
+test('roster resolves roots in at most eight git processes in main and linked worktrees', { timeout: 60000 }, () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-state-git-count-'));
+  const repo = path.join(temp, 'repo');
+  const worker = path.join(repo, '.worktrees', 'worker');
+  const bin = path.join(temp, 'bin');
+  const log = path.join(temp, 'git-calls.log');
+  try {
+    initRepo(repo);
+    fs.mkdirSync(path.dirname(worker), { recursive: true });
+    const added = spawnSync('git', ['worktree', 'add', '-q', '-b', 'worker', worker], { cwd: repo, encoding: 'utf8' });
+    assert.equal(added.status, 0, added.stderr);
+    fs.mkdirSync(bin);
+    const realGit = process.env.REAL_GIT || path.resolve((process.env.PATH || '').split(path.delimiter).map((dir) => path.join(dir, process.platform === 'win32' ? 'git.exe' : 'git')).find((candidate) => fs.existsSync(candidate)) || 'git');
+    writeFakeCli(bin, 'git', `
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+fs.appendFileSync(process.env.GIT_CALL_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
+const result = spawnSync(process.env.REAL_GIT, process.argv.slice(2), { cwd: process.cwd(), env: process.env, encoding: 'utf8' });
+if (result.stdout) process.stdout.write(result.stdout);
+if (result.stderr) process.stderr.write(result.stderr);
+process.exit(result.status ?? 1);
+`);
+    writeFakeCli(bin, 'herdr', `
+const [group, action] = process.argv.slice(2, 4);
+if (group === 'agent' && action === 'list') process.stdout.write('{"result":{"agents":[]}}\\n');
+else if (group === 'pane' && action === 'list') process.stdout.write('{"result":{"panes":[]}}\\n');
+else if (group === 'tab' && action === 'list') process.stdout.write('{"result":{"tabs":[]}}\\n');
+else process.exit(1);
+`);
+    const env = {
+      ...process.env,
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      REAL_GIT: realGit,
+      GIT_CALL_LOG: log,
+      HERDR_SOCKET_PATH: path.join(temp, 'no-herdr-socket'),
+      HERDR_WORKSPACE_ID: 'ws',
+      HERDR_ENV: '1',
+    };
+    const counts = [];
+    for (const [label, cwd] of [['linked-worktree', worker], ['main-checkout', repo]]) {
+      fs.writeFileSync(log, '');
+      const roster = run(cwd, env, ['roster']);
+      assert.equal(roster.status, 0, roster.stderr);
+      const count = fs.readFileSync(log, 'utf8').trim().split(/\r?\n/).filter(Boolean).length;
+      counts.push(count);
+      process.stdout.write(`GIT_COUNT ${label}=${count}\n`);
+      assert.ok(count <= 8, `${cwd}: expected at most 8 git processes, got ${count}`);
+    }
+    assert.equal(counts.length, 2);
+    assert.ok(counts.every((count) => count > 0));
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 });
