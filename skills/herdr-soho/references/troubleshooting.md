@@ -437,7 +437,8 @@ without checking that generation succeeded and produced what you expect.
 ## Running the test matrix
 
 - The JS unit tests run under either runtime: `node --test scripts/test/`
-  or `bun test scripts/test/`.
+  or `bun test --timeout 60000 scripts/test/` (Bun's 5 s default per-test
+  timeout is too short for the process-heavy tests on Windows).
 - Use `scripts/run-tests.sh`: every `scripts/test-*.sh` suite (bash suites
   that exercise the JS through the POSIX `scripts/herdr-soho` launcher) ×
   inside/outside in parallel (one `PASS|FAIL` line per run, last 30 log
