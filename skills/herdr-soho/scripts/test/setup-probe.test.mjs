@@ -37,6 +37,7 @@ let TMP;
 let BIN;
 let ARGS;
 let MODES;
+let PIDS;
 let ENV;
 
 // The probe fake (Node source, per CLI name): logs its args + the stdin
@@ -67,11 +68,12 @@ function probeFakeSource(name) {
   L.push('  case \'hang\': {');
   // The child outlives both ceilings below (5 s unit, 8 s e2e), so a probe
   // that waited for it would fail them.
-  L.push("    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], { stdio: ['ignore', 'inherit', 'inherit'] });");
-  // On Windows the probe kills only cmd.exe behind the .cmd launcher and
-  // this node process outlives it, holding the fixture directory: it hangs
-  // 4 s there (still far past the 1 s limit) so the cleanup waits less.
-  L.push(`    setTimeout(() => {}, ${process.platform === 'win32' ? 4000 : 30000});`);
+  L.push("    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], { stdio: ['ignore', 'inherit', 'inherit'] });");
+  // Both pids for the cleanup: the child outlives the suite otherwise, and
+  // on Windows the probe kills only cmd.exe behind the .cmd launcher, so
+  // this process outlives it too.
+  L.push("    fs.appendFileSync(process.env.PROBE_PID_DIR + '/pids', `${child.pid}\\n${process.pid}\\n`);");
+  L.push('    setTimeout(() => {}, 30000);');
   L.push('    break;');
   L.push('  }');
   L.push("  default: process.stdout.write('ok\\n');");
@@ -100,7 +102,8 @@ test.before(() => {
   BIN = path.join(ROOT, 'bin');
   ARGS = path.join(ROOT, 'args');
   MODES = path.join(ROOT, 'modes');
-  for (const d of [REPO, HOME, CONF, STATE, TMP, BIN, ARGS, MODES]) fs.mkdirSync(d, { recursive: true });
+  PIDS = path.join(ROOT, 'pids');
+  for (const d of [REPO, HOME, CONF, STATE, TMP, BIN, ARGS, MODES, PIDS]) fs.mkdirSync(d, { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: REPO, stdio: 'ignore', timeout: 20000 });
   // git on the controlled PATH (the config loader and the state root shell
   // out to git); the four probe fakes of test-probe.sh — agy/opencode stay
@@ -111,13 +114,19 @@ test.before(() => {
   ENV = fixtureEnv({
     HOME, USERPROFILE: HOME, XDG_CONFIG_HOME: CONF, HERDR_SOHO_DIR: STATE, HERDR_WORKSPACE_ID: 'ws', TMPDIR: TMP,
     PATH: `${BIN}${path.delimiter}/usr/bin${path.delimiter}/bin`,
-    PROBE_ARGS_DIR: ARGS, PROBE_MODE_DIR: MODES,
+    PROBE_ARGS_DIR: ARGS, PROBE_MODE_DIR: MODES, PROBE_PID_DIR: PIDS,
   });
 });
-// On Windows the timeout fake's processes keep files under ROOT open for
-// up to 10 s after the probe returns (see the hang fake); rmSync's own
-// retries do not cover that there, so wait them out here.
+// The hang fake's processes outlive the probe (the child always, the fake
+// itself on Windows): end them, then remove the fixture. On Windows a
+// file they held can stay locked briefly after they end, and rmSync's own
+// retries do not cover that there.
 test.after(async () => {
+  let pids = '';
+  try { pids = fs.readFileSync(path.join(PIDS, 'pids'), 'utf8'); } catch { /* no hang ran */ }
+  for (const pid of pids.split('\n').filter(Boolean)) {
+    try { process.kill(Number(pid)); } catch { /* already gone */ }
+  }
   for (let attempt = 0; ; attempt++) {
     try { fs.rmSync(ROOT, { recursive: true, force: true }); return; } catch (e) {
       if (process.platform !== 'win32' || attempt >= 60 || !['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(e.code)) throw e;
