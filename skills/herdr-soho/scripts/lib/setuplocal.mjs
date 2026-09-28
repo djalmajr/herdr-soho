@@ -35,6 +35,23 @@ export function localTarget(root) {
   return path.join(root, LOCAL_INSTRUCTION_FILE);
 }
 
+// Git may print Windows absolute paths with forward slashes. Keep CLI paths
+// in the host's native spelling before they are compared or shown.
+export function normalizeGitPath(value, platform = process.platform) {
+  return platform === 'win32' ? path.win32.normalize(value) : path.normalize(value);
+}
+
+export function setupTargetPath(root, target, platform = process.platform) {
+  const hostPath = platform === 'win32' ? path.win32 : path;
+  return hostPath.isAbsolute(target) ? hostPath.normalize(target) : hostPath.resolve(root, target);
+}
+
+export function isPathWithin(root, candidate, platform = process.platform) {
+  const hostPath = platform === 'win32' ? path.win32 : path;
+  const rel = hostPath.relative(root, candidate);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${hostPath.sep}`) && !hostPath.isAbsolute(rel);
+}
+
 // gitDirFor <root>: the absolute git dir (`rev-parse --absolute-git-dir`,
 // so a worktree resolves to its own `<common>/.git/worktrees/<name>` and
 // not to an assumed `.git` directory), or '' when git cannot say (not a
@@ -42,12 +59,12 @@ export function localTarget(root) {
 export function gitDirFor(root, env = process.env) {
   const abs = spawnSync('git', ['-C', root, 'rev-parse', '--absolute-git-dir'],
     { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000 });
-  if (abs.status === 0 && (abs.stdout || '').trim() !== '') return (abs.stdout || '').trim();
+  if (abs.status === 0 && (abs.stdout || '').trim() !== '') return normalizeGitPath((abs.stdout || '').trim());
   const rel = spawnSync('git', ['-C', root, 'rev-parse', '--git-dir'],
     { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000 });
   if (rel.status === 0 && (rel.stdout || '').trim() !== '') {
     const g = (rel.stdout || '').trim();
-    return path.isAbsolute(g) ? g : path.join(root, g);
+    return normalizeGitPath(path.isAbsolute(g) ? g : path.join(root, g));
   }
   return '';
 }
@@ -64,7 +81,7 @@ export function excludePathFor(root, env = process.env) {
     { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000 });
   if (gp.status === 0 && (gp.stdout || '').trim() !== '') {
     const p = (gp.stdout || '').trim();
-    return path.isAbsolute(p) ? p : path.join(root, p);
+    return normalizeGitPath(path.isAbsolute(p) ? p : path.join(root, p));
   }
   const gd = gitDirFor(root, env);
   return gd === '' ? '' : path.join(gd, 'info', 'exclude');
@@ -101,7 +118,7 @@ export function checkIgnoreStatus(root, rel, env = process.env) {
 // matches before the directory is created (a trailing-slash pattern never
 // matches a path missing from disk, and setup creates no state dir).
 export function excludeEntry(rel) {
-  return `/${String(rel ?? '').replace(/\/+$/, '')}`;
+  return `/${String(rel ?? '').replaceAll('\\', '/').replace(/\/+$/, '')}`;
 }
 
 // missingExcludeEntries <current> <entries>: the entries with no exact
@@ -273,7 +290,7 @@ export function worktreeRoots(root, env = process.env) {
   if (r.status !== 0) return [];
   const out = [];
   for (const line of String(r.stdout).split('\n')) {
-    if (line.startsWith('worktree ')) out.push(line.slice('worktree '.length));
+    if (line.startsWith('worktree ')) out.push(normalizeGitPath(line.slice('worktree '.length)));
   }
   return out;
 }
@@ -473,9 +490,11 @@ const UNSAFE_EXCLUDE_RE = /[*?\[\\\]\n\r]/;
 // ends in whitespace (after the trailing-separator normalization, so
 // `cache /` is caught too); interior spaces (`my cache`) and a plain
 // trailing separator (`cache/`) keep working.
-export function assertSafeLocalRels(rels, cmd = 'setup') {
+export function assertSafeLocalRels(rels, cmd = 'setup', platform = process.platform) {
   for (const rel of rels ?? []) {
-    const norm = String(rel).replace(/\/+$/, '');
+    const raw = String(rel);
+    const slashPath = platform === 'win32' ? raw.replaceAll('\\', '/') : raw;
+    const norm = slashPath.replace(/\/+$/, '');
     const segs = norm.split('/');
     if (segs.some((s) => /[\s]$/.test(s))) {
       throw new DieError(`${cmd}: refusing to ignore state path '${rel}' via the git exclude file because a path segment ends in whitespace (git strips it from the exclude pattern, so the directory would stay untracked) (no files were changed; set HERDR_SOHO_DIR or state_dir to a plain directory name such as .herdr-soho)`, 4);

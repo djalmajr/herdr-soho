@@ -55,6 +55,29 @@ let ENV;
 })();
 test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
+function posixPermissionsEnforced() {
+  if (process.platform === 'win32' || process.getuid?.() === 0) return false;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-doctor-permission-probe-'));
+  const file = path.join(dir, 'file');
+  const child = path.join(dir, 'child');
+  fs.mkdirSync(child);
+  fs.writeFileSync(file, 'x');
+  let deniedRead = false;
+  let deniedWrite = false;
+  try {
+    fs.chmodSync(file, 0o000);
+    try { fs.readFileSync(file); } catch { deniedRead = true; }
+    fs.chmodSync(child, 0o000);
+    try { fs.writeFileSync(path.join(child, 'blocked'), 'x'); } catch { deniedWrite = true; }
+    return deniedRead && deniedWrite;
+  } finally {
+    fs.chmodSync(file, 0o600);
+    fs.chmodSync(child, 0o700);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+const POSIX_PERMISSION_APPLIES = posixPermissionsEnforced();
+
 const PROJ_CONF = path.join(REPO, '.agents', 'herdr-soho.conf');
 const USER_CONF = path.join(CONF, 'herdr-soho', 'config');
 const writeProj = (text) => {
@@ -310,7 +333,7 @@ test('doctorModelPairs: an unresolvable kind+model pair warns; an unavailable li
   rmOwnFiles();
   // A grok listing fake (the same shape modelIds/spawn use).
   writeFakeCli(FAKES, 'grok', `if (process.argv[2] === 'models') process.stdout.write('grok-4.7\\ngrok-4\\ngrok-3\\n');\n`);
-  const env = { ...ENV, PATH: FAKES };
+  const env = { ...ENV, PATH: [FAKES].join(path.delimiter) };
   const lines = [];
   const say = { ok: () => {}, warn: (m) => lines.push(m) };
   // lanes on: the lane pair (kind and model from the project layer).
@@ -329,7 +352,7 @@ test('doctorModelPairs: an unresolvable kind+model pair warns; an unavailable li
   assert.ok(lines.includes("config: role 'reviewer' model 'not-a-model' (project) does not resolve for kind 'grok' (project)"), lines.join('\n'));
   // A kind whose model list is unavailable (no grok on PATH, no cache in a
   // fresh TMPDIR): the pair is skipped without a warn.
-  fs.rmSync(path.join(FAKES, 'grok'), { force: true });
+  for (const name of ['grok', 'grok.cmd']) fs.rmSync(path.join(FAKES, name), { force: true });
   const tmp2 = path.join(ROOT, 'tmp2');
   fs.mkdirSync(tmp2, { recursive: true });
   const env2 = { ...env, TMPDIR: tmp2 };
@@ -1112,41 +1135,36 @@ test('nowrite: doctor reports an absent state dir as absent, never creates it, a
     fs.mkdirSync(project, { recursive: true });
     const envBase = { ...ENV, HERDR_SOHO_DIR: '' };
     const d = path.join(project, '.herdr-soho');
-    const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
     // A fresh project (no state dir): reported absent — and not created.
     let out = runDoctorAt(project, { ...envBase, HERDR_SOHO_NOWRITE: '1' });
     assert.ok(out.includes(`state dir absent (no-write mode, not created): ${d}`), out);
     assert.ok(!out.includes('state dir not writable'), out);
     assert.ok(!fs.existsSync(d), 'no-write mode never creates the state dir');
     assert.ok(!fs.existsSync(path.join(project, '.gitignore')));
-    if (isRoot) {
-      // root bypasses permission checks: the two permission cases below
-      // cannot be exercised honestly.
-      t.skip('root: permission-denied cases are not reachable');
-      return;
-    }
-    // An existing but unwritable dir keeps the genuine warning.
-    fs.mkdirSync(d, { recursive: true });
-    fs.chmodSync(d, 0o555);
-    try {
-      out = runDoctorAt(project, { ...envBase, HERDR_SOHO_NOWRITE: '1' });
-      assert.ok(out.includes(`state dir not writable: ${d}`), out);
-      assert.ok(!out.includes('state dir absent (no-write mode'), out);
-    } finally {
-      fs.chmodSync(d, 0o755);
-    }
-    // A permission error resolving the path (no traverse on the parent)
-    // keeps the warning too — absence is reported only for ENOENT.
-    const outer = path.join(root, 'outer');
-    const project2 = path.join(outer, 'inner');
-    fs.mkdirSync(project2, { recursive: true });
-    fs.chmodSync(outer, 0o600);
-    try {
-      out = runDoctorAt(project2, { ...envBase, HERDR_SOHO_NOWRITE: '1' });
-      assert.ok(out.includes('state dir not writable:'), out);
-      assert.ok(!out.includes('state dir absent (no-write mode'), out);
-    } finally {
-      fs.chmodSync(outer, 0o755);
+    if (POSIX_PERMISSION_APPLIES) {
+      // An existing but unwritable dir keeps the genuine warning.
+      fs.mkdirSync(d, { recursive: true });
+      fs.chmodSync(d, 0o555);
+      try {
+        out = runDoctorAt(project, { ...envBase, HERDR_SOHO_NOWRITE: '1' });
+        assert.ok(out.includes(`state dir not writable: ${d}`), out);
+        assert.ok(!out.includes('state dir absent (no-write mode'), out);
+      } finally {
+        fs.chmodSync(d, 0o755);
+      }
+      // A permission error resolving the path (no traverse on the parent)
+      // keeps the warning too — absence is reported only for ENOENT.
+      const outer = path.join(root, 'outer');
+      const project2 = path.join(outer, 'inner');
+      fs.mkdirSync(project2, { recursive: true });
+      fs.chmodSync(outer, 0o600);
+      try {
+        out = runDoctorAt(project2, { ...envBase, HERDR_SOHO_NOWRITE: '1' });
+        assert.ok(out.includes('state dir not writable:'), out);
+        assert.ok(!out.includes('state dir absent (no-write mode'), out);
+      } finally {
+        fs.chmodSync(outer, 0o755);
+      }
     }
     // Control: without the env the CLI creates the dir and reports it
     // writable (normal behavior unchanged).
@@ -1298,7 +1316,7 @@ test('explainPrintRunning: the panel count, the preset order and the idle paragr
 });
 
 test('explainStateDir: an unreadable state root lists nothing (bash find 2>/dev/null)', {
-  skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs POSIX permissions and a non-root user' : false,
+  skip: !POSIX_PERMISSION_APPLIES ? 'POSIX permission bits are not enforced here' : false,
 }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-explain-unreadable-'));
   const state = path.join(root, 'state');
