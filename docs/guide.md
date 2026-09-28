@@ -232,12 +232,16 @@ the env, the CLI behaves exactly as before.
   telling it to report failures in files it does not own as outside its
   slice. A `done` report routed through `$TMPDIR/herdr-soho/<ws>/reports/`
   is mirrored back into the state dir (best effort).
-- One agent name is one growing session. After several briefs, or when a
-  report includes unrelated prior work, close the completed worker with
-  `release <name> --close` and spawn with `--fresh` for the next slice (only
-  panes this skill created close). A name still live in Herdr, even after a
-  plain `release`, makes the spawn choose a suffix. A report covers only the
-  current brief and its explicit amendments.
+- One agent name is one growing session. Reuse the pane for the next slice
+  instead of closing it. Same slice or subject: reuse it as it is (`--amend`
+  for fix rounds). Another subject in the same project: send `/compact`
+  (Claude Code, Codex, pi) while it is idle, wait for it to finish, then
+  dispatch. An unrelated subject: clear the session (`/new` in Codex,
+  `/clear` in Claude Code) before the dispatch. Close a worker with
+  `release <name> --close` only when the session will not use it again
+  (only panes this skill created close). A name still live in Herdr, even
+  after a plain `release`, makes the spawn choose a suffix. A report covers
+  only the current brief and its explicit amendments.
 - `release --close` ends the agent; without `--close` it keeps running.
 
 ## Configuration
@@ -457,8 +461,9 @@ worker whose last report is already written instead of opening a new pane.
 With lanes on (the default) the lane's idle worker is reused even when the
 next brief is another role of the same lane; a lane never mixes CLIs (a
 kind mismatch exits 13: `release --close` it and set `lane.<name>.kind`).
-Cheaper and keeps the worker's context; use `--fresh` when a slice must
-start clean.
+Cheaper and keeps the worker's context; before an unrelated slice, compact
+or clear the reused session (see the list above) rather than passing
+`--fresh`, which opens another pane.
 
 ## Feeding improvements back
 

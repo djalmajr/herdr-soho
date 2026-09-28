@@ -620,8 +620,9 @@ contracts"), `reuse_workers`
 (default `on`, also when no config sets it: `spawn` returns an idle
 worker of the same role, kind and cwd whose last report exists instead of
 opening a pane, and a reuse never counts against `max_workers`; `--reuse`/`--fresh`
-override per call; a reused worker keeps earlier briefs in context, so pass
-`--fresh` when a slice must start clean), `multi_role` (default `on`; one
+override per call; a reused worker keeps earlier briefs in context: compact
+or clear its session before an unrelated slice instead of opening another
+pane — see "One agent, one growing session"), `multi_role` (default `on`; one
 idle agent may take another role — see "Setup: guided configuration"), `feedback` +
 `feedback_repo` (see "Improving this skill"), `approvals`
 (default for roles without one), `auto_approve` + `max_auto_approvals`
@@ -862,10 +863,22 @@ and warning is also appended to `<state>/friction.log` (`$S friction`).
 - **One agent, one growing session.** Several `dispatch` calls to the same
   name land in the same conversation; the worker remembers earlier briefs.
   `collect` prints only the latest report; older ones stay in `reports/`.
-  After several briefs, or if a report mentions unrelated prior work, close
-  the completed worker with `release <name> --close` and spawn with `--fresh`
-  for the next slice. A name still live in Herdr (including one released
-  without `--close`, or a pane passed with `--pane`) makes the spawn choose a
+  Reuse the pane for the next slice instead of closing it (a new pane
+  reloads the CLI, its skills and its rules). Before the dispatch, compare
+  the worker's last task (`roster` TASK) with the new brief:
+  - same slice or same subject (a fix round, the next step of the same
+    area): reuse it as it is, and send fix rounds with `--amend`;
+  - another subject in the same project: while it is idle, send its CLI's
+    compaction command (`/compact` in Claude Code, Codex and pi) with
+    `herdr agent prompt <name> "/compact"`, wait until the screen shows it
+    finished, then dispatch;
+  - nothing of the old context helps (an unrelated subject): clear the
+    session instead (`/new` in Codex, `/clear` in Claude Code), then
+    dispatch.
+  Close a worker (`release <name> --close`) only when this session will not
+  use it again; a plain `release` leaves its pane running outside the
+  roster. A name still live in Herdr (including one released without
+  `--close`, or a pane passed with `--pane`) makes the spawn choose a
   suffixed name. A worker's report covers only the current brief and its
   explicit amendments.
 - **`dispatch` only knows agents this skill spawned.** An agent started by
