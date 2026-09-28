@@ -297,8 +297,9 @@ trusting a version named here.
   redo the provider and `herdr integration install opencode`. `herdr agent
   start --kind opencode` then stops timing out at startup.
 - **Context.** Long slices fill these CLIs' context fast (tens of millions of
-  input tokens over a slice); give each slice a fresh worker and a short
-  brief.
+  input tokens over a slice); keep briefs short and clear the session
+  between slices (`/new` in pi; for opencode, `release <name> --close` and
+  spawn again).
 - **pi or opencode?** In one side-by-side run (same task, same self-hosted
   reasoning model, run in parallel) opencode finished about 30% sooner, while
   pi's diff followed the specification more closely and flagged an edge case

@@ -870,11 +870,14 @@ and warning is also appended to `<state>/friction.log` (`$S friction`).
     area): reuse it as it is, and send fix rounds with `--amend`;
   - another subject in the same project: while it is idle, send its CLI's
     compaction command (`/compact` in Claude Code, Codex and pi) with
-    `herdr agent prompt <name> "/compact"`, wait until the screen shows it
-    finished, then dispatch;
+    `herdr agent prompt <name> "/compact"` (a slash command is not a brief,
+    so `dispatch` does not apply). Then read the pane once with
+    `herdr agent read <name>` until the CLI confirms it (Codex prints
+    `Context compacted`), and dispatch;
   - nothing of the old context helps (an unrelated subject): clear the
-    session instead (`/new` in Codex, `/clear` in Claude Code), then
-    dispatch.
+    session the same way instead (`/new` in Codex and pi, `/clear` in
+    Claude Code), then dispatch;
+  - a CLI without such a command: `release <name> --close` and spawn again.
   Close a worker (`release <name> --close`) only when this session will not
   use it again; a plain `release` leaves its pane running outside the
   roster. A name still live in Herdr (including one released without
