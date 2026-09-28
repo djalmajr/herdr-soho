@@ -21,8 +21,9 @@ import {
   roleAbbrev, herdLabelMax, composeHerdLabel, herdAutoLabel, herdTabEntries,
   herdTabsRelabel, herdTabPane, cmdTabLabel, rosterPanesInTab,
 } from '../lib/herdtabs.mjs';
+import { fileURLToPath } from 'node:url';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS = {
   config: path.join(SCRIPTS, 'lib', 'config.mjs'),
   herdtabs: path.join(SCRIPTS, 'lib', 'herdtabs.mjs'),

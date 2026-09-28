@@ -21,8 +21,9 @@ import {
   pickSplitAnchor, uiFocusedPane, restoreFocusIfStolen,
 } from '../lib/layout.mjs';
 import { herdTabPane } from '../lib/herdtabs.mjs';
+import { fileURLToPath } from 'node:url';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
 
 function tmp(prefix) {

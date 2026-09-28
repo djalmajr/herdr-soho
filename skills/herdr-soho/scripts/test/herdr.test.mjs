@@ -11,14 +11,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { nodeBin } from './parity.mjs';
 import { writeFakeCli, sleepingFake } from './fakes.mjs';
 import { agentState, paneTitle, requireEnv, liveAgents, paneList, tabList, agentRead } from '../lib/herdr.mjs';
 
-const HERDR_MJS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'lib', 'herdr.mjs');
+const HERDR_MJS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'herdr.mjs');
 const HERDR_URL = pathToFileURL(HERDR_MJS).href;
-const CONFIG_URL = pathToFileURL(path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'lib', 'config.mjs')).href;
+const CONFIG_URL = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'config.mjs')).href;
 
 // Bash variables stay plain in the template; only `${` (a bash parameter
 // expansion) is escaped for the JS template literal.

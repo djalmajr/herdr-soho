@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { nodeBin } from './parity.mjs';
 import { writeFakeCli, listingFake } from './fakes.mjs';
 import { loadConfig, DieError } from '../lib/config.mjs';
@@ -28,7 +28,7 @@ import {
   findReusable, resolvedRoleKind, resolveSpawnEffort, uniqueName,
 } from '../lib/spawn.mjs';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SPAWN_URL = pathToFileURL(path.join(SCRIPTS, 'lib', 'spawn.mjs')).href;
 const CONFIG_URL = pathToFileURL(path.join(SCRIPTS, 'lib', 'config.mjs')).href;
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');

@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { nodeBin } from './parity.mjs';
 import { atomicWrite } from '../lib/platform.mjs';
 import { sanitizeCause } from '../lib/text.mjs';
@@ -21,7 +21,7 @@ import {
   warn, setFrictionLog, nowStamp, nowIso, frictionSafe,
 } from '../lib/state.mjs';
 
-const STATE_MJS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'lib', 'state.mjs');
+const STATE_MJS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'state.mjs');
 const STATE_URL = pathToFileURL(STATE_MJS).href;
 
 function tmp(prefix) {
@@ -351,7 +351,7 @@ import { workspaceId } from '../lib/state.mjs';
 import { DieError } from '../lib/config.mjs';
 import { writeFakeCli } from './fakes.mjs';
 
-const CONFIG_TEST_URL = pathToFileURL(path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'lib', 'config.mjs')).href;
+const CONFIG_TEST_URL = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'config.mjs')).href;
 
 function wsFakeEnv(root, source) {
   const bin = path.join(root, 'bin');
@@ -437,7 +437,7 @@ test('nowrite: the entry guard rejects non-exact invocations before any project 
     fs.mkdirSync(project, { recursive: true });
     assert.equal(spawnSync('git', ['init', '--quiet'], { cwd: project, encoding: 'utf8' }).status, 0);
     const before = fs.readdirSync(project).sort();
-    const entry = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'herdr-soho.mjs');
+    const entry = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'herdr-soho.mjs');
     const env = { ...process.env, HERDR_SOHO_NOWRITE: '1', HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'ws' };
     // `doctor --fix` can still write: it is rejected, with every other
     // non-exact invocation, before any state write. The rejection names

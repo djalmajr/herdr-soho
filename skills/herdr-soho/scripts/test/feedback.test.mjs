@@ -18,8 +18,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { writeFakeCli } from './fakes.mjs';
 import { nodeBin } from './parity.mjs';
+import { fileURLToPath } from 'node:url';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
 
 // The fake herdr the code sees: `agent prompt <agent> <text>` appends

@@ -31,8 +31,9 @@ import {
   normalizeApproveScreen, normalizeScreen,
 } from '../lib/wait.mjs';
 import { briefTask, markTaskDone } from '../lib/tasks.mjs';
+import { fileURLToPath } from 'node:url';
 
-const SCRIPTS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const SCRIPTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JS_ENTRY = path.join(SCRIPTS, 'herdr-soho.mjs');
 
 // ---------- fake herdr (Node) ----------
