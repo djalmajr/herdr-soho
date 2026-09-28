@@ -55,6 +55,7 @@ import { cmdDoctor } from './lib/commands/doctor.mjs';
 import { cmdExplain } from './lib/commands/explain.mjs';
 import { cmdInit } from './lib/commands/init.mjs';
 import { cmdTitle } from './lib/commands/title.mjs';
+import { cmdMutationGuard } from './lib/commands/mutation-guard.mjs';
 import { die, findExecutable } from './lib/platform.mjs';
 
 // The commands that log to friction when running inside Herdr (bash main's
@@ -203,6 +204,9 @@ try {
       break;
     case 'env':
       cmdEnv(ctx, env);
+      break;
+    case 'mutation-guard':
+      cmdMutationGuard(argv.slice(1), env);
       break;
     // bash main: `-h|--help|help|""` → usage, exit 0, no Herdr needed.
     case 'help':

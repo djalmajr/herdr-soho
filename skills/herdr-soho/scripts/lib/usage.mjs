@@ -62,6 +62,7 @@ Usage:
   herdr-soho friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction)
   herdr-soho feedback send <report.md> "<one-line summary>"
                                              # feedback=local: file the report in feedback_dir; one line to feedback_to when set
+  herdr-soho mutation-guard <copy-dir> [--source <dir>] [--env NAME]...
 
 Completion contract: a worker is finished when its report file exists. Use
 \`dispatch\` (waits by default), \`wait\` (one or many agents), or \`status\`
