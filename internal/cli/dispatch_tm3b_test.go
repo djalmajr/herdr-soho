@@ -653,6 +653,45 @@ func TestDispatchTM3bStrictLintOverlapAndMarkerCases(t *testing.T) {
 			t.Fatalf("dispatch code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})
+	// JS: "dispatch: the owned-files overlap warn only fires inside the same tree"
+	t.Run("dispatch: the owned-files overlap warn only fires inside the same tree", func(t *testing.T) {
+		tmp := t.TempDir()
+		briefText := strings.Replace(tm3bFullBrief(), "internal/a.go", "- scripts/x.mjs", 1)
+		h := newTM3bHarness(t, briefText)
+		h.env["TMPDIR"] = tmp
+		reports := filepath.Join(tmp, "herdr-soho", "ws", "reports")
+		if err := os.MkdirAll(reports, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		body := "# Brief\n## Owned files\n- scripts/x.mjs\n# Report contract\n"
+		for _, name := range []string{"other.brief.md", "same.brief.md"} {
+			if err := os.WriteFile(filepath.Join(reports, name), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, name := range []string{"other", "same"} {
+			if err := os.WriteFile(filepath.Join(h.ws, "last-report-"+name), []byte(filepath.Join(reports, name+".md")+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\tmode\targs\teffort\n" +
+			"other\tw0test:p0b\tcodex\timplementer\topenai\t0\t/worktree/other\tnow\tgpt-5\ttask\timplementer\t\t\t\t\n" +
+			"same\tw0test:p0c\tcodex\timplementer\topenai\t0\t/worktree/build\tnow\tgpt-5\ttask\timplementer\t\t\t\t\n" +
+			"build\tw0test:p0a\tcodex\timplementer\topenai\t0\t/worktree/build\tnow\tgpt-5\ttask\timplementer\t\t\t\t\n"
+		if err := os.WriteFile(filepath.Join(h.ws, "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, out, stderr := h.run(t, "build", h.brief, "--no-wait")
+		if code != 0 || !strings.Contains(out, `"wait_status":"submitted"`) {
+			t.Fatalf("dispatch code=%d out=%q stderr=%q", code, out, stderr)
+		}
+		if !strings.Contains(stderr, "owns files that 'same' is still editing: scripts/x.mjs") {
+			t.Fatalf("same-tree overlap warning missing: %s", stderr)
+		}
+		if strings.Contains(stderr, "owns files that 'other' is still editing") {
+			t.Fatalf("different-tree overlap warning fired: %s", stderr)
+		}
+	})
 	// JS: "dispatch: a new dispatch clears the approve-screen marker"
 	t.Run("dispatch: a new dispatch clears the approve-screen marker", func(t *testing.T) {
 		h := newTM3bHarness(t, tm3bFullBrief())
