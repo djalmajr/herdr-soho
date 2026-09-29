@@ -1,12 +1,12 @@
 package provider
 
 import (
-	"path/filepath"
 	"testing"
 )
 
 func TestQueuedPromptEvidenceRules(t *testing.T) {
-	composed := filepath.Join("/tmp", "herdr-soho", "ws", "reports", "build-20260929T121817.brief.md")
+	// A literal slash path on every host: the screen shows the path as it was sent.
+	composed := "/tmp/herdr-soho/ws/reports/build-20260929T121817.brief.md"
 	t.Run("rule (a): a line carrying the radical of the composed file is proof", func(t *testing.T) {
 		screen := "Read the file …/reports/build-20260929T121817.brief.md in full and execute it\n"
 		if !QueuedPromptEvidence(screen, composed) {

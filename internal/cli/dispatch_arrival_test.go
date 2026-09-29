@@ -166,7 +166,7 @@ func TestDispatchArrivalPortedCases(t *testing.T) {
 	t.Run(`arrival: a working target with a truncated queued prompt counts as queued`, func(t *testing.T) {
 		// JS: "arrival: working target with no prompt evidence is not-received and sends no key" (the queued-proof side)
 		// The queue shows the dispatched prompt with the path cut, so the full path never appears.
-		f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\nRead the file state/ws/briefs/work…\n", "0")
+		f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\nRead the file "+filepath.Join("state", "ws", "briefs", "work")+"…\n", "0")
 		code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || dispatchOutputStatus(t, out) != "queued" || !strings.Contains(errText, "prompt queued: 'worker' is working") {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
