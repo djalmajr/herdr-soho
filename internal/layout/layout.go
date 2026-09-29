@@ -24,6 +24,11 @@ func GridSizes(n int) Grid {
 	if n < 1 {
 		return Grid{Rows: []int{}}
 	}
+	if n == 7 {
+		// Seven panes: the caller (the orchestrator) alone in its column, 1+3+3,
+		// not the 2+2+3 the square split gives (user decision, 2026-09-29).
+		return Grid{Cols: 3, Rows: []int{1, 3, 3}}
+	}
 	cols := int(math.Ceil(math.Sqrt(float64(n))))
 	base, extra := n/cols, n%cols
 	rows := make([]int, cols)
