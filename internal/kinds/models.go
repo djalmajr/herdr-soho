@@ -17,6 +17,7 @@ import (
 
 var ansiSGR = regexp.MustCompile("\\x1b\\[[0-9;]*m")
 var effortSuffixRE = regexp.MustCompile("-(minimal|low|medium|high|xhigh|max)(-fast)?$")
+var claudeDottedAliasRE = regexp.MustCompile(`(?i)^(opus|sonnet|haiku|fable)-([0-9]+)\.([0-9]+)$`)
 
 func ParseCursorModels(stdout string) []string {
 	var ids []string
@@ -281,6 +282,11 @@ func ResolveModel(kind, spec, effort string, env platform.Env, warn WarnFunc) (s
 	}
 	ids := ModelIDs(kind, env)
 	if len(ids) == 0 {
+		if kind == "claude" {
+			if m := claudeDottedAliasRE.FindStringSubmatch(spec); m != nil {
+				return "claude-" + strings.ToLower(m[1]) + "-" + m[2] + "-" + m[3], nil
+			}
+		}
 		return spec, nil
 	}
 	for _, raw := range strings.Split(spec, "|") {
@@ -291,6 +297,18 @@ func ResolveModel(kind, spec, effort string, env platform.Env, warn WarnFunc) (s
 		for _, id := range ids {
 			if id == alt {
 				return alt, nil
+			}
+		}
+		if strings.Contains(alt, ".") {
+			n := strings.ReplaceAll(alt, ".", "-")
+			var candidates []string
+			for _, id := range ids {
+				if id == n || strings.HasSuffix(id, "-"+n) {
+					candidates = append(candidates, id)
+				}
+			}
+			if sorted := VersionSortDesc(candidates); len(sorted) > 0 {
+				return sorted[0], nil
 			}
 		}
 		re, ok := ERERegExp(alt)

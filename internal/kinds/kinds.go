@@ -8,7 +8,7 @@ import (
 )
 
 var KnownKinds = []string{"claude", "codex", "grok", "agy", "gemini", "cursor", "pi", "opencode"}
-var families = []string{"anthropic", "openai", "xai", "google"}
+var families = []string{"anthropic", "openai", "xai", "google", "alibaba"}
 
 func KindFamily(kind string) string {
 	switch kind {
@@ -47,6 +47,8 @@ func AgentFamily(kind, model string) string {
 	}
 	last := parts[len(parts)-1]
 	switch {
+	case strings.HasPrefix(strings.ToLower(last), "qwen"):
+		return "alibaba"
 	case strings.HasPrefix(last, "claude-"):
 		return "anthropic"
 	case strings.HasPrefix(last, "gpt-") || strings.Contains(last, "codex"):
