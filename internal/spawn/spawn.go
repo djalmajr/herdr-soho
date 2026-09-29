@@ -219,6 +219,62 @@ func fieldAt(values []string, i int) string {
 	}
 	return ""
 }
+
+// renameLaneWorker renames the reused worker's agent to newName with the same
+// herdr agent rename call EnsureOrchestratorName uses; it returns the cause
+// extracted from the result when the rename failed, empty on success.
+func renameLaneWorker(newName, pane string, env platform.Env) string {
+	r := platform.RunCli("herdr", []string{"agent", "rename", pane, newName}, platform.RunOptions{Env: env, TimeoutMs: int(herdr.Timeout.Milliseconds())})
+	if !r.NotFound && r.Status != nil && *r.Status == 0 {
+		return ""
+	}
+	raw := r.Stderr
+	if raw == "" {
+		raw = r.Stdout
+	}
+	if code, msg := renameErrorInfo(raw); code != "" {
+		if cause := text.SanitizeCause(code + ": " + msg); cause != "" {
+			return cause
+		}
+	}
+	rc := 1
+	if r.NotFound {
+		rc = 127
+	} else if r.Status != nil {
+		rc = *r.Status
+	}
+	if cause := text.SanitizeCause(raw); cause != "" {
+		return cause
+	}
+	return fmt.Sprintf("herdr agent rename failed (exit %d)", rc)
+}
+
+func renameErrorInfo(raw string) (string, string) {
+	v, err := jsonjs.Parse([]byte(raw))
+	if err != nil {
+		return "", ""
+	}
+	o, ok := v.(*jsonjs.Object)
+	if !ok {
+		return "", ""
+	}
+	e, ok := o.Get("error")
+	if !ok {
+		return "", ""
+	}
+	eo, ok := e.(*jsonjs.Object)
+	if !ok {
+		return "", ""
+	}
+	code, _ := eo.Get("code")
+	msg, _ := eo.Get("message")
+	cs, _ := code.(string)
+	ms, _ := msg.(string)
+	if cs == "" {
+		return "", ""
+	}
+	return cs, ms
+}
 func fieldString(value any, key string) string {
 	if o, ok := value.(*jsonjs.Object); ok {
 		v, _ := o.Get(key)
@@ -403,9 +459,23 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 				Warn(fmt.Sprintf("lane '%s' worker '%s' was started with other native args ('%s'); this spawn wants '%s'. Release the lane, then spawn again.", lane, d.Name, args, wanted), ctx, env, "spawn")
 				platform.Die("", 13)
 			}
-			EmitReuse(d.Name, o.role, actual, ctx, env, cwd)
-			sameTreeEditors(d.Name, o.role, fieldAt(f, 6), sd, env, cwd, ctx)
-			Warn(fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s; its session already holds earlier briefs", lane, d.Name, o.role), ctx, env, "spawn")
+			name := d.Name
+			renamedTo := ""
+			if o.name != "" && o.name != d.Name {
+				if cause := renameLaneWorker(o.name, fieldAt(f, 1), env); cause != "" {
+					core.DieFriction(fmt.Sprintf("spawn: could not rename worker '%s' to '%s': %s", d.Name, o.name, cause), 4, "", "")
+				}
+				core.RosterRename(sd, d.Name, o.name)
+				name = o.name
+				renamedTo = o.name
+			}
+			EmitReuse(name, o.role, actual, ctx, env, cwd)
+			sameTreeEditors(name, o.role, fieldAt(f, 6), sd, env, cwd, ctx)
+			warnMsg := fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s; its session already holds earlier briefs", lane, d.Name, o.role)
+			if renamedTo != "" {
+				warnMsg = fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s, renamed to '%s'; its session already holds earlier briefs", lane, d.Name, o.role, renamedTo)
+			}
+			Warn(warnMsg, ctx, env, "spawn")
 			return
 		case "busy":
 			if burst {
