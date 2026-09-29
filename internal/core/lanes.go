@@ -937,9 +937,14 @@ func ApplyLaneFile(file, panes string, env platform.Env, cwd string) []string {
 		}
 		ConfigWritePair(file, "max_workers", strconv.Itoa(sum), env, cwd)
 		lines = append(lines, "set max_workers="+strconv.Itoa(sum))
-		splitCap, _ := strconv.Atoi(panes)
-		if mode == "flex" {
-			splitCap += FlexExtra(&ctx, env)
+		// The caller plus the whole team, as layout.SplitCap and the doctor
+		// measure it; with no team cap, panes (plus flex_extra).
+		splitCap := 1 + sum
+		if sum == 0 {
+			splitCap, _ = strconv.Atoi(panes)
+			if mode == "flex" {
+				splitCap += FlexExtra(&ctx, env)
+			}
 		}
 		ConfigWritePair(file, "split_max_panes", strconv.Itoa(splitCap), env, cwd)
 		lines = append(lines, "set split_max_panes="+strconv.Itoa(splitCap))

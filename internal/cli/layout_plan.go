@@ -6,8 +6,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
@@ -35,36 +33,11 @@ type layoutPlan struct {
 	Grid       any               `json:"grid"`
 }
 
-func splitCap(ctx *core.Config, env platform.Env) int {
-	if core.LanesEnabled(ctx, env) && !core.ConfigExplicit(ctx, "split_max_panes", env) {
-		panes, _ := strconv.Atoi(core.PanesValue(ctx, env))
-		if core.PaneMode(ctx, env) == "flex" {
-			return panes + core.FlexExtra(ctx, env)
-		}
-		return panes
-	}
-	v := core.Cfg(ctx, "split_max_panes", "4", env)
-	if !regexp.MustCompile(`^[0-9]+$`).MatchString(v) {
-		return 4
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return 4
-	}
-	return n
-}
+// splitCap and splitMin are the spawn's own values, so layout-plan shows where
+// the next spawn really lands.
+func splitCap(ctx *core.Config, env platform.Env) int { return layout.SplitCap(ctx, env) }
 
-func splitMin(ctx *core.Config, env platform.Env) float64 {
-	v := core.Cfg(ctx, "split_min_pane", "0.18", env)
-	if !regexp.MustCompile(`^0?\.[0-9]+$`).MatchString(v) {
-		return .18
-	}
-	n, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		return .18
-	}
-	return n
-}
+func splitMin(ctx *core.Config, env platform.Env) float64 { return layout.SplitMin(ctx, env) }
 
 func cmdLayoutPlan(args []string, ctx *core.Config, env platform.Env, cwd string) int {
 	file, me, mine := "", env.Get("HERDR_PANE_ID"), ""

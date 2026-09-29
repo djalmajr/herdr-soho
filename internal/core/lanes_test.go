@@ -128,10 +128,11 @@ func TestLaneFileMigrationAndSignatures(t *testing.T) {
 		t.Fatalf("preset migration failed: lines=%v file=%s", lines, text)
 	}
 	write(t, file, "lane.ops.roles=implementer,tasker\nlane.ops.panes=2\n")
+	// A custom lane of two workers: the caller's tab holds the caller plus the team (1 + 2).
 	lines = ApplyLaneFile(file, "4", env, repo)
 	raw, _ = os.ReadFile(file)
 	text = string(raw)
-	if FileLaneCount(file) != 1 || !containsText(text, "lane.ops.roles=implementer,tasker") || !containsText(text, "max_workers=2") || !containsText(text, "split_max_panes=4") || !containsString(lines, "set max_workers=2") {
+	if FileLaneCount(file) != 1 || !containsText(text, "lane.ops.roles=implementer,tasker") || !containsText(text, "max_workers=2") || !containsText(text, "split_max_panes=3") || !containsString(lines, "set max_workers=2") || !containsString(lines, "set split_max_panes=3") {
 		t.Fatalf("custom migration failed: lines=%v file=%s", lines, text)
 	}
 }
