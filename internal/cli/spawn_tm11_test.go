@@ -43,10 +43,10 @@ case "$1 $2" in
       gone|dead) echo '{"error":{"code":"agent_not_found","message":"gone"}}' >&2; exit 1 ;;
     esac
     case "$mode" in
-      working) echo "{"result":{"agent":{"name":"$target","agent_status":"working"}}}" ;;
-      blocked) echo "{"result":{"agent":{"name":"$target","agent_status":"blocked"}}}" ;;
+      working) echo "{\"result\":{\"agent\":{\"name\":\"$target\",\"agent_status\":\"working\"}}}" ;;
+      blocked) echo "{\"result\":{\"agent\":{\"name\":\"$target\",\"agent_status\":\"blocked\"}}}" ;;
       gone|gone-until-start) echo '{"error":{"code":"agent_not_found","message":"gone"}}' >&2; exit 1 ;;
-      *) echo "{"result":{"agent":{"name":"$target","agent_status":"idle"}}}" ;;
+      *) echo "{\"result\":{\"agent\":{\"name\":\"$target\",\"agent_status\":\"idle\"}}}" ;;
     esac ;;
   "agent list")
     if [ -f "$HA_LIVE" ]; then cat "$HA_LIVE"; else echo '{"result":{"agents":[]}}'; fi ;;
@@ -156,9 +156,9 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 		}
 		f := newTM11SpawnFixture(t, rules)
 		roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\n" +
-			"w1\tp-w1\tgrok\timplementer\txai\t1\t" + f.cwd + "\tnow\tfull\timplementer\tbuild\n" +
-			"w2\tp-w2\tgrok\tscouter\txai\t1\t" + f.cwd + "\tnow\tfull\tscouter\texplore\n" +
-			"w3\tp-w3\tgrok\treviewer\txai\t1\t" + f.cwd + "\tnow\tfull\treviewer\treview\n"
+			"w1\tp-w1\tgrok\timplementer\txai\t1\t" + f.cwd + "\tnow\tgrok-4.7\tfull\timplementer\tbuild\n" +
+			"w2\tp-w2\tgrok\tscouter\txai\t1\t" + f.cwd + "\tnow\tgrok-4.7\tfull\tscouter\texplore\n" +
+			"w3\tp-w3\tgrok\treviewer\txai\t1\t" + f.cwd + "\tnow\tgrok-4.7\tfull\treviewer\treview\n"
 		if err := os.WriteFile(filepath.Join(f.state, "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -196,7 +196,7 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 					kind = "grok"
 				}
 				tm11SpawnSeed(t, f, [][4]string{{"build", "designer", "build", kind}}, `{"result":{"agents":[{"name":"build","pane_id":"p-build","agent_status":"idle"}]}}`)
-				_ = tm11SpawnWriteConfig(t, f, "lane.build.kind = \"grok\"\n", "")
+				_ = tm11SpawnWriteConfig(t, f, "", "lane.build.kind = \"grok\"\n")
 			}
 			tm11SpawnInstallStateRules(t, f, "idle")
 		})
@@ -210,11 +210,10 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 			switch i {
 			case 0:
 				tm11SpawnReset(t, f)
-				tm11SpawnSeed(t, f, [][4]string{{"build", "implementer", "build", "grok"}}, `{"result":{"agents":[{"name":"build","pane_id":"p-build","agent_status":"working"}]}}`)
+				tm11SpawnSeed(t, f, [][4]string{{"build", "implementer", "build", "grok"}, {"build-2", "designer", "build", "grok"}}, `{"result":{"agents":[{"name":"build","pane_id":"p-build","agent_status":"working"},{"name":"build-2","pane_id":"p-build2","agent_status":"working"}]}}`)
 				status = "working"
 			case 1:
 				tm11SpawnSeed(t, f, [][4]string{{"build", "implementer", "build", "grok"}}, live)
-				_ = os.Remove(filepath.Join(f.state, "herd-tab"))
 				status = "gone-until-start"
 			case 2:
 				rows := [][4]string{{"explore", "scouter", "explore", "grok"}, {"review", "reviewer", "review", "codex"}, {"extra", "researcher", "extra", "grok"}}
@@ -566,7 +565,7 @@ func tm11SpawnSeed(t *testing.T, f *tm11SpawnFixture, rows [][4]string, live str
 	var roster strings.Builder
 	roster.WriteString("# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\n")
 	for _, row := range rows {
-		fmt.Fprintf(&roster, "%s\tp-%s\t%s\t%s\txai\t1\t%s\tgrok-4.7\tfull\t%s\t%s\n", row[0], row[0], row[3], row[1], f.cwd, row[1], row[2])
+		fmt.Fprintf(&roster, "%s\tp-%s\t%s\t%s\txai\t1\t%s\tnow\tgrok-4.7\tfull\t%s\t%s\n", row[0], row[0], row[3], row[1], f.cwd, row[1], row[2])
 	}
 	if err := os.WriteFile(filepath.Join(f.state, "agents.tsv"), []byte(roster.String()), 0o600); err != nil {
 		t.Fatal(err)
