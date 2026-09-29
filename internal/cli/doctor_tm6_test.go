@@ -2,9 +2,12 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -292,7 +295,12 @@ func TestDoctorTM6CLIAndParity(t *testing.T) {
 				errOut = strings.ReplaceAll(errOut, "herdr-soho:", "PROG:")
 				errOut = normalizeGoldenRoot(errOut, root)
 				errOut = normalizeGoldenRootPathSeparators(errOut)
-				if code != want.RC || out != want.Out || errOut != want.Err {
+				// The Go doctor measures split_max_panes against the whole team,
+				// 1 + max_workers (PLAN §9 A9); the frozen JS golden says panes. In
+				// these strict-default fixtures the team is panes-1 workers.
+				wantOut := tm6SplitCapAgainstTeam(want.Out)
+				if code != want.RC || out != wantOut || errOut != want.Err {
+					want.Out = wantOut
 					t.Fatalf("golden %s step %d args=%v\ncode=%d want=%d\nstdout difference: %s\nstderr difference: %s\nstdout=%q\nwant=%q\nstderr=%q\nwant=%q", tc.golden, i, want.Args, code, want.RC, firstGoldenLineDifference(out, want.Out), firstGoldenLineDifference(errOut, want.Err), out, want.Out, errOut, want.Err)
 				}
 			}
@@ -399,5 +407,15 @@ func TestDoctorTM6FixTargets(t *testing.T) {
 		if code != 0 || !strings.Contains(out, "doctor --fix: updated") || !strings.Contains(out, "first_run:") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
+	})
+}
+
+var tm6SplitCapGreaterRE = regexp.MustCompile(`split_max_panes=(\d+) is greater than panes=(\d+)\. Set split_max_panes=(\d+) `)
+
+func tm6SplitCapAgainstTeam(out string) string {
+	return tm6SplitCapGreaterRE.ReplaceAllStringFunc(out, func(m string) string {
+		g := tm6SplitCapGreaterRE.FindStringSubmatch(m)
+		panes, _ := strconv.Atoi(g[2])
+		return fmt.Sprintf("split_max_panes=%s is greater than 1 + max_workers=%d. Set split_max_panes=%s ", g[1], panes-1, g[3])
 	})
 }

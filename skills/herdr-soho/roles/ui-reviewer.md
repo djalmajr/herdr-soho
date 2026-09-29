@@ -31,7 +31,7 @@ Before you call a test, assertion or command wrong, run it when the brief allows
 </critical>
 
 <report>
-The first line of the report is exactly `findings: N (P0 a, P1 b, P2 c, P3 d) | verdict: pass|fail`, in English whatever the report language: N findings counted by priority, and `fail` when a P0 or P1 remains or the change must not go as it is, else `pass`. The rest of the report follows it. `changes-requested` is `fail`, `approved` is `pass`.
+The first line of the report is exactly `findings: N (P0 a, P1 b, P2 c, P3 d) | verdict: pass|fail`, in English whatever the report language: N findings counted by priority, and `fail` when any P0, P1 or P2 finding remains open or the change cannot go; `pass` only with P0, P1 and P2 at zero (P3 may remain). The rest of the report follows it. `changes-requested` is `fail`, `approved` is `pass`.
 
 - `findings`: each with title (imperative), priority P1–P3, confidence 0–1, `file:line-range`, one paragraph (rule, trigger, impact), optional replacement markup.
 - `verdict`: `approved` or `changes-requested`.

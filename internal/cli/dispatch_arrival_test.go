@@ -163,6 +163,35 @@ func TestDispatchArrivalPortedCases(t *testing.T) {
 			}
 		}
 	})
+	t.Run(`arrival: a working target with a truncated queued prompt counts as queued`, func(t *testing.T) {
+		// JS: "arrival: working target with no prompt evidence is not-received and sends no key" (the queued-proof side)
+		// The queue shows the dispatched prompt with the path cut, so the full path never appears.
+		f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\nRead the file "+filepath.Join("state", "ws", "briefs", "work")+"…\n", "0")
+		code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
+		if code != 0 || dispatchOutputStatus(t, out) != "queued" || !strings.Contains(errText, "prompt queued: 'worker' is working") {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+		if _, err := os.Stat(filepath.Join(f.state, "ws", "wait", "worker.queued")); err != nil {
+			t.Fatalf("queued marker missing: %v", err)
+		}
+		sidecars, err := filepath.Glob(filepath.Join(f.state, "ws", "briefs", "worker-*.dispatch.json"))
+		if err != nil || len(sidecars) == 0 {
+			t.Fatalf("dispatch sidecar missing: %v", err)
+		}
+		if !strings.Contains(mustRead(t, sidecars[0]), `"arrival":"queued"`) {
+			t.Fatalf("sidecar did not record queued arrival: %s", mustRead(t, sidecars[0]))
+		}
+	})
+	t.Run(`arrival: a working target with another dispatch's queued prompt stays not-received`, func(t *testing.T) {
+		f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\nRead the file /…/briefs/review-20260928T090000.md in full\n", "0")
+		code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
+		if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+		if _, err := os.Stat(filepath.Join(f.state, "ws", "wait", "worker.not-received")); err != nil {
+			t.Fatalf("not-received marker missing: %v", err)
+		}
+	})
 	t.Run(`arrival: amend ignores a generic marker from the previous prompt`, func(t *testing.T) {
 		// JS: "arrival: amend ignores a generic marker from the previous prompt"
 		f := newDispatchArrivalFixture(t, "working", 5, 5, "Read the file /tmp/old/previous-brief.md in full\n", "0")

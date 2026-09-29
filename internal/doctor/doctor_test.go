@@ -422,15 +422,54 @@ func TestDoctorWarnsAboutLegacyProjectConfig(t *testing.T) { // JS: "doctor: the
 	}
 }
 
-func TestDoctorWarnsWhenSplitCapExceedsPanes(t *testing.T) { // JS: "doctor: max_workers / split_max_panes alignment warns"
+func TestDoctorWarnsWhenSplitCapExceedsTheTeam(t *testing.T) { // A9: the reference is 1 + the effective max_workers, not panes (the frozen JS text was panes-based)
 	root := t.TempDir()
 	env := platform.Env{"HOME": root, "HERDR_SOHO_SKILL_DIR": root}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{"panes": {Value: "3", Source: "project"}, "split_max_panes": {Value: "8", Source: "project"}}, Order: []string{"panes", "split_max_panes"}}
 	var out strings.Builder
 	s := &Say{Out: &out}
 	doctorLaneWarnings(&ctx, env, root, s)
-	if !strings.Contains(out.String(), "split_max_panes=8 is greater than panes=3") {
+	if !strings.Contains(out.String(), "split_max_panes=8 is greater than 1 + max_workers=2. Set split_max_panes=3 (doctor --fix aligns it).") {
 		t.Fatalf("split cap mismatch warning missing: %s", out.String())
+	}
+}
+
+func TestDoctorSplitCapChecksTheWholeTeam(t *testing.T) { // A9: an explicit split_max_panes is checked against 1 + the effective max_workers
+	root := t.TempDir()
+	env := platform.Env{"HOME": root, "HERDR_SOHO_SKILL_DIR": root}
+	for _, tc := range []struct {
+		name   string
+		values map[string]string
+		want   string
+	}{
+		{"a team of six fits under split_max_panes=7 without a split cap warning",
+			map[string]string{"lane_build_panes": "5", "lane_review_panes": "1", "split_max_panes": "7"},
+			""},
+		{"split_max_panes=9 is greater than 1 + max_workers=6",
+			map[string]string{"lane_build_panes": "5", "lane_review_panes": "1", "split_max_panes": "9"},
+			"config: split_max_panes=9 is greater than 1 + max_workers=6. Set split_max_panes=7 (doctor --fix aligns it)."},
+		{"split_max_panes=3 leaves no room for a team of five",
+			map[string]string{"lane_build_panes": "4", "lane_review_panes": "1", "split_max_panes": "3"},
+			"config: split_max_panes=3 leaves no room for the whole team (1 + max_workers=5); the last workers will open in a herd tab. Remove split_max_panes or set 6."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := &core.Config{Entries: make(map[string]core.ConfigEntry, len(tc.values))}
+			for key, value := range tc.values {
+				ctx.Entries[key] = core.ConfigEntry{Value: value, Source: "project"}
+			}
+			var out strings.Builder
+			doctorLaneWarnings(ctx, env, root, &Say{Out: &out})
+			got := out.String()
+			if tc.want == "" {
+				if strings.Contains(got, "is greater than 1 + max_workers") || strings.Contains(got, "leaves no room for the whole team") {
+					t.Fatalf("unexpected split cap warning: %s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("missing %q in %s", tc.want, got)
+			}
+		})
 	}
 }
 

@@ -158,3 +158,60 @@ func TestDispatchWaitEmptyExitErrorRecordsFriction(t *testing.T) { // Mutation c
 		t.Fatalf("code=%d stderr=%q friction=%q err=%v", code, stderr, log, err)
 	}
 }
+
+func TestDispatchForAmendPortedCases(t *testing.T) {
+	// JS: "dispatch: --for with --amend is accepted and keeps the --for validations"
+	h := newTM3bHarness(t, tm3bFullBrief())
+	rolesDir := filepath.Dir(h.role)
+	if err := os.WriteFile(filepath.Join(rolesDir, "reviewer.md"), []byte("---\nname: Reviewer\nmode: review\n---\nRole body.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\tmode\targs\teffort\n" +
+		"reviewer\tw0test:p0r\tclaude\treviewer\tanthropic\t0\t" + h.root + "\tnow\tclaude-sonnet-4\ttask\treviewer\t\t\t\t\n" +
+		"author\tw0test:p0o\tcodex\timplementer\topenai\t0\t" + h.root + "\tnow\tgpt-5\ttask\timplementer\t\t\t\t\n"
+	if err := os.WriteFile(filepath.Join(h.ws, "agents.tsv"), []byte(roster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous := filepath.Join(h.ws, "reports", "reviewer-previous.md")
+	if err := os.MkdirAll(filepath.Dir(previous), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(previous, []byte("previous report\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h.ws, "last-report-reviewer"), []byte(previous+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("--for with --amend is accepted and proceeds with the amendment", func(t *testing.T) {
+		code, out, stderr := h.run(t, "reviewer", h.brief, "--amend", "--for", "author", "--no-wait")
+		if code != 0 || !strings.Contains(out, `"wait_status":"submitted"`) || !strings.Contains(out, `"amend":true`) {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		}
+		if strings.Contains(stderr, "--for needs a plain dispatch") {
+			t.Fatalf("amend with --for still rejected: %s", stderr)
+		}
+	})
+	t.Run("--for with --amend and an unknown spec still exits 2", func(t *testing.T) {
+		defer func() {
+			v := recover()
+			x, ok := v.(*platform.ExitError)
+			if !ok || x.Code != 2 || !strings.Contains(x.Msg, "not an agent in the roster") {
+				t.Fatalf("panic=%#v", v)
+			}
+		}()
+		h.run(t, "reviewer", h.brief, "--amend", "--for", "nosuchspec", "--no-wait")
+	})
+	t.Run("--for with --amend on a non-reviewer role still exits 2", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(h.ws, "last-report-author"), []byte(previous+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			v := recover()
+			x, ok := v.(*platform.ExitError)
+			if !ok || x.Code != 2 || !strings.Contains(x.Msg, "applies to a reviewer dispatch") {
+				t.Fatalf("panic=%#v", v)
+			}
+		}()
+		h.run(t, "author", h.brief, "--amend", "--for", "reviewer", "--no-wait")
+	})
+}

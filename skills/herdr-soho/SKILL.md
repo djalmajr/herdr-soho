@@ -201,7 +201,7 @@ move: the reviewer of a slice comes from **another model family** than its
 implementer (cursor running a grok model is the xai family, like `grok`).
 The family check enforces it for workers; for code the orchestrator wrote,
 pass `--for <your family>` to the reviewer's dispatch (`anthropic`,
-`openai`, `xai` or `google`; a kind with a fixed family such as `claude`
+`openai`, `xai`, `google` or `alibaba`; a kind with a fixed family such as `claude`
 or `codex` works too). **Before choosing or changing a team,
 read [references/agent-profiles.md](references/agent-profiles.md):** what
 each assistant did well and badly in each role in real use, and a
@@ -737,9 +737,14 @@ snapshot; an absent snapshot or empty field groups as `(unknown)`. With
 and `review`; with `--by` (including `--by role`), JSON has `by`,
 `groups`, `lost_briefs` and `review`. The review table covers reviewer,
 security-reviewer, ui-reviewer and inspector. Other date formats exit 2.
-Each counted pair is exactly one of a task, amendment or reuse. A
-non-amendment that switches from the agent's previous known role counts
-under `reuses`, not `tasks`. Each group also has `no_report`, `minutes`,
+Each counted pair is exactly one of a task, amendment or reuse. An
+agent's first non-amendment brief is a task; every later non-amendment
+brief to the same agent counts under `reuses`, with or without a role
+change. An amendment belongs to the brief it amends: it is never lost or
+pending on its own, and it does not decide which brief is the agent's
+last. A brief without a report is pending while its agent is in the
+roster and it is the agent's last non-amendment brief, and lost
+otherwise. Each group also has `no_report`, `minutes`,
 `partials` and `not_received`. The last field records a dispatch's
 arrival-check result even if a later wait recovers. JSON
 `lost_briefs` maps each group to the stored composed-prompt paths for
@@ -787,7 +792,7 @@ still counts. Same family → exit 5 unless `--allow-same-family`.
 `--for <author>[,…]` narrows the check to the slice's author, and the rest
 of the roster is not scanned. Each author is one of:
 - an agent in the roster (its family column);
-- a family: `anthropic`, `openai`, `xai` or `google`;
+- a family: `anthropic`, `openai`, `xai`, `google` or `alibaba`;
 - a kind with a fixed family (`claude`, `codex`, `grok`, `agy`, `gemini`).
   `cursor`, `pi` and `opencode` have a family per model: name the family;
 - an agent already released from the roster: its family comes from the

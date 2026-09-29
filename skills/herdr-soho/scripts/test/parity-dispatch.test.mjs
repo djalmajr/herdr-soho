@@ -20,8 +20,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { makeFixture, runImpl, normalizeErr } from './parity.mjs';
 import { golden, normalizeRoots } from './golden.mjs';
+
+// The skill dir the JS entry resolves the launcher path from (the module-
+// relative ENTRY_SCRIPT); the composed prompt carries it, so it normalizes
+// to <SKILL> like the fixture root does to <ROOT>.
+const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 // The fixture contract is POSIX (the sh fake herdr), so the scenarios are
 // skipped on Windows.
@@ -255,7 +261,7 @@ function dispatchValue(opts) {
       results.push({ args: step.args, rc: r.rc, out: normTs(r.out), err: normalizeErr(normTs(r.err)) });
       stepFiles.push(collectState(fix));
     }
-    return normalizeRoots({ steps: results, stepFiles, files: stepFiles.at(-1) }, { '<ROOT>': fix.root });
+    return normalizeRoots({ steps: results, stepFiles, files: stepFiles.at(-1) }, { '<ROOT>': fix.root, '<SKILL>': SKILL_DIR });
   } finally {
     fix.cleanup();
   }

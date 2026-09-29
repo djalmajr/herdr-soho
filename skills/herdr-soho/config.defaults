@@ -27,8 +27,9 @@ max_workers=3
 # Panes per tab before new workers overflow into the next herd tab. In the
 # caller's tab the caller counts (4 = caller + 3 workers, a 2x2 grid); herd
 # tabs hold that many workers. `release --close` frees the slot again. When
-# no user/project/session/env layer sets it, it follows `panes` (plus
-# flex_extra in pane_mode=flex, so the temporary worker stays in this tab).
+# no user/project/session/env layer sets it, it is 1 + max_workers (the
+# caller plus the whole team), or `panes` (plus flex_extra in
+# pane_mode=flex) when max_workers is 0.
 split_max_panes=4
 
 # Smallest pane a spawn may leave, as a fraction of the tab's width/height

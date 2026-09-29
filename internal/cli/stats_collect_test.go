@@ -604,6 +604,7 @@ func TestStatsPortedCases(t *testing.T) {
 		}
 	})
 	t.Run("a new task after a role change is counted as a reuse", func(t *testing.T) { // JS: "stats: a non-amendment is a reuse when the immediately previous counted known role differs"
+		// A5: the reuse rule now counts any earlier non-amendment pair of the same agent, role change or not; this case keeps its assertion (reuses 1) under the new rule.
 		f := newCommandFixture(t)
 		f.pair("alice", "20260928T120000", "implementer", "done\n", time.Minute, "")
 		f.pair("alice", "20260928T120001", "reviewer", "done\n", time.Minute, "")
@@ -637,6 +638,59 @@ func TestStatsPortedCases(t *testing.T) {
 		}
 		out, _, code := f.invoke("stats", "--by", "model", "--json")
 		if code != 0 || !strings.Contains(out, `"__proto__":{"tasks":1`) || !strings.Contains(out, `"constructor":{"tasks":1`) {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+	t.Run("an amendment without its own report is not lost when the next dispatch has one", func(t *testing.T) { // A5 (Go fix; the JS product keeps the old behavior): an amendment never enters tasks, lost, pending or lost_briefs
+		f := newCommandFixture(t)
+		f.pair("alice", "20260928T120000", "tasker", "done\n", time.Minute, "")
+		amend := filepath.Join(f.briefs, "alice-20260928T120001.md")
+		if err := os.WriteFile(amend, []byte("# Amendment to your current brief\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f.pair("alice", "20260928T120002", "tasker", "done\n", time.Minute, "")
+		out, _, code := f.invoke("stats", "--json")
+		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"amendments":1,"reuses":1,"no_report":{"pending":0,"lost":0}`) || !strings.Contains(out, `"lost_briefs":{}`) {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+	t.Run("a report-less prompt stays pending when only an amendment follows", func(t *testing.T) { // A5 (Go fix): the last non-amendment pair of a roster agent stays pending; the amendment does not count as the last pair nor as lost
+		f := newCommandFixture(t)
+		f.roster("alice")
+		f.pair("alice", "20260928T120000", "tasker", "", 0, "")
+		amend := filepath.Join(f.briefs, "alice-20260928T120001.md")
+		if err := os.WriteFile(amend, []byte("# Amendment to your current brief\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out, _, code := f.invoke("stats", "--json")
+		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"amendments":1,"reuses":0,"no_report":{"pending":1,"lost":0}`) || !strings.Contains(out, `"lost_briefs":{}`) {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+	t.Run("a second non-amendment dispatch on the same role counts as a reuse", func(t *testing.T) { // A5 (Go fix): reuses counts every non-amendment pair whose agent had an earlier non-amendment pair, role change or not
+		f := newCommandFixture(t)
+		f.pair("alice", "20260928T120000", "tasker", "done\n", time.Minute, "")
+		f.pair("alice", "20260928T120001", "tasker", "done\n", time.Minute, "")
+		out, _, code := f.invoke("stats", "--json")
+		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"amendments":0,"reuses":1,"no_report":{"pending":0,"lost":0}`) {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+	t.Run("three non-amendment dispatches to one agent count one task and two reuses", func(t *testing.T) { // A5 (Go fix): reuses follows the earlier-pair rule, with or without a role change
+		f := newCommandFixture(t)
+		f.pair("alice", "20260928T120000", "tasker", "done\n", time.Minute, "")
+		f.pair("alice", "20260928T120001", "reviewer", "done\n", time.Minute, "")
+		f.pair("alice", "20260928T120002", "scouter", "done\n", time.Minute, "")
+		out, _, code := f.invoke("stats", "--json")
+		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"amendments":0,"reuses":0`) || !strings.Contains(out, `"reviewer":{"tasks":0,"amendments":0,"reuses":1`) || !strings.Contains(out, `"scouter":{"tasks":0,"amendments":0,"reuses":1`) {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+	t.Run("a report-less prompt of an agent not in the roster stays lost", func(t *testing.T) { // A5 (Go fix): lost is unchanged when the agent is not in the roster
+		f := newCommandFixture(t)
+		f.pair("gone", "20260928T120000", "tasker", "", 0, "")
+		out, _, code := f.invoke("stats", "--json")
+		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"amendments":0,"reuses":0,"no_report":{"pending":0,"lost":1}`) || !strings.Contains(out, `"lost_briefs":{"tasker":[`) || !strings.Contains(out, "gone-20260928T120000.md") {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})

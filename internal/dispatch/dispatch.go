@@ -15,7 +15,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
-var forFamilies = map[string]bool{"anthropic": true, "openai": true, "xai": true, "google": true}
+var forFamilies = map[string]bool{"anthropic": true, "openai": true, "xai": true, "google": true, "alibaba": true}
 var dispatchPairName = regexp.MustCompile(`^(.+)-(\d{8}T\d{6})(-\d+)?$`)
 
 func FamilyConflicts(sd, family string, env platform.Env, cwd string) []string {
@@ -123,7 +123,7 @@ func ForSpecFamily(spec, sd string, env platform.Env, cwd string, ctx *core.Conf
 		counts[fam]++
 	}
 	if len(counts) == 0 {
-		return "", fmt.Errorf("dispatch: --for '%s': not an agent in the roster, a family (anthropic|openai|xai|google), a kind with a fixed family, or an agent with an accepted dispatch recorded in this workspace", spec)
+		return "", fmt.Errorf("dispatch: --for '%s': not an agent in the roster, a family (anthropic|openai|xai|google|alibaba), a kind with a fixed family, or an agent with an accepted dispatch recorded in this workspace", spec)
 	}
 	if len(counts) == 1 {
 		for fam := range counts {
@@ -141,7 +141,7 @@ func ForSpecFamily(spec, sd string, env platform.Env, cwd string, ctx *core.Conf
 	for _, fam := range families {
 		detail = append(detail, fmt.Sprintf("%s ×%d", fam, counts[fam]))
 	}
-	return "", fmt.Errorf("dispatch: --for '%s': the recorded dispatches of this released agent do not agree on one known model family (%s); pass the family instead (anthropic|openai|xai|google)", spec, strings.Join(detail, ", "))
+	return "", fmt.Errorf("dispatch: --for '%s': the recorded dispatches of this released agent do not agree on one known model family (%s); pass the family instead (anthropic|openai|xai|google|alibaba)", spec, strings.Join(detail, ", "))
 }
 
 const standingRules = "- Only you write this report, once all of the brief is done, including any part you handed to subagents or background tasks; a subagent never writes it. Report every item as it stands in the files, not as a subagent summarized it.\n" +
@@ -174,6 +174,7 @@ func ComposePrompt(roleFile, role, agent, briefRaw, report string, ctx *core.Con
 	for _, n := range SandboxNotes(kind, args) {
 		out.WriteString(n)
 	}
+	fmt.Fprintf(&out, "- Run every `herdr-soho` command this prompt names through the launcher at `%s`, not through PATH.\n", platform.LauncherPath(env))
 	if shared {
 		out.WriteString(sharedTreeNote)
 	}

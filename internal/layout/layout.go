@@ -24,6 +24,11 @@ func GridSizes(n int) Grid {
 	if n < 1 {
 		return Grid{Rows: []int{}}
 	}
+	if n == 7 {
+		// Seven panes: the caller (the orchestrator) alone in its column, 1+3+3,
+		// not the 2+2+3 the square split gives (user decision, 2026-09-29).
+		return Grid{Cols: 3, Rows: []int{1, 3, 3}}
+	}
 	cols := int(math.Ceil(math.Sqrt(float64(n))))
 	base, extra := n/cols, n%cols
 	rows := make([]int, cols)
@@ -229,6 +234,10 @@ func SplitAnchor(raw []byte, me string, mine []string, cap int, min float64) *An
 
 func SplitCap(ctx *core.Config, env platform.Env) int {
 	if core.LanesEnabled(ctx, env) && !core.ConfigExplicit(ctx, "split_max_panes", env) {
+		mw, _ := strconv.Atoi(core.MaxWorkers(ctx, env))
+		if mw > 0 {
+			return 1 + mw
+		}
 		panes, _ := strconv.Atoi(core.PanesValue(ctx, env))
 		if core.PaneMode(ctx, env) == "flex" {
 			return panes + core.FlexExtra(ctx, env)

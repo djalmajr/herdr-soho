@@ -336,6 +336,23 @@ func LaneWorkers(sd, lane string) []string {
 	return out
 }
 
+// RosterRename changes the name (first column) of oldName's roster line to
+// newName; the rest of the line stays the same. It is the roster half of the
+// spawn rename, paired with the herdr agent rename.
+func RosterRename(sd, oldName, newName string) {
+	WithRosterLock(sd, func() {
+		lines := tsvLines(sd)
+		for i, line := range lines {
+			f := strings.Split(line, "\t")
+			if len(f) > 0 && f[0] == oldName {
+				f[0] = newName
+				lines[i] = strings.Join(f, "\t")
+			}
+		}
+		atomicRoster(filepath.Join(sd, "agents.tsv"), lines)
+	})
+}
+
 type LaneDecision struct {
 	Decision, Name, State, Cause string
 	Gone                         []string
@@ -920,9 +937,14 @@ func ApplyLaneFile(file, panes string, env platform.Env, cwd string) []string {
 		}
 		ConfigWritePair(file, "max_workers", strconv.Itoa(sum), env, cwd)
 		lines = append(lines, "set max_workers="+strconv.Itoa(sum))
-		splitCap, _ := strconv.Atoi(panes)
-		if mode == "flex" {
-			splitCap += FlexExtra(&ctx, env)
+		// The caller plus the whole team, as layout.SplitCap and the doctor
+		// measure it; with no team cap, panes (plus flex_extra).
+		splitCap := 1 + sum
+		if sum == 0 {
+			splitCap, _ = strconv.Atoi(panes)
+			if mode == "flex" {
+				splitCap += FlexExtra(&ctx, env)
+			}
 		}
 		ConfigWritePair(file, "split_max_panes", strconv.Itoa(splitCap), env, cwd)
 		lines = append(lines, "set split_max_panes="+strconv.Itoa(splitCap))

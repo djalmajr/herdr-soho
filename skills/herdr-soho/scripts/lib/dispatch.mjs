@@ -75,6 +75,7 @@ import { roleTimeoutMs } from './resolve.mjs';
 import { PROMPT_MARKER, lastNonEmptyLines, promptSitsInInput, markerSeq, markerSeqChanged } from './arrival.mjs';
 import { agentFamily, kindFamily } from './kinds.mjs';
 import { collectPrompts, readSidecar } from './commands/stats.mjs';
+import { ENTRY_SCRIPT } from './commands/doctor.mjs';
 import { readTaskReportPointer, taskReportPointerPath, writeTaskReportPointer, syncTaskReport } from './taskreport.mjs';
 // Re-exported so the names that were exported here before the move to
 // lib/arrival.mjs keep their import path.
@@ -704,6 +705,7 @@ export function composePrompt(roleFile, role, agent, briefRaw, report, ctx, env 
     out.push(`- This brief is self-contained. Do NOT read CLAUDE.md, AGENTS.md, ai-memory rules, wiki pages or other project instruction files unless the brief names them explicitly; the rules that apply are quoted in the brief. Start on the task immediately.\n`);
   }
   for (const n of sandboxNotes(kind, agentArgs)) out.push(n);
+  out.push(`- Run every \`herdr-soho\` command this prompt names through the launcher at \`${ENTRY_SCRIPT}\`, not through PATH.\n`);
   if (sharedTree) out.push(SHARED_TREE_NOTE);
   out.push(standingRules());
   return out.join('');

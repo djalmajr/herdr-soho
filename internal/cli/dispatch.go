@@ -114,9 +114,6 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		if !containsWord(core.ReviewRoles, role) {
 			core.DieFriction("dispatch: --for applies to a reviewer dispatch", 2, frictionLogPath, "dispatch")
 		}
-		if amend {
-			core.DieFriction("dispatch: --for needs a plain dispatch; drop it with --amend", 2, frictionLogPath, "dispatch")
-		}
 	}
 	workerCwd := at(6)
 	findings := dispatch.BriefLintFindings(brief, ctx, env, dispatch.BriefLintOptions{ReadOnly: !core.RoleIsEdit(role, env, cwd), WorkerCwd: workerCwd, OrchestratorCwd: cwd})
@@ -167,7 +164,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			} else {
 				hint := "Pass --for <author> when the slice was written by another family"
 				if forValue != nil {
-					hint = "Name the author's family with --for <family> (anthropic|openai|xai|google) to narrow the check"
+					hint = "Name the author's family with --for <family> (anthropic|openai|xai|google|alibaba) to narrow the check"
 				}
 				core.DieFriction(fmt.Sprintf("reviewer '%s' (%s, %s) shares a model family with edit agents: %s. %s, spawn the reviewer with another --kind, pass --allow-same-family, or set family_check=warn.", agent, kind, family, strings.Join(scan, " "), hint), 5, frictionLogPath, "dispatch")
 			}
@@ -351,7 +348,8 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			return (st.State == "working" || st.State == "blocked") && preSeq != "" && seqString(st.Seq) != "" && seqString(st.Seq) != preSeq
 		}
 		promptEvidence := func() bool {
-			return strings.Contains(herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40)), composed)
+			screen := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
+			return strings.Contains(screen, composed) || provider.QueuedPromptEvidence(screen, composed)
 		}
 		if !wasWorking && !waitDispatchArrival(window, env, arrived) {
 			screen := herdr.AgentRead(env, agent, "visible", nil)
@@ -690,6 +688,15 @@ func warnOwnedOverlap(brief, role, agent, sd string, ctx *core.Config, env platf
 	for _, row := range core.RosterRows(sd) {
 		cols := strings.Split(row, "\t")
 		if len(cols) == 0 || cols[0] == "" || cols[0] == agent {
+			continue
+		}
+		at := func(i int) string {
+			if i < len(cols) {
+				return cols[i]
+			}
+			return ""
+		}
+		if !dispatch.SamePath(at(6), workerCwd, platform.Current()) {
 			continue
 		}
 		report := core.LastReport(sd, cols[0])

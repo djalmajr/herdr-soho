@@ -54,7 +54,8 @@ func TestBuildGridCallOrder(t *testing.T) {
 			{4, [][]string{{"p3", "right", "p1", "0.5000"}, {"p2", "down", "p1", "0.5000"}, {"p4", "down", "p3", "0.5000"}}},
 			{5, [][]string{{"p2", "right", "p1", "0.3333"}, {"p4", "right", "p2", "0.5000"}, {"p3", "down", "p2", "0.5000"}, {"p5", "down", "p4", "0.5000"}}},
 			{6, [][]string{{"p3", "right", "p1", "0.3333"}, {"p5", "right", "p3", "0.5000"}, {"p2", "down", "p1", "0.5000"}, {"p4", "down", "p3", "0.5000"}, {"p6", "down", "p5", "0.5000"}}},
-			{7, [][]string{{"p3", "right", "p1", "0.3333"}, {"p5", "right", "p3", "0.5000"}, {"p2", "down", "p1", "0.5000"}, {"p4", "down", "p3", "0.5000"}, {"p6", "down", "p5", "0.3333"}, {"p7", "down", "p6", "0.5000"}}},
+			// 7 is 1+3+3 (the caller alone in its column): heads p1, p2, p5.
+			{7, [][]string{{"p2", "right", "p1", "0.3333"}, {"p5", "right", "p2", "0.5000"}, {"p3", "down", "p2", "0.3333"}, {"p4", "down", "p3", "0.5000"}, {"p6", "down", "p5", "0.3333"}, {"p7", "down", "p6", "0.5000"}}},
 		}
 		for _, tt := range tests {
 			t.Run(strconv.Itoa(tt.cells), func(t *testing.T) {

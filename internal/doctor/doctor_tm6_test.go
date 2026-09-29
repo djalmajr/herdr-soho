@@ -114,17 +114,17 @@ func TestDoctorTM6LaneWarnings(t *testing.T) {
 			}
 		}
 	})
-	t.Run(`doctor: the flex split_max_panes warns (the mode cap, strict keeps its text)`, func(t *testing.T) { // JS: "doctor: the flex split_max_panes warns (the mode cap, strict keeps its text)"
-		// Mutation captured: comparing the split cap to panes alone breaks the flex warning boundary.
+	t.Run(`doctor: split_max_panes is checked against 1 + max_workers (greater and no-room warn)`, func(t *testing.T) { // A9: the reference is 1 + the effective max_workers (the frozen JS text was panes-based)
+		// Mutation captured: comparing the split cap to panes alone instead of 1 + max_workers moves both warning boundaries.
 		env, root := tm6DoctorEnv(t)
 		for _, tc := range []struct {
 			values map[string]string
 			want   string
 		}{
-			{map[string]string{"panes": "4", "pane_mode": "flex", "split_max_panes": "4"}, "leaves no room for the temporary panel"},
+			{map[string]string{"panes": "4", "pane_mode": "flex", "split_max_panes": "4"}, "leaves no room for the whole team"},
 			{map[string]string{"panes": "4", "pane_mode": "flex", "split_max_panes": "5"}, ""},
-			{map[string]string{"panes": "4", "pane_mode": "flex", "split_max_panes": "6"}, "greater than panes=4 + flex_extra=1"},
-			{map[string]string{"panes": "4", "split_max_panes": "5"}, "greater than panes=4"},
+			{map[string]string{"panes": "4", "pane_mode": "flex", "split_max_panes": "6"}, "greater than 1 + max_workers=4"},
+			{map[string]string{"panes": "4", "split_max_panes": "5"}, "greater than 1 + max_workers=3"},
 			{map[string]string{"panes": "4", "pane_mode": "flex", "split_max_panes": "5"}, "no split cap diagnostic"},
 		} {
 			var out strings.Builder

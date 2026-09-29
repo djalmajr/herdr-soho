@@ -96,6 +96,7 @@ func CmdInit(ctx *core.Config, env platform.Env, cwd string) {
 	friction := filepath.Join(state, "friction.log")
 	name := spawn.EnsureOrchestratorName(ctx, env)
 	pane := env.Get("HERDR_PANE_ID")
+	paneID := ""
 	title := ""
 	if pane != "" {
 		r := platform.RunCli("herdr", []string{"pane", "get", pane}, platform.RunOptions{Env: env, TimeoutMs: 30000})
@@ -118,21 +119,24 @@ func CmdInit(ctx *core.Config, env platform.Env, cwd string) {
 			}
 		}
 		if r.NotFound || r.Status == nil || *r.Status != 0 {
-			core.Warn("init: herdr pane get failed; pane title left as is", friction)
-		} else if existing != "" {
-			title = existing
+			core.Warn(fmt.Sprintf("init: HERDR_PANE_ID '%s' is not a live pane; pane title left as is and pane_id left empty", pane), friction)
 		} else {
-			fresh := "orchestrator: " + filepath.Base(platform.ProjectRoot(env, cwd))
-			if herdr.PaneTitle(pane, &fresh, env) {
-				title = fresh
+			paneID = pane
+			if existing != "" {
+				title = existing
 			} else {
-				core.Warn("init: herdr pane report-metadata failed; pane title left as is", friction)
+				fresh := "orchestrator: " + filepath.Base(platform.ProjectRoot(env, cwd))
+				if herdr.PaneTitle(pane, &fresh, env) {
+					title = fresh
+				} else {
+					core.Warn("init: herdr pane report-metadata failed; pane title left as is", friction)
+				}
 			}
 		}
 	}
 	first := ProjectIsFirstRun(ctx, env, cwd)
 	layoutName := core.Cfg(ctx, "layout", "split", env)
-	obj := jsonjs.O("orchestrator", name, "pane_id", pane, "tab_id", env.Get("HERDR_TAB_ID"), "workspace_id", core.WorkspaceID(ctx, env, cwd), "layout", layoutName, "state_dir", state, "first_run", first, "title", title)
+	obj := jsonjs.O("orchestrator", name, "pane_id", paneID, "tab_id", env.Get("HERDR_TAB_ID"), "workspace_id", core.WorkspaceID(ctx, env, cwd), "layout", layoutName, "state_dir", state, "first_run", first, "title", title)
 	fmt.Fprintln(platform.Stdout, jsonjs.StringifyIndent(obj, 2))
 }
 
@@ -241,7 +245,7 @@ func doctorFix(where, panes string, ctx *core.Config, env platform.Env, cwd stri
 func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) {
 	s := &Say{Out: out}
 	if env.Get("HERDR_ENV") == "1" {
-		s.Ok("inside Herdr (HERDR_ENV=1)")
+		herdrContextCheck(env, s)
 	} else {
 		s.Warning(codexenv.DiagnoseOutsideHerdr("HERDR_ENV != 1: not inside a Herdr pane", env, platform.Current(), 0, nil))
 	}
@@ -384,6 +388,146 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 	}
 	checkSetup(ctx, env, cwd, s)
 	fmt.Fprintf(out, "first_run: %t\n%d ok, %d warning(s)\n", ProjectIsFirstRun(ctx, env, cwd), s.OK, s.Warn)
+}
+
+// herdrContextCheck verifies the context HERDR_ENV=1 claims: the inherited
+// pane id must be a live pane of the caller's workspace, or the current pane
+// must resolve with the same argv core.WorkspaceID uses.
+func herdrContextCheck(env platform.Env, s *Say) {
+	if pane := env.Get("HERDR_PANE_ID"); pane != "" {
+		r := platform.RunCli("herdr", []string{"pane", "get", pane}, platform.RunOptions{Env: env, TimeoutMs: 30000})
+		if r.NotFound || r.Status == nil || *r.Status != 0 {
+			s.Warning(fmt.Sprintf("Herdr context invalid: HERDR_PANE_ID=%s is not a live pane (%s)", pane, herdrCause("pane get", r)))
+			return
+		}
+		ws := env.Get("HERDR_WORKSPACE_ID")
+		if ws == "" {
+			s.Ok("inside Herdr (HERDR_ENV=1)")
+			return
+		}
+		paneWs := paneWorkspaceID(r.Stdout)
+		if paneWs == ws {
+			s.Ok("inside Herdr (HERDR_ENV=1)")
+			return
+		}
+		s.Warning(fmt.Sprintf("Herdr context invalid: pane %s belongs to workspace '%s', not HERDR_WORKSPACE_ID '%s'", pane, paneWs, ws))
+		return
+	}
+	r := platform.RunCli("herdr", []string{"pane", "current", "--current"}, platform.RunOptions{Env: env, TimeoutMs: 30000})
+	if !r.NotFound && r.Status != nil && *r.Status == 0 {
+		s.Ok("inside Herdr (HERDR_ENV=1)")
+		return
+	}
+	s.Warning(fmt.Sprintf("Herdr context invalid: HERDR_PANE_ID is unset and herdr pane current failed (%s)", herdrCause("pane current", r)))
+}
+
+// paneWorkspaceID reads result.pane.workspace_id from a herdr pane payload,
+// the same navigation core.WorkspaceID applies to the pane current result.
+func paneWorkspaceID(stdout string) string {
+	v, err := jsonjs.Parse([]byte(stdout))
+	if err != nil {
+		return ""
+	}
+	root, ok := v.(*jsonjs.Object)
+	if !ok {
+		return ""
+	}
+	result, _ := root.Get("result")
+	resultObject, ok := result.(*jsonjs.Object)
+	if !ok {
+		return ""
+	}
+	pane, _ := resultObject.Get("pane")
+	paneObject, ok := pane.(*jsonjs.Object)
+	if !ok {
+		return ""
+	}
+	id, ok := paneObject.Get("workspace_id")
+	if !ok || id == nil || id == false {
+		return ""
+	}
+	if s, ok := id.(string); ok {
+		return s
+	}
+	return fmt.Sprint(id)
+}
+
+// herdrCause extracts the same short failure cause internal/herdr derives
+// from a failed herdr call: the structured error code and message when the
+// output carries one, the sanitized raw output otherwise, and a fallback
+// with the exit code when there is nothing to read.
+func herdrCause(what string, r platform.RunResult) string {
+	if r.NotFound {
+		return "herdr CLI not found in PATH"
+	}
+	if r.TimedOut || r.Error == "ETIMEDOUT" {
+		return fmt.Sprintf("herdr %s timed out after 30s", what)
+	}
+	fallback := fmt.Sprintf("herdr %s failed (exit %d)", what, herdrExitCode(r))
+	raw := r.Stderr
+	if raw == "" {
+		raw = r.Stdout
+	}
+	if code, message := herdrErrorInfo(raw); code != "" {
+		if cause := textutil.SanitizeCause(code + ": " + message); cause != "" {
+			return cause
+		}
+	}
+	if raw == "" {
+		return fallback
+	}
+	if cause := textutil.SanitizeCause(raw); cause != "" {
+		return cause
+	}
+	return fallback
+}
+
+func herdrExitCode(r platform.RunResult) int {
+	if r.Status != nil {
+		return *r.Status
+	}
+	if r.Signal != "" {
+		return 128
+	}
+	return 1
+}
+
+func herdrErrorInfo(raw string) (string, string) {
+	v, err := jsonjs.Parse([]byte(raw))
+	if err != nil {
+		return "", ""
+	}
+	root, ok := v.(*jsonjs.Object)
+	if !ok {
+		return "", ""
+	}
+	errValue, _ := root.Get("error")
+	errObject, ok := errValue.(*jsonjs.Object)
+	if !ok {
+		return "", ""
+	}
+	code, _ := errObject.Get("code")
+	if code == nil || code == false {
+		return "", ""
+	}
+	message, _ := errObject.Get("message")
+	return herdrCauseString(code), herdrCauseString(message)
+}
+
+func herdrCauseString(value any) string {
+	if value == false {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return v
+	case nil:
+		return ""
+	case bool:
+		return "true"
+	default:
+		return jsonjs.Stringify(v)
+	}
 }
 
 func kindExe(k string) string {
@@ -614,21 +758,19 @@ func doctorLaneWarnings(ctx *core.Config, env platform.Env, cwd string, s *Say) 
 	if core.ConfigExplicit(ctx, "split_max_panes", env) {
 		sp := core.Cfg(ctx, "split_max_panes", "", env)
 		n, e := strconv.Atoi(sp)
-		cap := core.PanesValue(ctx, env)
-		pi, _ := strconv.Atoi(cap)
-		flex := mode == "flex"
-		if flex {
-			pi += core.FlexExtra(ctx, env)
-		}
-		if e == nil && n > pi {
-			if flex {
-				s.Warning(fmt.Sprintf("config: split_max_panes=%s is greater than panes=%s + flex_extra=%d. Set split_max_panes=%d (doctor --fix aligns it).", sp, cap, core.FlexExtra(ctx, env), pi))
-			} else {
-				s.Warning(fmt.Sprintf("config: split_max_panes=%s is greater than panes=%s. Set split_max_panes=%s (doctor --fix aligns it).", sp, cap, cap))
+		mw, _ := strconv.Atoi(core.MaxWorkers(ctx, env))
+		ref := 1 + mw
+		if mw == 0 {
+			ref, _ = strconv.Atoi(core.PanesValue(ctx, env))
+			if mode == "flex" {
+				ref += core.FlexExtra(ctx, env)
 			}
 		}
-		if core.LanesEnabled(ctx, env) && flex && e == nil && n < pi {
-			s.Warning(fmt.Sprintf("config: split_max_panes=%s leaves no room for the temporary panel (panes=%s + flex_extra=%d); the extra worker will open in a herd tab. Remove split_max_panes or set %d.", sp, cap, core.FlexExtra(ctx, env), pi))
+		if e == nil && n > ref {
+			s.Warning(fmt.Sprintf("config: split_max_panes=%s is greater than 1 + max_workers=%d. Set split_max_panes=%d (doctor --fix aligns it).", sp, mw, ref))
+		}
+		if core.LanesEnabled(ctx, env) && e == nil && n < ref {
+			s.Warning(fmt.Sprintf("config: split_max_panes=%s leaves no room for the whole team (1 + max_workers=%d); the last workers will open in a herd tab. Remove split_max_panes or set %d.", sp, mw, ref))
 		}
 	}
 	plannerKeys := make([]string, 0, len(ctx.Entries))
