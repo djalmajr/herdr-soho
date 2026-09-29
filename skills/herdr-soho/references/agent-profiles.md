@@ -56,6 +56,40 @@ project, max 59):
     - a child process held by a Windows job object;
   - once skipped the neighbouring unit test of the file it changed.
 
+**As implementer on a long port** (this repository's JS-to-Go port,
+2026-09-28 to 2026-09-29: 4 panes at `high`, about 270 briefs, 43 of them
+amendments):
+- **Strong on product code:**
+  - each slice came with probes against the reference implementation and a
+    mutation check in an isolated copy;
+  - honest `[partial]` items, with the cause;
+  - no commit, no `Forbidden` violation;
+  - fix rounds passed re-review.
+- **Weak:**
+  - the first review of a product slice usually failed: 4 to 8 findings, 1 to
+    4 of them P1. Budget one fix round per slice;
+  - **volume slices stop halfway.** On test-mirror slices of 70 to 140
+    items, every first round stopped after 6 to 15 min at 30% to 60%, the
+    rest marked `[partial]` with "no subtest in this slice". One round
+    wrote no test at all, only the inventory. Each slice took 2 to 5
+    amendments;
+  - **weak tests that carry the right name.** A subtest titled like the
+    reference test only called an internal helper where the reference ran
+    the command: a reviewer removed a product branch and 25 such subtests
+    stayed green. Others hid a difference behind `t.Skip`, rebuilt a
+    different scenario, or declared an "accepted divergence" that no plan
+    listed;
+  - **tests that read the machine.** Fixtures inherited `TMPDIR` or `HOME`,
+    where a model cache lived, and passed only on the machine that wrote the
+    cache; `go test`'s result cache hid it for a day;
+  - platform work it cannot run went by hypothesis: about 13 rounds to take
+    the Windows tests from 12 failures to green. Two causes surfaced only
+    after the brief asked for diagnostics printed in the failing assertion
+    (an antivirus scan on the first start of a copied `.exe`, and `select
+    {}` aborted by the Go runtime as a deadlock).
+
+See "Cheap implementers" below for the briefs that avoid most of this.
+
 **As designer** (1 project, 4 tasks, about 30 min):
 - **Weak:** this was its worst role. It delivered UI and e2e tests it never
   ran. Its sandbox blocks what a browser e2e needs: a local port and, on
@@ -157,6 +191,27 @@ per project, max 25). **As security-reviewer** (1 project, 3 tasks; about
   - in a directory with `direnv`, the TUI did not come up, and the brief
     was typed into the shell.
 
+**As reviewer on a long port** (this repository's JS-to-Go port, at `high`:
+about 25 reviews of Codex slices and of the orchestrator's own commits):
+- **Strong:** the most useful role of the run. Every review executed probes
+  against the reference implementation and a mutation in a throwaway copy,
+  and about half of them failed the slice with real P1s:
+  - an error blamed on a command that never ran;
+  - a flag resolved by a file-name prefix;
+  - `doctor --fix` writing a commented-out value;
+  - a model regex in another dialect;
+  - a safety check that said `ok` when its tool was not executable;
+  - test mirrors that stayed green after the product was broken.
+  It read the runtime's source (libuv) to settle what Node does on Windows,
+  and said what only the target machine could prove. No false positive
+  seen; one review read a tree that was already stale.
+- **Operational:** the TUI ignores a `/compact` sent from outside: open a
+  fresh pane per review. Its follow-up box truncates a queued prompt path,
+  so `dispatch` reports "not confirmed" for a prompt that did arrive.
+- **Best use with cheap implementers:** a sampled review of test mirrors
+  ("does each test prove what its title promises? mutate the product and
+  see which test fails") caught what the gate could not.
+
 **As implementer** (2 projects: 3 spikes that need a server, about 23 min
 typical and max 28; multi-file backend and extension slices in the other):
 - **Strong:**
@@ -248,7 +303,8 @@ it should say so instead of guessing.
 
 - **implementer:**
   - `codex` for closed briefs and sensitive correctness (TDD,
-    atomicity, payments, access control);
+    atomicity, payments, access control); for volume work, small slices
+    and the quality bar of "Cheap implementers" in the first brief;
   - `grok` for speed on well-specified slices and scripts, with a
     reviewer that looks for design shortcuts and missing cleanup;
   - `cursor` for multi-file backend slices and spikes that need a server;
@@ -277,6 +333,52 @@ it should say so instead of guessing.
 - **documenter:** `codex`, `grok` or a small model, with the claims table.
   `grok` and a small model are the cheapest.
 
+## Cheap implementers
+
+One goal of this skill is to build with cheap implementers (for example
+`codex` with gpt-6-luna, or a small model on `pi`) and keep quality with a
+strong reviewer from another family. Cheap models follow a closed brief well
+and fail in predictable ways: they stop early on volume, write tests that look
+right and prove little, and trust the machine they run on. These briefs held
+up on a long port with four cheap panes:
+
+1. **Small slices.** Keep a volume slice under about 40 items, or one module.
+   Past that, the first round stops at 30% to 60% and asks for more rounds
+   than a split would have cost.
+2. **The quality bar goes in the first brief, not in an amendment:**
+   - "Volume is not a reason for `[partial]`; a report with items left for
+     lack of time does not close the slice: continue until done";
+   - a test goes through the entry point the reference test uses (the
+     command, not an internal helper), and asserts the exact values the
+     reference asserts;
+   - one mutation per group of items, and the test for that item must fail
+     with it;
+   - no skip to hide a difference, and no "accepted divergence" unless the
+     orchestrator's plan lists it. A difference is a finding, with both
+     outputs.
+3. **An item map as the deliverable.** Ask for a file that maps every item
+   to its proof (test name, command, output), with `[partial]` and the
+   reason. Count the `[partial]` lines yourself. When a first round comes
+   back more than about 30% partial, amend at once with "continue".
+4. **Hermetic tests.** Fixtures set `HOME` and `USERPROFILE`,
+   `XDG_CONFIG_HOME`, `TMPDIR` (caches live there) and a `PATH` with only the
+   fakes. Gates run uncached (`go test -count=1`, `--no-cache`): a cached
+   pass can hide a test that reads the machine.
+5. **Platform work.** A cheap model cannot run Windows or macOS it does not
+   have. Ask it for diagnostics printed in every failing assertion
+   (environment, argv, paths, timings), run the tests on the target
+   yourself, and send the log back as the next amendment.
+6. **Check a "product bug" before acting on it.** A worker's worktree can be
+   older than the integration branch: rerun the failing test on the
+   integrated tree first.
+7. **Review the tests, not only the code.** Besides the per-slice review,
+   run a sampled review of the test mirrors: "does each test prove what its
+   title promises? mutate the product and see which test fails". It found
+   what the gate could not.
+8. **Context.** Send a same-subject amendment to the same pane while its
+   context is under about 70%. Past that, `/compact` and send an amendment
+   that stands alone: it points to the original brief and to the item map.
+
 ## Directives these observations already put in the roles
 
 - The reviewer runs a test before calling it wrong, and may mutate or build
@@ -285,7 +387,12 @@ it should say so instead of guessing.
   - writes the integration test the brief asks for even when it cannot run
     it (the codex network note);
   - runs mutation checks in a throwaway copy when the tree is shared;
-  - never starts local infrastructure the brief did not ask for.
+  - never starts local infrastructure the brief did not ask for;
+  - finishes the list instead of leaving items for a later round;
+  - ports a test through the entry point the original uses, and reports a
+    difference instead of skipping it;
+  - keeps tests hermetic and runs the gate uncached, and makes a failing
+    platform assertion print what the next run needs.
 - Workers stop the processes they started by PID, and never list every
   process command line.
 - The scouter and the researcher look up before they state; the documenter
