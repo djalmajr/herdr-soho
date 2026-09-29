@@ -512,13 +512,30 @@ test('Decision 2 case: sem ancestral codex (nenhuma chamada ao Herdr)', () => {
   }
 });
 
-// Mutation captured: removing the Windows short-circuit adds ancestry details to the base message.
+// Mutation captured: removing the Windows short-circuit lets a discoverable herdr add ancestry details.
 test('Decision 2: Windows returns the base message even with a Codex ancestor', () => {
+  const root = tmp('ha-d2-win-short-circuit-');
   const baseMessage = 'not running inside Herdr (HERDR_ENV != 1); refusing to control a session from outside';
-  const message = diagnoseOutsideHerdr(baseMessage, { PATH: '' }, 'win32', {
-    getAncestors: () => [{ pid: 5, name: 'codex' }],
-  });
-  assert.equal(message, baseMessage);
+  try {
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    writeFakeCli(bin, 'herdr', `process.stdout.write(JSON.stringify({ result: { snapshot: { panes: [] } } }) + '\\n');\n`, 'win32');
+    const comspec = process.platform === 'win32'
+      ? (process.env.ComSpec || process.env.COMSPEC || 'cmd.exe')
+      : writeFakeCli(bin, 'comspec', `process.stdout.write(JSON.stringify({ result: { snapshot: { panes: [] } } }) + '\\n');\n`);
+    const env = {
+      ...process.env,
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+      PATHEXT: '.cmd;.exe;.bat',
+      COMSPEC: comspec,
+    };
+    const message = diagnoseOutsideHerdr(baseMessage, env, 'win32', {
+      getAncestors: () => [{ pid: 5, name: 'codex' }],
+    });
+    assert.equal(message, baseMessage);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // Mutation captured: omitting the matched pane diagnosis causes requireEnv to report a generic outside-Herdr error.

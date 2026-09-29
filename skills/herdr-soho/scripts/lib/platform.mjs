@@ -33,15 +33,16 @@ function tempDirFor(env) {
 }
 
 function tempFileError(resolved, error) {
+  const code = error?.code ?? 'UNKNOWN';
   return {
     notFound: false,
     resolved,
     status: null,
     signal: null,
     stdout: '',
-    stderr: '',
+    stderr: `herdr-soho: cannot write temporary files: ${code}\n`,
     timedOut: false,
-    error: error?.code ?? 'UNKNOWN',
+    error: code,
   };
 }
 

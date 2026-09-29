@@ -297,7 +297,9 @@ test('Windows .cmd timeout creates a missing TMPDIR before writing its spec', { 
   const tmpdir = path.join(root, 'created-on-run');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'fixture.cmd'), '');
-  const comspec = writeFakeCli(bin, 'comspec', 'process.exit(0);\n');
+  const comspec = process.platform === 'win32'
+    ? (process.env.ComSpec || process.env.COMSPEC || 'cmd.exe')
+    : writeFakeCli(bin, 'comspec', 'process.exit(0);\n');
   const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`, PATHEXT: '.cmd', COMSPEC: comspec, TMPDIR: tmpdir };
   assert.equal(fs.existsSync(tmpdir), false, 'the temp directory starts absent');
 
@@ -343,7 +345,9 @@ test('Windows .cmd timeout resolves a relative TMPDIR before using a different c
     fs.mkdirSync(bin);
     fs.mkdirSync(childCwd);
     fs.writeFileSync(path.join(bin, 'fixture.cmd'), '');
-    const comspec = writeFakeCli(bin, 'comspec', 'process.exit(0);\n');
+    const comspec = process.platform === 'win32'
+      ? (process.env.ComSpec || process.env.COMSPEC || 'cmd.exe')
+      : writeFakeCli(bin, 'comspec', 'process.exit(0);\n');
     const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`, PATHEXT: '.cmd', COMSPEC: comspec, TMPDIR: relativeTmpdir };
     const result = runCli('fixture', [], { env, platform: 'win32', cwd: childCwd, timeoutMs: 10_000 });
     assert.equal(result.status, 0, JSON.stringify(result));

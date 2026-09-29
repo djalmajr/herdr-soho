@@ -328,6 +328,19 @@ test('send to a local target by reference: exact header, blank line, body; exit 
   } finally { fx.cleanup(); }
 });
 
+// Mutation captured: dropping tempFileError's stderr hides why Herdr could not start.
+test('send reports a temporary-file error when TMPDIR is a file', { timeout: 60000 }, () => {
+  const fx = makeFixture();
+  const badTmpdir = path.join(fx.root, 'not-a-directory');
+  try {
+    fx.targetAgent('idle');
+    fs.writeFileSync(badTmpdir, 'file');
+    const r = fx.run([TARGET_PANE, 'hello'], { TMPDIR: badTmpdir });
+    assert.equal(r.rc, 4, `rc ${r.rc}: ${r.err}`);
+    assert.match(r.err, /herdr-soho: send: local\/w0test:p0b unavailable: herdr-soho: cannot write temporary files: EEXIST/);
+  } finally { fx.cleanup(); }
+});
+
 // Mutation captured: dropping the blank line, omitting or altering the 4th line of the header,
 // rewording the header, dropping the "> " quoting prefix, or joining the words with anything
 // but a space changes prompt[3] and the test fails.
