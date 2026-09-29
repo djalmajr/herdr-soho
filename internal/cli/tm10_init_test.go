@@ -51,7 +51,7 @@ func TestTM10InitGoldenMirrors(t *testing.T) {
 	})
 	t.Run(`JS: "init: when orchestrator is live the rename takes the unique suffix"`, TestInitRenamesTakenOrchestratorNameThroughFakeHerdr)
 	t.Run(`JS: "init: an orchestrator-N prefix is left alone (no rename)"`, func(t *testing.T) {
-		out, stderr, calls, _, _ := runTM10Init(t, `{"result":{"agent":{"name":"orchestrator-2"}}}`, `{"result":{"pane":{"title":"existing"}}}`, 0, 0)
+		out, stderr, calls, _, _ := runTM10Init(t, `{"result":{"agent":{"name":"orchestrator-2"}}}`, `{"result":{"pane":{"title":"existing","workspace_id":"ws"}}}`, 0, 0)
 		if !strings.Contains(out, `"orchestrator": "orchestrator-2"`) || stderr == "" {
 			t.Fatalf("stdout=%q stderr=%q", out, stderr)
 		}
@@ -70,7 +70,7 @@ func TestTM10InitGoldenMirrors(t *testing.T) {
 			{Argv: []string{"agent", "get", "p1"}, Call: 1, Stdout: `{"result":{"agent":{"name":"worker-old"}}}`},
 			{Argv: []string{"agent", "get", "p1"}, Call: 2, Stdout: `{"result":{"agent":{"name":"orchestrator"}}}`},
 			{Argv: []string{"agent", "list"}, Stdout: `{"result":{"agents":[]}}`},
-			{Argv: []string{"agent", "rename", "p1", "orchestrator"}}, {Argv: []string{"pane", "get", "p1"}, Stdout: `{"result":{"pane":{"title":"current"}}}`}, {AnyArgs: true},
+			{Argv: []string{"agent", "rename", "p1", "orchestrator"}}, {Argv: []string{"pane", "get", "p1"}, Stdout: `{"result":{"pane":{"title":"current","workspace_id":"ws"}}}`}, {AnyArgs: true},
 		}
 		if _, err := fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
 			t.Fatal(err)
@@ -121,7 +121,7 @@ func TestTM10InitGoldenMirrors(t *testing.T) {
 		}
 	})
 	t.Run("JS: \"init: a title-less pane gets `orchestrator: <basename>` exactly once\"", func(t *testing.T) {
-		out, _, calls, _, code := runTM10Init(t, `{"result":{"agent":{"name":"orchestrator"}}}`, `{"result":{"pane":{"title":""}}}`, 0, 0)
+		out, _, calls, _, code := runTM10Init(t, `{"result":{"agent":{"name":"orchestrator"}}}`, `{"result":{"pane":{"title":"","workspace_id":"ws"}}}`, 0, 0)
 		if code != 0 {
 			t.Fatalf("init exit=%d", code)
 		}
@@ -139,7 +139,7 @@ func TestTM10InitGoldenMirrors(t *testing.T) {
 		}
 	})
 	t.Run(`JS: "init: an existing title is left alone (no report-metadata)"`, func(t *testing.T) {
-		out, _, calls, _, code := runTM10Init(t, `{"result":{"agent":{"name":"orchestrator"}}}`, `{"result":{"pane":{"title":"orchestrator: existing"}}}`, 0, 0)
+		out, _, calls, _, code := runTM10Init(t, `{"result":{"agent":{"name":"orchestrator"}}}`, `{"result":{"pane":{"title":"orchestrator: existing","workspace_id":"ws"}}}`, 0, 0)
 		if code != 0 {
 			t.Fatalf("init exit=%d", code)
 		}
@@ -157,14 +157,14 @@ func TestTM10InitGoldenMirrors(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("init exit=%d", code)
 		}
-		assertTM10InitWarning(t, out, stderr, state, `"title": ""`, "pane get failed")
+		assertTM10InitWarning(t, out, stderr, state, `"title": ""`, "init: HERDR_PANE_ID 'p1' is not a live pane; pane title left as is and pane_id left empty")
 	})
 	t.Run(`JS: "init: a report-metadata failure warns and reports title """`, func(t *testing.T) {
-		out, stderr, _, state, code := runTM10Init(t, `{"result":{"agent":{"name":"orchestrator"}}}`, `{"result":{"pane":{"title":""}}}`, 0, 1)
+		out, stderr, _, state, code := runTM10Init(t, `{"result":{"agent":{"name":"orchestrator"}}}`, `{"result":{"pane":{"title":"","workspace_id":"ws"}}}`, 0, 1)
 		if code != 0 {
 			t.Fatalf("init exit=%d", code)
 		}
-		assertTM10InitWarning(t, out, stderr, state, `"title": ""`, "pane report-metadata failed")
+		assertTM10InitWarning(t, out, stderr, state, `"title": ""`, "init: herdr pane report-metadata failed; pane title left as is")
 	})
 }
 
@@ -212,13 +212,13 @@ func runTM10Init(t *testing.T, agent, pane string, paneGetCode, metadataCode int
 	return out.String(), stderr.String(), calls, state, code
 }
 
-func assertTM10InitWarning(t *testing.T, out, stderr, state, title, reason string) {
+func assertTM10InitWarning(t *testing.T, out, stderr, state, title, warning string) {
 	t.Helper()
-	if !strings.Contains(out, title) || !strings.Contains(stderr, "init: herdr "+reason) {
+	if !strings.Contains(out, title) || !strings.Contains(stderr, warning) {
 		t.Fatalf("stdout=%q stderr=%q", out, stderr)
 	}
 	data, err := os.ReadFile(filepath.Join(state, "friction.log"))
-	if err != nil || !strings.Contains(string(data), "init: herdr "+reason) {
+	if err != nil || !strings.Contains(string(data), warning) {
 		t.Fatalf("friction=%q err=%v", data, err)
 	}
 }

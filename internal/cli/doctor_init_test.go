@@ -53,7 +53,7 @@ func TestInitRenamesTakenOrchestratorNameThroughFakeHerdr(t *testing.T) { // JS:
 		{Argv: []string{"agent", "get", "p1"}, Stdout: `{"result":{"agent":{"name":"reviewer"}}}`},
 		{Argv: []string{"agent", "list"}, Stdout: `{"result":{"agents":[{"name":"orchestrator"}]}}`},
 		{Argv: []string{"agent", "rename", "p1", "orchestrator-2"}},
-		{Argv: []string{"pane", "get", "p1"}, Stdout: `{"result":{"pane":{"title":"current task"}}}`},
+		{Argv: []string{"pane", "get", "p1"}, Stdout: `{"result":{"pane":{"title":"current task","workspace_id":"ws"}}}`},
 	}
 	if _, err = fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
 		t.Fatal(err)
