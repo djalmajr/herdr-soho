@@ -148,12 +148,18 @@ export function probeKind(ctx, kind, model, source = 'configured', timeoutSec = 
       status = 'ready';
       cause = '';
     } else {
-      // A spawn that never ran (a bad shebang interpreter, a file that is
-      // not executable) has no exit code: `timeout` reports 127 when the
-      // command cannot be found and 126 when it cannot be invoked.
-      const rc = r.status ?? (r.error === 'ENOENT' ? 127 : 126);
-      status = 'error';
-      cause = `exit ${rc}`;
+      const tempFileError = String(r.stderr ?? '').match(/^herdr-soho: cannot write temporary files: [A-Z0-9_]+\s*$/);
+      if (tempFileError) {
+        status = 'error';
+        cause = tempFileError[0].trim();
+      } else {
+        // A spawn that never ran (a bad shebang interpreter, a file that is
+        // not executable) has no exit code: `timeout` reports 127 when the
+        // command cannot be found and 126 when it cannot be invoked.
+        const rc = r.status ?? (r.error === 'ENOENT' ? 127 : 126);
+        status = 'error';
+        cause = `exit ${rc}`;
+      }
     }
   }
   return { kind, model, status, cause, source };

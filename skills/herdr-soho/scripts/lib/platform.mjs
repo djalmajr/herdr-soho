@@ -26,6 +26,26 @@ export function homeDir(platform = process.platform, env = process.env) {
   return env.HOME || os.homedir();
 }
 
+function tempDirFor(env) {
+  const tmpdir = path.resolve(env.TMPDIR || os.tmpdir());
+  fs.mkdirSync(tmpdir, { recursive: true });
+  return tmpdir;
+}
+
+function tempFileError(resolved, error) {
+  const code = error?.code ?? 'UNKNOWN';
+  return {
+    notFound: false,
+    resolved,
+    status: null,
+    signal: null,
+    stdout: '',
+    stderr: `herdr-soho: cannot write temporary files: ${code}\n`,
+    timedOut: false,
+    error: code,
+  };
+}
+
 // User config file path (the `user` layer). Decision 4: XDG_CONFIG_HOME wins
 // on every platform; otherwise per-platform defaults.
 export function userConfigPath(platform = process.platform, env = process.env) {
@@ -260,14 +280,24 @@ export function runCli(exe, args, opts = {}) {
   // 0 (no timeout) or any other platform/extension keeps today's spawnSync
   // call, unchanged.
   if (platform === 'win32' && verbatim && opts.timeoutMs > 0) {
-    return runCliTreeKill(resolved, command, argv, verbatim, opts, env);
+    try {
+      return runCliTreeKill(resolved, command, argv, verbatim, opts, env);
+    } catch (error) {
+      return tempFileError(resolved, error);
+    }
   }
   // mergeOutput: stdout and stderr share one file descriptor, so the text
   // keeps the order it was written in (the bash `"$(cmd 2>&1)"`); it comes
   // back as `stdout`, with `stderr` empty.
   if (opts.mergeOutput) {
-    const tmp = path.join(env.TMPDIR || os.tmpdir(), `.herdr-soho-out-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
-    const fd = fs.openSync(tmp, 'w', 0o600);
+    let tmp;
+    let fd;
+    try {
+      tmp = path.join(tempDirFor(env), `.herdr-soho-out-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
+      fd = fs.openSync(tmp, 'w', 0o600);
+    } catch (error) {
+      return tempFileError(resolved, error);
+    }
     let merged;
     try {
       merged = spawnSync(command, argv, {
@@ -297,9 +327,17 @@ export function runCli(exe, args, opts = {}) {
   // a child left alive holding them cannot hold the call past the timeout,
   // and the two streams stay apart (bash `>"$outf" 2>"$errf"`).
   if (opts.outputFiles) {
-    const base = path.join(env.TMPDIR || os.tmpdir(), `.herdr-soho-out-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
-    const outFd = fs.openSync(`${base}.out`, 'w', 0o600);
-    const errFd = fs.openSync(`${base}.err`, 'w', 0o600);
+    let base;
+    let outFd;
+    let errFd;
+    try {
+      base = path.join(tempDirFor(env), `.herdr-soho-out-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
+      outFd = fs.openSync(`${base}.out`, 'w', 0o600);
+      errFd = fs.openSync(`${base}.err`, 'w', 0o600);
+    } catch (error) {
+      if (outFd !== undefined) fs.closeSync(outFd);
+      return tempFileError(resolved, error);
+    }
     let child;
     try {
       child = spawnSync(command, argv, {
@@ -364,7 +402,7 @@ export function runCli(exe, args, opts = {}) {
 // timeoutMs + 15 s against a stuck taskkill or a tree that ignores the
 // kill.
 function runCliTreeKill(resolved, command, argv, verbatim, opts, env) {
-  const tmpdir = env.TMPDIR || os.tmpdir();
+  const tmpdir = tempDirFor(env);
   const suffix = `${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
   const specFile = path.join(tmpdir, `.herdr-soho-tk-${suffix}.spec`);
   const resultFile = path.join(tmpdir, `.herdr-soho-tk-${suffix}.result`);
