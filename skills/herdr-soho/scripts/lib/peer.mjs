@@ -246,13 +246,17 @@ export function waitUntilIdle(machine, pane, timeoutMs, env = process.env) {
 // never landed (a slow submission, or --now with an active turn that does
 // not settle within 15 s) — it is never a delivery. Any other failure is a
 // herdr failure (the caller exits 4).
-export function deliverPrompt(machine, pane, text, env = process.env) {
-  const args = [
+export function buildPromptArgs(machine, pane, text) {
+  return [
     ...herdrMachineArgs(machine), 'agent', 'prompt', pane, text,
     '--wait',
     '--until', 'working', '--until', 'blocked', '--until', 'idle', '--until', 'done',
     '--timeout', String(PROMPT_WAIT_TIMEOUT_MS),
   ];
+}
+
+export function deliverPrompt(machine, pane, text, env = process.env) {
+  const args = buildPromptArgs(machine, pane, text);
   const r = runCli('herdr', args, { env, timeoutMs: PROMPT_WAIT_TIMEOUT_MS + HERDR_CALL_TIMEOUT_MS, mergeOutput: true });
   if (r.notFound) return { ok: false, code: '', cause: 'herdr CLI not found in PATH' };
   if (r.status === 0) return { ok: true, code: '', cause: '' };

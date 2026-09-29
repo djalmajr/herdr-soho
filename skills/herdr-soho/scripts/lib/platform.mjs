@@ -26,6 +26,26 @@ export function homeDir(platform = process.platform, env = process.env) {
   return env.HOME || os.homedir();
 }
 
+function tempDirFor(env) {
+  const tmpdir = path.resolve(env.TMPDIR || os.tmpdir());
+  fs.mkdirSync(tmpdir, { recursive: true });
+  return tmpdir;
+}
+
+function tempFileError(resolved, error) {
+  const code = error?.code ?? 'UNKNOWN';
+  return {
+    notFound: false,
+    resolved,
+    status: null,
+    signal: null,
+    stdout: '',
+    stderr: `herdr-soho: cannot write temporary files: ${code}\n`,
+    timedOut: false,
+    error: code,
+  };
+}
+
 // User config file path (the `user` layer). Decision 4: XDG_CONFIG_HOME wins
 // on every platform; otherwise per-platform defaults.
 export function userConfigPath(platform = process.platform, env = process.env) {
@@ -43,45 +63,80 @@ export function readTextFile(file) {
   return fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 }
 
+const rootCache = new Map();
+
+function rootCacheKey(kind, env, cwd) {
+  return JSON.stringify([kind, path.resolve(cwd), env.GIT_DIR ?? '', env.GIT_WORK_TREE ?? '', env.GIT_COMMON_DIR ?? '']);
+}
+
+// Test seam for fixtures that replace a repository at the same path.
+export function _resetRootCacheForTests() {
+  rootCache.clear();
+}
+
 // project_root() port: `git rev-parse --show-toplevel`, else the cwd.
 export function projectRoot(env = process.env, cwd = process.cwd()) {
+  const key = rootCacheKey('project', env, cwd);
+  if (rootCache.has(key)) return rootCache.get(key);
   const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  let root = cwd;
   if (r.status === 0) {
     const p = (r.stdout || '').trim();
-    if (p) return p;
+    if (p) root = p;
   }
-  return cwd;
+  rootCache.set(key, root);
+  return root;
+}
+
+function hasGitPathSegment(value) {
+  return String(value).split(/[\\/]+/).some((segment) => segment.toLowerCase() === '.git');
+}
+
+export function _hasGitPathSegmentForTests(value, pathApi = path) {
+  return hasGitPathSegment(pathApi.resolve(value));
 }
 
 // State belongs to the primary checkout when this cwd is in a linked
 // worktree. Normal checkouts and non-git directories keep projectRoot's
 // existing behavior.
 export function stateProjectRoot(env = process.env, cwd = process.cwd()) {
+  const key = rootCacheKey('state', env, cwd);
+  if (rootCache.has(key)) return rootCache.get(key);
+  const fallback = () => projectRoot(env, cwd);
+  let stateRoot;
   const gitDir = spawnSync('git', ['rev-parse', '--git-dir'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   const commonDir = spawnSync('git', ['rev-parse', '--git-common-dir'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  if (gitDir.status !== 0 || commonDir.status !== 0) return projectRoot(env, cwd);
-  const gitPath = path.resolve(cwd, (gitDir.stdout || '').trim());
-  const commonPath = path.resolve(cwd, (commonDir.stdout || '').trim());
-  if (!gitPath || gitPath === commonPath) return projectRoot(env, cwd);
-  if (path.basename(commonPath) === '.git') return path.dirname(commonPath);
-  const worktrees = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  if (worktrees.status === 0) {
-    const first = (worktrees.stdout || '').split(/\r?\n\r?\n/, 1)[0];
-    const firstPath = first.split(/\r?\n/).find((line) => line.startsWith('worktree '));
-    if (firstPath && !first.split(/\r?\n/).some((line) => line === 'bare')) {
-      let root = path.resolve(cwd, firstPath.slice('worktree '.length));
-      const listedRel = path.relative(commonPath, root);
-      const listedInsideCommon = listedRel === '' || (listedRel !== '..' && !listedRel.startsWith(`..${path.sep}`) && !path.isAbsolute(listedRel));
-      if (listedInsideCommon) {
-        const worktree = spawnSync('git', ['--git-dir', commonPath, 'config', '--path', 'core.worktree'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-        if (worktree.status === 0 && (worktree.stdout || '').trim()) root = path.resolve(commonPath, worktree.stdout.trim());
+  if (gitDir.status === 0 && commonDir.status === 0) {
+    const gitPath = path.resolve(cwd, (gitDir.stdout || '').trim());
+    const commonPath = path.resolve(cwd, (commonDir.stdout || '').trim());
+    if (gitPath && gitPath !== commonPath) {
+      if (path.basename(commonPath) === '.git') {
+        const candidate = path.dirname(commonPath);
+        stateRoot = hasGitPathSegment(candidate) ? fallback() : candidate;
+      } else {
+        const worktrees = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        if (worktrees.status === 0) {
+          const first = (worktrees.stdout || '').split(/\r?\n\r?\n/, 1)[0];
+          const firstPath = first.split(/\r?\n/).find((line) => line.startsWith('worktree '));
+          if (firstPath && !first.split(/\r?\n/).some((line) => line === 'bare')) {
+            let root = path.resolve(cwd, firstPath.slice('worktree '.length));
+            const listedRel = path.relative(commonPath, root);
+            const listedInsideCommon = listedRel === '' || (listedRel !== '..' && !listedRel.startsWith(`..${path.sep}`) && !path.isAbsolute(listedRel));
+            if (listedInsideCommon) {
+              const worktree = spawnSync('git', ['--git-dir', commonPath, 'config', '--path', 'core.worktree'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+              if (worktree.status === 0 && (worktree.stdout || '').trim()) root = path.resolve(commonPath, worktree.stdout.trim());
+            }
+            const rootRel = path.relative(commonPath, root);
+            const rootInsideCommon = rootRel === '' || (rootRel !== '..' && !rootRel.startsWith(`..${path.sep}`) && !path.isAbsolute(rootRel));
+            if (!rootInsideCommon && !hasGitPathSegment(root)) stateRoot = root;
+          }
+        }
       }
-      const rootRel = path.relative(commonPath, root);
-      const rootInsideCommon = rootRel === '' || (rootRel !== '..' && !rootRel.startsWith(`..${path.sep}`) && !path.isAbsolute(rootRel));
-      if (!rootInsideCommon) return root;
     }
   }
-  return projectRoot(env, cwd);
+  if (stateRoot === undefined) stateRoot = fallback();
+  rootCache.set(key, stateRoot);
+  return stateRoot;
 }
 
 // `command -v` port: resolve an executable on PATH, honoring PATHEXT on
@@ -225,14 +280,24 @@ export function runCli(exe, args, opts = {}) {
   // 0 (no timeout) or any other platform/extension keeps today's spawnSync
   // call, unchanged.
   if (platform === 'win32' && verbatim && opts.timeoutMs > 0) {
-    return runCliTreeKill(resolved, command, argv, verbatim, opts, env);
+    try {
+      return runCliTreeKill(resolved, command, argv, verbatim, opts, env);
+    } catch (error) {
+      return tempFileError(resolved, error);
+    }
   }
   // mergeOutput: stdout and stderr share one file descriptor, so the text
   // keeps the order it was written in (the bash `"$(cmd 2>&1)"`); it comes
   // back as `stdout`, with `stderr` empty.
   if (opts.mergeOutput) {
-    const tmp = path.join(env.TMPDIR || os.tmpdir(), `.herdr-soho-out-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
-    const fd = fs.openSync(tmp, 'w', 0o600);
+    let tmp;
+    let fd;
+    try {
+      tmp = path.join(tempDirFor(env), `.herdr-soho-out-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
+      fd = fs.openSync(tmp, 'w', 0o600);
+    } catch (error) {
+      return tempFileError(resolved, error);
+    }
     let merged;
     try {
       merged = spawnSync(command, argv, {
@@ -262,9 +327,17 @@ export function runCli(exe, args, opts = {}) {
   // a child left alive holding them cannot hold the call past the timeout,
   // and the two streams stay apart (bash `>"$outf" 2>"$errf"`).
   if (opts.outputFiles) {
-    const base = path.join(env.TMPDIR || os.tmpdir(), `.herdr-soho-out-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
-    const outFd = fs.openSync(`${base}.out`, 'w', 0o600);
-    const errFd = fs.openSync(`${base}.err`, 'w', 0o600);
+    let base;
+    let outFd;
+    let errFd;
+    try {
+      base = path.join(tempDirFor(env), `.herdr-soho-out-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
+      outFd = fs.openSync(`${base}.out`, 'w', 0o600);
+      errFd = fs.openSync(`${base}.err`, 'w', 0o600);
+    } catch (error) {
+      if (outFd !== undefined) fs.closeSync(outFd);
+      return tempFileError(resolved, error);
+    }
     let child;
     try {
       child = spawnSync(command, argv, {
@@ -329,7 +402,7 @@ export function runCli(exe, args, opts = {}) {
 // timeoutMs + 15 s against a stuck taskkill or a tree that ignores the
 // kill.
 function runCliTreeKill(resolved, command, argv, verbatim, opts, env) {
-  const tmpdir = env.TMPDIR || os.tmpdir();
+  const tmpdir = tempDirFor(env);
   const suffix = `${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
   const specFile = path.join(tmpdir, `.herdr-soho-tk-${suffix}.spec`);
   const resultFile = path.join(tmpdir, `.herdr-soho-tk-${suffix}.result`);
