@@ -55,7 +55,7 @@ func TestDispatchTM3bPromptContracts(t *testing.T) {
 		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\nRole body.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		got := ComposePrompt(role, "implementer", "build", "# Goal\nDo it.\n", "/tmp/report.md", ctx, nil, "codex", "", false)
+		got := ComposePrompt(role, "implementer", "build", "# Goal\nDo it.\n", "/tmp/report.md", ctx, composeEnv(t), "codex", "", false)
 		for _, part := range []string{"# Role: Implementer\n", "# Brief\n\n# Goal\nDo it.\n", "Write your report as Markdown to `/tmp/report.md`", "Command output you put in the report is pasted from the run"} {
 			if !strings.Contains(got, part) {
 				t.Errorf("composed prompt lacks %q", part)
@@ -68,7 +68,7 @@ func TestDispatchTM3bPromptContracts(t *testing.T) {
 		if err := os.WriteFile(role, []byte("---\nname: Codex\n---\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		got := ComposePrompt(role, "implementer", "build", "brief", "/tmp/report.md", ctx, nil, "codex", "", false)
+		got := ComposePrompt(role, "implementer", "build", "brief", "/tmp/report.md", ctx, composeEnv(t), "codex", "", false)
 		if !strings.Contains(got, "tests that start a local server fail with \"Operation not permitted\"") || !strings.Contains(got, "Still write the integration tests the brief asks for") {
 			t.Fatalf("Codex sandbox note missing its local-network guidance:\n%s", got)
 		}

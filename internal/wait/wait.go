@@ -617,6 +617,12 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 						writeWaitFile(sd, agent, "partial-warned", report+"\n")
 					}
 				}
+				if header != nil && header.Verdict == "pass" {
+					open := header.Severity["P0"] + header.Severity["P1"] + header.Severity["P2"]
+					if open > 0 {
+						sendWarning(fmt.Sprintf("report of '%s' says verdict pass with %s open P0-P2 finding(s): read them before commit, push or release", agent, numberString(open)))
+					}
+				}
 				if header != nil {
 					sum := header.Severity["P0"] + header.Severity["P1"] + header.Severity["P2"] + header.Severity["P3"]
 					if sum != header.Findings {
