@@ -4,6 +4,11 @@
 // Ports: sanitize_cause (:793), redact_secrets (:1032) and has_word (:89) of
 // the original bash implementation.
 
+// Match JavaScript's default string sort without consulting host ICU data.
+export function compareCodeUnits(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 // sanitize_cause() port: one line, no tabs, control characters dropped
 // (printables 0x20-0x7E only), runs of spaces collapsed, at most 200 chars.
 export function sanitizeCause(s) {

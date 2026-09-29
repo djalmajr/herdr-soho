@@ -438,6 +438,101 @@ test('stats: --json prints one compact object with the stable shape', { timeout:
   } finally { fix.cleanup(); }
 });
 
+// Mutation captured: replacing UTF-16 ordering with localeCompare puts `a`
+// before `B`, changing the observable role insertion order.
+test('stats: pair order uses code units for agent names', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-stats-agent-order-');
+  try {
+    fix.prompt('a', '20260925T100000', 'designer', { mtime: T0 });
+    fix.prompt('B', '20260925T100000', 'implementer', { mtime: T0 });
+    const result = fix.stats(['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(Object.keys(JSON.parse(result.stdout).roles), ['implementer', 'designer']);
+  } finally { fix.cleanup(); }
+});
+
+// Mutation captured: localeCompare orders `é` before `f`, changing JSON group keys.
+test('stats: JSON groups sort names by code units', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-stats-json-groups-order-');
+  try {
+    for (const agent of ['é', 'f']) {
+      fix.prompt(agent, '20260925T100000', 'reviewer', { mtime: T0 });
+      fix.report(agent, '20260925T100000', '# Report\n\ndone.\n', { mtime: T0 + MIN });
+    }
+    const result = fix.stats(['--by', 'agent', '--json']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(Object.keys(JSON.parse(result.stdout).groups), ['f', 'é']);
+  } finally { fix.cleanup(); }
+});
+
+// Mutation captured: sorting no-`--by` lost_briefs with localeCompare reverses `f` and `é`.
+test('stats: JSON lost briefs sort names by code units', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-stats-json-lost-order-');
+  try {
+    fix.prompt('a', '20260925T100000', 'é', { mtime: T0 });
+    fix.prompt('b', '20260925T100000', 'f', { mtime: T0 });
+    const result = fix.stats(['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(Object.keys(JSON.parse(result.stdout).lost_briefs), ['f', 'é']);
+  } finally { fix.cleanup(); }
+});
+
+// Mutation captured: sorting the JSON review map with localeCompare moves `a` before `B`.
+test('stats: JSON review groups sort names by code units', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-stats-json-review-order-');
+  try {
+    for (const agent of ['a', 'B']) {
+      fix.prompt(agent, '20260925T100000', 'reviewer', { mtime: T0 });
+      fix.report(agent, '20260925T100000', '# Report\n\ndone.\n', { mtime: T0 + MIN });
+    }
+    const result = fix.stats(['--by', 'agent', '--json']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(Object.keys(JSON.parse(result.stdout).review), ['B', 'a']);
+  } finally { fix.cleanup(); }
+});
+
+// Mutation captured: localeCompare reverses `f` and `é` in the task table.
+test('stats: task table sorts names by code units', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-stats-table-order-');
+  try {
+    for (const agent of ['é', 'f']) {
+      fix.prompt(agent, '20260925T100000', 'reviewer', { mtime: T0 });
+      fix.report(agent, '20260925T100000', '# Report\n\ndone.\n', { mtime: T0 + MIN });
+    }
+    const result = fix.stats(['--by', 'agent']);
+    assert.equal(result.status, 0, result.stderr);
+    const tasks = result.stdout.split('tasks by agent:\n')[1].split('\n\nreviews by agent:')[0];
+    assert.ok(tasks.indexOf('\nf ') < tasks.indexOf('\né '), tasks);
+  } finally { fix.cleanup(); }
+});
+
+// Mutation captured: localeCompare puts `a` before `B` in the review table.
+test('stats: review table sorts names by code units', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-stats-review-table-order-');
+  try {
+    for (const agent of ['a', 'B']) {
+      fix.prompt(agent, '20260925T100000', 'reviewer', { mtime: T0 });
+      fix.report(agent, '20260925T100000', '# Report\n\ndone.\n', { mtime: T0 + MIN });
+    }
+    const result = fix.stats(['--by', 'agent']);
+    assert.equal(result.status, 0, result.stderr);
+    const reviews = result.stdout.split('reviews by agent:\n')[1];
+    assert.ok(reviews.indexOf('\nB ') < reviews.indexOf('\na '), reviews);
+  } finally { fix.cleanup(); }
+});
+
+// Mutation captured: localeCompare reverses the `f` and `é` lost-brief lines.
+test('stats: lost brief lines sort names by code units', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-stats-lost-lines-order-');
+  try {
+    for (const agent of ['é', 'f']) fix.prompt(agent, '20260925T100000', 'reviewer', { mtime: T0 });
+    const result = fix.stats(['--by', 'agent']);
+    assert.equal(result.status, 0, result.stderr);
+    const lost = result.stdout.split('lost briefs by agent:\n')[1];
+    assert.ok(lost.indexOf('f: ') < lost.indexOf('é: '), lost);
+  } finally { fix.cleanup(); }
+});
+
 test('stats: an empty state dir prints the no-dispatches message and exits 0', { timeout: 30000 }, () => {
   const fix = makeFix('ha-stats-empty-');
   try {

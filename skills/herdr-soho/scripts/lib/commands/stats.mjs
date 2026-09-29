@@ -54,6 +54,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { compareCodeUnits } from '../text.mjs';
 import { stateDir, workspaceId, rosterRows, dieFriction, warn } from '../state.mjs';
 import { readTextFile } from '../platform.mjs';
 import { partialCount, reviewHeader } from '../reportscan.mjs';
@@ -296,7 +297,7 @@ export function cmdStats(argv, ctx, env = process.env, cwd = process.cwd()) {
   // Agent ascending, then dispatch order (the ts is fixed-width, the
   // collision suffix breaks the same-second ties): the last pair of an
   // agent is its last dispatch.
-  pairs.sort((a, b) => a.agent.localeCompare(b.agent) || a.ts.localeCompare(b.ts) || a.suf - b.suf);
+  pairs.sort((a, b) => compareCodeUnits(a.agent, b.agent) || compareCodeUnits(a.ts, b.ts) || a.suf - b.suf);
   // The role an amendment inherits is the role of the previous COUNTED
   // prompt of the same agent: a rejected (attempted/failed/invalid)
   // dispatch is not an accepted one and must not be inherited. A counted
@@ -407,7 +408,7 @@ export function cmdStats(argv, ctx, env = process.env, cwd = process.cwd()) {
   }
   if (asJson) {
     if (byMode) {
-      const sortEntries = (obj) => Object.entries(obj).sort(([a], [b]) => a.localeCompare(b));
+      const sortEntries = (obj) => Object.entries(obj).sort(([a], [b]) => compareCodeUnits(a, b));
       const byObj = {
         by,
         groups: Object.fromEntries(sortEntries(groups).map(([name, a]) => [name, {
@@ -441,7 +442,7 @@ export function cmdStats(argv, ctx, env = process.env, cwd = process.cwd()) {
         minutes: minutesStats(a.minutes),
         partials: a.partials,
       }])),
-      lost_briefs: Object.fromEntries(Object.entries(lostBriefs).sort(([a], [b]) => a.localeCompare(b))),
+      lost_briefs: Object.fromEntries(Object.entries(lostBriefs).sort(([a], [b]) => compareCodeUnits(a, b))),
       review: Object.fromEntries(Object.entries(review).map(([role, r]) => [role, {
         header: r.header,
         pass: r.pass,
@@ -453,7 +454,7 @@ export function cmdStats(argv, ctx, env = process.env, cwd = process.cwd()) {
     process.stdout.write(`${JSON.stringify(obj)}\n`);
     return 0;
   }
-  const t1 = Object.keys(groups).sort((a, b) => a.localeCompare(b)).map((name) => {
+  const t1 = Object.keys(groups).sort((a, b) => compareCodeUnits(a, b)).map((name) => {
     const a = groups[name];
     const m = minutesStats(a.minutes);
     return [
@@ -474,7 +475,7 @@ export function cmdStats(argv, ctx, env = process.env, cwd = process.cwd()) {
     t1,
   );
   const t2 = (byMode
-    ? Object.keys(review).sort((a, b) => a.localeCompare(b))
+    ? Object.keys(review).sort((a, b) => compareCodeUnits(a, b))
     : reviewRoles.filter((role) => review[role] !== undefined)
   ).map((name) => {
     const r = review[name];
@@ -489,7 +490,7 @@ export function cmdStats(argv, ctx, env = process.env, cwd = process.cwd()) {
   // and the exact stored path of its composed prompt (the pair that won
   // the dedupe, in the full-set order; the pending pairs stay out). The
   // section is absent when nothing is lost.
-  const lostLines = Object.keys(lostBriefs).sort((a, b) => a.localeCompare(b))
+  const lostLines = Object.keys(lostBriefs).sort((a, b) => compareCodeUnits(a, b))
     .flatMap((name) => lostBriefs[name].map((p) => `${name}: ${p}`));
   if (lostLines.length > 0) process.stdout.write(`\nlost briefs by ${byMode ? by : 'role'}:\n${lostLines.join('\n')}\n`);
   return 0;
