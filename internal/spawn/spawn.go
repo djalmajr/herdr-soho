@@ -18,6 +18,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/layout"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/provider"
+	"github.com/djalmajr/herdr-soho/internal/taskreport"
 	"github.com/djalmajr/herdr-soho/internal/text"
 )
 
@@ -275,6 +276,37 @@ func renameErrorInfo(raw string) (string, string) {
 	}
 	return cs, ms
 }
+
+// moveNameStateFiles moves the per-agent state files from oldName to newName
+// after a successful lane rename, so the worker's earlier session is read back
+// under the new name: the last-report pointer (core.LastReportPath), the task
+// title file ("task-" plus the name, as internal/core reads and writes it),
+// the task report pointer (taskreport.TaskReportPointerPath) and every wait
+// marker the wait package stores as wait/<agent>.<marker>. Missing files are
+// not an error; a failing rename becomes a warning and the spawn continues.
+func moveNameStateFiles(sd, oldName, newName string, ctx *core.Config, env platform.Env) {
+	move := func(display, from, to string) {
+		if _, err := os.Stat(from); err != nil {
+			return
+		}
+		if err := os.Rename(from, to); err != nil {
+			Warn(fmt.Sprintf("spawn: could not move '%s' to the name '%s': %s", display, newName, text.SanitizeCause(err.Error())), ctx, env, "spawn")
+		}
+	}
+	move("last-report-"+oldName, core.LastReportPath(sd, oldName), core.LastReportPath(sd, newName))
+	move("task-"+oldName, filepath.Join(sd, "task-"+oldName), filepath.Join(sd, "task-"+newName))
+	oldPointer := taskreport.TaskReportPointerPath(sd, oldName)
+	move(filepath.Base(oldPointer), oldPointer, taskreport.TaskReportPointerPath(sd, newName))
+	if entries, err := os.ReadDir(filepath.Join(sd, "wait")); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasPrefix(entry.Name(), oldName+".") {
+				continue
+			}
+			rest := strings.TrimPrefix(entry.Name(), oldName+".")
+			move("wait/"+entry.Name(), filepath.Join(sd, "wait", entry.Name()), filepath.Join(sd, "wait", newName+"."+rest))
+		}
+	}
+}
 func fieldString(value any, key string) string {
 	if o, ok := value.(*jsonjs.Object); ok {
 		v, _ := o.Get(key)
@@ -359,6 +391,9 @@ func parseArgs(argv []string, cwd string) spawnOptions {
 
 func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	o := parseArgs(argv, cwd)
+	if o.name != "" && !agentNameRE.MatchString(o.name) {
+		core.DieFriction(fmt.Sprintf("invalid agent name '%s' (must match [a-z][a-z0-9_-]{0,31})", o.name), 2, "", "")
+	}
 	info, err := os.Stat(o.cwd)
 	if err != nil || !info.IsDir() {
 		core.DieFriction("spawn: --cwd "+o.cwd+" is not a directory", 2, "", "")
@@ -466,6 +501,7 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 					core.DieFriction(fmt.Sprintf("spawn: could not rename worker '%s' to '%s': %s", d.Name, o.name, cause), 4, "", "")
 				}
 				core.RosterRename(sd, d.Name, o.name)
+				moveNameStateFiles(sd, d.Name, o.name, ctx, env)
 				name = o.name
 				renamedTo = o.name
 			}
@@ -521,9 +557,6 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	}
 	core.EnforceWorkerCap(ctx, env, cwd)
 	if o.name != "" {
-		if !agentNameRE.MatchString(o.name) {
-			core.DieFriction(fmt.Sprintf("invalid agent name '%s' (must match [a-z][a-z0-9_-]{0,31})", o.name), 2, "", "")
-		}
 		if AgentNameTaken(o.name, env) {
 			taken := o.name
 			o.name = UniqueName(o.name, env)
