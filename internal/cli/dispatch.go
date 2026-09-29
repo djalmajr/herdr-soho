@@ -164,7 +164,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			} else {
 				hint := "Pass --for <author> when the slice was written by another family"
 				if forValue != nil {
-					hint = "Name the author's family with --for <family> (anthropic|openai|xai|google) to narrow the check"
+					hint = "Name the author's family with --for <family> (anthropic|openai|xai|google|alibaba) to narrow the check"
 				}
 				core.DieFriction(fmt.Sprintf("reviewer '%s' (%s, %s) shares a model family with edit agents: %s. %s, spawn the reviewer with another --kind, pass --allow-same-family, or set family_check=warn.", agent, kind, family, strings.Join(scan, " "), hint), 5, frictionLogPath, "dispatch")
 			}
