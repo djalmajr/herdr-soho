@@ -284,6 +284,41 @@ test('status: a queued marker stays working while the target is working', { time
   } finally { fix.cleanup(); }
 });
 
+test('status: queued input is not-received, while quota after queued keeps exit 11', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-status-queued-stopped-');
+  try {
+    fix.writeRoster(ROW('lost', 'implementer', 'grok', 'grok-4.7', 'build'),
+      ROW('quota', 'researcher', 'grok', 'grok-4.7', 'build'));
+    const prompt = path.join(fix.ws, 'briefs', 'lost-queued.md');
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'lost.queued'), `1 5 ${prompt}\n`);
+    fix.modeOf('lost', 'idle');
+    fix.screenOf('lost', `Welcome\n> Read the file ${prompt} in full\n`);
+    fs.writeFileSync(fix.env.FAKE_SEQ, '9\n');
+    // Mutation captured: disabling the queued status branch leaves this
+    // input-box prompt as no-report-yet instead of rc 15.
+    const r15 = cmd(fix, ['status', 'lost']);
+    assert.equal(r15.status, 15, r15.stderr);
+    assert.match(r15.stdout, /^lost\tnot-received\t/);
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'lost.queued')), true, 'status is read-only');
+
+    const quotaPrompt = path.join(fix.ws, 'briefs', 'quota-queued.md');
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'quota.queued'), `1 5 ${quotaPrompt}\n`);
+    fix.modeOf('quota', 'idle');
+    fix.screenOf('quota', "You've hit your usage limit. Try again in 5 hours\n");
+    const r11 = cmd(fix, ['status', 'quota']);
+    assert.equal(r11.status, 11, r11.stderr);
+    assert.equal(JSON.parse(r11.stdout.trim()).status, 'quota');
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'quota.queued')), true, 'status is read-only');
+
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'quota.not-received'), '1 5\n');
+    // Mutation captured: consulting the queued branch before the regular
+    // quota probe hides quota even when the old .not-received seq moved.
+    const control = cmd(fix, ['status', 'quota']);
+    assert.equal(control.status, 11, control.stderr);
+    assert.equal(JSON.parse(control.stdout.trim()).status, 'quota');
+  } finally { fix.cleanup(); }
+});
+
 // A dispatch that ended not-received recorded the moment, and the agent is
 // not working or blocked: the status is not-received (rc 15, through the
 // wait rank) and the command sends nothing — it only reads the marker (the

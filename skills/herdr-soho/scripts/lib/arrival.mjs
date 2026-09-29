@@ -8,6 +8,9 @@
 // so its public surface is unchanged.
 
 // The exact start of the text dispatch sends to the worker (the input-box
+import fs from 'node:fs';
+import path from 'node:path';
+
 // marker below must track it).
 export const PROMPT_MARKER = 'Read the file ';
 
@@ -33,7 +36,7 @@ export function promptSitsInInput(screen) {
 // marker's text.
 export function markerSeq(markerText) {
   const parts = String(markerText ?? '').trim().split(/\s+/);
-  return parts.length >= 2 ? parts[1] : '';
+  return parts.length >= 2 && parts[1] !== '-' ? parts[1] : '';
 }
 
 // True when the marker holds a seq, the current seq is known, and the two
@@ -42,4 +45,31 @@ export function markerSeq(markerText) {
 export function markerSeqChanged(markerText, curSeq) {
   const seq = markerSeq(markerText);
   return seq !== '' && curSeq !== '' && String(curSeq) !== seq;
+}
+
+// A queued marker is "<epoch> <seq> <composed prompt path>". Preserve paths
+// with spaces by treating everything after the first two fields as the path.
+// Two-field markers predate this format; derive their path from last-report.
+export function queuedPromptPath(markerText, sd, agent) {
+  const match = String(markerText ?? '').trim().match(/^\S+\s+\S+\s+(.+)$/);
+  if (match) return match[1];
+  let report = '';
+  try { report = fs.readFileSync(path.join(sd, `last-report-${agent}`), 'utf8').trim(); } catch {}
+  if (!report) return '';
+  const basename = path.basename(report);
+  const statePrompt = path.join(sd, 'briefs', basename);
+  if (fs.existsSync(statePrompt)) return statePrompt;
+  const tmpPrompt = path.join(path.dirname(report), basename.replace(/\.md$/, '.brief.md'));
+  return fs.existsSync(tmpPrompt) ? tmpPrompt : statePrompt;
+}
+
+export function markerHasPromptPath(markerText) {
+  return /^\s*\S+\s+\S+\s+.+\s*$/.test(String(markerText ?? ''));
+}
+
+// A queued prompt is still in the input box only when its unique composed
+// path is among the final three non-empty visible lines.
+export function queuedPromptSitsInInput(markerText, screen, sd, agent) {
+  const promptPath = queuedPromptPath(markerText, sd, agent);
+  return promptPath !== '' && lastNonEmptyLines(screen, 3).some((line) => line.includes(promptPath));
 }

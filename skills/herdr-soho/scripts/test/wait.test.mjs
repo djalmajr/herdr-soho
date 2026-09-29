@@ -372,14 +372,15 @@ test('wait: queued prompt leaves working and is retried with Enter when still in
   try {
     fix.writeRoster(ROW('w', 'implementer'));
     const now = Math.floor(Date.now() / 1000);
-    fix.waitFile('w', 'queued', `${now - 120} 5\n`);
+    const prompt = path.join(fix.ws, 'briefs', 'w.md');
+    fix.waitFile('w', 'queued', `${now - 120} 5 ${prompt}\n`);
     fix.modeOf('w', 'idle');
     fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
-    fix.screenOf('w', 'Welcome\n> Read the file /tmp/brief.md in full and execute it.\n');
+    fix.screenOf('w', `Welcome\n> Read the file ${prompt} in full and execute it.\n`);
     // Mutation captured: dropping the queued-to-input retry conversion leaves the prompt unsent.
     assert.equal(probeAgent(fix.ws, 'w', '', fix.ctx, fix.env), 'working');
     assert.equal(fix.waitRead('w', 'queued'), null);
-    assert.match(fix.waitRead('w', 'not-received'), /^\d+ 5\n$/);
+    assert.match(fix.waitRead('w', 'not-received'), /^\d+ 5 .+\n$/);
     assert.match(fix.waitRead('w', 'enter-retry'), /^1 \d+\n$/);
     assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), ['agent send-keys w enter']);
   } finally { fix.cleanup(); }
@@ -404,6 +405,128 @@ test('wait: queued marker is cleared when the worker has a new seq and the repor
     assert.equal(fix.waitRead('w', 'queued'), null);
     assert.equal(probeAgent(fix.ws, 'w', report, fix.ctx, fix.env), 'done');
     assert.equal(fix.waitRead('w', 'queued'), null);
+    assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
+  } finally { fix.cleanup(); }
+});
+
+test('wait: a queued working probe still records stuck-screen activity', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-working-probe-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    const now = Math.floor(Date.now() / 1000);
+    const screen = 'same working screen\n';
+    fix.waitFile('w', 'queued', `${now - 120} 5 ${path.join(fix.ws, 'briefs', 'w.md')}\n`);
+    fix.waitFile('w', 'stuck-hash', `${cksumField(normalizeScreen(screen))}\n`);
+    fix.waitFile('w', 'stuck-since', `${now - 1800}\n`);
+    fix.modeOf('w', 'working');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fix.screenOf('w', screen);
+    setFrictionLog(path.join(fix.ws, 'friction.log'), 'wait');
+    // Mutation captured: returning working directly for the same queued seq
+    // skips the normal stuck/activity bookkeeping.
+    assert.equal(probeAgent(fix.ws, 'w', '', fix.ctx, fix.env), 'working');
+    assert.equal(fix.waitRead('w', 'stuck-warned'), '');
+    assert.match(fs.readFileSync(path.join(fix.ws, 'friction.log'), 'utf8'), /may be stuck in one tool call/);
+  } finally { setFrictionLog('', ''); fix.cleanup(); }
+});
+
+test('wait: queued prompt with a moved seq and outside the input box ends not-received and persists the result', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-notreceived-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    const now = Math.floor(Date.now() / 1000);
+    const prompt = path.join(fix.ws, 'briefs', 'w-queued.md');
+    fix.waitFile('w', 'queued', `${now - 120} 5 ${prompt}\n`);
+    fix.modeOf('w', 'idle');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '9\n');
+    fix.screenOf('w', `Welcome\nRead the file ${prompt} in full\nworking output\nnext output\nfinal output\n`);
+    // Mutation captured: returning working when the unique prompt path is
+    // outside the final three lines hides a lost prompt; clearing queued
+    // without persisting .not-received makes the next wait report a different result.
+    assert.equal(probeAgent(fix.ws, 'w', '', fix.ctx, fix.env), 'not-received');
+    const r = waitCmd(fix, ['w', '--timeout', '1000']);
+    assert.equal(r.status, 15, r.stderr);
+    assert.deepEqual(jsonLines(r.stdout).map((x) => x.status), ['not-received']);
+    assert.equal(fix.waitRead('w', 'queued'), null);
+    assert.match(fix.waitRead('w', 'not-received'), /^\d+ 9 .+\n$/);
+    const status = cmd(fix, ['status', 'w']);
+    assert.equal(status.status, 15, status.stderr);
+    assert.match(status.stdout, /^w\tnot-received\t/);
+    const again = waitCmd(fix, ['w', '--timeout', '1000']);
+    assert.equal(again.status, 15, again.stderr);
+    assert.deepEqual(jsonLines(again.stdout).map((x) => x.status), ['not-received']);
+    assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
+  } finally { fix.cleanup(); }
+});
+
+test('wait: quota after queued wins over not-received and clears queued markers', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-quota-');
+  try {
+    fix.writeRoster(ROW('w', 'researcher', 'grok', 'grok-4.7', 'build'));
+    const now = Math.floor(Date.now() / 1000);
+    const prompt = path.join(fix.ws, 'briefs', 'w-quota.md');
+    fix.waitFile('w', 'queued', `${now - 120} 5 ${prompt}\n`);
+    fix.waitFile('w', 'enter-retry', `1 ${now - 100}\n`);
+    fix.modeOf('w', 'idle');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '9\n');
+    fix.screenOf('w', "You've hit your usage limit. Try again in 5 hours\n");
+    // Mutation captured: handling queued before the quota probe returns
+    // not-received and hides exit 11 from the orchestrator.
+    const r = waitCmd(fix, ['w', '--timeout', '1000']);
+    assert.equal(r.status, 11, r.stderr);
+    assert.equal(jsonLines(r.stdout)[0].status, 'quota');
+    assert.equal(fix.waitRead('w', 'queued'), null);
+    assert.equal(fix.waitRead('w', 'enter-retry'), null);
+    assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
+
+    fix.waitFile('w', 'not-received', `${now - 120} 5\n`);
+    const control = waitCmd(fix, ['w', '--timeout', '1000']);
+    assert.equal(control.status, 11, control.stderr);
+    assert.equal(jsonLines(control.stdout)[0].status, 'quota');
+  } finally { fix.cleanup(); }
+});
+
+test('wait: empty queued marker starts its retry window now', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-empty-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    const prompt = path.join(fix.ws, 'briefs', 'w.md');
+    fix.report('w', 'previous report\n');
+    fs.writeFileSync(prompt, 'composed prompt\n');
+    fix.waitFile('w', 'queued', '');
+    fix.modeOf('w', 'idle');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fix.screenOf('w', `Read the file ${prompt} in full and execute it.\n`);
+    // Mutation captured: parsing an empty first field as epoch zero sends
+    // Enter immediately instead of honoring a fresh retry window.
+    assert.equal(probeAgent(fix.ws, 'w', '', fix.ctx, fix.env), 'working');
+    assert.match(fix.waitRead('w', 'not-received'), /^\d+ 5 /);
+    assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
+  } finally { fix.cleanup(); }
+});
+
+test('wait: normal blocked, gone and unavailable probes clear queued markers', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-terminal-');
+  try {
+    fix.writeRoster(ROW('blocked', 'implementer'), ROW('gone', 'implementer'), ROW('unavailable', 'implementer'));
+    const prompt = path.join(fix.ws, 'briefs', 'queued.md');
+    for (const agent of ['blocked', 'gone', 'unavailable']) fix.waitFile(agent, 'queued', `1 5 ${prompt}\n`);
+    fix.modeOf('blocked', 'blocked');
+    fix.screenOf('blocked', 'Allow command?\nPress enter to confirm or esc to cancel\n');
+    fix.waitFile('blocked', 'enter-retry', `1 ${Math.floor(Date.now() / 1000) - 100}\n`);
+    fix.modeOf('gone', 'missing');
+    fix.modeOf('unavailable', 'denied');
+    // Mutation captured: retaining queued markers when a terminal state
+    // takes over permits a stale Enter after the dispatch has stopped applying.
+    assert.equal(probeAgent(fix.ws, 'blocked', '', fix.ctx, fix.env), 'working');
+    assert.notEqual(fix.waitRead('blocked', 'queued'), null, 'the first blocked probe is not yet decisive');
+    assert.equal(probeAgent(fix.ws, 'blocked', '', fix.ctx, fix.env), 'blocked');
+    assert.equal(probeAgent(fix.ws, 'gone', '', fix.ctx, fix.env), 'gone');
+    assert.match(probeAgent(fix.ws, 'unavailable', '', fix.ctx, fix.env), /^unavailable\t/);
+    for (const agent of ['blocked', 'gone', 'unavailable']) {
+      assert.equal(fix.waitRead(agent, 'queued'), null);
+      assert.equal(fix.waitRead(agent, 'enter-retry'), null);
+    }
     assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
   } finally { fix.cleanup(); }
 });

@@ -37,7 +37,7 @@ import { readTextFile } from './platform.mjs';
 import { cfg, DieError } from './config.mjs';
 import { stateDir, rosterLine, lastReport, warn, dieFriction, nowStamp, sleepSync, workspaceId } from './state.mjs';
 import { agentState, agentRead, agentSendKeys, notificationShow, agentPrompt } from './herdr.mjs';
-import { promptSitsInInput, markerSeqChanged } from './arrival.mjs';
+import { promptSitsInInput, queuedPromptPath, queuedPromptSitsInInput, markerHasPromptPath, markerSeqChanged } from './arrival.mjs';
 import { sanitizeCause, hasWord } from './text.mjs';
 import { dialogKind, questionText } from './dialog.mjs';
 import { partialCount, reviewHeader } from './reportscan.mjs';
@@ -261,8 +261,19 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
     return 'pending';
   }
   const st = agentState(agent, env);
-  if (st.state === 'gone') return 'gone';
-  if (st.state === 'unavailable') return `unavailable\t${st.cause}`;
+  const nrFile = path.join(sd, 'wait', `${agent}.not-received`);
+  const queuedFile = path.join(sd, 'wait', `${agent}.queued`);
+  const retryFile = path.join(sd, 'wait', `${agent}.enter-retry`);
+  if (st.state === 'gone') {
+    fs.rmSync(queuedFile, { force: true });
+    fs.rmSync(retryFile, { force: true });
+    return 'gone';
+  }
+  if (st.state === 'unavailable') {
+    fs.rmSync(queuedFile, { force: true });
+    fs.rmSync(retryFile, { force: true });
+    return `unavailable\t${st.cause}`;
+  }
   // A dispatch that ended not-received recorded the moment and the
   // agent's state_change_seq in .not-received ("<epoch> <seq>"; an
   // epoch-only marker is an older one and stays valid). Working or blocked
@@ -270,34 +281,23 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
   // changed state in the meantime: in both cases drop the markers and go on
   // with the normal probe (no key in the seq case). Otherwise the wait
   // continues the dispatch with a bounded Enter retry (see below).
-  const nrFile = path.join(sd, 'wait', `${agent}.not-received`);
-  const queuedFile = path.join(sd, 'wait', `${agent}.queued`);
-  const retryFile = path.join(sd, 'wait', `${agent}.enter-retry`);
+  let queuedPending = false;
+  let queuedTerminal = false;
+  let queuedText = '';
   if (fs.existsSync(queuedFile)) {
-    const queuedText = readWaitFile(sd, agent, `${agent}.queued`);
+    queuedText = readWaitFile(sd, agent, `${agent}.queued`) ?? '';
     if (st.state === 'working') {
-      if (!markerSeqChanged(queuedText, st.seq)) return 'working';
-      fs.rmSync(queuedFile, { force: true });
-      fs.rmSync(retryFile, { force: true });
-    } else if (st.state === 'blocked' || st.state === 'gone' || st.state === 'unavailable') {
-      fs.rmSync(queuedFile, { force: true });
-      fs.rmSync(retryFile, { force: true });
-    } else {
-      const screen = agentRead(env, agent, { source: 'visible' });
-      if (!promptSitsInInput(screen)) {
+      if (markerSeqChanged(queuedText, st.seq)) {
         fs.rmSync(queuedFile, { force: true });
         fs.rmSync(retryFile, { force: true });
-        return 'not-received';
       }
-      // Once the worker leaves its turn, the queued prompt follows the same
-      // bounded Enter retry path as a not-received prompt. Refresh the seq
-      // while keeping the original window start so retries remain spaced.
-      const epoch = String(queuedText ?? '').trim().split(/\s+/)[0] ?? `${Math.floor(Date.now() / 1000)}`;
-      fs.writeFileSync(nrFile, `${epoch}${st.seq !== '' ? ` ${st.seq}` : ''}\n`);
-      fs.rmSync(queuedFile, { force: true });
+    } else if (st.state === 'blocked' || st.state === 'gone' || st.state === 'unavailable') {
+      queuedTerminal = true;
+    } else {
+      queuedPending = true;
     }
   }
-  if (fs.existsSync(nrFile)) {
+  if (!queuedPending && fs.existsSync(nrFile)) {
     const markText = readWaitFile(sd, agent, `${agent}.not-received`);
     // True when the marker holds a seq, the current one is known, and the
     // two differ: the agent did something since the dispatch gave up, so a
@@ -331,10 +331,18 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
         lastEpoch = e;
       }
       const nowS = Math.floor(Date.now() / 1000);
+      const retryScreen = agentRead(env, agent, { source: 'visible' });
+      const pathInInput = markerHasPromptPath(markText)
+        ? queuedPromptSitsInInput(markText, retryScreen, sd, agent)
+        : null;
+      // A queued prompt that was already outside its exact input-box area
+      // must stay not-received on every later wait, without a new retry grace.
+      if (pathInInput === false) return 'not-received';
       // Inside the window since the last attempt: nothing to do, the agent
       // keeps working.
       if (nowS - lastEpoch < winS) return 'working';
-      if (attempts < ENTER_RETRY_LIMIT && promptSitsInInput(agentRead(env, agent, { source: 'visible' }))) {
+      const markerInInput = pathInInput ?? promptSitsInInput(retryScreen);
+      if (attempts < ENTER_RETRY_LIMIT && markerInInput) {
         const n = attempts + 1;
         agentSendKeys(agent, 'enter', env);
         fs.writeFileSync(retryFile, `${n} ${nowS}\n`);
@@ -347,6 +355,12 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
     }
   }
   if (st.state === 'blocked') {
+    fs.rmSync(retryFile, { force: true });
+    const clearQueuedAfterBlockedProbe = () => {
+      if (!queuedTerminal) return;
+      fs.rmSync(queuedFile, { force: true });
+      fs.rmSync(retryFile, { force: true });
+    };
     // Detection can flag a transient approval UI; require two consecutive
     // blocked probes before acting. With auto_approve=on the default
     // option is sent and the wait continues (bounded by
@@ -360,16 +374,22 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
       const visible = agentRead(env, agent, { source: 'visible', lines: 40 });
       if (dialogKind(kind, visible) === 'question') {
         fs.writeFileSync(path.join(sd, 'wait', `${agent}.question`), `${questionText(visible)}\n`);
+        clearQueuedAfterBlockedProbe();
         return 'question';
       }
       const h = cksumField(normalizeApproveScreen(visible));
       const n = approveRepeatOf(sd, agent, h);
       if (n >= 3) {
         warn(`auto_approve: the same dialog came back 3 times for '${agent}'; leaving it blocked`);
+        clearQueuedAfterBlockedProbe();
         return 'blocked';
       }
-      if (!tryAutoApprove(sd, agent, ctx, env)) return 'blocked';
+      if (!tryAutoApprove(sd, agent, ctx, env)) {
+        clearQueuedAfterBlockedProbe();
+        return 'blocked';
+      }
       approveRepeatSet(sd, agent, n, h);
+      clearQueuedAfterBlockedProbe();
       return 'working';
     }
     fs.writeFileSync(bfile, '');
@@ -438,6 +458,8 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
     const qtext = agentRead(env, agent, { source: 'visible', lines: 20 });
     const q = quotaDetect(st.state, qtext);
     if (q) {
+      fs.rmSync(queuedFile, { force: true });
+      fs.rmSync(retryFile, { force: true });
       // `printf '%s\n' "$(quota_detect …)"`: the command substitution strips
       // the trailing newlines, so an empty renewal leaves a one-line file.
       fs.writeFileSync(path.join(sd, 'wait', `${agent}.quota`), q[1] !== '' ? `${q[0]}\n${q[1]}\n` : `${q[0]}\n`);
@@ -454,6 +476,8 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
       // double-confirming or settling without a report. The quota check
       // above still wins over this on the same screen.
       if (p.status === 'provider-error' && p.auth === true) {
+        fs.rmSync(queuedFile, { force: true });
+        fs.rmSync(retryFile, { force: true });
         clearProviderMarks();
         fs.writeFileSync(path.join(sd, 'wait', `${agent}.provider-cause`), `${p.cause}\n`);
         return 'provider-error';
@@ -471,7 +495,11 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
       }
       // Confirmed: the same screen hash and status as the previous probe.
       fs.writeFileSync(path.join(sd, 'wait', `${agent}.provider-cause`), `${p.cause}\n`);
-      if (p.status === 'provider-error') return 'provider-error';
+      if (p.status === 'provider-error') {
+        fs.rmSync(queuedFile, { force: true });
+        fs.rmSync(retryFile, { force: true });
+        return 'provider-error';
+      }
       // Capacity is transient: at most provider_retries continue prompts,
       // each at least provider_retry_delay apart from the first
       // confirmation (the .capacity-at epoch-s marker).
@@ -480,11 +508,19 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
       if (usedRaw !== null) {
         // A counter that exists but is not an integer fails closed, like
         // the .approvals counter: treat it as exhausted.
-        if (!/^\s*[0-9]+\s*$/.test(usedRaw)) return 'capacity';
+        if (!/^\s*[0-9]+\s*$/.test(usedRaw)) {
+          fs.rmSync(queuedFile, { force: true });
+          fs.rmSync(retryFile, { force: true });
+          return 'capacity';
+        }
         used = Number(usedRaw.trim());
       }
       const limit = Number(cfg(ctx, 'provider_retries', '3', env));
-      if (!Number.isFinite(limit) || used >= limit) return 'capacity';
+      if (!Number.isFinite(limit) || used >= limit) {
+        fs.rmSync(queuedFile, { force: true });
+        fs.rmSync(retryFile, { force: true });
+        return 'capacity';
+      }
       const atRaw = readWaitFile(sd, agent, `${agent}.capacity-at`);
       if (atRaw === null) {
         fs.writeFileSync(atFile, `${Math.floor(Date.now() / 1000)}\n`);
@@ -503,15 +539,59 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
       if (!sent.ok) {
         // The continue never left: warn and act as if exhausted.
         warn(`provider capacity: failed to send the continue to '${agent}': ${sanitizeCause(sent.raw) || 'unknown error'}; acting as exhausted`);
+        fs.rmSync(queuedFile, { force: true });
+        fs.rmSync(retryFile, { force: true });
         return 'capacity';
       }
       fs.writeFileSync(path.join(sd, 'wait', `${agent}.capacity-retries`), `${used + 1}\n`);
       fs.rmSync(atFile, { force: true });
       fs.rmSync(pfile, { force: true });
       warn(`provider capacity: sent continue #${used + 1} of ${limit} to '${agent}': ${p.cause}`);
+      fs.rmSync(queuedFile, { force: true });
+      fs.rmSync(retryFile, { force: true });
       return 'working';
     }
     clearProviderMarks();
+  }
+  if (queuedPending) {
+    const screen = visibleScreen();
+    const inInput = queuedPromptSitsInInput(queuedText, screen, sd, agent);
+    if (!inInput) {
+      const promptPath = queuedPromptPath(queuedText, sd, agent) || '-';
+      fs.writeFileSync(nrFile,
+        `${Math.floor(Date.now() / 1000)}${st.seq !== '' ? ` ${st.seq}` : ''} ${promptPath}\n`);
+      fs.rmSync(queuedFile, { force: true });
+      fs.rmSync(retryFile, { force: true });
+      return 'not-received';
+    }
+    const first = String(queuedText).trim().split(/\s+/)[0];
+    const epoch = /^[0-9]+$/.test(first) ? first : `${Math.floor(Date.now() / 1000)}`;
+    const promptPath = queuedPromptPath(queuedText, sd, agent) || '-';
+    fs.writeFileSync(nrFile, `${epoch}${st.seq !== '' ? ` ${st.seq}` : ''} ${promptPath}\n`);
+    fs.rmSync(queuedFile, { force: true });
+    const nowS = Math.floor(Date.now() / 1000);
+    const winRaw = String(cfg(ctx, 'prompt_check_seconds', '15', env));
+    const winS = /^[0-9]+$/.test(winRaw) && Number(winRaw) > 0 ? Number(winRaw) : 0;
+    const retryRaw = readWaitFile(sd, agent, `${agent}.enter-retry`);
+    let attempts = 0;
+    let lastEpoch = epoch;
+    if (retryRaw !== null) {
+      const parts = retryRaw.trim().split(/\s+/);
+      const a = Number(parts[0]);
+      const e = Number(parts[1]);
+      if (!Number.isFinite(a) || !Number.isFinite(e) || parts.length !== 2) return 'not-received';
+      attempts = a;
+      lastEpoch = e;
+    }
+    if (nowS - Number(lastEpoch) < winS) return 'working';
+    if (attempts < ENTER_RETRY_LIMIT && inInput) {
+      const n = attempts + 1;
+      agentSendKeys(agent, 'enter', env);
+      fs.writeFileSync(retryFile, `${n} ${nowS}\n`);
+      warn(`prompt to '${agent}' was still in its input box; sent Enter again (${n} of ${ENTER_RETRY_LIMIT})`);
+      return 'working';
+    }
+    return 'not-received';
   }
   const hash = String(cksumField(visibleScreen()));
   const lastScreen = readWaitFile(sd, agent, `${agent}.screen`) ?? '';

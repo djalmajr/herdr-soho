@@ -1333,7 +1333,7 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
     if (wasWorking) {
       const promptEvidence = () => {
         const recent = agentRead(env, agent, { source: 'recent-unwrapped', lines: 40 });
-        return recent.includes(composed) || recent.includes(PROMPT_MARKER);
+        return recent.includes(composed);
       };
       if (!waitForArrival(windowMs, promptEvidence)) return notReceived('the working target showed no prompt evidence');
       const current = agentState(agent, env);
@@ -1349,7 +1349,7 @@ export function cmdDispatch(argv, ctx, env = process.env, cwd = process.cwd(), o
           warn(`could not record the queued arrival in the attempt sidecar ${sidecar}: ${sanitizeCause(e && e.message ? e.message : e) || 'unknown error'}; the dispatch result stands`);
         }
         fs.writeFileSync(path.join(sd, 'wait', `${agent}.queued`),
-          `${Math.floor(Date.now() / 1000)}${current.seq !== '' ? ` ${current.seq}` : ''}\n`);
+          `${Math.floor(Date.now() / 1000)} ${current.seq !== '' ? current.seq : '-'} ${composed}\n`);
         process.stderr.write(`herdr-soho: prompt queued: '${agent}' is working; it takes the prompt when its turn ends\n`);
       }
     }

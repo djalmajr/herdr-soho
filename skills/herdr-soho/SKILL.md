@@ -524,8 +524,9 @@ in place), never from the Unix epoch.
 `dispatch` also checks that the prompt arrived. If the target is already
 `working`, dispatch skips the settle wait and sends no key after the prompt.
 Within `prompt_check_seconds` (15, 0 off), a moved `state_change_seq` while
-working or a non-empty report confirms receipt. The composed prompt path or
-the `Read the file ` marker anywhere in the recent screen confirms that the
+working or a non-empty report confirms receipt. The generic `Read the file `
+marker from an earlier prompt does not count. Only this dispatch's unique
+composed prompt path in the recent screen confirms that the
 prompt is queued; with `--no-wait`, dispatch returns `queued`, and otherwise
 it continues waiting for the report. If a working target shows no evidence,
 dispatch returns `not-received` (exit 15) and says no key was sent. For a
@@ -539,11 +540,16 @@ moved without the composed prompt path visible in recent screen outside the
 last 3 non-empty lines, it resends the prompt once (`resent`) followed by a
 fresh window with the strict rules; if nothing works, it returns
 `not-received` (exit 15) — read the pane before sending anything else. A
-`queued` dispatch records the moment and the agent's `state_change_seq` in
-`<state>/wait/<agent>.queued`. A later `wait` keeps watching while the same
-working turn continues; when the target leaves working and the prompt remains
-in its input box, `wait` retries Enter once per `prompt_check_seconds` window,
-up to 3 retries. A new working seq or a report clears the marker. A
+`queued` dispatch records the moment, the agent's `state_change_seq`, and the
+composed prompt path in `<state>/wait/<agent>.queued`. A later `wait` keeps
+running its normal probes while the same working turn continues. Once the
+target leaves working, quota, provider, and dialog probes run first. The prompt
+is still in the input box only when this dispatch's path is among the last 3
+non-empty visible lines. If so, `wait` retries Enter once per
+`prompt_check_seconds` window, up to 3 retries. If the path is outside those
+lines, `wait` ends `not-received` (exit 15) and keeps that result in
+`.not-received` for later `wait` and `status` calls. A new working seq or a
+report clears the queued marker. A
 `not-received` `dispatch` records the moment and the agent's
 `state_change_seq`, and a `wait` afterwards
 retries one Enter per `prompt_check_seconds` window while the prompt is
@@ -553,8 +559,10 @@ different `state_change_seq`), clears the markers and the wait goes on
 as usual, and
 after the 3 retries — or when the prompt is no longer in the input box
 with the agent not working — the wait ends `not-received` (exit 15).
-`status` reports `not-received` the same way but read-only (exit 15, no
-key sent), and a moved seq clears the report there too. `gone` is only
+`status` reports `not-received` read-only for a queued marker only while that
+dispatch's path is still in the input box; quota, provider, and question
+results take precedence. For a `.not-received` marker it remains read-only
+(exit 15, no key sent), and a moved seq clears the report there too. `gone` is only
 `agent_not_found`. `unavailable` is a permission or transport failure of
 `herdr agent get` (cause on stderr and in JSON `error`): retry or restore
 access; do not spawn a replacement, and do not `release` or `release --close`

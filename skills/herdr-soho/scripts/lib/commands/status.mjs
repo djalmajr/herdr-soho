@@ -24,7 +24,7 @@ import { quotaDetect } from '../quota.mjs';
 import { providerDetect } from '../provider.mjs';
 import { dialogKind, questionText } from '../dialog.mjs';
 import { waitRank, activityAgeSeconds } from '../wait.mjs';
-import { markerSeqChanged } from '../arrival.mjs';
+import { markerSeqChanged, queuedPromptSitsInInput } from '../arrival.mjs';
 
 // True when a live agent with this name exists and none of them sits in
 // `pane` (a herdr failure keeps the direct query: false).
@@ -47,6 +47,16 @@ function reportNonEmpty(p) {
 // command never drops a marker (the wait is the one that does).
 function readMarker(p) {
   try { return fs.readFileSync(p, 'utf8'); } catch { return ''; }
+}
+
+// The queued signal follows the ordinary stop probes: an actionable quota
+// or provider screen remains visible as that result, even if old prompt text
+// is still on the pane. Blocked questions take their existing branch below.
+function queuedPromptIsUnresolved(marker, sd, agent, state, env) {
+  const visible = agentRead(env, agent, { source: 'visible' });
+  if (!queuedPromptSitsInInput(marker, visible, sd, agent)) return false;
+  if (quotaDetect(state, visible)) return false;
+  return providerDetect(state, agentRead(env, agent, { source: 'recent-unwrapped', lines: 40 })) === null;
 }
 
 export function cmdStatus(argv, ctx, env = process.env, cwd = process.cwd()) {
@@ -99,10 +109,11 @@ export function cmdStatus(argv, ctx, env = process.env, cwd = process.cwd()) {
         // wait rank).
         if (waitRank(15) > waitRank(rc)) rc = 15;
       } else if (!stale && fs.existsSync(path.join(sd, 'wait', `${a}.queued`))
-        && orig !== 'working' && orig !== 'blocked') {
-        // A queued prompt is pending while the worker is working. Once the
-        // worker stops without a report, status surfaces the unresolved
-        // arrival without modifying the marker or sending a key.
+        && orig !== 'working' && orig !== 'blocked'
+        && queuedPromptIsUnresolved(readMarker(path.join(sd, 'wait', `${a}.queued`)), sd, a, orig, env)) {
+        // Only this dispatch's composed path in the input box is evidence
+        // that the queued prompt was not consumed. The probe above excludes
+        // current quota/provider stops, and the command remains read-only.
         state = 'not-received';
         if (waitRank(15) > waitRank(rc)) rc = 15;
       } else if (!stale && orig === 'blocked') {
