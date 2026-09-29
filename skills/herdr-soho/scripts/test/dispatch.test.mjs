@@ -1287,6 +1287,24 @@ test('forSpecFamily: roster agent (col 5, derived when unknown), family name, fi
   } finally { fix.cleanup(); }
 });
 
+// Mutation captured: this asserts the stable family-detail contract; the
+// family alphabet is closed ASCII, so localeCompare cannot change its order.
+test('forSpecFamily: conflicting recorded families are reported in code-unit order', () => {
+  const fix = makeFix('ha-dispatch-for-family-order-');
+  try {
+    for (const [ts, kind] of [['20260925T100000', 'codex'], ['20260925T110000', 'claude']]) {
+      const prompt = path.join(fix.ws, 'briefs', `released-${ts}.md`);
+      fs.writeFileSync(prompt, '# Role: implementer\n');
+      fs.writeFileSync(sidecarForPrompt(prompt), JSON.stringify({
+        version: 1, kind, model: '', effort: 'full', submission: 'accepted',
+      }));
+    }
+    assert.throws(() => forSpecFamily('released', fix.ws, fix.env, fix.repo),
+      (error) => error.code === 2
+        && error.message.includes('(anthropic ×1, openai ×1)'));
+  } finally { fix.cleanup(); }
+});
+
 test('dispatch: --for compares the reviewer with the slice author(s) (pass, strict 5, warn, the dies 2)', { timeout: 60000 }, () => {
   const fix = makeFix('ha-dispatch-for-');
   try {

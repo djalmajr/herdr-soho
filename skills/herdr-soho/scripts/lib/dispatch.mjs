@@ -61,7 +61,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { dieFriction, lastReport, nowStamp, rosterLine, rosterRows, sleepSync, stateDir, stateDirPath, warn, workspaceId } from './state.mjs';
 import { cfg, DieError } from './config.mjs';
-import { hasWord, sanitizeCause } from './text.mjs';
+import { compareCodeUnits, hasWord, sanitizeCause } from './text.mjs';
 import { atomicWrite, projectRoot, runCli, stateProjectRoot } from './platform.mjs';
 import { fmGet, roleBody, roleFile, roleIsEdit, historyHasEdit, REVIEW_ROLES } from './roles.mjs';
 import { agentPrompt, agentState, agentRead, agentSendKeys, liveAgents, HERDR_TIMEOUT_MS } from './herdr.mjs';
@@ -143,7 +143,7 @@ export function forSpecFamily(spec, sd, env = process.env, cwd = process.cwd(), 
     counts.set(family, (counts.get(family) ?? 0) + 1);
   }
   if (counts.size === 1 && !counts.has('unknown')) return counts.keys().next().value;
-  const detail = [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([family, n]) => `${family} ×${n}`).join(', ');
+  const detail = [...counts].sort(([a], [b]) => compareCodeUnits(a, b)).map(([family, n]) => `${family} ×${n}`).join(', ');
   throw new DieError(`dispatch: --for '${spec}': the recorded dispatches of this released agent do not agree on one known model family (${detail}); pass the family instead (anthropic|openai|xai|google)`, 2);
 }
 

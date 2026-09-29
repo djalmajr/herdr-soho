@@ -2,6 +2,7 @@
 // artifacts before a worker mutates or builds in the copy.
 import fs from 'node:fs';
 import path from 'node:path';
+import { compareCodeUnits } from '../text.mjs';
 import { projectRoot } from '../platform.mjs';
 
 const USAGE = 'usage: mutation-guard <copy-dir> [--source <dir>] [--env NAME]...';
@@ -69,7 +70,7 @@ function symlinkIntoSource(copy, source) {
   const pending = [copy];
   while (pending.length > 0) {
     const dir = pending.pop();
-    const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => b.name.localeCompare(a.name));
+    const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => compareCodeUnits(b.name, a.name));
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       const rel = path.relative(copy, full);

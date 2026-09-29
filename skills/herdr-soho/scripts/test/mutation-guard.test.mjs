@@ -76,6 +76,23 @@ test('rejects a target symlink into the source before any mutation', (t) => {
   } finally { s.cleanup(); }
 });
 
+// Mutation captured: localeCompare reverses `B` and `a`, changing which
+// source-linked directory the guard reports first.
+test('reports source symlinks in reverse code-unit directory order', () => {
+  const s = setup();
+  try {
+    for (const name of ['B', 'a']) {
+      fs.mkdirSync(path.join(s.source, name));
+      fs.mkdirSync(path.join(s.copy, name));
+      fs.symlinkSync(path.join(s.source, name), path.join(s.copy, name, 'target'), 'dir');
+    }
+    const result = s.run([s.copy, '--source', s.source]);
+    assert.equal(result.rc, 1, result.err);
+    assert.match(result.out, /fail no-symlink-into-source: symlink B\/target -> /);
+    assert.doesNotMatch(result.out, /symlink a\/target/);
+  } finally { s.cleanup(); }
+});
+
 test('rejects build output environment paths inside the source without echoing values', (t) => {
   const s = setup();
   try {
