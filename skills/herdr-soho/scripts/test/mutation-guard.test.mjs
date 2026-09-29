@@ -78,9 +78,10 @@ test('rejects a target symlink into the source before any mutation', (t) => {
 
 // Mutation captured: localeCompare reverses `B` and `a`, changing which
 // source-linked directory the guard reports first.
-test('reports source symlinks in reverse code-unit directory order', () => {
+test('reports source symlinks in reverse code-unit directory order', (t) => {
   const s = setup();
   try {
+    if (!canSymlink(s.root)) return t.skip('symlink creation is unavailable on this host');
     for (const name of ['B', 'a']) {
       fs.mkdirSync(path.join(s.source, name));
       fs.mkdirSync(path.join(s.copy, name));
