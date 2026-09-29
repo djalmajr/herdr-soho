@@ -51,10 +51,10 @@ case "$1 $2" in
       gone|dead) echo '{"error":{"code":"agent_not_found","message":"gone"}}' >&2; exit 1 ;;
     esac
     case "$mode" in
-      working) echo "{\"result\":{\"agent\":{\"name\":\"$target\",\"agent_status\":\"working\"}}}" ;;
-      blocked) echo "{\"result\":{\"agent\":{\"name\":\"$target\",\"agent_status\":\"blocked\"}}}" ;;
+      working) echo "{\\\"result\\\":{\\\"agent\\\":{\\\"name\\\":\\\"$target\\\",\\\"agent_status\\\":\\\"working\\\"}}}" ;;
+      blocked) echo "{\\\"result\\\":{\\\"agent\\\":{\\\"name\\\":\\\"$target\\\",\\\"agent_status\\\":\\\"blocked\\\"}}}" ;;
       gone|gone-until-start) echo '{"error":{"code":"agent_not_found","message":"gone"}}' >&2; exit 1 ;;
-      *) echo "{\"result\":{\"agent\":{\"name\":\"$target\",\"agent_status\":\"idle\"}}}" ;;
+      *) echo "{\\\"result\\\":{\\\"agent\\\":{\\\"name\\\":\\\"$target\\\",\\\"agent_status\\\":\\\"idle\\\"}}}" ;;
     esac ;;
   "agent list")
     if [ -f "$HA_LIVE" ]; then cat "$HA_LIVE"; else echo '{"result":{"agents":[]}}'; fi ;;
@@ -84,9 +84,12 @@ case "$1 $2" in
 esac
 `;
 
-// Roster row (test-lanes.sh:33-35, add_worker) — model always grok-4.7.
+// Roster row aligned to the product's 12-column header (the rosterHeader
+// constant in core/state.go — the code that writes agents.tsv — and the
+// same shape test-lanes.sh's add_worker seeds): name, pane, kind, role,
+// family, created_pane, cwd, started, model, approvals, roles, lane.
 const ROW = (fix, name, role, lane, kind = 'grok') =>
-  `${name}\tp-${name}\t${kind}\t${role}\txai\t1\t${fix.repo}\tgrok-4.7\tfull\t${role}\t${lane}\n`;
+  `${name}\tp-${name}\t${kind}\t${role}\txai\t1\t${fix.repo}\tnow\tgrok-4.7\tfull\t${role}\t${lane}\n`;
 
 function makeParityFixture(name) {
   let root = fs.mkdtempSync(path.join(os.tmpdir(), `ha-parity-spawn-${name}-`));
@@ -265,7 +268,8 @@ test('parity spawn: fresh worker, lane reuse, kind mismatch, lane-kind reuse', {
     { fs: (f) => { live(f, [{ name: 'build', pane_id: 'p-build', agent_status: 'idle' }]); mode(f, 'idle'); } },
     { args: ['spawn', 'implementer'] },
     { fs: (f) => {
-      conf(f, 'lane.build.kind = "grok"\n');
+      fs.mkdirSync(path.join(f.repo, '.agents'), { recursive: true });
+      fs.writeFileSync(path.join(f.repo, '.agents', 'herdr-soho.conf'), 'lane.build.kind = "grok"\n');
       addWorkers(f, ['build', 'designer', 'build', 'agy']);
       live(f, [{ name: 'build', pane_id: 'p-build', agent_status: 'idle' }]);
       mode(f, 'idle');
@@ -273,7 +277,7 @@ test('parity spawn: fresh worker, lane reuse, kind mismatch, lane-kind reuse', {
     { args: ['spawn', 'implementer'] },
     { fs: (f) => { addWorkers(f, ['build', 'designer', 'build', 'grok']); } },
     { args: ['spawn', 'implementer'] },
-    { fs: (f) => { conf(f, null); } },
+    { fs: (f) => { fs.rmSync(path.join(f.repo, '.agents', 'herdr-soho.conf'), { force: true }); } },
   ];
   let value;
   const actual = () => (value !== undefined ? value : (value = spawnValue([nodeBin(), JS_ENTRY], 'kind', script))); // check/update
@@ -282,7 +286,7 @@ test('parity spawn: fresh worker, lane reuse, kind mismatch, lane-kind reuse', {
 
 test('parity spawn: busy 10, gone recreated, worker cap 8, locked 5, lane kind, lanes=off reuse', { timeout: 120000, skip: SKIP }, () => {
   const script = [
-    { fs: (f) => { addWorkers(f, ['build', 'implementer', 'build']); live(f, [{ name: 'build', pane_id: 'p-build', agent_status: 'working' }]); mode(f, 'working'); } },
+    { fs: (f) => { addWorkers(f, ['build', 'implementer', 'build'], ['build-2', 'designer', 'build']); live(f, [{ name: 'build', pane_id: 'p-build', agent_status: 'working' }, { name: 'build-2', pane_id: 'p-build2', agent_status: 'working' }]); mode(f, 'working'); } },
     { args: ['spawn', 'tasker'] },
     { fs: (f) => { addWorkers(f, ['build', 'implementer', 'build']); live(f, []); mode(f, 'gone-until-start'); } },
     { args: ['spawn', 'implementer'] },

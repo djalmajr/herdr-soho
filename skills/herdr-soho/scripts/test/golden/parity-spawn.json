@@ -85,7 +85,7 @@
   "kind": {
     "files": {
       "herdTab": "t-herd\therd\tmanual\n",
-      "roster": "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\nbuild\tp-build\tgrok\tdesigner\txai\t1\t<ROOT>/repo\tT\tfull\tdesigner\tbuild\n"
+      "roster": "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\nbuild\tp-build\tgrok\timplementer\txai\t1\t<ROOT>/repo\tT\tgrok-4.7\tfull\tdesigner,implementer\tbuild\n"
     },
     "steps": [
       {
@@ -123,30 +123,30 @@
           "spawn",
           "implementer"
         ],
-        "err": "PROG: lane 'build' worker 'build' matches but herdr agent get failed (agent get returned no agent_status). Not spawning a replacement; it may still be live.\n",
+        "err": "PROG: warning: lane 'build' worker 'build' is agy (model gemini-2.5, effort high); this role wants grok (model grok-4.7, effort xhigh). Set lane.build.kind or release the lane, then spawn again.\n",
         "log": "agent get build\n",
-        "out": "",
-        "rc": 4
+        "out": "{\"status\":\"kind-mismatch\",\"lane\":\"build\",\"name\":\"build\",\"session_kind\":\"agy\",\"requested_kind\":\"grok\",\"session_model\":\"gemini-2.5\",\"requested_model\":\"grok-4.7\",\"session_effort\":\"high\",\"requested_effort\":\"xhigh\"}\n",
+        "rc": 13
       },
       {
         "args": [
           "spawn",
           "implementer"
         ],
-        "err": "PROG: lane 'build' worker 'build' matches but herdr agent get failed (agent get returned no agent_status). Not spawning a replacement; it may still be live.\n",
+        "err": "PROG: warning: lane 'build' worker 'build' runs agy but lane.build.kind is grok. Release the lane ('release build --close'), then spawn again.\n",
         "log": "agent get build\n",
-        "out": "",
-        "rc": 4
+        "out": "{\"status\":\"kind-mismatch\",\"lane\":\"build\",\"name\":\"build\",\"session_kind\":\"agy\",\"requested_kind\":\"grok\"}\n",
+        "rc": 13
       },
       {
         "args": [
           "spawn",
           "implementer"
         ],
-        "err": "PROG: lane 'build' worker 'build' matches but herdr agent get failed (agent get returned no agent_status). Not spawning a replacement; it may still be live.\n",
+        "err": "PROG: warning: reusing idle lane 'build' worker 'build' as implementer; its session already holds earlier briefs\n",
         "log": "agent get build\n",
-        "out": "",
-        "rc": 4
+        "out": "{\n  \"name\": \"build\",\n  \"pane_id\": \"p-build\",\n  \"kind\": \"grok\",\n  \"role\": \"implementer\",\n  \"family\": \"xai\",\n  \"reused\": true,\n  \"previous_role\": \"designer\",\n  \"status\": \"ready\"\n}\n",
+        "rc": 0
       }
     ]
   },
@@ -161,10 +161,10 @@
           "spawn",
           "tasker"
         ],
-        "err": "PROG: lane 'build' worker 'build' matches but herdr agent get failed (agent get returned no agent_status). Not spawning a replacement; it may still be live.\n",
-        "log": "agent get build\n",
-        "out": "",
-        "rc": 4
+        "err": "PROG: warning: lane 'build' is full (2 of 2: build build-2). Run 'wait build', then dispatch.\n",
+        "log": "agent get build\nagent get build-2\n",
+        "out": "{\"status\":\"busy\",\"lane\":\"build\",\"name\":\"build\"}\n",
+        "rc": 10
       },
       {
         "args": [
@@ -211,10 +211,10 @@
           "spawn",
           "implementer"
         ],
-        "err": "PROG: worker 'implementer' matches this role, kind and cwd but herdr agent get failed (agent get returned no agent_status). Not spawning a replacement; it may still be live.\n",
+        "err": "PROG: warning: reusing idle worker 'implementer' (grok, implementer); its session already holds earlier briefs\n",
         "log": "agent get implementer\n",
-        "out": "",
-        "rc": 4
+        "out": "{\n  \"name\": \"implementer\",\n  \"pane_id\": \"p-impl\",\n  \"kind\": \"grok\",\n  \"role\": \"implementer\",\n  \"family\": \"xai\",\n  \"reused\": true,\n  \"previous_role\": \"implementer\",\n  \"status\": \"ready\"\n}\n",
+        "rc": 0
       }
     ]
   },
@@ -283,10 +283,10 @@
           "--kind",
           "pi"
         ],
-        "err": "PROG: lane 'build' worker 'build' matches but herdr agent get failed (agent get returned no agent_status). Not spawning a replacement; it may still be live.\n",
+        "err": "PROG: warning: reusing idle lane 'build' worker 'build' as implementer; its session already holds earlier briefs\n",
         "log": "agent get build\n",
-        "out": "",
-        "rc": 4
+        "out": "{\n  \"name\": \"build\",\n  \"pane_id\": \"p-new\",\n  \"kind\": \"pi\",\n  \"role\": \"implementer\",\n  \"family\": \"unknown\",\n  \"reused\": true,\n  \"previous_role\": \"implementer\",\n  \"status\": \"ready\"\n}\n",
+        "rc": 0
       },
       {
         "args": [
@@ -331,7 +331,7 @@
   "overflow": {
     "files": {
       "herdTab": "t-herd\therd\tmanual\n",
-      "roster": "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\nw1\tp-w1\tgrok\timplementer\txai\t1\t<ROOT>/repo\tT\tfull\timplementer\tbuild\nw2\tp-w2\tgrok\tscouter\txai\t1\t<ROOT>/repo\tT\tfull\tscouter\texplore\nw3\tp-w3\tgrok\treviewer\txai\t1\t<ROOT>/repo\tT\tfull\treviewer\treview\ndesigner\tp-new\tagy\tdesigner\tgoogle\t1\t<ROOT>/repo\tT\tgemini-2.5\task\tdesigner\t\t\t\thigh\n"
+      "roster": "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\nw1\tp-w1\tgrok\timplementer\txai\t1\t<ROOT>/repo\tT\tgrok-4.7\tfull\timplementer\tbuild\nw2\tp-w2\tgrok\tscouter\txai\t1\t<ROOT>/repo\tT\tgrok-4.7\tfull\tscouter\texplore\nw3\tp-w3\tgrok\treviewer\txai\t1\t<ROOT>/repo\tT\tgrok-4.7\tfull\treviewer\treview\ndesigner\tp-new\tagy\tdesigner\tgoogle\t1\t<ROOT>/repo\tT\tgemini-2.5\task\tdesigner\t\t\t\thigh\n"
     },
     "steps": [
       {
