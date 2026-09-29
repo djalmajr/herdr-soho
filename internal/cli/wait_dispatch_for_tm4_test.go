@@ -57,7 +57,7 @@ func TestDispatchForReleasedCommandCases(t *testing.T) {
 		f := releasedForFixture(t, "openai")
 		addReleasedForSidecar(t, f, "build", "20260927T101001", "claude", "", "failed", false)
 		code, out, stderr := f.run(t, "worker", f.brief, "--for", "build", "--no-wait")
-		want := "dispatch: --for 'build': not an agent in the roster, a family (anthropic|openai|xai|google), a kind with a fixed family, or an agent with an accepted dispatch recorded in this workspace"
+		want := "dispatch: --for 'build': not an agent in the roster, a family (anthropic|openai|xai|google|alibaba), a kind with a fixed family, or an agent with an accepted dispatch recorded in this workspace"
 		if code != 2 || out != "" || !strings.Contains(stderr, want) {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}

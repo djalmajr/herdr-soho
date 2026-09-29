@@ -121,7 +121,7 @@ func TestKindRules(t *testing.T) {
 		}
 	})
 	t.Run("agentFamily segment and model rules", func(t *testing.T) { // JS: "agentFamily: the NEW rule (decision cases) + fixed-family kinds"
-		for model, want := range map[string]string{"openrouter/anthropic/claude-x": "anthropic", "proxy/gpt-5": "openai", "xai-proxy/x": "unknown", "grok-4": "xai"} {
+		for model, want := range map[string]string{"openrouter/anthropic/claude-x": "anthropic", "proxy/gpt-5": "openai", "xai-proxy/x": "unknown", "grok-4": "xai", "applianceai01/qwen3.8-27b": "alibaba", "qwen3-coder": "alibaba", "provider/QWEN-x": "alibaba", "provider/qwenish/llama-3": "unknown"} {
 			if got := AgentFamily("pi", model); got != want {
 				t.Errorf("%s=%s", model, got)
 			}
@@ -137,6 +137,44 @@ func TestKindRules(t *testing.T) {
 		got, err := ResolveModel("grok", "grok-4", "", env, func(string) {})
 		if err != nil || got != "grok-4.7" {
 			t.Fatalf("%q %v", got, err)
+		}
+	})
+	t.Run("dotted spec swaps dots for dashes and picks the newest candidate", func(t *testing.T) {
+		seed := func(ids ...string) platform.Env {
+			tmp := t.TempDir()
+			if err := os.WriteFile(filepath.Join(tmp, "herdr-soho-models-claude.txt"), []byte(strings.Join(ids, "\n")+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return platform.Env{"TMPDIR": tmp}
+		}
+		got, err := ResolveModel("claude", "sonnet-5.5", "", seed("claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-4-6"), func(string) {})
+		if err != nil || got != "claude-sonnet-5-5" {
+			t.Fatalf("got %q err %v, want claude-sonnet-5-5", got, err)
+		}
+		var warnings []string
+		got, err = ResolveModel("claude", "sonnet-5.5", "", seed("claude-opus-5-5", "claude-sonnet-4-6"), func(w string) { warnings = append(warnings, w) })
+		if err != nil || got != "sonnet-5.5" || len(warnings) != 1 || !strings.Contains(warnings[0], "no claude model matches 'sonnet-5.5'; passing it through unchanged") {
+			t.Fatalf("no candidate: got %q warns %v err %v", got, warnings, err)
+		}
+		got, err = ResolveModel("claude", "sonnet-5.5", "", seed("sonnet-5.5", "claude-sonnet-5-5"), func(string) {})
+		if err != nil || got != "sonnet-5.5" {
+			t.Fatalf("exact id: got %q err %v, want sonnet-5.5", got, err)
+		}
+		got, err = ResolveModel("claude", "sonnet-5.5", "", seed("claude-sonnet-5-5", "x-sonnet-5.5.10"), func(string) {})
+		if err != nil || got != "claude-sonnet-5-5" {
+			t.Fatalf("candidates restricted to the swapped spec: got %q err %v, want claude-sonnet-5-5", got, err)
+		}
+	})
+	t.Run("claude with an empty list maps dotted alias specs to claude ids", func(t *testing.T) {
+		env := platform.Env{"TMPDIR": t.TempDir()}
+		for spec, want := range map[string]string{"sonnet-5.5": "claude-sonnet-5-5", "Opus-5.5": "claude-opus-5-5", "fable-5.1": "claude-fable-5-1", "sonnet": "sonnet", "claude-sonnet-5-5": "claude-sonnet-5-5", "gpt-5.5": "gpt-5.5"} {
+			got, err := ResolveModel("claude", spec, "", env, func(string) {})
+			if err != nil || got != want {
+				t.Errorf("claude %s: got %q err %v, want %q", spec, got, err, want)
+			}
+		}
+		if got, err := ResolveModel("pi", "sonnet-5.5", "", platform.Env{"TMPDIR": t.TempDir()}, func(string) {}); err != nil || got != "sonnet-5.5" {
+			t.Fatalf("pi sonnet-5.5: got %q err %v, want sonnet-5.5", got, err)
 		}
 	})
 	t.Run("regex dialect rejects unsupported constructs and handles classes", func(t *testing.T) { // JS: "model specs: defined regex dialect"

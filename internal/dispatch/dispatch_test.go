@@ -51,7 +51,7 @@ func TestDispatchHelpers(t *testing.T) {
 		}
 	})
 	t.Run(`JS: --for resolves family names and fixed-family kinds`, func(t *testing.T) {
-		for spec, want := range map[string]string{"openai": "openai", "codex": "openai", "gemini": "google"} {
+		for spec, want := range map[string]string{"openai": "openai", "codex": "openai", "gemini": "google", "alibaba": "alibaba"} {
 			got, err := ForSpecFamily(spec, t.TempDir(), platform.Env{}, t.TempDir(), &core.Config{Entries: map[string]core.ConfigEntry{}})
 			if err != nil || got != want {
 				t.Errorf("%s: got %q, %v", spec, got, err)
@@ -313,7 +313,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 				t.Errorf("%s: got %q, %v; want %q", spec, got, err, want)
 			}
 		}
-		if got, err := ForSpecFamily("mystery", sd, platform.Env{"HERDR_WORKSPACE_ID": "ws", "TMPDIR": t.TempDir()}, "/work", ctx); err == nil || got != "" || !strings.Contains(err.Error(), "not an agent in the roster") {
+		if got, err := ForSpecFamily("mystery", sd, platform.Env{"HERDR_WORKSPACE_ID": "ws", "TMPDIR": t.TempDir()}, "/work", ctx); err == nil || got != "" || !strings.Contains(err.Error(), "not an agent in the roster") || !strings.Contains(err.Error(), "a family (anthropic|openai|xai|google|alibaba)") {
 			t.Fatalf("unresolved: got %q, %v", got, err)
 		}
 	})
@@ -333,7 +333,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 			}
 		}
 		_, err := ForSpecFamily("released", sd, platform.Env{"HERDR_WORKSPACE_ID": "ws", "TMPDIR": t.TempDir()}, "/work", &core.Config{Entries: map[string]core.ConfigEntry{}})
-		if err == nil || !strings.Contains(err.Error(), "anthropic ×1, openai ×1") {
+		if err == nil || !strings.Contains(err.Error(), "anthropic ×1, openai ×1") || !strings.Contains(err.Error(), "pass the family instead (anthropic|openai|xai|google|alibaba)") {
 			t.Fatalf("conflict error=%v", err)
 		}
 	})
