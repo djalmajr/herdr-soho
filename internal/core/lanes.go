@@ -336,6 +336,23 @@ func LaneWorkers(sd, lane string) []string {
 	return out
 }
 
+// RosterRename changes the name (first column) of oldName's roster line to
+// newName; the rest of the line stays the same. It is the roster half of the
+// spawn rename, paired with the herdr agent rename.
+func RosterRename(sd, oldName, newName string) {
+	WithRosterLock(sd, func() {
+		lines := tsvLines(sd)
+		for i, line := range lines {
+			f := strings.Split(line, "\t")
+			if len(f) > 0 && f[0] == oldName {
+				f[0] = newName
+				lines[i] = strings.Join(f, "\t")
+			}
+		}
+		atomicRoster(filepath.Join(sd, "agents.tsv"), lines)
+	})
+}
+
 type LaneDecision struct {
 	Decision, Name, State, Cause string
 	Gone                         []string

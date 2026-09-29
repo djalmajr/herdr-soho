@@ -192,3 +192,23 @@ func containsString(values []string, needle string) bool {
 	return false
 }
 func containsText(value, needle string) bool { return strings.Contains(value, needle) }
+
+func TestRosterRenameChangesOnlyTheNameColumn(t *testing.T) {
+	// A4.1: the roster half of the spawn rename keeps every column after the name.
+	env, repo := fixture(t)
+	ctx := LoadConfig(env, repo)
+	state := StateDir(&ctx, env, repo)
+	row := "review-2\tw0test:p0a\tcodex\treviewer\topenai\t1\t/tmp/work\tnow\t\task\treviewer\treview\t\t"
+	RosterAppend(state, strings.Split(row, "\t"))
+	RosterRename(state, "review-2", "review")
+	got := RosterLine(state, "review")
+	if got == "" || strings.Split(got, "\t")[0] != "review" {
+		t.Fatalf("renamed line missing: %q", got)
+	}
+	if want := "review\tw0test:p0a\tcodex\treviewer\topenai\t1\t/tmp/work\tnow\t\task\treviewer\treview\t\t"; got != want {
+		t.Fatalf("roster line=%q want %q", got, want)
+	}
+	if RosterLine(state, "review-2") != "" {
+		t.Fatalf("old name still in roster: %q", RosterLine(state, "review-2"))
+	}
+}
