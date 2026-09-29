@@ -509,6 +509,28 @@ test('wait: queued prompt with a moved seq and outside the input box ends not-re
   } finally { fix.cleanup(); }
 });
 
+test('wait: an absent seq stays a dash when queued becomes not-received, so a foreign echo gets no Enter', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-noseq-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    const now = Math.floor(Date.now() / 1000);
+    const prompt = path.join(fix.ws, 'briefs', 'w-noseq.md');
+    fix.waitFile('w', 'queued', `${now - 120} - ${prompt}\n`);
+    fix.modeOf('w', 'idle');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '');
+    fix.screenOf('w', `Welcome\nRead the file ${prompt} in full\nworking output\nnext output\nRead the file /tmp/old/previous-brief.md in full\n`);
+    // Mutation captured: dropping the seq field when it is absent leaves a
+    // two-field marker; the next wait no longer sees this prompt's path and
+    // sends Enter three times to the foreign echo in the input box.
+    const r = waitCmd(fix, ['w', '--timeout', '1000']);
+    assert.equal(r.status, 15, r.stderr);
+    assert.match(fix.waitRead('w', 'not-received'), /^\d+ - .+w-noseq\.md\n$/);
+    const again = waitCmd(fix, ['w', '--timeout', '1000']);
+    assert.equal(again.status, 15, again.stderr);
+    assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
+  } finally { fix.cleanup(); }
+});
+
 test('wait: quota after queued wins over not-received and clears queued markers', { timeout: 60000 }, () => {
   const fix = makeFix('ha-wait-queued-quota-');
   try {

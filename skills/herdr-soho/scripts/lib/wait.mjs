@@ -556,8 +556,8 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
     const inInput = queuedPromptSitsInInput(queuedText, screen, sd, agent);
     if (!inInput) {
       const promptPath = queuedPromptPath(queuedText, sd, agent) || '-';
-      fs.writeFileSync(nrFile,
-        `${Math.floor(Date.now() / 1000)}${st.seq !== '' ? ` ${st.seq}` : ''} ${promptPath}\n`);
+      const seqField = st.seq !== '' ? st.seq : '-';
+      fs.writeFileSync(nrFile, `${Math.floor(Date.now() / 1000)} ${seqField} ${promptPath}\n`);
       fs.rmSync(queuedFile, { force: true });
       fs.rmSync(retryFile, { force: true });
       return 'not-received';
@@ -565,7 +565,10 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
     const first = String(queuedText).trim().split(/\s+/)[0];
     const epoch = /^[0-9]+$/.test(first) ? first : `${Math.floor(Date.now() / 1000)}`;
     const promptPath = queuedPromptPath(queuedText, sd, agent) || '-';
-    fs.writeFileSync(nrFile, `${epoch}${st.seq !== '' ? ` ${st.seq}` : ''} ${promptPath}\n`);
+    // An absent seq is written as '-', the field .queued uses, so the
+    // marker keeps three fields and markerHasPromptPath still sees the path.
+    const seqField = st.seq !== '' ? st.seq : '-';
+    fs.writeFileSync(nrFile, `${epoch} ${seqField} ${promptPath}\n`);
     fs.rmSync(queuedFile, { force: true });
     const nowS = Math.floor(Date.now() / 1000);
     const winRaw = String(cfg(ctx, 'prompt_check_seconds', '15', env));
