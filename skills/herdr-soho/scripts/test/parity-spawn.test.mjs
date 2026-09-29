@@ -112,7 +112,8 @@ function makeParityFixture(name) {
     panes: path.join(root, 'panes.json'),
     layout: path.join(root, 'layout.json'),
     startN: path.join(root, 'start-n'),
-    conf: path.join(root, 'home', '.config', 'herdr-soho', 'config.toml'),
+    // user layer: the file the product reads ($XDG_CONFIG_HOME/herdr-soho/config)
+    conf: path.join(root, 'config', 'herdr-soho', 'config'),
     files: {
       roster: path.join(ws, 'agents.tsv'),
       herdTab: path.join(ws, 'herd-tab'),
@@ -300,18 +301,21 @@ test('parity spawn: busy 10, gone recreated, worker cap 8, locked 5, lane kind, 
     } },
     { args: ['spawn', 'implementer'] },
     { fs: (f) => {
-      conf(f, 'lane.mix.roles = "implementer,reviewer"\n');
+      fs.mkdirSync(path.join(f.repo, '.agents'), { recursive: true });
+      fs.writeFileSync(path.join(f.repo, '.agents', 'herdr-soho.conf'), 'lane.mix.roles = "implementer,reviewer"\n');
       addWorkers(f, ['mix', 'implementer', 'mix']);
       live(f, [{ name: 'mix', pane_id: 'p-mix', agent_status: 'idle' }]);
       mode(f, 'idle');
     } },
     { args: ['spawn', 'reviewer'] },
     { fs: (f) => {
-      conf(f, 'lane.build.kind = "codex"\n');
+      fs.mkdirSync(path.join(f.repo, '.agents'), { recursive: true });
+      fs.writeFileSync(path.join(f.repo, '.agents', 'herdr-soho.conf'), 'lane.build.kind = "codex"\n');
       resetRoster(f);
     } },
     { args: ['spawn', 'implementer'] },
     { fs: (f) => {
+      fs.rmSync(path.join(f.repo, '.agents', 'herdr-soho.conf'), { force: true });
       conf(f, null);
       fs.writeFileSync(f.files.roster, `${HEADER}implementer\tp-impl\tgrok\timplementer\txai\t1\t${f.repo}\tnow\n`);
       live(f, [{ name: 'implementer', pane_id: 'p-impl', agent_status: 'idle' }]);

@@ -191,10 +191,10 @@
           "spawn",
           "reviewer"
         ],
-        "err": "",
-        "log": "agent list\nagent list\nagent list\npane list\npane list --workspace ws\ntab get t-herd\npane list --workspace ws\ntab get t-herd\nagent start review --kind codex --pane p-root --timeout 60000 -- -m sol|gpt-5 -c model_reasoning_effort=\"high\"\nagent get review\nagent read review --source visible --lines 40\npane list --workspace ws\ntab get t-herd\n",
-        "out": "{\n  \"name\": \"review\",\n  \"pane_id\": \"p-root\",\n  \"kind\": \"codex\",\n  \"role\": \"reviewer\",\n  \"family\": \"openai\",\n  \"created_pane\": true,\n  \"layout\": \"tab\",\n  \"placement\": \"herd\",\n  \"effort\": \"high\",\n  \"model\": \"sol|gpt-5\",\n  \"model_spec\": \"sol|gpt-5\",\n  \"approvals\": \"ask\",\n  \"agent_args\": \"-m sol|gpt-5 -c model_reasoning_effort=\\\"high\\\"\",\n  \"status\": \"ready\"\n}\n",
-        "rc": 0
+        "err": "PROG: lane 'mix' worker 'mix' has edited and cannot take review role 'reviewer'.\n",
+        "log": "agent get mix\n",
+        "out": "",
+        "rc": 5
       },
       {
         "args": [
@@ -202,8 +202,8 @@
           "implementer"
         ],
         "err": "",
-        "log": "agent list\nagent list\nagent list\npane list\npane list --workspace ws\ntab create --workspace ws --cwd <ROOT>/repo --label impl --no-focus\nagent start build --kind grok --pane p-new --timeout 60000 -- --model grok-4.7 --reasoning-effort xhigh\nagent get build\nagent read build --source visible --lines 40\npane list --workspace ws\ntab get t-herd\n",
-        "out": "{\n  \"name\": \"build\",\n  \"pane_id\": \"p-new\",\n  \"kind\": \"grok\",\n  \"role\": \"implementer\",\n  \"family\": \"xai\",\n  \"created_pane\": true,\n  \"layout\": \"tab\",\n  \"placement\": \"herd\",\n  \"effort\": \"xhigh\",\n  \"model\": \"grok-4.7\",\n  \"model_spec\": \"grok\",\n  \"approvals\": \"ask\",\n  \"agent_args\": \"--model grok-4.7 --reasoning-effort xhigh\",\n  \"status\": \"ready\"\n}\n",
+        "log": "agent list\nagent list\nagent list\npane list\npane list --workspace ws\ntab create --workspace ws --cwd <ROOT>/repo --label impl --no-focus\nagent start build --kind codex --pane p-new --timeout 60000 -- -m sol|gpt-5 -c model_reasoning_effort=\"xhigh\"\nagent get build\nagent read build --source visible --lines 40\npane list --workspace ws\ntab get t-herd\n",
+        "out": "{\n  \"name\": \"build\",\n  \"pane_id\": \"p-new\",\n  \"kind\": \"codex\",\n  \"role\": \"implementer\",\n  \"family\": \"openai\",\n  \"created_pane\": true,\n  \"layout\": \"tab\",\n  \"placement\": \"herd\",\n  \"effort\": \"xhigh\",\n  \"model\": \"sol|gpt-5\",\n  \"model_spec\": \"sol|gpt-5\",\n  \"approvals\": \"ask\",\n  \"agent_args\": \"-m sol|gpt-5 -c model_reasoning_effort=\\\"xhigh\\\"\",\n  \"status\": \"ready\"\n}\n",
         "rc": 0
       },
       {
@@ -305,7 +305,7 @@
         ],
         "err": "",
         "log": "agent list\nagent list\nagent list\npane list\npane list --workspace ws\ntab create --workspace ws --cwd <ROOT>/repo --label impl --no-focus\nagent start build --kind grok --pane p-new --timeout 60000 -- --model grok-4.7 --reasoning-effort xhigh\nagent get build\nagent read build --source visible --lines 40\npane list --workspace ws\ntab get t-herd\n",
-        "out": "{\n  \"name\": \"build\",\n  \"pane_id\": \"p-new\",\n  \"kind\": \"grok\",\n  \"role\": \"implementer\",\n  \"family\": \"xai\",\n  \"created_pane\": true,\n  \"layout\": \"tab\",\n  \"placement\": \"herd\",\n  \"effort\": \"xhigh\",\n  \"model\": \"grok-4.7\",\n  \"model_spec\": \"grok\",\n  \"approvals\": \"ask\",\n  \"agent_args\": \"--model grok-4.7 --reasoning-effort xhigh\",\n  \"status\": \"ready\"\n}\n",
+        "out": "{\n  \"name\": \"build\",\n  \"pane_id\": \"p-new\",\n  \"kind\": \"grok\",\n  \"role\": \"implementer\",\n  \"family\": \"xai\",\n  \"created_pane\": true,\n  \"layout\": \"tab\",\n  \"placement\": \"herd\",\n  \"effort\": \"xhigh\",\n  \"model\": \"grok-4.7\",\n  \"model_spec\": \"grok-4.7\",\n  \"approvals\": \"ask\",\n  \"agent_args\": \"--model grok-4.7 --reasoning-effort xhigh\",\n  \"status\": \"ready\"\n}\n",
         "rc": 0
       }
     ]
