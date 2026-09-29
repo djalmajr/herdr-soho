@@ -412,7 +412,9 @@ func CmdStats(args []string, command CommandContext) int {
 		}
 		return a.suffix < b.suffix
 	})
-	lastRole := map[string]string{}
+	// A non-amendment pair is a reuse when the agent already had an earlier
+	// counted non-amendment pair (dispatch order), with or without a role change.
+	seenNonAmendment := map[string]bool{}
 	prevAgent := ""
 	prevResolved := ""
 	for i := range pairs {
@@ -429,11 +431,8 @@ func CmdStats(args []string, command CommandContext) int {
 			if p.resolved == "" {
 				p.resolved = "(unknown)"
 			}
-			old := lastRole[p.agent]
-			p.reuse = p.role != "" && old != "" && old != p.role
-			if p.role != "" {
-				lastRole[p.agent] = p.role
-			}
+			p.reuse = seenNonAmendment[p.agent]
+			seenNonAmendment[p.agent] = true
 		} else {
 			p.resolved = prevResolved
 			if p.resolved == "" {
@@ -444,7 +443,7 @@ func CmdStats(args []string, command CommandContext) int {
 	}
 	last := map[string]int{}
 	for i, p := range pairs {
-		if p.counted {
+		if p.counted && !p.amendment {
 			last[p.agent] = i
 		}
 	}
@@ -486,7 +485,7 @@ func CmdStats(args []string, command CommandContext) int {
 		} else {
 			a.tasks++
 		}
-		if !p.hasReport {
+		if !p.amendment && !p.hasReport {
 			if roster[p.agent] && p.isLast {
 				p.noReport = "pending"
 				a.pending++
