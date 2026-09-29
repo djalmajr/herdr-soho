@@ -201,7 +201,7 @@ move: the reviewer of a slice comes from **another model family** than its
 implementer (cursor running a grok model is the xai family, like `grok`).
 The family check enforces it for workers; for code the orchestrator wrote,
 pass `--for <your family>` to the reviewer's dispatch (`anthropic`,
-`openai`, `xai` or `google`; a kind with a fixed family such as `claude`
+`openai`, `xai`, `google` or `alibaba`; a kind with a fixed family such as `claude`
 or `codex` works too). **Before choosing or changing a team,
 read [references/agent-profiles.md](references/agent-profiles.md):** what
 each assistant did well and badly in each role in real use, and a
@@ -787,7 +787,7 @@ still counts. Same family → exit 5 unless `--allow-same-family`.
 `--for <author>[,…]` narrows the check to the slice's author, and the rest
 of the roster is not scanned. Each author is one of:
 - an agent in the roster (its family column);
-- a family: `anthropic`, `openai`, `xai` or `google`;
+- a family: `anthropic`, `openai`, `xai`, `google` or `alibaba`;
 - a kind with a fixed family (`claude`, `codex`, `grok`, `agy`, `gemini`).
   `cursor`, `pi` and `opencode` have a family per model: name the family;
 - an agent already released from the roster: its family comes from the
