@@ -126,6 +126,7 @@ function makeFix(prefix) {
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
     HERDR_WORKSPACE_ID: 'ws',
+    HERDR_SOCKET_PATH: path.join(root, 'missing-herdr.sock'),
     HERDR_ENV: '1',
     HERDR_SOHO_REGRID: 'off',
     HERDR_SOHO_WAIT_POLL_MS: '20',
@@ -176,14 +177,159 @@ function cmd(fix, args, extraEnv = {}) {
 
 const BRIEF = `# Goal\n\nPerform dispatch arrival verification.\n\n# Expected result\n\nPrompt received.\n\n# Owned files\n\nskills/herdr-soho/scripts/lib/dispatch.mjs\n\n# Forbidden\n\nDo not commit or push.\n\n# Report\n\ndone.\n`;
 
-// (a) alvo que pisca working com o mesmo state_change_seq e muda a tela sozinho,
-// e perde o primeiro prompt -> um reenvio; perde de novo -> not-received exit 15
-test('arrival (a): target blinks working with same seq and changing screen, loses both prompts -> 1 resend and not-received exit 15', { timeout: 60000 }, () => {
+test('arrival: working target skips settle and reports queued from the prompt marker', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-arr-queued-');
+  try {
+    const brief = fix.brief('brief.md', BRIEF);
+    fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fs.writeFileSync(fix.env.FAKE_READY, 'false\n');
+    fs.writeFileSync(fix.env.FAKE_SCREEN, 'working screen\n');
+    fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
+      const text = argv[3] || '';
+      const m = text.match(/Read the file (.+?) in full/);
+      fs.writeFileSync(process.env.FAKE_RECENT, 'history\\nRead the file ' + (m ? m[1] : '') + ' in full\\n');
+    `);
+    const started = Date.now();
+    // Mutation captured: running settle for a working target waits the configured 20 seconds.
+    // Mutation captured: requiring a changed state seq or path outside the input area loses this queued proof.
+    const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait'], {
+      HERDR_SOHO_PROMPT_CHECK_SECONDS: '1',
+      HERDR_SOHO_PROMPT_SETTLE_SECONDS: '20',
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(Date.now() - started < 20_000, 'working dispatch skips the settle deadline');
+    const j = JSON.parse(r.stdout.trim().split('\n').pop());
+    assert.equal(j.wait_status, 'queued');
+    assert.equal(Object.keys(j)[0], 'wait_status');
+    assert.match(r.stderr, /herdr-soho: prompt queued: 'build' is working; it takes the prompt when its turn ends/);
+    assert.doesNotMatch(r.stderr, /did not settle/);
+    const calls = fix.log().split('\n').filter(Boolean);
+    assert.equal(calls.filter((l) => l.startsWith('agent prompt ')).length, 1);
+    assert.deepEqual(calls.filter((l) => l.startsWith('agent send-keys ')), []);
+    const queuedFields = fs.readFileSync(path.join(fix.ws, 'wait', 'build.queued'), 'utf8').trim().split(/\s+/);
+    assert.equal(queuedFields[0].match(/^\d+$/)?.[0], queuedFields[0]);
+    assert.equal(queuedFields[1], '5');
+    assert.equal(queuedFields.slice(2).join(' '), j.composed_prompt);
+    const sidecar = JSON.parse(fs.readFileSync(sidecarForPrompt(j.composed_prompt), 'utf8'));
+    assert.equal(sidecar.arrival, 'queued');
+
+    fs.writeFileSync(fix.env.FAKE_LOG, '');
+    fs.writeFileSync(fix.env.FAKE_MODE, 'idle\n');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
+      fs.writeFileSync(process.env.FAKE_MODE, 'working\\n');
+      fs.writeFileSync(process.env.FAKE_SEQ, '6\\n');
+    `);
+    const normal = cmd(fix, ['dispatch', 'build', brief, '--no-wait'], {
+      HERDR_SOHO_PROMPT_CHECK_SECONDS: '1',
+      HERDR_SOHO_PROMPT_SETTLE_SECONDS: '0',
+    });
+    assert.equal(normal.status, 0, normal.stderr);
+    // Mutation captured: a new dispatch clears the previous dispatch's queued marker.
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'build.queued')), false);
+    assert.deepEqual(Object.keys(JSON.parse(r.stdout.trim().split('\n').pop())),
+      Object.keys(JSON.parse(normal.stdout.trim().split('\n').pop())), 'queued keeps submitted JSON keys and order');
+  } finally { fix.cleanup(); }
+});
+
+test('arrival: working target with no prompt evidence is not-received and sends no key', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-arr-working-miss-');
+  try {
+    const brief = fix.brief('brief.md', BRIEF);
+    fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fs.writeFileSync(fix.env.FAKE_SCREEN, 'unchanged work screen\n');
+    fs.writeFileSync(fix.env.FAKE_RECENT, 'Read the file /tmp/old/previous-brief.md in full and execute it.\n');
+    // Mutation captured: accepting the generic marker from a previous prompt queues this lost dispatch.
+    // Mutation captured: permitting Enter or resend for an occupied target creates a send-keys log entry.
+    const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait'], {
+      HERDR_SOHO_PROMPT_CHECK_SECONDS: '1',
+      HERDR_SOHO_PROMPT_SETTLE_SECONDS: '20',
+    });
+    assert.equal(r.status, 15, r.stderr);
+    assert.match(r.stderr, /prompt to 'build' not confirmed: it was working and shows no sign of the prompt; no key was sent\. Read the pane before sending anything else\./);
+    const j = JSON.parse(r.stdout.trim().split('\n').pop());
+    assert.equal(j.wait_status, 'not-received');
+    const calls = fix.log().split('\n').filter(Boolean);
+    assert.equal(calls.filter((l) => l.startsWith('agent prompt ')).length, 1);
+    assert.deepEqual(calls.filter((l) => l.startsWith('agent send-keys ')), []);
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'build.not-received')), true);
+
+  } finally { fix.cleanup(); }
+});
+
+test('arrival: amend ignores a generic marker from the previous prompt', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-arr-amend-old-marker-');
+  try {
+    const previousReport = path.join(fix.ws, 'reports', 'build-previous.md');
+    fs.writeFileSync(previousReport, 'existing report\n');
+    fs.writeFileSync(path.join(fix.ws, 'last-report-build'), `${previousReport}\n`);
+    const amend = fix.brief('amend.md', '# Change\n\nAdd this detail.\n');
+    fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fs.writeFileSync(fix.env.FAKE_SCREEN, 'unchanged work screen\n');
+    fs.writeFileSync(fix.env.FAKE_RECENT, 'Read the file /tmp/old/previous-brief.md in full and execute it.\n');
+    // Mutation captured: the previous prompt's generic marker must not
+    // count as arrival evidence for a new amendment.
+    const r = cmd(fix, ['dispatch', 'build', amend, '--amend', '--no-wait'], {
+      HERDR_SOHO_PROMPT_CHECK_SECONDS: '1',
+      HERDR_SOHO_PROMPT_SETTLE_SECONDS: '0',
+    });
+    assert.equal(r.status, 15, r.stderr);
+    assert.equal(JSON.parse(r.stdout.trim().split('\n').pop()).wait_status, 'not-received');
+    assert.deepEqual(fix.log().split('\n').filter((l) => l.startsWith('agent send-keys ')), []);
+  } finally { fix.cleanup(); }
+});
+
+test('arrival: s1 control with no prompt evidence stays not-received', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-arr-control-no-prompt-');
+  try {
+    const brief = fix.brief('brief.md', BRIEF);
+    fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fs.writeFileSync(fix.env.FAKE_SCREEN, 'unchanged work screen\n');
+    fs.writeFileSync(fix.env.FAKE_RECENT, 'old work output without a prompt marker\n');
+    // Mutation captured: accepting a lost prompt without either the unique
+    // composed path or a changed seq must not report queued.
+    const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait'], {
+      HERDR_SOHO_PROMPT_CHECK_SECONDS: '1',
+      HERDR_SOHO_PROMPT_SETTLE_SECONDS: '0',
+    });
+    assert.equal(r.status, 15, r.stderr);
+    assert.equal(JSON.parse(r.stdout.trim().split('\n').pop()).wait_status, 'not-received');
+    assert.deepEqual(fix.log().split('\n').filter((l) => l.startsWith('agent send-keys ')), []);
+  } finally { fix.cleanup(); }
+});
+
+test('arrival: working target with a moved seq counts as received', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-arr-working-seq-');
+  try {
+    const brief = fix.brief('brief.md', BRIEF);
+    fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
+      fs.writeFileSync(process.env.FAKE_SEQ, '6\\n');
+    `);
+    // Mutation captured: if Rule 1 stops accepting working with a changed seq, this exits 15 after the window.
+    const r = cmd(fix, ['dispatch', 'build', brief, '--no-wait'], {
+      HERDR_SOHO_PROMPT_CHECK_SECONDS: '1',
+      HERDR_SOHO_PROMPT_SETTLE_SECONDS: '0',
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout.trim().split('\n').pop()).wait_status, 'submitted');
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'build.queued')), false);
+    assert.deepEqual(fix.log().split('\n').filter((l) => l.startsWith('agent send-keys ')), []);
+  } finally { fix.cleanup(); }
+});
+
+// (a) idle target with changing screen and no prompt proof keeps the legacy resend behavior.
+test('arrival (a): idle target with changing screen, loses both prompts -> 1 resend and not-received exit 15', { timeout: 60000 }, () => {
   const fix = makeFix('ha-arr-a-');
   try {
     const brief = fix.brief('brief.md', BRIEF);
-    // Target is working with unchanging seq 1. On prompt, screen redraws itself without prompt path.
-    fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
+    // On prompt, the idle target redraws its screen without the prompt path.
+    fs.writeFileSync(fix.env.FAKE_MODE, 'idle\n');
     fs.writeFileSync(fix.env.FAKE_SEQ, '1\n');
     fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
       // Redraws screen with boot messages on each prompt
@@ -213,12 +359,12 @@ test('arrival (a): target blinks working with same seq and changing screen, lose
   } finally { fix.cleanup(); }
 });
 
-// (b) o mesmo alvo que recebe o reenvio (seq muda) -> recebido, um reenvio
-test('arrival (b): target blinks working with same seq on prompt 1, but receives resend (seq changes) -> received with 1 resend', { timeout: 60000 }, () => {
+// (b) idle target receives the resend when its seq changes.
+test('arrival (b): idle target receives resend (seq changes) -> received with 1 resend', { timeout: 60000 }, () => {
   const fix = makeFix('ha-arr-b-');
   try {
     const brief = fix.brief('brief.md', BRIEF);
-    fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
+    fs.writeFileSync(fix.env.FAKE_MODE, 'idle\n');
     fs.writeFileSync(fix.env.FAKE_SEQ, '1\n');
     fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
       if (count === 1) {
@@ -226,6 +372,7 @@ test('arrival (b): target blinks working with same seq on prompt 1, but receives
         fs.writeFileSync(process.env.FAKE_SCREEN, 'boot welcome redraw 1\\n');
       } else {
         // Second prompt received: state_change_seq increments to 2
+        fs.writeFileSync(process.env.FAKE_MODE, 'working\\n');
         fs.writeFileSync(process.env.FAKE_SEQ, '2\\n');
         fs.writeFileSync(process.env.FAKE_SCREEN, 'thinking...\\n');
       }
@@ -330,11 +477,12 @@ test('arrival (d): settle wait waits for interactive_ready and two identical vis
     ]));
 
     fs.writeFileSync(fix.env.FAKE_READY, 'true\n');
-    fs.writeFileSync(fix.env.FAKE_MODE, 'working\n');
+    fs.writeFileSync(fix.env.FAKE_MODE, 'idle\n');
     fs.writeFileSync(fix.env.FAKE_SEQ, '1\n');
 
     // Update FAKE_PROMPT_HOOK for prompt arrival
     fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
+      fs.writeFileSync(process.env.FAKE_MODE, 'working\\n');
       fs.writeFileSync(process.env.FAKE_SEQ, '2\\n');
     `);
 
@@ -362,9 +510,11 @@ test('arrival (d): settle wait waits for interactive_ready and two identical vis
 
     // Sub-case d2: prompt_settle_seconds=0 disables settle check completely
     fs.writeFileSync(fix.env.FAKE_LOG, '');
+    fs.writeFileSync(fix.env.FAKE_MODE, 'idle\n');
     fs.writeFileSync(fix.env.FAKE_READY, 'false\n'); // even if ready is false
     fs.writeFileSync(fix.env.FAKE_SEQ, '1\n');
     fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
+      fs.writeFileSync(process.env.FAKE_MODE, 'working\\n');
       fs.writeFileSync(process.env.FAKE_SEQ, '2\\n');
     `);
 
@@ -385,10 +535,12 @@ test('arrival (d): settle wait waits for interactive_ready and two identical vis
 
     // Sub-case d3: target does not settle within prompt_settle_seconds -> warns and sends anyway
     fs.writeFileSync(fix.env.FAKE_LOG, '');
+    fs.writeFileSync(fix.env.FAKE_MODE, 'idle\n');
     fs.writeFileSync(fix.env.FAKE_READY, 'false\n');
     fs.writeFileSync(fix.env.FAKE_SCREEN, 'never-settling\n');
     fs.writeFileSync(fix.env.FAKE_SEQ, '1\n');
     fs.writeFileSync(fix.env.FAKE_PROMPT_HOOK, `
+      fs.writeFileSync(process.env.FAKE_MODE, 'working\\n');
       fs.writeFileSync(process.env.FAKE_SEQ, '2\\n');
     `);
 
@@ -450,10 +602,8 @@ test('arrival (e): screen changed and composed prompt path visible outside last 
   } finally { fix.cleanup(); }
 });
 
-// (f) reprodução das sondas A e D: agente working com mesmo state_change_seq, texto do prompt na tela
-// visível e na recente com 4 linhas depois -> recebido via regra 4 (exit 0, nenhum Enter, nenhum reenvio),
-// tanto em dispatch quanto em --amend
-test('arrival (f): probes A and D - working target with same seq, prompt text on visible screen + recent with 4 trailing lines -> received via rule 4 without Enter or resend', { timeout: 60000 }, () => {
+// (f) a working target with the prompt visible stays queued, with no Enter or resend, for dispatch and amend.
+test('arrival (f): working target with prompt visible is queued without Enter or resend, including amend', { timeout: 60000 }, () => {
   const fix = makeFix('ha-arr-f-');
   try {
     const brief = fix.brief('brief.md', BRIEF);
@@ -485,6 +635,7 @@ test('arrival (f): probes A and D - working target with same seq, prompt text on
     // Sonda A: plain dispatch
     // Mutation captured: evaluating promptSitsInInput before rule 4 treats the prompt marker
     // in the last 15 lines of visible screen as text stuck in the input box, sending Enter and exiting 15.
+    // Mutation captured: returning submitted instead of queued for a working prompt echo changes this result.
     const rA = cmd(fix, ['dispatch', 'build', brief, '--no-wait'], {
       HERDR_SOHO_PROMPT_CHECK_SECONDS: '1',
       HERDR_SOHO_PROMPT_SETTLE_SECONDS: '0',
@@ -492,7 +643,7 @@ test('arrival (f): probes A and D - working target with same seq, prompt text on
 
     assert.equal(rA.status, 0, `probe A expected exit 0, got ${rA.status}. stderr: ${rA.stderr}`);
     const jA = JSON.parse(rA.stdout.trim().split('\n').pop());
-    assert.equal(jA.wait_status, 'submitted');
+    assert.equal(jA.wait_status, 'queued');
     assert.equal('resent' in jA, false, 'probe A must not resend');
 
     const logA = fix.log().split('\n').filter(Boolean);
@@ -514,7 +665,7 @@ test('arrival (f): probes A and D - working target with same seq, prompt text on
 
     assert.equal(rD.status, 0, `probe D expected exit 0, got ${rD.status}. stderr: ${rD.stderr}`);
     const jD = JSON.parse(rD.stdout.trim().split('\n').pop());
-    assert.equal(jD.wait_status, 'submitted');
+    assert.equal(jD.wait_status, 'queued');
     assert.equal('resent' in jD, false, 'probe D must not resend');
 
     const logD = fix.log().split('\n').filter(Boolean);

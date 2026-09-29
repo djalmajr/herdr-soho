@@ -997,3 +997,19 @@ test('stats: an accepted pair with the not-received arrival mark counts once, pe
     assert.ok(!rt.stdout.includes('lost briefs'), 'no lost pairs, no section');
   } finally { fix.cleanup(); }
 });
+
+test('stats: an accepted queued pair does not count as not_received', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-stats-queued-');
+  try {
+    fix.roster(fix.row('q'));
+    fix.prompt('q', '20260928T100000', 'implementer', { mtime: T0 });
+    fix.report('q', '20260928T100000', '# Report\n\ndone.\n', { mtime: T0 + MIN });
+    fix.sidecar('q', '20260928T100000', {
+      version: 1, kind: 'grok', model: 'm-q', effort: 'full', submission: 'accepted', arrival: 'queued',
+    });
+    // Mutation captured: counting every non-empty arrival mark incorrectly includes queued prompts.
+    const r = fix.stats(['--json']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).roles.implementer.not_received, 0);
+  } finally { fix.cleanup(); }
+});

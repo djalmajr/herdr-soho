@@ -44,8 +44,16 @@ const modeOf = (t) => {
   try { return fs.readFileSync(process.env.FAKE_MODE, 'utf8').trim(); } catch { return 'working'; }
 };
 const screenOf = (t) => {
-  try { return fs.readFileSync(process.env.FAKE_SCREEN_DIR + '/screen-' + t, 'utf8'); }
-  catch { try { return fs.readFileSync(process.env.FAKE_SCREEN, 'utf8'); } catch { return ''; } }
+  const recent = argv.includes('recent-unwrapped');
+  const dir = recent ? process.env.FAKE_RECENT_DIR : process.env.FAKE_SCREEN_DIR;
+  const file = recent ? process.env.FAKE_RECENT : process.env.FAKE_SCREEN;
+  try { return fs.readFileSync(dir + '/' + (recent ? 'recent-' : 'screen-') + t, 'utf8'); }
+  catch {
+    if (recent) {
+      try { return fs.readFileSync(process.env.FAKE_SCREEN_DIR + '/screen-' + t, 'utf8'); } catch {}
+    }
+    try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
+  }
 };
 if (cmd === 'agent get') {
   const m = modeOf(t);
@@ -83,8 +91,9 @@ function makeFix(prefix) {
   const ws = path.join(state, 'ws');
   const modeDir = path.join(root, 'modes');
   const screenDir = path.join(root, 'screens');
+  const recentDir = path.join(root, 'recent');
   for (const d of [bin, repo, ws, path.join(ws, 'briefs'), path.join(ws, 'reports'), path.join(ws, 'wait'),
-    modeDir, screenDir, path.join(root, 'home'), path.join(root, 'conf'), path.join(root, 'tmp')]) {
+    modeDir, screenDir, recentDir, path.join(root, 'home'), path.join(root, 'conf'), path.join(root, 'tmp')]) {
     fs.mkdirSync(d, { recursive: true });
   }
   writeFakeCli(bin, 'herdr', HERDR_FAKE);
@@ -94,12 +103,15 @@ function makeFix(prefix) {
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
     HERDR_WORKSPACE_ID: 'ws',
+    HERDR_SOCKET_PATH: path.join(root, 'missing-herdr.sock'),
     HERDR_ENV: '1',
     HERDR_SOHO_REGRID: 'off',
     FAKE_MODE: path.join(root, 'mode'),
     FAKE_MODE_DIR: modeDir,
     FAKE_SCREEN: path.join(root, 'screen'),
     FAKE_SCREEN_DIR: screenDir,
+    FAKE_RECENT: path.join(root, 'recent-screen'),
+    FAKE_RECENT_DIR: recentDir,
     FAKE_LOG: path.join(root, 'herdr.log'),
     FAKE_SEQ: path.join(root, 'seq'),
     HA_LIST: path.join(root, 'list.json'),
@@ -115,6 +127,8 @@ function makeFix(prefix) {
     liveList(agents) { fs.writeFileSync(env.HA_LIST, JSON.stringify({ result: { agents } }) + '\n'); },
     screen(s) { fs.writeFileSync(env.FAKE_SCREEN, s); },
     screenOf(agent, s) { fs.writeFileSync(path.join(screenDir, `screen-${agent}`), s); },
+    recent(s) { fs.writeFileSync(env.FAKE_RECENT, s); },
+    recentOf(agent, s) { fs.writeFileSync(path.join(recentDir, `recent-${agent}`), s); },
     writeRoster(...rows) { fs.writeFileSync(path.join(ws, 'agents.tsv'), H12 + rows.join('\n') + '\n'); },
     waitExists(agent, name) { return fs.existsSync(path.join(ws, 'wait', `${agent}.${name}`)); },
     logLines() {
@@ -268,6 +282,137 @@ test('status: a blocked worker on an approval screen keeps the old TSV line', { 
 });
 
 // ---------- a not-received marker: read-only, rc 15, no key ----------
+
+test('status: a queued marker stays working while the target is working', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-status-queued-working-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'w.queued'), `${Math.floor(Date.now() / 1000) - 120} 5\n`);
+    fix.modeOf('w', 'working');
+    // Mutation captured: treating .queued like .not-received reports rc 15 while the worker is still busy.
+    const r = cmd(fix, ['status', 'w']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^w\tworking\t/);
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'w.queued')), true, 'status is read-only');
+    assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
+  } finally { fix.cleanup(); }
+});
+
+test('status: queued input is not-received, while quota after queued keeps exit 11', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-status-queued-stopped-');
+  try {
+    fix.writeRoster(ROW('lost', 'implementer', 'grok', 'grok-4.7', 'build'),
+      ROW('quota', 'researcher', 'grok', 'grok-4.7', 'build'));
+    const prompt = path.join(fix.ws, 'briefs', 'lost-queued.md');
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'lost.queued'), `1 5 ${prompt}\n`);
+    fix.modeOf('lost', 'idle');
+    fix.screenOf('lost', `Welcome\n> Read the file ${prompt} in full\n`);
+    fs.writeFileSync(fix.env.FAKE_SEQ, '9\n');
+    // Mutation captured: disabling the queued status branch leaves this
+    // input-box prompt as no-report-yet instead of rc 15.
+    const r15 = cmd(fix, ['status', 'lost']);
+    assert.equal(r15.status, 15, r15.stderr);
+    assert.match(r15.stdout, /^lost\tnot-received\t/);
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'lost.queued')), true, 'status is read-only');
+
+    const quotaPrompt = path.join(fix.ws, 'briefs', 'quota-queued.md');
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'quota.queued'), `1 5 ${quotaPrompt}\n`);
+    fix.modeOf('quota', 'idle');
+    fix.screenOf('quota', "You've hit your usage limit. Try again in 5 hours\n");
+    const r11 = cmd(fix, ['status', 'quota']);
+    assert.equal(r11.status, 11, r11.stderr);
+    assert.equal(JSON.parse(r11.stdout.trim()).status, 'quota');
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'quota.queued')), true, 'status is read-only');
+
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'quota.not-received'), '1 5\n');
+    // Mutation captured: consulting the queued branch before the regular
+    // quota probe hides quota even when the old .not-received seq moved.
+    const control = cmd(fix, ['status', 'quota']);
+    assert.equal(control.status, 11, control.stderr);
+    assert.equal(JSON.parse(control.stdout.trim()).status, 'quota');
+  } finally { fix.cleanup(); }
+});
+
+test('status: queued path uses unwrapped history while quota still uses visible screen', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-status-queued-wrap-quota-');
+  try {
+    fix.writeRoster(ROW('wrapped', 'implementer', 'grok', 'grok-4.7', 'build'),
+      ROW('quota', 'implementer', 'grok', 'grok-4.7', 'build'));
+    const prompt = path.join(fix.ws, 'briefs', 'wrapped-path.md');
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'wrapped.queued'), `1 5 ${prompt}\n`);
+    fix.modeOf('wrapped', 'idle');
+    const cut = Math.floor(prompt.length / 2);
+    fix.screenOf('wrapped', `> Read the file ${prompt.slice(0, cut)}\n${prompt.slice(cut)} in full\n`);
+    fix.recentOf('wrapped', `> Read the file ${prompt} in full\n`);
+    // Mutation captured: checking the wrapped viewport misses the exact prompt path and hides not-received.
+    const wrapped = cmd(fix, ['status', 'wrapped']);
+    assert.equal(wrapped.status, 15, wrapped.stderr);
+    assert.match(wrapped.stdout, /^wrapped\tnot-received\t/);
+
+    const quotaPrompt = path.join(fix.ws, 'briefs', 'quota-path.md');
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'quota.queued'), `1 5 ${quotaPrompt}\n`);
+    fix.modeOf('quota', 'idle');
+    const quotaVisible = `You've hit your usage limit. Try again in 5 hours\n> Read the file ${quotaPrompt} in full\n`;
+    fix.screenOf('quota', quotaVisible);
+    fix.recentOf('quota', quotaVisible);
+    // Mutation captured: skipping quota detection while the queued prompt is visible reports not-received instead of quota.
+    const quota = cmd(fix, ['status', 'quota']);
+    assert.equal(quota.status, 11, quota.stderr);
+    assert.equal(JSON.parse(quota.stdout.trim()).status, 'quota');
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'quota.queued')), true, 'status remains read-only');
+  } finally { fix.cleanup(); }
+});
+
+test('status: provider failure wins when the queued prompt path is in the input box', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-status-queued-provider-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer', 'grok', 'grok-4.7', 'build'));
+    const prompt = path.join(fix.ws, 'briefs', 'provider-path.md');
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'w.queued'), `1 5 ${prompt}\n`);
+    fix.modeOf('w', 'idle');
+    const screen = `Error: 401 Unauthorized: Incorrect API key provided\n> Read the file ${prompt} in full\n`;
+    fix.screenOf('w', screen);
+    fix.recentOf('w', screen);
+    // Mutation captured: ignoring provider stops in queued input mislabels terminal auth as not-received.
+    const r = cmd(fix, ['status', 'w']);
+    assert.equal(r.status, 14, r.stderr);
+    assert.equal(JSON.parse(r.stdout.trim()).status, 'provider-error');
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'w.queued')), true, 'status remains read-only');
+  } finally { fix.cleanup(); }
+});
+
+test('status: a queued input path never overrides a working state', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-status-queued-working-path-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    const prompt = path.join(fix.ws, 'briefs', 'working-path.md');
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'w.queued'), `1 5 ${prompt}\n`);
+    fix.modeOf('w', 'working');
+    const screen = `> Read the file ${prompt} in full\n`;
+    fix.screenOf('w', screen);
+    fix.recentOf('w', screen);
+    // Mutation captured: dropping the original-working guard reports not-received while the task is still active.
+    const r = cmd(fix, ['status', 'w']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^w\tworking\t/);
+    assert.equal(fs.existsSync(path.join(fix.ws, 'wait', 'w.queued')), true, 'status remains read-only');
+  } finally { fix.cleanup(); }
+});
+
+test('status: a dash in the not-received seq field means the seq is absent', { timeout: 30000 }, () => {
+  const fix = makeFix('ha-status-nr-dash-seq-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    fix.modeOf('w', 'idle');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '9\n');
+    fs.writeFileSync(path.join(fix.ws, 'wait', 'w.not-received'), '1 -\n');
+    // Mutation captured: treating the sentinel dash as a real seq makes any numeric state seq appear to move.
+    const r = cmd(fix, ['status', 'w']);
+    assert.equal(r.status, 15, r.stderr);
+    assert.match(r.stdout, /^w\tnot-received\t/);
+    assert.equal(fs.readFileSync(path.join(fix.ws, 'wait', 'w.not-received'), 'utf8'), '1 -\n');
+  } finally { fix.cleanup(); }
+});
 
 // A dispatch that ended not-received recorded the moment, and the agent is
 // not working or blocked: the status is not-received (rc 15, through the

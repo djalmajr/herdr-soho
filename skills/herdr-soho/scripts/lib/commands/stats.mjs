@@ -362,8 +362,8 @@ export function cmdStats(argv, ctx, env = process.env, cwd = process.cwd()) {
     else a.tasks += 1;
     if (p.noReport === 'pending') a.pending += 1;
     else if (p.noReport === 'lost') { a.lost += 1; a.lostBriefs.push(p.prompt); }
-    // The arrival mark of the winning sidecar: one accepted pair, one
-    // count — a legacy pair (no sidecar) carries no arrival proof.
+    // Only an explicit not-received arrival mark counts here. A queued
+    // prompt was accepted and is pending the worker's current turn.
     if (p.sidecar !== null && p.sidecar.submission === 'accepted' && p.sidecar.arrival === 'not-received') a.notReceived += 1;
     if (p.minutes !== null) a.minutes.push(p.minutes);
     a.partials += p.partials;
