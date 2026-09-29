@@ -33,6 +33,50 @@ above updates any existing `herdr-soho` installation; skip it if you want
 to keep your current version. `herdr-soho` replaces the former
 `herdr-agents` skill; see [Migrating from herdr-agents](#migrating-from-herdr-agents).
 
+## Instalação do binário
+
+No macOS ou Linux, baixe e execute o instalador:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/djalmajr/herdr-soho/main/install.sh -o install.sh
+sh install.sh
+```
+
+No Windows PowerShell 5.1+, baixe e execute o instalador:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/djalmajr/herdr-soho/main/install.ps1 -OutFile "$env:TEMP\herdr-soho-install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\herdr-soho-install.ps1"
+```
+
+Para instalar uma versão específica, passe `--version vX.Y.Z` ao `install.sh`
+ou `-Version vX.Y.Z` ao `install.ps1`. Sem versão, os instaladores baixam a
+última release estável; uma pré-release (tag com hífen, como `v0.2.0-rc.1`)
+só é instalada pedindo a versão, e enquanto não houver release estável é
+preciso passá-la. Os instaladores verificam o arquivo
+`SHA256SUMS` da mesma release antes de substituir o binário. Eles instalam no
+diretório do usuário sem alterar o `PATH`; mostram a linha necessária quando o
+diretório ainda não está nele. No Windows, `-AddToPath` altera o `PATH` do
+usuário.
+
+Também é possível baixar um binário manualmente. Escolha `herdr-soho_<os>_<arch>`
+na página de [releases](https://github.com/djalmajr/herdr-soho/releases), baixe
+`SHA256SUMS` da mesma release e confira o nome exato do arquivo:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+No macOS, use `shasum -a 256 herdr-soho_darwin_arm64` e compare o hash impresso
+com a linha correspondente em `SHA256SUMS`. No Windows PowerShell, use:
+
+```powershell
+Get-FileHash .\herdr-soho_windows_amd64.exe -Algorithm SHA256
+```
+
+Compare o hash exibido com a linha do mesmo nome em `SHA256SUMS` antes de rodar
+o binário baixado.
+
 ## Migrating from herdr-agents
 
 `herdr-soho` is the new name of the `herdr-agents` skill, CLI and plugin.

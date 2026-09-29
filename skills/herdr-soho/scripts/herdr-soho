@@ -1,12 +1,63 @@
 #!/bin/sh
-# herdr-soho — launcher for the JavaScript entry (herdr-soho.mjs, next
-# to this file). Runs the entry with node when it is on PATH and is version
-# 20 or newer, else with bun; passes every argument through and exits with
-# the runtime's code. The directory is resolved physically (pwd -P), so the
-# launcher also works when it is invoked through a symlinked directory
-# (the setup hooks call it that way).
+# herdr-soho — prefer the installed Go binary; keep the JS entry as a fallback.
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P) || exit 2
+script_path=$script_dir/$(basename -- "$0")
+
+# The installed binary lives outside the skill tree: tell it where the skill is.
+if [ -z "${HERDR_SOHO_SKILL_DIR:-}" ]; then
+  HERDR_SOHO_SKILL_DIR=$(CDPATH= cd -- "$script_dir/.." && pwd -P) || exit 2
+  export HERDR_SOHO_SKILL_DIR
+fi
+
+resolve_path() {
+  resolved=$1
+  resolved=$(CDPATH= cd -- "$(dirname -- "$resolved")" && pwd -P)/$(basename -- "$resolved") || return 1
+  hops=0
+  while [ -L "$resolved" ] && [ "$hops" -lt 40 ]; do
+    target=$(readlink "$resolved" 2>/dev/null) || return 1
+    case $target in
+      /*) resolved=$target ;;
+      *) resolved=$(dirname -- "$resolved")/$target ;;
+    esac
+    resolved=$(CDPATH= cd -- "$(dirname -- "$resolved")" && pwd -P)/$(basename -- "$resolved") || return 1
+    hops=$((hops + 1))
+  done
+  [ -f "$resolved" ] || return 1
+  printf '%s\n' "$resolved"
+}
+
+is_binary() {
+  [ -f "$1" ] && [ -x "$1" ] || return 1
+  first_bytes=$(dd if="$1" bs=2 count=1 2>/dev/null)
+  [ "$first_bytes" = '#!' ] && return 1
+  return 0
+}
+
+if [ "${HERDR_SOHO_JS:-}" = 1 ]; then
+  js_only=1
+else
+  js_only=0
+fi
+
+if [ "$js_only" -eq 0 ]; then
+  if [ "${HERDR_SOHO_BIN+x}" = x ]; then
+    if ! is_binary "$HERDR_SOHO_BIN"; then
+      printf 'herdr-soho: HERDR_SOHO_BIN is missing or not an executable binary: %s\n' "$HERDR_SOHO_BIN" >&2
+      exit 2
+    fi
+    exec "$HERDR_SOHO_BIN" "$@"
+  fi
+
+  path_bin=$(command -v herdr-soho 2>/dev/null || true)
+  if [ -n "$path_bin" ] && is_binary "$path_bin"; then
+    candidate_path=$(resolve_path "$path_bin" 2>/dev/null || true)
+    own_path=$(resolve_path "$script_path" 2>/dev/null || true)
+    if [ -n "$candidate_path" ] && [ "$candidate_path" != "$own_path" ]; then
+      exec "$path_bin" "$@"
+    fi
+  fi
+fi
 
 node_bin=$(command -v node 2>/dev/null || true)
 if [ -n "$node_bin" ]; then
@@ -26,5 +77,5 @@ if [ -n "$bun_bin" ]; then
   exec "$bun_bin" "$script_dir/herdr-soho.mjs" "$@"
 fi
 
-printf 'herdr-soho: needs Node.js 20+ or Bun\n' >&2
+printf 'herdr-soho: install the herdr-soho binary (install.sh / install.ps1 from the GitHub releases) or Node.js 20+ / Bun\n' >&2
 exit 2

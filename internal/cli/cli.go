@@ -1,0 +1,344 @@
+package cli
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime/debug"
+	"strconv"
+	"strings"
+
+	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/herdr-soho/internal/doctor"
+	"github.com/djalmajr/herdr-soho/internal/herdr"
+	"github.com/djalmajr/herdr-soho/internal/kinds"
+	"github.com/djalmajr/herdr-soho/internal/peer"
+	"github.com/djalmajr/herdr-soho/internal/platform"
+	pluginpkg "github.com/djalmajr/herdr-soho/internal/plugin"
+	"github.com/djalmajr/herdr-soho/internal/setup"
+	"github.com/djalmajr/herdr-soho/internal/spawn"
+	"github.com/djalmajr/herdr-soho/internal/stats"
+	waitpkg "github.com/djalmajr/herdr-soho/internal/wait"
+)
+
+var knownCommands = map[string]bool{
+	"config": true, "session": true, "roles": true, "role": true, "kinds": true,
+	"models": true, "model": true, "spawn": true, "dispatch": true, "lint": true,
+	"find": true, "run": true, "status": true, "wait": true, "collect": true,
+	"send": true, "stats": true, "release": true, "clean": true, "setup": true,
+	"doctor": true, "explain": true, "init": true, "title": true, "regrid": true,
+	"roster": true, "friction": true, "feedback": true, "tab-label": true,
+	"layout-plan": true, "env": true, "mutation-guard": true,
+}
+
+var frictionLogPath string
+
+// version is set for release builds with -ldflags. Keep dev builds useful by
+// appending the VCS revision recorded by the Go toolchain when available.
+var version = "dev"
+
+func versionText(buildVersion, revision string) string {
+	if buildVersion == "" {
+		buildVersion = "dev"
+	}
+	if buildVersion == "dev" && revision != "" {
+		buildVersion += "+" + revision
+	}
+	return "herdr-soho " + buildVersion + "\n"
+}
+
+func vcsRevision() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			return setting.Value
+		}
+	}
+	return ""
+}
+
+// liveAgentsFriction adapts herdr.LiveAgents' DieError-equivalent panics at
+// living command boundaries. The JS entry records non-empty DieErrors for
+// these commands, while an empty message only preserves Herdr's exit code.
+func liveAgentsFriction(env platform.Env) []any {
+	defer func() {
+		if value := recover(); value != nil {
+			exitErr, ok := value.(*platform.ExitError)
+			if !ok {
+				panic(value)
+			}
+			platform.DieFriction(exitErr.Msg, exitErr.Code)
+		}
+	}()
+	return herdr.LiveAgents(env, herdr.Timeout)
+}
+
+// Run routes the commands implemented in Go and delegates the rest to JS.
+func Run(args []string, env platform.Env) (code int) {
+	frictionLogPath = ""
+	defer func() {
+		value := recover()
+		if value == nil {
+			return
+		}
+		exitErr, ok := value.(*platform.ExitError)
+		if !ok {
+			panic(value)
+		}
+		if exitErr.Msg != "" {
+			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", exitErr.Msg)
+			if exitErr.Friction && frictionLogPath != "" {
+				core.RecordFrictionError(exitErr.Msg, exitErr.Code, frictionLogPath)
+			}
+		}
+		code = exitErr.Code
+	}()
+	if len(args) == 1 && args[0] == "--version" {
+		_, _ = io.WriteString(platform.Stdout, versionText(version, vcsRevision()))
+		return 0
+	}
+
+	decisionEnv := env.Clone()
+	applyLegacyEnv(decisionEnv)
+	command := ""
+	if len(args) != 0 {
+		command = args[0]
+	}
+	core.SetFrictionCommand(command)
+	var configCtx *core.Config
+	commandCwd, _ := os.Getwd()
+	var commandConfig *core.Config
+	readOnlyRejectedDoctor := command == "doctor" && decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && len(args) > 1
+	if !readOnlyRejectedDoctor && (command == "config" || command == "session" || command == "roles" || command == "role" || command == "explain" || command == "layout-plan" || command == "regrid" || command == "tab-label" || command == "stats" || command == "collect" || command == "setup" || command == "release" || command == "doctor" || command == "init" || command == "spawn" || command == "dispatch" || command == "run" || command == "lint" || command == "wait" || command == "status") {
+		ctx := core.LoadConfig(decisionEnv, commandCwd)
+		configCtx = &ctx
+	}
+	if command == "env" {
+		ctx := core.LoadConfig(decisionEnv, commandCwd)
+		configCtx = &ctx
+	}
+	if command == "send" || command == "find" {
+		ctx := core.LoadConfig(decisionEnv, commandCwd)
+		commandConfig = &ctx
+	}
+	if decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && !(len(args) == 1 && (command == "doctor" || command == "roster")) {
+		shown, extra := command, ""
+		if command == "" {
+			shown = "(none)"
+		} else if len(args) > 1 {
+			count := len(args) - 1
+			noun := "argument"
+			if count > 1 {
+				noun = "arguments"
+			}
+			extra = fmt.Sprintf(" (%d extra %s not allowed)", count, noun)
+		}
+		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only the exact 'doctor' and 'roster' invocations run (the plugin's actions); rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
+	}
+	if command == "help" || command == "-h" || command == "--help" || command == "" {
+		_, _ = io.WriteString(platform.Stdout, usage)
+		return 0
+	}
+	if command == "plugin" {
+		if len(args) < 2 || (args[1] != "bridge" && args[1] != "clipboard" && args[1] != "picker") {
+			return pluginpkg.PluginCommand(args[1:], env, platform.Current(), "", "")
+		}
+		input := ""
+		if args[1] == "clipboard" {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				fmt.Fprintf(platform.Stderr, "herdr-soho plugin: cannot read clipboard input: %s\n", err)
+				return 2
+			}
+			input = string(data)
+		}
+		executable, err := os.Executable()
+		if err != nil && (args[1] == "bridge" || args[1] == "picker") {
+			fmt.Fprintf(platform.Stderr, "herdr-soho plugin: cannot resolve executable: %s\n", err)
+			return 4
+		}
+		return pluginpkg.PluginCommand(args[1:], env, platform.Current(), executable, input)
+	}
+	if !knownCommands[command] {
+		platform.Die("unknown command '"+command+"'", 2)
+	}
+	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" {
+		ctx := core.LoadConfig(decisionEnv, commandCwd)
+		commandConfig = &ctx
+		herdr.RequireEnv(decisionEnv, platform.Current(), os.Getpid(), nil)
+		frictionLogPath = ""
+		if !core.Nowrite(decisionEnv) {
+			if _, found := platform.FindExecutable("herdr", decisionEnv, platform.Current()); found {
+				frictionLogPath = filepath.Join(core.StateDir(commandConfig, decisionEnv, commandCwd), "friction.log")
+			}
+		}
+	}
+	if command == "wait" || command == "status" {
+		waitpkg.SetFrictionLogFile(frictionLogPath)
+	}
+	if command == "collect" {
+		frictionLogPath = ""
+		if !core.Nowrite(decisionEnv) {
+			if _, found := platform.FindExecutable("herdr", decisionEnv, platform.Current()); found {
+				frictionLogPath = filepath.Join(core.StateDir(configCtx, decisionEnv, commandCwd), "friction.log")
+			}
+		}
+	}
+	if command == "mutation-guard" {
+		return runMutationGuard(args[1:], decisionEnv)
+	}
+	if command == "config" || command == "session" {
+		if command == "config" {
+			if len(args) > 1 && args[1] == "set" {
+				core.CmdConfigSet(args[2:], configCtx, decisionEnv, commandCwd)
+			} else {
+				core.CmdConfig(configCtx, decisionEnv, commandCwd)
+			}
+			return 0
+		}
+		core.CmdSession(args[1:], configCtx, decisionEnv, commandCwd)
+		return 0
+	}
+	if command == "setup" {
+		setup.CmdSetup(args[1:], configCtx, decisionEnv, commandCwd)
+		return 0
+	}
+	if command == "doctor" {
+		doctor.CmdDoctor(args[1:], configCtx, decisionEnv, commandCwd)
+		return 0
+	}
+	if command == "init" {
+		doctor.CmdInit(configCtx, decisionEnv, commandCwd)
+		return 0
+	}
+	ctx := commandConfig
+	if ctx == nil {
+		ctx = configCtx
+	}
+	switch command {
+	case "kinds":
+		kinds.CmdKinds(decisionEnv, platform.Current())
+		return 0
+	case "models":
+		return cmdModels(args[1:], decisionEnv)
+	case "model":
+		return cmdModel(args[1:], decisionEnv)
+	case "env":
+		cmdEnv(configCtx, decisionEnv, commandCwd)
+		return 0
+	case "roster":
+		cmdRoster(ctx, decisionEnv, commandCwd)
+		return 0
+	case "friction":
+		cmdFriction(args[1:], ctx, decisionEnv, commandCwd)
+		return 0
+	case "title":
+		cmdTitle(args[1:], decisionEnv)
+		return 0
+	case "clean":
+		cmdClean(args[1:], ctx, decisionEnv, commandCwd)
+		return 0
+	case "release":
+		return cmdRelease(args[1:], ctx, decisionEnv, commandCwd)
+	case "feedback":
+		return cmdFeedback(args[1:], ctx, decisionEnv, commandCwd)
+	case "spawn":
+		spawn.CmdSpawn(args[1:], ctx, decisionEnv, commandCwd)
+		return 0
+	case "dispatch":
+		return cmdDispatch(args[1:], ctx, decisionEnv, commandCwd)
+	case "run":
+		return cmdRun(args[1:], ctx, decisionEnv, commandCwd)
+	case "roles":
+		cmdRoles(decisionEnv, commandCwd)
+		return 0
+	case "role":
+		cmdRole(args[1:], decisionEnv, commandCwd)
+		return 0
+	case "explain":
+		cmdExplain(args[1:], ctx, decisionEnv, commandCwd)
+		return 0
+	case "send":
+		return peer.CmdSend(args[1:], ctx, decisionEnv, commandCwd)
+	case "find":
+		return peer.CmdFind(args[1:], decisionEnv)
+	case "layout-plan":
+		return cmdLayoutPlan(args[1:], ctx, decisionEnv, commandCwd)
+	case "regrid":
+		return cmdRegrid(args[1:], ctx, decisionEnv, commandCwd)
+	case "tab-label":
+		return cmdTabLabel(args[1:], ctx, decisionEnv, commandCwd)
+	case "stats":
+		return stats.CmdStats(args[1:], stats.CommandContext{Config: ctx, Env: decisionEnv, Cwd: commandCwd, FrictionLog: frictionLogPath})
+	case "collect":
+		return stats.CmdCollect(args[1:], stats.CommandContext{Config: ctx, Env: decisionEnv, Cwd: commandCwd, FrictionLog: frictionLogPath})
+	case "wait":
+		return waitpkg.CmdWait(args[1:], ctx, decisionEnv, commandCwd)
+	case "status":
+		return waitpkg.CmdStatus(args[1:], ctx, decisionEnv, commandCwd)
+	case "lint":
+		return cmdLint(args[1:], ctx, decisionEnv, commandCwd)
+	}
+	return runJS(command, args, env)
+}
+
+func withoutArg(args []string, target string) []string {
+	out := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg != target {
+			out = append(out, arg)
+		}
+	}
+	return out
+}
+
+func applyLegacyEnv(env platform.Env) {
+	core.ApplyLegacyEnv(env)
+}
+
+func runJS(command string, args []string, env platform.Env) int {
+	if runtime := env.Get("HERDR_SOHO_JS_RUNTIME"); runtime != "" && validRuntime(runtime, platform.Current()) {
+		skillDir := platform.SkillDir(env)
+		return execute(runtime, append([]string{filepath.Join(skillDir, "scripts", "herdr-soho.mjs")}, args...), env)
+	}
+	node, ok := platform.FindExecutable("node", env, platform.Current())
+	if ok && nodeMajor(node, env) >= 20 {
+		skillDir := platform.SkillDir(env)
+		return execute(node, append([]string{skillDir + string(os.PathSeparator) + "scripts" + string(os.PathSeparator) + "herdr-soho.mjs"}, args...), env)
+	}
+	if bun, found := platform.FindExecutable("bun", env, platform.Current()); found {
+		skillDir := platform.SkillDir(env)
+		return execute(bun, append([]string{skillDir + string(os.PathSeparator) + "scripts" + string(os.PathSeparator) + "herdr-soho.mjs"}, args...), env)
+	}
+	platform.Die("needs Node.js 20+ or Bun", 2)
+	return 2
+}
+
+func validRuntime(runtime, platformName string) bool {
+	if !filepath.IsAbs(runtime) {
+		return false
+	}
+	info, err := os.Stat(runtime)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	return platformName == "win32" || info.Mode().Perm()&0o111 != 0
+}
+
+func nodeMajor(node string, env platform.Env) int {
+	cmd := exec.Command(node, "-e", "process.stdout.write(String(process.versions.node.split('.')[0]))")
+	cmd.Env = env.List()
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if cmd.Run() != nil {
+		return 0
+	}
+	major, _ := strconv.Atoi(strings.TrimSpace(stdout.String()))
+	return major
+}

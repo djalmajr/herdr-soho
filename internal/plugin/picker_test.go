@@ -1,0 +1,282 @@
+package plugin_test
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/plugin"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+)
+
+func readPickerFixture(t *testing.T) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "picker.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture map[string]any
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	return fixture
+}
+
+func pickerFixtureEntries(t *testing.T, fixture map[string]any) []plugin.PickerEntry {
+	t.Helper()
+	data, err := json.Marshal(fixture["entries"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []plugin.PickerEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatal(err)
+	}
+	return entries
+}
+
+func TestPickerFunctionsMatchJSFixture(t *testing.T) {
+	// JS: "differential picker fixture covers filter, controls, UTF-16 rows, key handling and split ESC sequences"
+	// Mutation captured: changing any JS-matched rule changes a fixture result or state transition.
+	fixture := readPickerFixture(t)
+	entries := pickerFixtureEntries(t, fixture)
+	filters := fixture["filters"].([]any)
+	for _, item := range filters {
+		pair := item.([]any)
+		query := pair[0].(string)
+		want := pair[1].([]any)
+		var wantRefs []string
+		for _, ref := range want {
+			wantRefs = append(wantRefs, ref.(string))
+		}
+		if wantRefs == nil {
+			wantRefs = []string{}
+		}
+		gotEntries := plugin.FilterPickerEntries(entries, query)
+		got := make([]string, 0, len(gotEntries))
+		for _, entry := range gotEntries {
+			got = append(got, entry["ref"].(string))
+		}
+		if !reflect.DeepEqual(got, wantRefs) {
+			t.Errorf("filter %q: got %v want %v", query, got, wantRefs)
+		}
+	}
+	strips := fixture["strips"].([]any)
+	stripInputs := []string{"a\tB\nC\x00D\x01E\x7fF\u0080G", "evil\x1b[2J\x1b[31mRED\x1b]52;c;UEFO\x07", "a\x1b]52;c;UEFO\x1b\\b", "a\x1b[31m", "a\x1b]unterminated", "olá — referência 𝄞"}
+	for i, input := range stripInputs {
+		if got, want := plugin.StripPickerControls(input), strips[i].(string); got != want {
+			t.Errorf("strip[%d]=%q want %q", i, got, want)
+		}
+	}
+	for _, item := range fixture["lines"].([]any) {
+		pair := item.([]any)
+		width := int(pair[0].(float64))
+		want := pair[1].([]any)
+		for i, entry := range entries {
+			if got, w := plugin.PickerEntryLine(entry, width), want[i].(string); got != w {
+				t.Errorf("entryLine width %d entry %d=%q want %q", width, i, got, w)
+			}
+		}
+	}
+	for _, item := range fixture["renders"].([]any) {
+		pair := item.([]any)
+		width := int(pair[0].(float64))
+		state := plugin.NewPickerState()
+		state.Entries = entries
+		state.Query = "pinar codex"
+		state.Loading = 1
+		state.Failures = []plugin.PickerFailure{{Label: "windows", Cause: "exit 1: boom\x1b[2J"}}
+		if got, want := plugin.RenderPicker(state, width), pair[1].(string); got != want {
+			t.Errorf("render width %d:\n%q\nwant\n%q", width, got, want)
+		}
+	}
+	state := plugin.NewPickerState()
+	state.Entries = entries
+	for i, item := range fixture["keyResults"].([]any) {
+		expected := item.(map[string]any)
+		key := fixture["keys"].([]any)[i].(string)
+		gotResult := state.ApplyKey(key)
+		if state.Query != expected["query"] || float64(state.Selected) != expected["selected"] || state.Exit != expected["exit"] || gotResult != expected["result"] {
+			t.Errorf("applyKey %s: state query=%q selected=%d exit=%q result=%q", key, state.Query, state.Selected, state.Exit, gotResult)
+		}
+	}
+	chunks := fixture["feed"].([]any)
+	for i, item := range fixture["feedResults"].([]any) {
+		feed := plugin.NewPickerState()
+		feed.Entries = entries
+		expected := item.(map[string]any)
+		chunk := chunks[i].([]any)
+		var result string
+		for _, part := range chunk {
+			result = feed.FeedChunk(part.(string))
+		}
+		if feed.Query != expected["query"] || float64(feed.Selected) != expected["selected"] || feed.Exit != expected["exit"] || feed.EscPending != expected["esc"] || feed.CSIPending != expected["csi"] || result != expected["result"] {
+			t.Errorf("feed %d state=%+v result=%q expected=%v", i, feed, result, expected)
+		}
+		if got, want := feed.FlushEsc(), expected["flush"]; got != want {
+			t.Errorf("flushEsc case %d=%q want %v", i, got, want)
+		}
+	}
+}
+
+func TestPickerPipeCopiesOnEnterAndEscClosesWithoutCopy(t *testing.T) {
+	// JS: "main: Enter copies via the platform tool and notifies; the screen shows the rows"
+	// Mutation captured: changing Enter/Esc outcomes copies the wrong row or returns without selecting the required action.
+	entries := pickerFixtureEntries(t, readPickerFixture(t))
+	state := plugin.NewPickerState()
+	state.Entries = entries
+	if got := state.FeedChunk("\x1b[B"); got != "" || state.Selected != 1 {
+		t.Fatalf("down action=%q selection=%d", got, state.Selected)
+	}
+	if got := state.FeedChunk("\r"); got != "copy" || state.Copied == nil || *state.Copied != "local/w14:pW (-, -, idle) /tmp/soho" {
+		t.Fatalf("enter result=%q copy=%v", got, state.Copied)
+	}
+	esc := plugin.NewPickerState()
+	esc.Entries = entries
+	esc.FeedChunk("\x1b")
+	if got := esc.FlushEsc(); got != "esc" || esc.Copied != nil {
+		t.Fatalf("Esc result=%q copied=%v", got, esc.Copied)
+	}
+}
+
+func TestPickerCommandPipeLoadsFindAndCopiesSelectedEntry(t *testing.T) {
+	// JS: "main: Enter copies via the platform tool and notifies; the screen shows the rows"
+	// Mutation captured: changing find inputs, selected row, clipboard stdin or notification effect breaks the pipe flow.
+	dir := t.TempDir()
+	local := "{\"ref\":\"local/w1:p1\",\"machine\":\"local\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"pane_id\":\"w1:p1\",\"name\":\"first\",\"kind\":\"codex\",\"status\":\"working\",\"workspace_label\":\"soho\",\"tab_label\":\"1\",\"cwd\":\"/tmp/first\"}\n"
+	remote := "{\"ref\":\"windows/w2:p1\",\"machine\":\"windows\",\"workspace_id\":\"w2\",\"tab_id\":\"w2:t1\",\"pane_id\":\"w2:p1\",\"name\":\"second\",\"kind\":\"claude\",\"status\":\"idle\",\"workspace_label\":\"pinar\",\"tab_label\":\"2\",\"cwd\":\"C:\\\\repo\"}\n"
+	cliPath, err := fakecli.Install(t, dir, "herdr-soho", []fakecli.Rule{{Argv: []string{"find", "--json"}, Stdout: local}, {Argv: []string{"find", "--json", "--machine", "windows"}, Stdout: remote}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"windows","enabled":true}]`}, {ArgvPrefix: true, Argv: []string{"notification", "show", "herdr-soho"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clipboard := plugin.ClipboardCandidates(platform.Current())[0][0]
+	_, err = fakecli.InstallWithOptions(t, dir, clipboard, []fakecli.Rule{{AnyArgs: true}}, fakecli.InstallOptions{CaptureStdin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, dir, map[string]string{"HERDR_BIN_PATH": filepath.Join(dir, "herdr")})
+	input, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.CreateTemp(t.TempDir(), "picker-output-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldIn, oldOut := os.Stdin, os.Stdout
+	os.Stdin, os.Stdout = input, output
+	t.Cleanup(func() { os.Stdin, os.Stdout = oldIn, oldOut; _ = input.Close(); _ = writer.Close(); _ = output.Close() })
+	finished := make(chan int, 1)
+	go func() { finished <- plugin.RunPicker(env, platform.Current(), cliPath) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		screen, _ := os.ReadFile(output.Name())
+		if strings.Contains(string(screen), "windows/w2:p1") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err = writer.Write([]byte("\x1b[B\r")); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-finished:
+		if code != 0 {
+			t.Fatalf("picker code=%d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("picker did not finish")
+	}
+	if _, err = output.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	screen, err := os.ReadFile(output.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(screen), "windows/w2:p1") {
+		t.Fatalf("picker screen did not render the remote row: %q", screen)
+	}
+	findCalls, err := fakecli.ReadCallsForConfig(filepath.Join(dir, "herdr-soho.json"))
+	if err != nil || len(findCalls) != 2 || !reflect.DeepEqual(findCalls[0].Argv, []string{"find", "--json"}) || !reflect.DeepEqual(findCalls[1].Argv, []string{"find", "--json", "--machine", "windows"}) {
+		t.Fatalf("find calls=%#v err=%v", findCalls, err)
+	}
+	clipCalls, err := fakecli.ReadCallsForConfig(filepath.Join(dir, clipboard+".json"))
+	if err != nil || len(clipCalls) != 1 || clipCalls[0].Stdin != "windows/w2:p1 (second, claude, idle) C:\\repo" {
+		t.Fatalf("clipboard calls=%#v err=%v", clipCalls, err)
+	}
+	herdrCalls, err := fakecli.ReadCallsForConfig(filepath.Join(dir, "herdr.json"))
+	if err != nil || len(herdrCalls) != 2 || !reflect.DeepEqual(herdrCalls[1].Argv, []string{"notification", "show", "herdr-soho", "--body", "copied windows/w2:p1", "--sound", "none"}) {
+		t.Fatalf("Herdr calls=%#v err=%v", herdrCalls, err)
+	}
+}
+
+func TestPickerPipeEscapeCancelsSlowFindAndNeverCopies(t *testing.T) {
+	// JS: "main: Esc during a slow remote load exits without copying and kills the loads"
+	// Mutation captured: waiting for a find before reading input keeps Esc blocked until the slow child ends.
+	dir := t.TempDir()
+	cliPath, err := fakecli.Install(t, dir, "herdr-soho", []fakecli.Rule{{Argv: []string{"find", "--json"}, Delay: 8000}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: "[]"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, dir, map[string]string{"HERDR_BIN_PATH": filepath.Join(dir, "herdr")})
+	input, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.CreateTemp(t.TempDir(), "picker-escape-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldIn, oldOut := os.Stdin, os.Stdout
+	os.Stdin, os.Stdout = input, output
+	t.Cleanup(func() { os.Stdin, os.Stdout = oldIn, oldOut; _ = input.Close(); _ = writer.Close(); _ = output.Close() })
+	started := time.Now()
+	done := make(chan int, 1)
+	go func() { done <- plugin.RunPicker(env, platform.Current(), cliPath) }()
+	logPath := filepath.Join(dir, "herdr-soho.calls.jsonl")
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(logPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			_, _ = writer.Write([]byte("\x1b"))
+			<-done
+			t.Fatalf("find call did not start before timeout: %v", time.Since(started))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := writer.Write([]byte("\x1b")); err != nil {
+		t.Fatal(err)
+	}
+	if code := <-done; code != 0 {
+		t.Fatalf("picker code=%d", code)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatalf("Esc waited for the slow find: %s", time.Since(started))
+	}
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(dir, "herdr-soho.json"))
+	if err != nil || len(calls) != 1 || !reflect.DeepEqual(calls[0].Argv, []string{"find", "--json"}) {
+		t.Fatalf("find calls=%#v err=%v", calls, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pbcopy.calls.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("Esc invoked clipboard: %v", err)
+	}
+}

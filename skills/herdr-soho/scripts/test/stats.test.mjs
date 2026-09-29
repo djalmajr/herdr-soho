@@ -50,6 +50,21 @@ const amendmentBody = () => `# Amendment to your current brief\n\ndo it differen
 
 const H12 = '# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\n';
 
+test('stats CLI orders agent groups by UTF-16 code units', { timeout: 30000 }, () => {
+  // Mutation captured: localeCompare reverses the report-path order for uppercase and lowercase agent names.
+  const fix = makeFix('ha-stats-utf16-');
+  try {
+    fix.prompt('a', '20260925T100000', 'implementer', { mtime: T0 });
+    fix.prompt('Z', '20260925T100000', 'implementer', { mtime: T0 });
+    fix.sidecar('a', '20260925T100000', { version: 1, kind: 'codex', model: 'gpt-5', effort: 'full', submission: 'accepted' });
+    fix.sidecar('Z', '20260925T100000', { version: 1, kind: 'codex', model: 'gpt-5', effort: 'full', submission: 'accepted' });
+    const result = fix.stats(['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const stats = JSON.parse(result.stdout);
+    assert.deepEqual(stats.lost_briefs.implementer.map((file) => path.basename(file)), ['Z-20260925T100000.md', 'a-20260925T100000.md']);
+  } finally { fix.cleanup(); }
+});
+
 function makeFix(prefix) {
   let root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   const state = path.join(root, 'state');

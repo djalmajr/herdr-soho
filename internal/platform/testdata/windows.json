@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "find": [
+    {
+      "name": "npm",
+      "pathSpec": "first",
+      "pathext": ".EXE;.CMD",
+      "basename": null
+    },
+    {
+      "name": "npm",
+      "pathSpec": "first",
+      "pathext": ".EXE;.CMD;",
+      "basename": null
+    },
+    {
+      "name": "npm",
+      "pathSpec": "first",
+      "pathext": ";.CMD",
+      "basename": null
+    },
+    {
+      "name": "npm",
+      "pathSpec": "first",
+      "pathext": ".CMD;;.EXE",
+      "basename": null
+    },
+    {
+      "name": "tool",
+      "pathSpec": "second",
+      "pathext": ".CMD",
+      "basename": "tool.CMD"
+    }
+  ],
+  "invocations": [
+    {
+      "resolved": "C:\\tools\\grok.CMD",
+      "args": [
+        "models",
+        "has space",
+        "x& echo INJECTED",
+        "50%",
+        "a\"b"
+      ],
+      "env": {
+        "COMSPEC": "C:\\Windows\\system32\\cmd.exe"
+      },
+      "expected": {
+        "command": "C:\\Windows\\system32\\cmd.exe",
+        "args": [
+          "/d",
+          "/s",
+          "/c",
+          "\"C:\\tools\\grok.CMD ^\"models^\" ^\"has^ space^\" ^\"x^&^ echo^ INJECTED^\" ^\"50^%^\" ^\"a\\^\"b^\"\""
+        ],
+        "windowsVerbatimArguments": true
+      }
+    },
+    {
+      "resolved": "C:\\p\\node_modules\\.bin\\tool.cmd",
+      "args": [
+        "a&b"
+      ],
+      "env": {},
+      "expected": {
+        "command": "cmd.exe",
+        "args": [
+          "/d",
+          "/s",
+          "/c",
+          "\"C:\\p\\node_modules\\.bin\\tool.cmd ^^^\"a^^^&b^^^\"\""
+        ],
+        "windowsVerbatimArguments": true
+      }
+    }
+  ],
+  "resolve": [
+    {
+      "base": "C:\\x\\worker",
+      "value": "/repo/.git",
+      "expected": "C:\\repo\\.git"
+    },
+    {
+      "base": "C:\\x\\worker",
+      "value": "\\foo",
+      "expected": "C:\\foo"
+    },
+    {
+      "base": "C:\\x\\worker",
+      "value": "C:\\absolute\\path",
+      "expected": "C:\\absolute\\path"
+    }
+  ]
+}

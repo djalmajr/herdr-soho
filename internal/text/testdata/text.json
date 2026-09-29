@@ -1,0 +1,212 @@
+[
+  {
+    "input": "a\nb\tc",
+    "sanitize": "a b c",
+    "redact": "a\nb\tc"
+  },
+  {
+    "input": "x\u001b[31my\r\n z",
+    "sanitize": "x[31my z",
+    "redact": "x\u001b[31my\r\n z"
+  },
+  {
+    "input": "a  b   c ",
+    "sanitize": "a b c",
+    "redact": "a  b   c "
+  },
+  {
+    "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sanitize": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "redact": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "input": "",
+    "sanitize": "",
+    "redact": ""
+  },
+  {
+    "input": "áéñ 😀  \r\u001b",
+    "sanitize": "",
+    "redact": "áéñ 😀  \r\u001b"
+  },
+  {
+    "input": "Bearer abc123.~+/",
+    "sanitize": "Bearer abc123.~+/",
+    "redact": "Bearer [redacted]"
+  },
+  {
+    "input": "bearer xyz-123",
+    "sanitize": "bearer xyz-123",
+    "redact": "Bearer [redacted]"
+  },
+  {
+    "input": "bearer sk-abcdefgh12",
+    "sanitize": "bearer sk-abcdefgh12",
+    "redact": "bearer [redacted]"
+  },
+  {
+    "input": "pk-proj-abcdefgh12",
+    "sanitize": "pk-proj-abcdefgh12",
+    "redact": "[redacted]"
+  },
+  {
+    "input": "token=sk_live_abcdefghij",
+    "sanitize": "token=sk_live_abcdefghij",
+    "redact": "token=[redacted]"
+  },
+  {
+    "input": "secret=x",
+    "sanitize": "secret=x",
+    "redact": "secret=[redacted]"
+  },
+  {
+    "input": "secret: sk_test_a1b2c3 rest",
+    "sanitize": "secret: sk_test_a1b2c3 rest",
+    "redact": "secret: [redacted] rest"
+  },
+  {
+    "input": "sk-ant-123",
+    "sanitize": "sk-ant-123",
+    "redact": "sk-ant-123"
+  },
+  {
+    "input": "sk-proj-abcDEF123456",
+    "sanitize": "sk-proj-abcDEF123456",
+    "redact": "[redacted]"
+  },
+  {
+    "input": "sk-ant-api01-XYZ12345",
+    "sanitize": "sk-ant-api01-XYZ12345",
+    "redact": "[redacted]"
+  },
+  {
+    "input": "pk-live12345678",
+    "sanitize": "pk-live12345678",
+    "redact": "[redacted]"
+  },
+  {
+    "input": "key sk_live_987654321",
+    "sanitize": "key sk_live_987654321",
+    "redact": "key [redacted]"
+  },
+  {
+    "input": "sk_live_abcdefghij\r",
+    "sanitize": "sk_live_abcdefghij",
+    "redact": "[redacted]\r"
+  },
+  {
+    "input": "sk-proj-abcdefgh\r",
+    "sanitize": "sk-proj-abcdefgh",
+    "redact": "[redacted]\r"
+  },
+  {
+    "input": "Bearer abc123.\r",
+    "sanitize": "Bearer abc123.",
+    "redact": "Bearer [redacted]\r"
+  },
+  {
+    "input": "token=\rabc",
+    "sanitize": "token= abc",
+    "redact": "token=[redacted]"
+  },
+  {
+    "input": "sk_live_abcdefghij\u001b",
+    "sanitize": "sk_live_abcdefghij",
+    "redact": "[redacted]\u001b"
+  },
+  {
+    "input": "sk-proj-abcdefgh\u001b",
+    "sanitize": "sk-proj-abcdefgh",
+    "redact": "[redacted]\u001b"
+  },
+  {
+    "input": "Bearer abc123.\u001b",
+    "sanitize": "Bearer abc123.",
+    "redact": "Bearer [redacted]\u001b"
+  },
+  {
+    "input": "token=\u001babc",
+    "sanitize": "token=abc",
+    "redact": "token=[redacted]"
+  },
+  {
+    "input": "sk_live_abcdefghij ",
+    "sanitize": "sk_live_abcdefghij",
+    "redact": "[redacted] "
+  },
+  {
+    "input": "sk-proj-abcdefgh ",
+    "sanitize": "sk-proj-abcdefgh",
+    "redact": "[redacted] "
+  },
+  {
+    "input": "Bearer abc123. ",
+    "sanitize": "Bearer abc123.",
+    "redact": "Bearer [redacted] "
+  },
+  {
+    "input": "token= abc",
+    "sanitize": "token=abc",
+    "redact": "token=[redacted]"
+  },
+  {
+    "input": "sk_live_abcdefghij ",
+    "sanitize": "sk_live_abcdefghij",
+    "redact": "[redacted] "
+  },
+  {
+    "input": "sk-proj-abcdefgh ",
+    "sanitize": "sk-proj-abcdefgh",
+    "redact": "[redacted] "
+  },
+  {
+    "input": "Bearer abc123. ",
+    "sanitize": "Bearer abc123.",
+    "redact": "Bearer [redacted] "
+  },
+  {
+    "input": "token= abc",
+    "sanitize": "token=abc",
+    "redact": "token=[redacted]"
+  },
+  {
+    "input": "sk_live_abcdefghij😀",
+    "sanitize": "sk_live_abcdefghij",
+    "redact": "[redacted]😀"
+  },
+  {
+    "input": "sk-proj-abcdefgh😀",
+    "sanitize": "sk-proj-abcdefgh",
+    "redact": "[redacted]😀"
+  },
+  {
+    "input": "Bearer abc123.😀",
+    "sanitize": "Bearer abc123.",
+    "redact": "Bearer [redacted]😀"
+  },
+  {
+    "input": "token=😀abc",
+    "sanitize": "token=abc",
+    "redact": "token=[redacted]"
+  },
+  {
+    "list": "one two three",
+    "word": "two",
+    "hasWord": true
+  },
+  {
+    "list": "one two three",
+    "word": "two three",
+    "hasWord": true
+  },
+  {
+    "list": "one  two",
+    "word": "two",
+    "hasWord": true
+  },
+  {
+    "list": "",
+    "word": "",
+    "hasWord": true
+  }
+]

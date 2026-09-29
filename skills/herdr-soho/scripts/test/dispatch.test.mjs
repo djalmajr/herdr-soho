@@ -1255,6 +1255,26 @@ test('dispatch: the family check (strict 5, warn and --allow-same-family continu
 
 // ---------- --for: the family check against the slice's author(s) ----------
 
+test('dispatch family conflict details use deterministic UTF-16 order', () => {
+  const fix = makeFix('ha-dispatch-family-order-');
+  try {
+    const briefs = path.join(fix.ws, 'briefs');
+    for (const [ts, kind, model] of [
+      ['20260925T100001', 'grok', 'grok-4'], ['20260925T100002', 'codex', 'gpt-5'],
+      ['20260925T100003', 'gemini', 'gemini-2.5'], ['20260925T100004', 'claude', 'claude-sonnet-4'],
+    ]) {
+      const prompt = path.join(briefs, `build-${ts}.md`);
+      fs.writeFileSync(prompt, '# Role: implementer\n\n# Brief\n\nwork\n');
+      fs.writeFileSync(path.join(briefs, `build-${ts}.dispatch.json`), JSON.stringify({ version: 1, kind, model, effort: 'full', submission: 'accepted' }));
+    }
+    // Mutation captured: locale-dependent family ordering changes the CLI diagnostic.
+    assert.throws(() => forSpecFamily('build', fix.ws, fix.env, fix.repo), (error) => {
+      assert.match(error.message, /anthropic ×1, google ×1, openai ×1, xai ×1/);
+      return true;
+    });
+  } finally { fix.cleanup(); }
+});
+
 test('forSpecFamily: roster agent (col 5, derived when unknown), family name, fixed kind, unresolved', () => {
   const fix = makeFix('ha-dispatch-for-resolve-');
   try {

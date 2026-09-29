@@ -1,0 +1,10041 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "hex": "610d0a620d0a",
+      "expected": "a\nb\n"
+    },
+    {
+      "hex": "e080",
+      "expected": "��"
+    },
+    {
+      "hex": "f080",
+      "expected": "��"
+    },
+    {
+      "hex": "f490",
+      "expected": "��"
+    },
+    {
+      "hex": "61808162",
+      "expected": "a��b"
+    },
+    {
+      "hex": "61e28262",
+      "expected": "a�b"
+    },
+    {
+      "hex": "c0af",
+      "expected": "��"
+    },
+    {
+      "hex": "eda080",
+      "expected": "���"
+    },
+    {
+      "hex": "efbbbf0d0af09f92",
+      "expected": "﻿\n�"
+    },
+    {
+      "hex": "6ed6",
+      "expected": "n�"
+    },
+    {
+      "hex": "a7d9ff207b9a570e",
+      "expected": "��� {�W\u000e"
+    },
+    {
+      "hex": "73c9d00ea83aac0b",
+      "expected": "s��\u000e�:�\u000b"
+    },
+    {
+      "hex": "0803d34a",
+      "expected": "\b\u0003�J"
+    },
+    {
+      "hex": "998a988917",
+      "expected": "����\u0017"
+    },
+    {
+      "hex": "01fab0d4",
+      "expected": "\u0001���"
+    },
+    {
+      "hex": "3748146679f4effa",
+      "expected": "7H\u0014fy���"
+    },
+    {
+      "hex": "85a265dec7",
+      "expected": "��e��"
+    },
+    {
+      "hex": "531908dab7edb57e",
+      "expected": "S\u0019\bڷ��~"
+    },
+    {
+      "hex": "5be38bbba7",
+      "expected": "[㋻�"
+    },
+    {
+      "hex": "6166cc1169de",
+      "expected": "af�\u0011i�"
+    },
+    {
+      "hex": "35fec080084a61",
+      "expected": "5���\bJa"
+    },
+    {
+      "hex": "a1101d5e577c4e",
+      "expected": "�\u0010\u001d^W|N"
+    },
+    {
+      "hex": "03a7b3298862ea75",
+      "expected": "\u0003��)�b�u"
+    },
+    {
+      "hex": "d6eee6",
+      "expected": "���"
+    },
+    {
+      "hex": "6fca",
+      "expected": "o�"
+    },
+    {
+      "hex": "6a73",
+      "expected": "js"
+    },
+    {
+      "hex": "c4ba3ea20c9f5718",
+      "expected": "ĺ>�\f�W\u0018"
+    },
+    {
+      "hex": "13951eb22052c0",
+      "expected": "\u0013�\u001e� R�"
+    },
+    {
+      "hex": "524e3471e27dfc6a",
+      "expected": "RN4q�}�j"
+    },
+    {
+      "hex": "5afdecba1a2a",
+      "expected": "Z��\u001a*"
+    },
+    {
+      "hex": "640d",
+      "expected": "d\r"
+    },
+    {
+      "hex": "c72a8a8c23e05aa5",
+      "expected": "�*��#�Z�"
+    },
+    {
+      "hex": "880488a47a9874",
+      "expected": "�\u0004��z�t"
+    },
+    {
+      "hex": "3ae68d7b08",
+      "expected": ":�{\b"
+    },
+    {
+      "hex": "ba",
+      "expected": "�"
+    },
+    {
+      "hex": "c69d89f7ba64a5",
+      "expected": "Ɲ���d�"
+    },
+    {
+      "hex": "fb9e53a4",
+      "expected": "��S�"
+    },
+    {
+      "hex": "7f00",
+      "expected": "\u0000"
+    },
+    {
+      "hex": "73b0",
+      "expected": "s�"
+    },
+    {
+      "hex": "05fe5c058874",
+      "expected": "\u0005�\\\u0005�t"
+    },
+    {
+      "hex": "72",
+      "expected": "r"
+    },
+    {
+      "hex": "df88d7f35e70",
+      "expected": "߈��^p"
+    },
+    {
+      "hex": "46db983c9226c9e7",
+      "expected": "Fۘ<�&��"
+    },
+    {
+      "hex": "8578858a30e1",
+      "expected": "�x��0�"
+    },
+    {
+      "hex": "76a4",
+      "expected": "v�"
+    },
+    {
+      "hex": "6dea3352eaaa",
+      "expected": "m�3R�"
+    },
+    {
+      "hex": "ed976a1384",
+      "expected": "�j\u0013�"
+    },
+    {
+      "hex": "7f505e016f9e",
+      "expected": "P^\u0001o�"
+    },
+    {
+      "hex": "dec7c65a5d7b",
+      "expected": "���Z]{"
+    },
+    {
+      "hex": "b5c8a7",
+      "expected": "�ȧ"
+    },
+    {
+      "hex": "bc98d7",
+      "expected": "���"
+    },
+    {
+      "hex": "4cb89d2d93cfdf",
+      "expected": "L��-���"
+    },
+    {
+      "hex": "ad4d0e123c5a",
+      "expected": "�M\u000e\u0012<Z"
+    },
+    {
+      "hex": "eefb",
+      "expected": "��"
+    },
+    {
+      "hex": "a7c458",
+      "expected": "��X"
+    },
+    {
+      "hex": "0c5e4f",
+      "expected": "\f^O"
+    },
+    {
+      "hex": "a5",
+      "expected": "�"
+    },
+    {
+      "hex": "ee",
+      "expected": "�"
+    },
+    {
+      "hex": "63bdd263d77e",
+      "expected": "c��c�~"
+    },
+    {
+      "hex": "106b5e42",
+      "expected": "\u0010k^B"
+    },
+    {
+      "hex": "eb",
+      "expected": "�"
+    },
+    {
+      "hex": "8e34f1",
+      "expected": "�4�"
+    },
+    {
+      "hex": "c0cf31cafe5001",
+      "expected": "��1��P\u0001"
+    },
+    {
+      "hex": "51344c6e2cd58620",
+      "expected": "Q4Ln,Ն "
+    },
+    {
+      "hex": "74e297dce0",
+      "expected": "t���"
+    },
+    {
+      "hex": "909d6cb58846",
+      "expected": "��l��F"
+    },
+    {
+      "hex": "5435",
+      "expected": "T5"
+    },
+    {
+      "hex": "5cf840a6126d09",
+      "expected": "\\�@�\u0012m\t"
+    },
+    {
+      "hex": "d5",
+      "expected": "�"
+    },
+    {
+      "hex": "57",
+      "expected": "W"
+    },
+    {
+      "hex": "1232",
+      "expected": "\u00122"
+    },
+    {
+      "hex": "e46b55d963",
+      "expected": "�kU�c"
+    },
+    {
+      "hex": "615b2886",
+      "expected": "a[(�"
+    },
+    {
+      "hex": "0e78f68f77",
+      "expected": "\u000ex��w"
+    },
+    {
+      "hex": "60c3e8d715af7939",
+      "expected": "`���\u0015�y9"
+    },
+    {
+      "hex": "e3d47cb08f",
+      "expected": "��|��"
+    },
+    {
+      "hex": "727ad8a99c55",
+      "expected": "rzة�U"
+    },
+    {
+      "hex": "c67e06045203eb39",
+      "expected": "�~\u0006\u0004R\u0003�9"
+    },
+    {
+      "hex": "ecd2",
+      "expected": "��"
+    },
+    {
+      "hex": "9c518e5f8cfdde42",
+      "expected": "�Q�_���B"
+    },
+    {
+      "hex": "ca4ed168dd",
+      "expected": "�N�h�"
+    },
+    {
+      "hex": "5a405e417337d2",
+      "expected": "Z@^As7�"
+    },
+    {
+      "hex": "e6ada0",
+      "expected": "歠"
+    },
+    {
+      "hex": "c9f2d7df7e5d32",
+      "expected": "����~]2"
+    },
+    {
+      "hex": "eeb6717dcf8aff3d",
+      "expected": "�q}ϊ�="
+    },
+    {
+      "hex": "7de61205e786d1f3",
+      "expected": "}�\u0012\u0005���"
+    },
+    {
+      "hex": "66f9",
+      "expected": "f�"
+    },
+    {
+      "hex": "3ca78b",
+      "expected": "<��"
+    },
+    {
+      "hex": "a6097bc3fb",
+      "expected": "�\t{��"
+    },
+    {
+      "hex": "3cab89dda40342",
+      "expected": "<��ݤ\u0003B"
+    },
+    {
+      "hex": "412081bf4fa6ac",
+      "expected": "A ��O��"
+    },
+    {
+      "hex": "c4",
+      "expected": "�"
+    },
+    {
+      "hex": "b211",
+      "expected": "�\u0011"
+    },
+    {
+      "hex": "85bf0900574cb6",
+      "expected": "��\t\u0000WL�"
+    },
+    {
+      "hex": "f7",
+      "expected": "�"
+    },
+    {
+      "hex": "d6d30f06a4442a",
+      "expected": "��\u000f\u0006�D*"
+    },
+    {
+      "hex": "1b90b8",
+      "expected": "\u001b��"
+    },
+    {
+      "hex": "7f410c",
+      "expected": "A\f"
+    },
+    {
+      "hex": "e607a73310",
+      "expected": "�\u0007�3\u0010"
+    },
+    {
+      "hex": "cee101b0e8",
+      "expected": "��\u0001��"
+    },
+    {
+      "hex": "3f4fde49",
+      "expected": "?O�I"
+    },
+    {
+      "hex": "bd6fcbeb",
+      "expected": "�o��"
+    },
+    {
+      "hex": "86b22c560021715e",
+      "expected": "��,V\u0000!q^"
+    },
+    {
+      "hex": "81ca1aa0aa6a37",
+      "expected": "��\u001a��j7"
+    },
+    {
+      "hex": "960e780b2137",
+      "expected": "�\u000ex\u000b!7"
+    },
+    {
+      "hex": "f3c2c19e5e1e",
+      "expected": "����^\u001e"
+    },
+    {
+      "hex": "cee1f7ebdcec",
+      "expected": "������"
+    },
+    {
+      "hex": "7f",
+      "expected": ""
+    },
+    {
+      "hex": "b56cfb0ef3f313d3",
+      "expected": "�l�\u000e��\u0013�"
+    },
+    {
+      "hex": "395db9226800ba58",
+      "expected": "9]�\"h\u0000�X"
+    },
+    {
+      "hex": "eb9535a3",
+      "expected": "�5�"
+    },
+    {
+      "hex": "1ba569678f615c62",
+      "expected": "\u001b�ig�a\\b"
+    },
+    {
+      "hex": "26f7b122",
+      "expected": "&��\""
+    },
+    {
+      "hex": "45221a14",
+      "expected": "E\"\u001a\u0014"
+    },
+    {
+      "hex": "f76b",
+      "expected": "�k"
+    },
+    {
+      "hex": "752a13c5ed9c61",
+      "expected": "u*\u0013��a"
+    },
+    {
+      "hex": "0560f9967827",
+      "expected": "\u0005`��x'"
+    },
+    {
+      "hex": "6dac0e",
+      "expected": "m�\u000e"
+    },
+    {
+      "hex": "dcc18ebbdea0",
+      "expected": "����ޠ"
+    },
+    {
+      "hex": "c976cbe56a80",
+      "expected": "�v��j�"
+    },
+    {
+      "hex": "9ad46cb4",
+      "expected": "��l�"
+    },
+    {
+      "hex": "dfda78bdbe",
+      "expected": "��x��"
+    },
+    {
+      "hex": "fa4a22",
+      "expected": "�J\""
+    },
+    {
+      "hex": "d2c5",
+      "expected": "��"
+    },
+    {
+      "hex": "2909341b",
+      "expected": ")\t4\u001b"
+    },
+    {
+      "hex": "84",
+      "expected": "�"
+    },
+    {
+      "hex": "ca526999e810",
+      "expected": "�Ri��\u0010"
+    },
+    {
+      "hex": "41",
+      "expected": "A"
+    },
+    {
+      "hex": "effcbc5885f953",
+      "expected": "���X��S"
+    },
+    {
+      "hex": "11bd4453641cde",
+      "expected": "\u0011�DSd\u001c�"
+    },
+    {
+      "hex": "a620ec1a154d12",
+      "expected": "� �\u001a\u0015M\u0012"
+    },
+    {
+      "hex": "68",
+      "expected": "h"
+    },
+    {
+      "hex": "59462846e411",
+      "expected": "YF(F�\u0011"
+    },
+    {
+      "hex": "8a98df81c5ab9111",
+      "expected": "��߁ū�\u0011"
+    },
+    {
+      "hex": "60f69c",
+      "expected": "`��"
+    },
+    {
+      "hex": "b69ae5",
+      "expected": "���"
+    },
+    {
+      "hex": "966291c84bcee67a",
+      "expected": "�b��K��z"
+    },
+    {
+      "hex": "a8c7080e1e68e2",
+      "expected": "��\b\u000e\u001eh�"
+    },
+    {
+      "hex": "d2261170",
+      "expected": "�&\u0011p"
+    },
+    {
+      "hex": "4e",
+      "expected": "N"
+    },
+    {
+      "hex": "0cdb",
+      "expected": "\f�"
+    },
+    {
+      "hex": "154be7e8775f87",
+      "expected": "\u0015K��w_�"
+    },
+    {
+      "hex": "31",
+      "expected": "1"
+    },
+    {
+      "hex": "d1a7966fb60c",
+      "expected": "ѧ�o�\f"
+    },
+    {
+      "hex": "83f0839d",
+      "expected": "����"
+    },
+    {
+      "hex": "379384b1",
+      "expected": "7���"
+    },
+    {
+      "hex": "de02009ac7ab",
+      "expected": "�\u0002\u0000�ǫ"
+    },
+    {
+      "hex": "985e60d4a6dcd81d",
+      "expected": "�^`Ԧ��\u001d"
+    },
+    {
+      "hex": "e9275e276305",
+      "expected": "�'^'c\u0005"
+    },
+    {
+      "hex": "a68925f3cb3c",
+      "expected": "��%��<"
+    },
+    {
+      "hex": "20f1d178",
+      "expected": " ��x"
+    },
+    {
+      "hex": "ab0010c2b9",
+      "expected": "�\u0000\u0010¹"
+    },
+    {
+      "hex": "eb33ab64a1d8",
+      "expected": "�3�d��"
+    },
+    {
+      "hex": "0f4775bc89",
+      "expected": "\u000fGu��"
+    },
+    {
+      "hex": "57ec1c79",
+      "expected": "W�\u001cy"
+    },
+    {
+      "hex": "65f5fcc16d20",
+      "expected": "e���m "
+    },
+    {
+      "hex": "e7239ebdf19b",
+      "expected": "�#���"
+    },
+    {
+      "hex": "ea25",
+      "expected": "�%"
+    },
+    {
+      "hex": "c75cd0b187",
+      "expected": "�\\б�"
+    },
+    {
+      "hex": "ab8a405eed21",
+      "expected": "��@^�!"
+    },
+    {
+      "hex": "5373a4",
+      "expected": "Ss�"
+    },
+    {
+      "hex": "cd8d",
+      "expected": "͍"
+    },
+    {
+      "hex": "a0b7a810a5459e",
+      "expected": "���\u0010�E�"
+    },
+    {
+      "hex": "30bde23634",
+      "expected": "0��64"
+    },
+    {
+      "hex": "0c07dd",
+      "expected": "\f\u0007�"
+    },
+    {
+      "hex": "585d9cbf07faa55f",
+      "expected": "X]��\u0007��_"
+    },
+    {
+      "hex": "79b3b84abed9",
+      "expected": "y��J��"
+    },
+    {
+      "hex": "87cd88",
+      "expected": "�͈"
+    },
+    {
+      "hex": "c29eaeb01e",
+      "expected": "��\u001e"
+    },
+    {
+      "hex": "286a",
+      "expected": "(j"
+    },
+    {
+      "hex": "d61d53eae29595",
+      "expected": "�\u001dS�╕"
+    },
+    {
+      "hex": "6cec",
+      "expected": "l�"
+    },
+    {
+      "hex": "549aab128e4b",
+      "expected": "T��\u0012�K"
+    },
+    {
+      "hex": "60",
+      "expected": "`"
+    },
+    {
+      "hex": "6d15",
+      "expected": "m\u0015"
+    },
+    {
+      "hex": "87017cf51e",
+      "expected": "�\u0001|�\u001e"
+    },
+    {
+      "hex": "662c59",
+      "expected": "f,Y"
+    },
+    {
+      "hex": "69ca6e",
+      "expected": "i�n"
+    },
+    {
+      "hex": "ece884a6e77533",
+      "expected": "�脦�u3"
+    },
+    {
+      "hex": "e6d26929b7",
+      "expected": "��i)�"
+    },
+    {
+      "hex": "2c9b7fbe9c",
+      "expected": ",���"
+    },
+    {
+      "hex": "dbca9b61",
+      "expected": "�ʛa"
+    },
+    {
+      "hex": "13825d222b1bd0",
+      "expected": "\u0013�]\"+\u001b�"
+    },
+    {
+      "hex": "1c6a14",
+      "expected": "\u001cj\u0014"
+    },
+    {
+      "hex": "d5",
+      "expected": "�"
+    },
+    {
+      "hex": "364b678f9d40",
+      "expected": "6Kg��@"
+    },
+    {
+      "hex": "af3723b1a3",
+      "expected": "�7#��"
+    },
+    {
+      "hex": "7e18",
+      "expected": "~\u0018"
+    },
+    {
+      "hex": "defb7521a6",
+      "expected": "��u!�"
+    },
+    {
+      "hex": "f66e",
+      "expected": "�n"
+    },
+    {
+      "hex": "45997b7e",
+      "expected": "E�{~"
+    },
+    {
+      "hex": "057b9d4a1037",
+      "expected": "\u0005{�J\u00107"
+    },
+    {
+      "hex": "3b04",
+      "expected": ";\u0004"
+    },
+    {
+      "hex": "e8c30e",
+      "expected": "��\u000e"
+    },
+    {
+      "hex": "6b1558",
+      "expected": "k\u0015X"
+    },
+    {
+      "hex": "44f3296c8b4ad43d",
+      "expected": "D�)l�J�="
+    },
+    {
+      "hex": "d6b3d02c",
+      "expected": "ֳ�,"
+    },
+    {
+      "hex": "3d9c3ae5c9aee9",
+      "expected": "=�:�ɮ�"
+    },
+    {
+      "hex": "aa6f",
+      "expected": "�o"
+    },
+    {
+      "hex": "4700067be688",
+      "expected": "G\u0000\u0006{�"
+    },
+    {
+      "hex": "85f66ec2e7",
+      "expected": "��n��"
+    },
+    {
+      "hex": "f7ad02a2eacf3346",
+      "expected": "��\u0002���3F"
+    },
+    {
+      "hex": "9e1948a18a66",
+      "expected": "�\u0019H��f"
+    },
+    {
+      "hex": "e5728b",
+      "expected": "�r�"
+    },
+    {
+      "hex": "fe90bb7c539ec42c",
+      "expected": "���|S��,"
+    },
+    {
+      "hex": "72e1ec36",
+      "expected": "r��6"
+    },
+    {
+      "hex": "669e47fe17",
+      "expected": "f�G�\u0017"
+    },
+    {
+      "hex": "d1c876eccf",
+      "expected": "��v��"
+    },
+    {
+      "hex": "5b",
+      "expected": "["
+    },
+    {
+      "hex": "58463a5b5ce04a9d",
+      "expected": "XF:[\\�J�"
+    },
+    {
+      "hex": "57",
+      "expected": "W"
+    },
+    {
+      "hex": "f24318",
+      "expected": "�C\u0018"
+    },
+    {
+      "hex": "3b96ce75fec0",
+      "expected": ";��u��"
+    },
+    {
+      "hex": "a1cad70ef5",
+      "expected": "���\u000e�"
+    },
+    {
+      "hex": "9b",
+      "expected": "�"
+    },
+    {
+      "hex": "29114222",
+      "expected": ")\u0011B\""
+    },
+    {
+      "hex": "04c3",
+      "expected": "\u0004�"
+    },
+    {
+      "hex": "c8d9d31073e544",
+      "expected": "���\u0010s�D"
+    },
+    {
+      "hex": "ebd483ca1a2f",
+      "expected": "�ԃ�\u001a/"
+    },
+    {
+      "hex": "933a0ce2f803c7f1",
+      "expected": "�:\f��\u0003��"
+    },
+    {
+      "hex": "32614e",
+      "expected": "2aN"
+    },
+    {
+      "hex": "4b40d7d79e",
+      "expected": "K@�מ"
+    },
+    {
+      "hex": "0b35",
+      "expected": "\u000b5"
+    },
+    {
+      "hex": "bdd25c",
+      "expected": "��\\"
+    },
+    {
+      "hex": "c3dd7f5a",
+      "expected": "��Z"
+    },
+    {
+      "hex": "cbc2bafa1f0a",
+      "expected": "�º�\u001f\n"
+    },
+    {
+      "hex": "a0",
+      "expected": "�"
+    },
+    {
+      "hex": "fb6cac74ad",
+      "expected": "�l�t�"
+    },
+    {
+      "hex": "d4e93a79",
+      "expected": "��:y"
+    },
+    {
+      "hex": "9af2",
+      "expected": "��"
+    },
+    {
+      "hex": "c0",
+      "expected": "�"
+    },
+    {
+      "hex": "75",
+      "expected": "u"
+    },
+    {
+      "hex": "761c88b34c951360",
+      "expected": "v\u001c��L�\u0013`"
+    },
+    {
+      "hex": "69243c4eb540a4",
+      "expected": "i$<N�@�"
+    },
+    {
+      "hex": "47",
+      "expected": "G"
+    },
+    {
+      "hex": "99cc7bebe861089b",
+      "expected": "��{��a\b�"
+    },
+    {
+      "hex": "6b9e8f",
+      "expected": "k��"
+    },
+    {
+      "hex": "6e6e80e9ba",
+      "expected": "nn��"
+    },
+    {
+      "hex": "2e1efe3090cc",
+      "expected": ".\u001e�0��"
+    },
+    {
+      "hex": "25047cd816da2d",
+      "expected": "%\u0004|�\u0016�-"
+    },
+    {
+      "hex": "b3073f2f",
+      "expected": "�\u0007?/"
+    },
+    {
+      "hex": "955d692f9d444914",
+      "expected": "�]i/�DI\u0014"
+    },
+    {
+      "hex": "7463",
+      "expected": "tc"
+    },
+    {
+      "hex": "c3e66595b7b5dc",
+      "expected": "��e����"
+    },
+    {
+      "hex": "cad1f5aac183c7",
+      "expected": "�������"
+    },
+    {
+      "hex": "5bb2be535c4c96",
+      "expected": "[��S\\L�"
+    },
+    {
+      "hex": "7e412db9ed",
+      "expected": "~A-��"
+    },
+    {
+      "hex": "e2",
+      "expected": "�"
+    },
+    {
+      "hex": "40534d05bd27",
+      "expected": "@SM\u0005�'"
+    },
+    {
+      "hex": "32a538d1c2",
+      "expected": "2�8��"
+    },
+    {
+      "hex": "cbfcf08a",
+      "expected": "����"
+    },
+    {
+      "hex": "13",
+      "expected": "\u0013"
+    },
+    {
+      "hex": "a5",
+      "expected": "�"
+    },
+    {
+      "hex": "387a3a290300",
+      "expected": "8z:)\u0003\u0000"
+    },
+    {
+      "hex": "7dcc",
+      "expected": "}�"
+    },
+    {
+      "hex": "e379b2cdd8",
+      "expected": "�y���"
+    },
+    {
+      "hex": "1d4f9538ccdad1",
+      "expected": "\u001dO�8���"
+    },
+    {
+      "hex": "b64343",
+      "expected": "�CC"
+    },
+    {
+      "hex": "22028d",
+      "expected": "\"\u0002�"
+    },
+    {
+      "hex": "cf45000e5c10d510",
+      "expected": "�E\u0000\u000e\\\u0010�\u0010"
+    },
+    {
+      "hex": "075377",
+      "expected": "\u0007Sw"
+    },
+    {
+      "hex": "cc7dedea990c3f",
+      "expected": "�}��\f?"
+    },
+    {
+      "hex": "1cc9d522",
+      "expected": "\u001c��\""
+    },
+    {
+      "hex": "72af3937d65f",
+      "expected": "r�97�_"
+    },
+    {
+      "hex": "1c",
+      "expected": "\u001c"
+    },
+    {
+      "hex": "332767",
+      "expected": "3'g"
+    },
+    {
+      "hex": "d0741479d5d993",
+      "expected": "�t\u0014y�ٓ"
+    },
+    {
+      "hex": "905ace881746cef3",
+      "expected": "�ZΈ\u0017F��"
+    },
+    {
+      "hex": "bc0569fe8875f0",
+      "expected": "�\u0005i��u�"
+    },
+    {
+      "hex": "6c9b1559f061",
+      "expected": "l�\u0015Y�a"
+    },
+    {
+      "hex": "82870c6b456f06b4",
+      "expected": "��\fkEo\u0006�"
+    },
+    {
+      "hex": "0f9ac83fc1",
+      "expected": "\u000f��?�"
+    },
+    {
+      "hex": "d82ba1f363",
+      "expected": "�+��c"
+    },
+    {
+      "hex": "d97ca5e25f",
+      "expected": "�|��_"
+    },
+    {
+      "hex": "fb4f7fac",
+      "expected": "�O�"
+    },
+    {
+      "hex": "03630de73313dcf9",
+      "expected": "\u0003c\r�3\u0013��"
+    },
+    {
+      "hex": "0f9731c934388992",
+      "expected": "\u000f�1�48��"
+    },
+    {
+      "hex": "6867d498a309",
+      "expected": "hgԘ�\t"
+    },
+    {
+      "hex": "28e2ed6572",
+      "expected": "(��er"
+    },
+    {
+      "hex": "33a7f6",
+      "expected": "3��"
+    },
+    {
+      "hex": "76d995a27a58",
+      "expected": "vٕ�zX"
+    },
+    {
+      "hex": "d523",
+      "expected": "�#"
+    },
+    {
+      "hex": "c5331e39b7",
+      "expected": "�3\u001e9�"
+    },
+    {
+      "hex": "c55b2c",
+      "expected": "�[,"
+    },
+    {
+      "hex": "c0cec02543",
+      "expected": "���%C"
+    },
+    {
+      "hex": "607f72ee6296",
+      "expected": "`r�b�"
+    },
+    {
+      "hex": "40344fb3",
+      "expected": "@4O�"
+    },
+    {
+      "hex": "1fbc1ced",
+      "expected": "\u001f�\u001c�"
+    },
+    {
+      "hex": "862a23f07067",
+      "expected": "�*#�pg"
+    },
+    {
+      "hex": "37d0cc58d29485ed",
+      "expected": "7��XҔ��"
+    },
+    {
+      "hex": "aaeda5",
+      "expected": "���"
+    },
+    {
+      "hex": "d9f56fac",
+      "expected": "��o�"
+    },
+    {
+      "hex": "24adc51f80e83215",
+      "expected": "$��\u001f��2\u0015"
+    },
+    {
+      "hex": "7a",
+      "expected": "z"
+    },
+    {
+      "hex": "66",
+      "expected": "f"
+    },
+    {
+      "hex": "f25ec0172a3f5bce",
+      "expected": "�^�\u0017*?[�"
+    },
+    {
+      "hex": "61a812",
+      "expected": "a�\u0012"
+    },
+    {
+      "hex": "b7c26f0fe5e41046",
+      "expected": "��o\u000f��\u0010F"
+    },
+    {
+      "hex": "b0",
+      "expected": "�"
+    },
+    {
+      "hex": "96",
+      "expected": "�"
+    },
+    {
+      "hex": "44af",
+      "expected": "D�"
+    },
+    {
+      "hex": "c2fbc72a423420f6",
+      "expected": "���*B4 �"
+    },
+    {
+      "hex": "a1f51a",
+      "expected": "��\u001a"
+    },
+    {
+      "hex": "2677",
+      "expected": "&w"
+    },
+    {
+      "hex": "17a252684de55a",
+      "expected": "\u0017�RhM�Z"
+    },
+    {
+      "hex": "03d3",
+      "expected": "\u0003�"
+    },
+    {
+      "hex": "f25f0b7dba3a1999",
+      "expected": "�_\u000b}�:\u0019�"
+    },
+    {
+      "hex": "7dc053",
+      "expected": "}�S"
+    },
+    {
+      "hex": "1e233b",
+      "expected": "\u001e#;"
+    },
+    {
+      "hex": "d4",
+      "expected": "�"
+    },
+    {
+      "hex": "15aba6a126",
+      "expected": "\u0015���&"
+    },
+    {
+      "hex": "b60a8ec9b65ae4",
+      "expected": "�\n�ɶZ�"
+    },
+    {
+      "hex": "40d10e3cd1af65",
+      "expected": "@�\u000e<ѯe"
+    },
+    {
+      "hex": "1b32d7a2442c4adb",
+      "expected": "\u001b2עD,J�"
+    },
+    {
+      "hex": "bb23375c05cbd636",
+      "expected": "�#7\\\u0005��6"
+    },
+    {
+      "hex": "80d2",
+      "expected": "��"
+    },
+    {
+      "hex": "ebd1a070",
+      "expected": "�Ѡp"
+    },
+    {
+      "hex": "78a021b6",
+      "expected": "x�!�"
+    },
+    {
+      "hex": "2c",
+      "expected": ","
+    },
+    {
+      "hex": "21cb7d79bb",
+      "expected": "!�}y�"
+    },
+    {
+      "hex": "f860522f",
+      "expected": "�`R/"
+    },
+    {
+      "hex": "687d",
+      "expected": "h}"
+    },
+    {
+      "hex": "29",
+      "expected": ")"
+    },
+    {
+      "hex": "4ec9038969c2",
+      "expected": "N�\u0003�i�"
+    },
+    {
+      "hex": "3be7169c78f204",
+      "expected": ";�\u0016�x�\u0004"
+    },
+    {
+      "hex": "d82afe",
+      "expected": "�*�"
+    },
+    {
+      "hex": "88260a1d2d935dfb",
+      "expected": "�&\n\u001d-�]�"
+    },
+    {
+      "hex": "f24cce23a1",
+      "expected": "�L�#�"
+    },
+    {
+      "hex": "dcdb4a",
+      "expected": "��J"
+    },
+    {
+      "hex": "e42177d8",
+      "expected": "�!w�"
+    },
+    {
+      "hex": "f4c2f570cd9bb014",
+      "expected": "���p͛�\u0014"
+    },
+    {
+      "hex": "4f9c08",
+      "expected": "O�\b"
+    },
+    {
+      "hex": "2600",
+      "expected": "&\u0000"
+    },
+    {
+      "hex": "c2",
+      "expected": "�"
+    },
+    {
+      "hex": "c73240054fb4",
+      "expected": "�2@\u0005O�"
+    },
+    {
+      "hex": "451d",
+      "expected": "E\u001d"
+    },
+    {
+      "hex": "22ee4492a627",
+      "expected": "\"�D��'"
+    },
+    {
+      "hex": "93e89314d4",
+      "expected": "��\u0014�"
+    },
+    {
+      "hex": "ed27e1ea4714",
+      "expected": "�'��G\u0014"
+    },
+    {
+      "hex": "7d",
+      "expected": "}"
+    },
+    {
+      "hex": "7a",
+      "expected": "z"
+    },
+    {
+      "hex": "87",
+      "expected": "�"
+    },
+    {
+      "hex": "ce",
+      "expected": "�"
+    },
+    {
+      "hex": "f465507c0d89fa37",
+      "expected": "�eP|\r��7"
+    },
+    {
+      "hex": "72d39c3231f3d0",
+      "expected": "rӜ21��"
+    },
+    {
+      "hex": "462e44149acc",
+      "expected": "F.D\u0014��"
+    },
+    {
+      "hex": "2589e214680e26",
+      "expected": "%��\u0014h\u000e&"
+    },
+    {
+      "hex": "fd54115d115aa24f",
+      "expected": "�T\u0011]\u0011Z�O"
+    },
+    {
+      "hex": "71",
+      "expected": "q"
+    },
+    {
+      "hex": "977ed485b392",
+      "expected": "�~ԅ��"
+    },
+    {
+      "hex": "4d96a265d4e0",
+      "expected": "M��e��"
+    },
+    {
+      "hex": "fde8e314",
+      "expected": "���\u0014"
+    },
+    {
+      "hex": "35a2193fbc",
+      "expected": "5�\u0019?�"
+    },
+    {
+      "hex": "446685",
+      "expected": "Df�"
+    },
+    {
+      "hex": "7292",
+      "expected": "r�"
+    },
+    {
+      "hex": "4b006ccd",
+      "expected": "K\u0000l�"
+    },
+    {
+      "hex": "47",
+      "expected": "G"
+    },
+    {
+      "hex": "bf48b2ba09dee399",
+      "expected": "�H��\t��"
+    },
+    {
+      "hex": "4fbf",
+      "expected": "O�"
+    },
+    {
+      "hex": "936a63",
+      "expected": "�jc"
+    },
+    {
+      "hex": "2aa44ba657",
+      "expected": "*�K�W"
+    },
+    {
+      "hex": "edc07d",
+      "expected": "��}"
+    },
+    {
+      "hex": "0f21",
+      "expected": "\u000f!"
+    },
+    {
+      "hex": "82018d403d11ecaa",
+      "expected": "�\u0001�@=\u0011�"
+    },
+    {
+      "hex": "33",
+      "expected": "3"
+    },
+    {
+      "hex": "a90f9fce",
+      "expected": "�\u000f��"
+    },
+    {
+      "hex": "b72cfab0fadc8771",
+      "expected": "�,���܇q"
+    },
+    {
+      "hex": "a919874a4d10",
+      "expected": "�\u0019�JM\u0010"
+    },
+    {
+      "hex": "34ebe78f65",
+      "expected": "4��e"
+    },
+    {
+      "hex": "91511c2334e83149",
+      "expected": "�Q\u001c#4�1I"
+    },
+    {
+      "hex": "41e4",
+      "expected": "A�"
+    },
+    {
+      "hex": "f269b66a91c44952",
+      "expected": "�i�j��IR"
+    },
+    {
+      "hex": "32844b058116",
+      "expected": "2�K\u0005�\u0016"
+    },
+    {
+      "hex": "70c8a7ba6d17",
+      "expected": "pȧ�m\u0017"
+    },
+    {
+      "hex": "58db8b02189e",
+      "expected": "Xۋ\u0002\u0018�"
+    },
+    {
+      "hex": "fb",
+      "expected": "�"
+    },
+    {
+      "hex": "cd98",
+      "expected": "͘"
+    },
+    {
+      "hex": "065b89d9ad21",
+      "expected": "\u0006[�٭!"
+    },
+    {
+      "hex": "fa569832da",
+      "expected": "�V�2�"
+    },
+    {
+      "hex": "6dbe911d8c4aac44",
+      "expected": "m��\u001d�J�D"
+    },
+    {
+      "hex": "3735c79ae64fd2",
+      "expected": "75ǚ�O�"
+    },
+    {
+      "hex": "f33a",
+      "expected": "�:"
+    },
+    {
+      "hex": "0cf837cd1469",
+      "expected": "\f�7�\u0014i"
+    },
+    {
+      "hex": "46f84be18303",
+      "expected": "F�K�\u0003"
+    },
+    {
+      "hex": "b9",
+      "expected": "�"
+    },
+    {
+      "hex": "4f01fb72",
+      "expected": "O\u0001�r"
+    },
+    {
+      "hex": "0f4b",
+      "expected": "\u000fK"
+    },
+    {
+      "hex": "5992177219ccbf",
+      "expected": "Y�\u0017r\u0019̿"
+    },
+    {
+      "hex": "46ffebbd",
+      "expected": "F��"
+    },
+    {
+      "hex": "69038ab71b84",
+      "expected": "i\u0003��\u001b�"
+    },
+    {
+      "hex": "d344",
+      "expected": "�D"
+    },
+    {
+      "hex": "b47f6429a780c3ee",
+      "expected": "�d)����"
+    },
+    {
+      "hex": "79ea5584c2",
+      "expected": "y�U��"
+    },
+    {
+      "hex": "9ed3",
+      "expected": "��"
+    },
+    {
+      "hex": "19c8888934",
+      "expected": "\u0019Ȉ�4"
+    },
+    {
+      "hex": "1c66",
+      "expected": "\u001cf"
+    },
+    {
+      "hex": "d5b03943fec5d2ee",
+      "expected": "հ9C����"
+    },
+    {
+      "hex": "98cc",
+      "expected": "��"
+    },
+    {
+      "hex": "5ae9",
+      "expected": "Z�"
+    },
+    {
+      "hex": "6ad9551f",
+      "expected": "j�U\u001f"
+    },
+    {
+      "hex": "612513c9b4dca5d5",
+      "expected": "a%\u0013ɴܥ�"
+    },
+    {
+      "hex": "a45b34670e",
+      "expected": "�[4g\u000e"
+    },
+    {
+      "hex": "e1345e7744",
+      "expected": "�4^wD"
+    },
+    {
+      "hex": "abb0",
+      "expected": "��"
+    },
+    {
+      "hex": "b2b6b3f4b0",
+      "expected": "�����"
+    },
+    {
+      "hex": "afadb2",
+      "expected": "���"
+    },
+    {
+      "hex": "3b17e97a5607a926",
+      "expected": ";\u0017�zV\u0007�&"
+    },
+    {
+      "hex": "0c79da67",
+      "expected": "\fy�g"
+    },
+    {
+      "hex": "603fb9fd5863",
+      "expected": "`?��Xc"
+    },
+    {
+      "hex": "2999",
+      "expected": ")�"
+    },
+    {
+      "hex": "44d6b97aec80",
+      "expected": "Dֹz�"
+    },
+    {
+      "hex": "58",
+      "expected": "X"
+    },
+    {
+      "hex": "4cebbcd69075873b",
+      "expected": "L�֐u�;"
+    },
+    {
+      "hex": "8fa2965194c8",
+      "expected": "���Q��"
+    },
+    {
+      "hex": "aa0571bb",
+      "expected": "�\u0005q�"
+    },
+    {
+      "hex": "7fb265",
+      "expected": "�e"
+    },
+    {
+      "hex": "a5721e8d7350e435",
+      "expected": "�r\u001e�sP�5"
+    },
+    {
+      "hex": "1979c63dab2ba8",
+      "expected": "\u0019y�=�+�"
+    },
+    {
+      "hex": "e53117403ebd",
+      "expected": "�1\u0017@>�"
+    },
+    {
+      "hex": "f3298f83be",
+      "expected": "�)���"
+    },
+    {
+      "hex": "23df66",
+      "expected": "#�f"
+    },
+    {
+      "hex": "86099a469d88f0",
+      "expected": "�\t�F���"
+    },
+    {
+      "hex": "026ba0aea3",
+      "expected": "\u0002k���"
+    },
+    {
+      "hex": "4859",
+      "expected": "HY"
+    },
+    {
+      "hex": "b145",
+      "expected": "�E"
+    },
+    {
+      "hex": "3d6600cccb6d3a",
+      "expected": "=f\u0000��m:"
+    },
+    {
+      "hex": "c7e8471b656dbf26",
+      "expected": "��G\u001bem�&"
+    },
+    {
+      "hex": "c53e7670",
+      "expected": "�>vp"
+    },
+    {
+      "hex": "e56339e41c49",
+      "expected": "�c9�\u001cI"
+    },
+    {
+      "hex": "d891c0",
+      "expected": "ؑ�"
+    },
+    {
+      "hex": "7b0768ef88ff4b",
+      "expected": "{\u0007h��K"
+    },
+    {
+      "hex": "5c",
+      "expected": "\\"
+    },
+    {
+      "hex": "a377e6dc26a0",
+      "expected": "�w��&�"
+    },
+    {
+      "hex": "186f0357",
+      "expected": "\u0018o\u0003W"
+    },
+    {
+      "hex": "2f4c",
+      "expected": "/L"
+    },
+    {
+      "hex": "ce0f24c2",
+      "expected": "�\u000f$�"
+    },
+    {
+      "hex": "05f731529695ac",
+      "expected": "\u0005�1R���"
+    },
+    {
+      "hex": "69ed681f",
+      "expected": "i�h\u001f"
+    },
+    {
+      "hex": "b69c1126bd",
+      "expected": "��\u0011&�"
+    },
+    {
+      "hex": "78cda8c55eed70",
+      "expected": "xͨ�^�p"
+    },
+    {
+      "hex": "63",
+      "expected": "c"
+    },
+    {
+      "hex": "51b160bf85",
+      "expected": "Q�`��"
+    },
+    {
+      "hex": "93487d",
+      "expected": "�H}"
+    },
+    {
+      "hex": "8435be3484",
+      "expected": "�5�4�"
+    },
+    {
+      "hex": "a5b10f3b",
+      "expected": "��\u000f;"
+    },
+    {
+      "hex": "b4db0b6e53",
+      "expected": "��\u000bnS"
+    },
+    {
+      "hex": "2974",
+      "expected": ")t"
+    },
+    {
+      "hex": "2f274444",
+      "expected": "/'DD"
+    },
+    {
+      "hex": "ad58f868ff7425b9",
+      "expected": "�X�h�t%�"
+    },
+    {
+      "hex": "c60e",
+      "expected": "�\u000e"
+    },
+    {
+      "hex": "6fe3",
+      "expected": "o�"
+    },
+    {
+      "hex": "d29412",
+      "expected": "Ҕ\u0012"
+    },
+    {
+      "hex": "de",
+      "expected": "�"
+    },
+    {
+      "hex": "27390e34",
+      "expected": "'9\u000e4"
+    },
+    {
+      "hex": "b490d1",
+      "expected": "���"
+    },
+    {
+      "hex": "3c58",
+      "expected": "<X"
+    },
+    {
+      "hex": "8a5314ca1f600b",
+      "expected": "�S\u0014�\u001f`\u000b"
+    },
+    {
+      "hex": "16",
+      "expected": "\u0016"
+    },
+    {
+      "hex": "4cfd76ccbdcb8c",
+      "expected": "L�v̽ˌ"
+    },
+    {
+      "hex": "8a7b56",
+      "expected": "�{V"
+    },
+    {
+      "hex": "efbe6f",
+      "expected": "�o"
+    },
+    {
+      "hex": "711708348190ae",
+      "expected": "q\u0017\b4���"
+    },
+    {
+      "hex": "77a06c",
+      "expected": "w�l"
+    },
+    {
+      "hex": "6b6ae4cd98",
+      "expected": "kj�͘"
+    },
+    {
+      "hex": "f92d22ec2927",
+      "expected": "�-\"�)'"
+    },
+    {
+      "hex": "6dd8a0e92ed16c51",
+      "expected": "mؠ�.�lQ"
+    },
+    {
+      "hex": "23dcdbf3f36e52da",
+      "expected": "#����nR�"
+    },
+    {
+      "hex": "957b",
+      "expected": "�{"
+    },
+    {
+      "hex": "5b1309fbd9d2cde6",
+      "expected": "[\u0013\t�����"
+    },
+    {
+      "hex": "57fe952c1a288c",
+      "expected": "W��,\u001a(�"
+    },
+    {
+      "hex": "f5eb1c",
+      "expected": "��\u001c"
+    },
+    {
+      "hex": "43aaacba3d3c89",
+      "expected": "C���=<�"
+    },
+    {
+      "hex": "02",
+      "expected": "\u0002"
+    },
+    {
+      "hex": "af021d2a4708e8",
+      "expected": "�\u0002\u001d*G\b�"
+    },
+    {
+      "hex": "b5ffff8d86ddd1",
+      "expected": "�������"
+    },
+    {
+      "hex": "5354d3431abe",
+      "expected": "ST�C\u001a�"
+    },
+    {
+      "hex": "6b0422b8eda8",
+      "expected": "k\u0004\"���"
+    },
+    {
+      "hex": "5262",
+      "expected": "Rb"
+    },
+    {
+      "hex": "34db6a738d",
+      "expected": "4�js�"
+    },
+    {
+      "hex": "0840100d344f351a",
+      "expected": "\b@\u0010\r4O5\u001a"
+    },
+    {
+      "hex": "4f71490fe8d220",
+      "expected": "OqI\u000f�� "
+    },
+    {
+      "hex": "a68a34",
+      "expected": "��4"
+    },
+    {
+      "hex": "70f48d107a842e",
+      "expected": "p�\u0010z�."
+    },
+    {
+      "hex": "79d6c0d6",
+      "expected": "y���"
+    },
+    {
+      "hex": "f04670491907",
+      "expected": "�FpI\u0019\u0007"
+    },
+    {
+      "hex": "66df",
+      "expected": "f�"
+    },
+    {
+      "hex": "4388065a182f",
+      "expected": "C�\u0006Z\u0018/"
+    },
+    {
+      "hex": "3e5d003c1c82cb",
+      "expected": ">]\u0000<\u001c��"
+    },
+    {
+      "hex": "cd13",
+      "expected": "�\u0013"
+    },
+    {
+      "hex": "9fec1fc61015",
+      "expected": "��\u001f�\u0010\u0015"
+    },
+    {
+      "hex": "b9b44d5111381f",
+      "expected": "��MQ\u00118\u001f"
+    },
+    {
+      "hex": "ee4168306fb3f7",
+      "expected": "�Ah0o��"
+    },
+    {
+      "hex": "10869a2c75",
+      "expected": "\u0010��,u"
+    },
+    {
+      "hex": "d505884fbca4",
+      "expected": "�\u0005�O��"
+    },
+    {
+      "hex": "f622116c35b9",
+      "expected": "�\"\u0011l5�"
+    },
+    {
+      "hex": "5e0de67f",
+      "expected": "^\r�"
+    },
+    {
+      "hex": "a3c7ac44",
+      "expected": "�ǬD"
+    },
+    {
+      "hex": "ce",
+      "expected": "�"
+    },
+    {
+      "hex": "1d",
+      "expected": "\u001d"
+    },
+    {
+      "hex": "5ecb11b0ce23",
+      "expected": "^�\u0011��#"
+    },
+    {
+      "hex": "aa5d94",
+      "expected": "�]�"
+    },
+    {
+      "hex": "9b52ad46ca",
+      "expected": "�R�F�"
+    },
+    {
+      "hex": "3971",
+      "expected": "9q"
+    },
+    {
+      "hex": "615191586df9",
+      "expected": "aQ�Xm�"
+    },
+    {
+      "hex": "2fbafe48",
+      "expected": "/��H"
+    },
+    {
+      "hex": "91935baa9764",
+      "expected": "��[��d"
+    },
+    {
+      "hex": "2cf2b2",
+      "expected": ",�"
+    },
+    {
+      "hex": "e9a750",
+      "expected": "�P"
+    },
+    {
+      "hex": "2415fe06c9af",
+      "expected": "$\u0015�\u0006ɯ"
+    },
+    {
+      "hex": "0285ee30c7c8649c",
+      "expected": "\u0002��0��d�"
+    },
+    {
+      "hex": "8569c9f53e",
+      "expected": "�i��>"
+    },
+    {
+      "hex": "7885614108",
+      "expected": "x�aA\b"
+    },
+    {
+      "hex": "5fac",
+      "expected": "_�"
+    },
+    {
+      "hex": "31f2a812",
+      "expected": "1�\u0012"
+    },
+    {
+      "hex": "08eabdb11ef668",
+      "expected": "\b꽱\u001e�h"
+    },
+    {
+      "hex": "7005fb",
+      "expected": "p\u0005�"
+    },
+    {
+      "hex": "60",
+      "expected": "`"
+    },
+    {
+      "hex": "63a1d06ccf",
+      "expected": "c��l�"
+    },
+    {
+      "hex": "c72188b12fb1f9",
+      "expected": "�!��/��"
+    },
+    {
+      "hex": "48e8fe4d94bd",
+      "expected": "H��M��"
+    },
+    {
+      "hex": "87",
+      "expected": "�"
+    },
+    {
+      "hex": "32ec15db27a52c",
+      "expected": "2�\u0015�'�,"
+    },
+    {
+      "hex": "f5",
+      "expected": "�"
+    },
+    {
+      "hex": "6124d21654f66b",
+      "expected": "a$�\u0016T�k"
+    },
+    {
+      "hex": "16be",
+      "expected": "\u0016�"
+    },
+    {
+      "hex": "18",
+      "expected": "\u0018"
+    },
+    {
+      "hex": "c7985d",
+      "expected": "ǘ]"
+    },
+    {
+      "hex": "f5ae7718669b",
+      "expected": "��w\u0018f�"
+    },
+    {
+      "hex": "356548",
+      "expected": "5eH"
+    },
+    {
+      "hex": "5af4519823c17c",
+      "expected": "Z�Q�#�|"
+    },
+    {
+      "hex": "9d8896ea",
+      "expected": "����"
+    },
+    {
+      "hex": "a3839c8b58a133d1",
+      "expected": "����X�3�"
+    },
+    {
+      "hex": "f5",
+      "expected": "�"
+    },
+    {
+      "hex": "1b1c15e3",
+      "expected": "\u001b\u001c\u0015�"
+    },
+    {
+      "hex": "098192da28013a",
+      "expected": "\t���(\u0001:"
+    },
+    {
+      "hex": "3e2c7175f566",
+      "expected": ">,qu�f"
+    },
+    {
+      "hex": "c0d02523c9",
+      "expected": "��%#�"
+    },
+    {
+      "hex": "673315",
+      "expected": "g3\u0015"
+    },
+    {
+      "hex": "f16870c47f12c6",
+      "expected": "�hp�\u0012�"
+    },
+    {
+      "hex": "e18e",
+      "expected": "�"
+    },
+    {
+      "hex": "63",
+      "expected": "c"
+    },
+    {
+      "hex": "b85c73",
+      "expected": "�\\s"
+    },
+    {
+      "hex": "80cda2d218e9",
+      "expected": "�͢�\u0018�"
+    },
+    {
+      "hex": "d0",
+      "expected": "�"
+    },
+    {
+      "hex": "55",
+      "expected": "U"
+    },
+    {
+      "hex": "746f5041",
+      "expected": "toPA"
+    },
+    {
+      "hex": "130e5659",
+      "expected": "\u0013\u000eVY"
+    },
+    {
+      "hex": "63af",
+      "expected": "c�"
+    },
+    {
+      "hex": "7d46",
+      "expected": "}F"
+    },
+    {
+      "hex": "7f2bbc25265c",
+      "expected": "+�%&\\"
+    },
+    {
+      "hex": "ceb9925c26",
+      "expected": "ι�\\&"
+    },
+    {
+      "hex": "a2c48988d787",
+      "expected": "�ĉ�ׇ"
+    },
+    {
+      "hex": "69a42f78916e1ece",
+      "expected": "i�/x�n\u001e�"
+    },
+    {
+      "hex": "ca1f405e",
+      "expected": "�\u001f@^"
+    },
+    {
+      "hex": "6129d4",
+      "expected": "a)�"
+    },
+    {
+      "hex": "325b926bec38a7",
+      "expected": "2[�k�8�"
+    },
+    {
+      "hex": "08f1b6e7ae00",
+      "expected": "\b��\u0000"
+    },
+    {
+      "hex": "f430b240",
+      "expected": "�0�@"
+    },
+    {
+      "hex": "13",
+      "expected": "\u0013"
+    },
+    {
+      "hex": "0548dc",
+      "expected": "\u0005H�"
+    },
+    {
+      "hex": "c0436f195d9c",
+      "expected": "�Co\u0019]�"
+    },
+    {
+      "hex": "48",
+      "expected": "H"
+    },
+    {
+      "hex": "8efca396",
+      "expected": "����"
+    },
+    {
+      "hex": "247913b417eba7cf",
+      "expected": "$y\u0013�\u0017��"
+    },
+    {
+      "hex": "b27f8bd0",
+      "expected": "���"
+    },
+    {
+      "hex": "dca9",
+      "expected": "ܩ"
+    },
+    {
+      "hex": "1d13b2",
+      "expected": "\u001d\u0013�"
+    },
+    {
+      "hex": "bce07a",
+      "expected": "��z"
+    },
+    {
+      "hex": "a9",
+      "expected": "�"
+    },
+    {
+      "hex": "8b9b62882ed6",
+      "expected": "��b�.�"
+    },
+    {
+      "hex": "caac775a5ddc",
+      "expected": "ʬwZ]�"
+    },
+    {
+      "hex": "7d82112ef4ae05",
+      "expected": "}�\u0011.��\u0005"
+    },
+    {
+      "hex": "bc73150b",
+      "expected": "�s\u0015\u000b"
+    },
+    {
+      "hex": "440700785c",
+      "expected": "D\u0007\u0000x\\"
+    },
+    {
+      "hex": "d0638d5a98",
+      "expected": "�c�Z�"
+    },
+    {
+      "hex": "8b",
+      "expected": "�"
+    },
+    {
+      "hex": "489c6e03ec",
+      "expected": "H�n\u0003�"
+    },
+    {
+      "hex": "047e2d",
+      "expected": "\u0004~-"
+    },
+    {
+      "hex": "04f843782a53",
+      "expected": "\u0004�Cx*S"
+    },
+    {
+      "hex": "56c5ff68b0",
+      "expected": "V��h�"
+    },
+    {
+      "hex": "25dfdff44d",
+      "expected": "%���M"
+    },
+    {
+      "hex": "e299d924",
+      "expected": "��$"
+    },
+    {
+      "hex": "6f503bda501c6798",
+      "expected": "oP;�P\u001cg�"
+    },
+    {
+      "hex": "f8de8103",
+      "expected": "�ށ\u0003"
+    },
+    {
+      "hex": "16",
+      "expected": "\u0016"
+    },
+    {
+      "hex": "59c128bfb7",
+      "expected": "Y�(��"
+    },
+    {
+      "hex": "e1b56bc0",
+      "expected": "�k�"
+    },
+    {
+      "hex": "cc2bb4a4d640",
+      "expected": "�+���@"
+    },
+    {
+      "hex": "cef3",
+      "expected": "��"
+    },
+    {
+      "hex": "714b621e00b2",
+      "expected": "qKb\u001e\u0000�"
+    },
+    {
+      "hex": "163ce96d6a0d48f0",
+      "expected": "\u0016<�mj\rH�"
+    },
+    {
+      "hex": "48d156204299",
+      "expected": "H�V B�"
+    },
+    {
+      "hex": "6e26bbc6074a6a",
+      "expected": "n&��\u0007Jj"
+    },
+    {
+      "hex": "7ef636",
+      "expected": "~�6"
+    },
+    {
+      "hex": "78afe9060fbf59",
+      "expected": "x��\u0006\u000f�Y"
+    },
+    {
+      "hex": "16ed9994",
+      "expected": "\u0016화"
+    },
+    {
+      "hex": "876780b9",
+      "expected": "�g��"
+    },
+    {
+      "hex": "67e0fbe3d67b78",
+      "expected": "g����{x"
+    },
+    {
+      "hex": "3814c219e61c8a",
+      "expected": "8\u0014�\u0019�\u001c�"
+    },
+    {
+      "hex": "b95c8e94e348",
+      "expected": "�\\���H"
+    },
+    {
+      "hex": "18a3ec5f",
+      "expected": "\u0018��_"
+    },
+    {
+      "hex": "f2b8f9f7",
+      "expected": "���"
+    },
+    {
+      "hex": "8223",
+      "expected": "�#"
+    },
+    {
+      "hex": "36",
+      "expected": "6"
+    },
+    {
+      "hex": "93092763f7",
+      "expected": "�\t'c�"
+    },
+    {
+      "hex": "89",
+      "expected": "�"
+    },
+    {
+      "hex": "54b9b3ff85",
+      "expected": "T����"
+    },
+    {
+      "hex": "bd559ef4f3",
+      "expected": "�U���"
+    },
+    {
+      "hex": "ea",
+      "expected": "�"
+    },
+    {
+      "hex": "87",
+      "expected": "�"
+    },
+    {
+      "hex": "1f7c5289460938",
+      "expected": "\u001f|R�F\t8"
+    },
+    {
+      "hex": "fe9b3d",
+      "expected": "��="
+    },
+    {
+      "hex": "e9e02d0f9c",
+      "expected": "��-\u000f�"
+    },
+    {
+      "hex": "0a6c1b",
+      "expected": "\nl\u001b"
+    },
+    {
+      "hex": "880ed48927bb9c",
+      "expected": "�\u000eԉ'��"
+    },
+    {
+      "hex": "55773f",
+      "expected": "Uw?"
+    },
+    {
+      "hex": "1164b8a3",
+      "expected": "\u0011d��"
+    },
+    {
+      "hex": "1df47bff10",
+      "expected": "\u001d�{�\u0010"
+    },
+    {
+      "hex": "bc601b42d93f",
+      "expected": "�`\u001bB�?"
+    },
+    {
+      "hex": "86550509b630",
+      "expected": "�U\u0005\t�0"
+    },
+    {
+      "hex": "949d",
+      "expected": "��"
+    },
+    {
+      "hex": "6b",
+      "expected": "k"
+    },
+    {
+      "hex": "035c2c95",
+      "expected": "\u0003\\,�"
+    },
+    {
+      "hex": "63631d09f3d7b8",
+      "expected": "cc\u001d\t�׸"
+    },
+    {
+      "hex": "7687a35f8e4c",
+      "expected": "v��_�L"
+    },
+    {
+      "hex": "a9eab6",
+      "expected": "��"
+    },
+    {
+      "hex": "e8285a",
+      "expected": "�(Z"
+    },
+    {
+      "hex": "3e5a97",
+      "expected": ">Z�"
+    },
+    {
+      "hex": "e401597617394c",
+      "expected": "�\u0001Yv\u00179L"
+    },
+    {
+      "hex": "08f5cdc48da38c",
+      "expected": "\b��č��"
+    },
+    {
+      "hex": "6871",
+      "expected": "hq"
+    },
+    {
+      "hex": "a058",
+      "expected": "�X"
+    },
+    {
+      "hex": "3a80b6bae2",
+      "expected": ":����"
+    },
+    {
+      "hex": "d0946958dcb4621e",
+      "expected": "ДiXܴb\u001e"
+    },
+    {
+      "hex": "dd25fa",
+      "expected": "�%�"
+    },
+    {
+      "hex": "ebb31c581d",
+      "expected": "�\u001cX\u001d"
+    },
+    {
+      "hex": "189649ced8",
+      "expected": "\u0018�I��"
+    },
+    {
+      "hex": "5517b0b5504aee46",
+      "expected": "U\u0017��PJ�F"
+    },
+    {
+      "hex": "5db67b00304af5",
+      "expected": "]�{\u00000J�"
+    },
+    {
+      "hex": "e63422",
+      "expected": "�4\""
+    },
+    {
+      "hex": "e500",
+      "expected": "�\u0000"
+    },
+    {
+      "hex": "da84",
+      "expected": "ڄ"
+    },
+    {
+      "hex": "df7de9910a75b24e",
+      "expected": "�}�\nu�N"
+    },
+    {
+      "hex": "3298e0ea7b3a",
+      "expected": "2���{:"
+    },
+    {
+      "hex": "b5",
+      "expected": "�"
+    },
+    {
+      "hex": "a2587c564e",
+      "expected": "�X|VN"
+    },
+    {
+      "hex": "fcd7d7b3",
+      "expected": "��׳"
+    },
+    {
+      "hex": "fa3ac991f082",
+      "expected": "�:ɑ��"
+    },
+    {
+      "hex": "031a6eaa42",
+      "expected": "\u0003\u001an�B"
+    },
+    {
+      "hex": "992d12b3ccfeb0",
+      "expected": "�-\u0012����"
+    },
+    {
+      "hex": "551f",
+      "expected": "U\u001f"
+    },
+    {
+      "hex": "21593e01ad58",
+      "expected": "!Y>\u0001�X"
+    },
+    {
+      "hex": "69713fb0e4",
+      "expected": "iq?��"
+    },
+    {
+      "hex": "a04689",
+      "expected": "�F�"
+    },
+    {
+      "hex": "d85011",
+      "expected": "�P\u0011"
+    },
+    {
+      "hex": "110f",
+      "expected": "\u0011\u000f"
+    },
+    {
+      "hex": "59e709",
+      "expected": "Y�\t"
+    },
+    {
+      "hex": "5623a33054",
+      "expected": "V#�0T"
+    },
+    {
+      "hex": "9dd876687680",
+      "expected": "��vhv�"
+    },
+    {
+      "hex": "264f714f43b4",
+      "expected": "&OqOC�"
+    },
+    {
+      "hex": "67b29c75",
+      "expected": "g��u"
+    },
+    {
+      "hex": "d2d22985",
+      "expected": "��)�"
+    },
+    {
+      "hex": "ec8a",
+      "expected": "�"
+    },
+    {
+      "hex": "f5de55799c",
+      "expected": "��Uy�"
+    },
+    {
+      "hex": "c84ec010",
+      "expected": "�N�\u0010"
+    },
+    {
+      "hex": "26e459",
+      "expected": "&�Y"
+    },
+    {
+      "hex": "fca74c0736ae12",
+      "expected": "��L\u00076�\u0012"
+    },
+    {
+      "hex": "a9b902b4a57b",
+      "expected": "��\u0002��{"
+    },
+    {
+      "hex": "c3ec",
+      "expected": "��"
+    },
+    {
+      "hex": "c1cedf73a86fc6",
+      "expected": "���s�o�"
+    },
+    {
+      "hex": "7bc0b9919279a834",
+      "expected": "{����y�4"
+    },
+    {
+      "hex": "c1452fbd4a1513",
+      "expected": "�E/�J\u0015\u0013"
+    },
+    {
+      "hex": "ba4abd",
+      "expected": "�J�"
+    },
+    {
+      "hex": "c3e9cb07",
+      "expected": "���\u0007"
+    },
+    {
+      "hex": "84c666",
+      "expected": "��f"
+    },
+    {
+      "hex": "5b",
+      "expected": "["
+    },
+    {
+      "hex": "a1d677c0",
+      "expected": "��w�"
+    },
+    {
+      "hex": "7662f7b58b3f1f",
+      "expected": "vb���?\u001f"
+    },
+    {
+      "hex": "fef8",
+      "expected": "��"
+    },
+    {
+      "hex": "a07241",
+      "expected": "�rA"
+    },
+    {
+      "hex": "75",
+      "expected": "u"
+    },
+    {
+      "hex": "9521abfb51",
+      "expected": "�!��Q"
+    },
+    {
+      "hex": "e1e56c98b059fa67",
+      "expected": "��l��Y�g"
+    },
+    {
+      "hex": "f13f472a0490f2",
+      "expected": "�?G*\u0004��"
+    },
+    {
+      "hex": "c2447e",
+      "expected": "�D~"
+    },
+    {
+      "hex": "b72c",
+      "expected": "�,"
+    },
+    {
+      "hex": "fb98d864d0",
+      "expected": "���d�"
+    },
+    {
+      "hex": "30a706",
+      "expected": "0�\u0006"
+    },
+    {
+      "hex": "e5103dd2ff65",
+      "expected": "�\u0010=��e"
+    },
+    {
+      "hex": "1611c7",
+      "expected": "\u0016\u0011�"
+    },
+    {
+      "hex": "2b9e7f16",
+      "expected": "+�\u0016"
+    },
+    {
+      "hex": "05a982",
+      "expected": "\u0005��"
+    },
+    {
+      "hex": "a364",
+      "expected": "�d"
+    },
+    {
+      "hex": "a5acf4c7b9",
+      "expected": "���ǹ"
+    },
+    {
+      "hex": "60ebcca18ae4a27d",
+      "expected": "`�̡��}"
+    },
+    {
+      "hex": "42854af4ee",
+      "expected": "B�J��"
+    },
+    {
+      "hex": "6a64b679",
+      "expected": "jd�y"
+    },
+    {
+      "hex": "334800d77eb0638d",
+      "expected": "3H\u0000�~�c�"
+    },
+    {
+      "hex": "28d2cd8a58530a",
+      "expected": "(�͊XS\n"
+    },
+    {
+      "hex": "33b049be3a0477",
+      "expected": "3�I�:\u0004w"
+    },
+    {
+      "hex": "6ccfa3771116d0",
+      "expected": "lϣw\u0011\u0016�"
+    },
+    {
+      "hex": "ea18cfe6c7dedca3",
+      "expected": "�\u0018����ܣ"
+    },
+    {
+      "hex": "b42c3e9a7e4d3c1c",
+      "expected": "�,>�~M<\u001c"
+    },
+    {
+      "hex": "20e6845222",
+      "expected": " �R\""
+    },
+    {
+      "hex": "994087b9",
+      "expected": "�@��"
+    },
+    {
+      "hex": "71025f578547",
+      "expected": "q\u0002_W�G"
+    },
+    {
+      "hex": "c18870",
+      "expected": "��p"
+    },
+    {
+      "hex": "6df22f07",
+      "expected": "m�/\u0007"
+    },
+    {
+      "hex": "7e",
+      "expected": "~"
+    },
+    {
+      "hex": "daa2740266bb01",
+      "expected": "ڢt\u0002f�\u0001"
+    },
+    {
+      "hex": "7a015e38f8d6",
+      "expected": "z\u0001^8��"
+    },
+    {
+      "hex": "1e3b533a88",
+      "expected": "\u001e;S:�"
+    },
+    {
+      "hex": "056cdd",
+      "expected": "\u0005l�"
+    },
+    {
+      "hex": "d48563",
+      "expected": "ԅc"
+    },
+    {
+      "hex": "7b2755",
+      "expected": "{'U"
+    },
+    {
+      "hex": "65d0369e271d13",
+      "expected": "e�6�'\u001d\u0013"
+    },
+    {
+      "hex": "32231d030a82b6cb",
+      "expected": "2#\u001d\u0003\n���"
+    },
+    {
+      "hex": "51536e",
+      "expected": "QSn"
+    },
+    {
+      "hex": "9202",
+      "expected": "�\u0002"
+    },
+    {
+      "hex": "28307fbc",
+      "expected": "(0�"
+    },
+    {
+      "hex": "8ed042",
+      "expected": "��B"
+    },
+    {
+      "hex": "0f38cfe66159f6f3",
+      "expected": "\u000f8��aY��"
+    },
+    {
+      "hex": "2b65e4ba0dce8d51",
+      "expected": "+e�\r΍Q"
+    },
+    {
+      "hex": "00",
+      "expected": "\u0000"
+    },
+    {
+      "hex": "f769ac1f5213",
+      "expected": "�i�\u001fR\u0013"
+    },
+    {
+      "hex": "0056",
+      "expected": "\u0000V"
+    },
+    {
+      "hex": "2e019a0595",
+      "expected": ".\u0001�\u0005�"
+    },
+    {
+      "hex": "d7",
+      "expected": "�"
+    },
+    {
+      "hex": "3844da",
+      "expected": "8D�"
+    },
+    {
+      "hex": "15560697ffc154",
+      "expected": "\u0015V\u0006���T"
+    },
+    {
+      "hex": "b4eb850d0d82",
+      "expected": "��\r\r�"
+    },
+    {
+      "hex": "34ae",
+      "expected": "4�"
+    },
+    {
+      "hex": "b2f723",
+      "expected": "��#"
+    },
+    {
+      "hex": "781b64",
+      "expected": "x\u001bd"
+    },
+    {
+      "hex": "9df984447a22e160",
+      "expected": "���Dz\"�`"
+    },
+    {
+      "hex": "df37dcd898e7cc",
+      "expected": "�7�ؘ��"
+    },
+    {
+      "hex": "7fb4373b6b3bfd",
+      "expected": "�7;k;�"
+    },
+    {
+      "hex": "be0c54",
+      "expected": "�\fT"
+    },
+    {
+      "hex": "fca8dd242cbec49f",
+      "expected": "���$,�ğ"
+    },
+    {
+      "hex": "646d85d3",
+      "expected": "dm��"
+    },
+    {
+      "hex": "d8",
+      "expected": "�"
+    },
+    {
+      "hex": "5c2dc4244ddbec",
+      "expected": "\\-�$M��"
+    },
+    {
+      "hex": "d33eea9e0209",
+      "expected": "�>�\u0002\t"
+    },
+    {
+      "hex": "1e014299",
+      "expected": "\u001e\u0001B�"
+    },
+    {
+      "hex": "6e34932fb6bc48",
+      "expected": "n4�/��H"
+    },
+    {
+      "hex": "d7eb89d6ac5baa",
+      "expected": "��֬[�"
+    },
+    {
+      "hex": "3368d971",
+      "expected": "3h�q"
+    },
+    {
+      "hex": "c3",
+      "expected": "�"
+    },
+    {
+      "hex": "89bad7",
+      "expected": "���"
+    },
+    {
+      "hex": "0348e4a62f37b2",
+      "expected": "\u0003H�/7�"
+    },
+    {
+      "hex": "f3",
+      "expected": "�"
+    },
+    {
+      "hex": "d1cd",
+      "expected": "��"
+    },
+    {
+      "hex": "a0c580e5035f3e07",
+      "expected": "�ŀ�\u0003_>\u0007"
+    },
+    {
+      "hex": "912cee0f9b8a45",
+      "expected": "�,�\u000f��E"
+    },
+    {
+      "hex": "a0",
+      "expected": "�"
+    },
+    {
+      "hex": "5e1d86b65dc10077",
+      "expected": "^\u001d��]�\u0000w"
+    },
+    {
+      "hex": "50b3d173",
+      "expected": "P��s"
+    },
+    {
+      "hex": "ef9615",
+      "expected": "�\u0015"
+    },
+    {
+      "hex": "259f",
+      "expected": "%�"
+    },
+    {
+      "hex": "f0e9",
+      "expected": "��"
+    },
+    {
+      "hex": "bf3e",
+      "expected": "�>"
+    },
+    {
+      "hex": "ecef",
+      "expected": "��"
+    },
+    {
+      "hex": "231f9d60de",
+      "expected": "#\u001f�`�"
+    },
+    {
+      "hex": "3709799a2dc8ab94",
+      "expected": "7\ty�-ȫ�"
+    },
+    {
+      "hex": "b03f55e92dc100",
+      "expected": "�?U�-�\u0000"
+    },
+    {
+      "hex": "326724",
+      "expected": "2g$"
+    },
+    {
+      "hex": "e606f5192770fb",
+      "expected": "�\u0006�\u0019'p�"
+    },
+    {
+      "hex": "3398d0",
+      "expected": "3��"
+    },
+    {
+      "hex": "0d3ddc5783",
+      "expected": "\r=�W�"
+    },
+    {
+      "hex": "7453c9",
+      "expected": "tS�"
+    },
+    {
+      "hex": "e3a96293d31b",
+      "expected": "�b��\u001b"
+    },
+    {
+      "hex": "6ab02b7fe0",
+      "expected": "j�+�"
+    },
+    {
+      "hex": "866b62c547faae",
+      "expected": "�kb�G��"
+    },
+    {
+      "hex": "55e2681e9631f09f",
+      "expected": "U�h\u001e�1�"
+    },
+    {
+      "hex": "747a9c2f",
+      "expected": "tz�/"
+    },
+    {
+      "hex": "2529da3b487544",
+      "expected": "%)�;HuD"
+    },
+    {
+      "hex": "714e0e1a5f5003",
+      "expected": "qN\u000e\u001a_P\u0003"
+    },
+    {
+      "hex": "6be6c9",
+      "expected": "k��"
+    },
+    {
+      "hex": "e615ba",
+      "expected": "�\u0015�"
+    },
+    {
+      "hex": "b16c9e301de3",
+      "expected": "�l�0\u001d�"
+    },
+    {
+      "hex": "495832",
+      "expected": "IX2"
+    },
+    {
+      "hex": "30ca14",
+      "expected": "0�\u0014"
+    },
+    {
+      "hex": "acdf7b47d5",
+      "expected": "��{G�"
+    },
+    {
+      "hex": "8ed715e80c3402f1",
+      "expected": "��\u0015�\f4\u0002�"
+    },
+    {
+      "hex": "aa3ff1b0f46f21",
+      "expected": "�?��o!"
+    },
+    {
+      "hex": "c2f8685f8ccff7c5",
+      "expected": "��h_����"
+    },
+    {
+      "hex": "8de493e760",
+      "expected": "���`"
+    },
+    {
+      "hex": "e9cbcce65a",
+      "expected": "����Z"
+    },
+    {
+      "hex": "677a",
+      "expected": "gz"
+    },
+    {
+      "hex": "3c9594",
+      "expected": "<��"
+    },
+    {
+      "hex": "5e4fbd7223",
+      "expected": "^O�r#"
+    },
+    {
+      "hex": "b44de2c6",
+      "expected": "�M��"
+    },
+    {
+      "hex": "ec3098fe32",
+      "expected": "�0��2"
+    },
+    {
+      "hex": "71f5b3fd1a673a",
+      "expected": "q���\u001ag:"
+    },
+    {
+      "hex": "1ffa66c9a131",
+      "expected": "\u001f�fɡ1"
+    },
+    {
+      "hex": "30bcada79432f599",
+      "expected": "0����2��"
+    },
+    {
+      "hex": "e3dbf340",
+      "expected": "���@"
+    },
+    {
+      "hex": "c8b720c76f",
+      "expected": "ȷ �o"
+    },
+    {
+      "hex": "caf19e3c9ba3",
+      "expected": "��<��"
+    },
+    {
+      "hex": "850ab7caf5af",
+      "expected": "�\n����"
+    },
+    {
+      "hex": "9eaec249cdf898",
+      "expected": "���I���"
+    },
+    {
+      "hex": "a105cf50",
+      "expected": "�\u0005�P"
+    },
+    {
+      "hex": "3b5fa208b2c7c535",
+      "expected": ";_�\b���5"
+    },
+    {
+      "hex": "82",
+      "expected": "�"
+    },
+    {
+      "hex": "79efc0ff13",
+      "expected": "y���\u0013"
+    },
+    {
+      "hex": "7776332d",
+      "expected": "wv3-"
+    },
+    {
+      "hex": "2cdb6f7d586a25a2",
+      "expected": ",�o}Xj%�"
+    },
+    {
+      "hex": "5b8055",
+      "expected": "[�U"
+    },
+    {
+      "hex": "de61",
+      "expected": "�a"
+    },
+    {
+      "hex": "e008ff",
+      "expected": "�\b�"
+    },
+    {
+      "hex": "f2588ac507",
+      "expected": "�X��\u0007"
+    },
+    {
+      "hex": "02",
+      "expected": "\u0002"
+    },
+    {
+      "hex": "1373c1d9",
+      "expected": "\u0013s��"
+    },
+    {
+      "hex": "c0",
+      "expected": "�"
+    },
+    {
+      "hex": "ea6d",
+      "expected": "�m"
+    },
+    {
+      "hex": "5f736d",
+      "expected": "_sm"
+    },
+    {
+      "hex": "d0ddf4897c",
+      "expected": "���|"
+    },
+    {
+      "hex": "e615",
+      "expected": "�\u0015"
+    },
+    {
+      "hex": "c8f7a8",
+      "expected": "���"
+    },
+    {
+      "hex": "1b",
+      "expected": "\u001b"
+    },
+    {
+      "hex": "7aac4c5a43ba3d",
+      "expected": "z�LZC�="
+    },
+    {
+      "hex": "012ef7e137b272",
+      "expected": "\u0001.��7�r"
+    },
+    {
+      "hex": "2160f12d49",
+      "expected": "!`�-I"
+    },
+    {
+      "hex": "2925a4",
+      "expected": ")%�"
+    },
+    {
+      "hex": "7dbb65ef6a99a8",
+      "expected": "}�e�j��"
+    },
+    {
+      "hex": "6fd956568c1f9d",
+      "expected": "o�VV�\u001f�"
+    },
+    {
+      "hex": "53aa585a15",
+      "expected": "S�XZ\u0015"
+    },
+    {
+      "hex": "8533",
+      "expected": "�3"
+    },
+    {
+      "hex": "e1e13d",
+      "expected": "��="
+    },
+    {
+      "hex": "507454",
+      "expected": "PtT"
+    },
+    {
+      "hex": "d775",
+      "expected": "�u"
+    },
+    {
+      "hex": "55",
+      "expected": "U"
+    },
+    {
+      "hex": "c8ab",
+      "expected": "ȫ"
+    },
+    {
+      "hex": "ee83",
+      "expected": "�"
+    },
+    {
+      "hex": "57d47e",
+      "expected": "W�~"
+    },
+    {
+      "hex": "897c360dcc0a",
+      "expected": "�|6\r�\n"
+    },
+    {
+      "hex": "2a16de",
+      "expected": "*\u0016�"
+    },
+    {
+      "hex": "9b7db5faa435",
+      "expected": "�}���5"
+    },
+    {
+      "hex": "f893838100",
+      "expected": "����\u0000"
+    },
+    {
+      "hex": "136dc2e2d71a",
+      "expected": "\u0013m���\u001a"
+    },
+    {
+      "hex": "57d6b3663e6d5a",
+      "expected": "Wֳf>mZ"
+    },
+    {
+      "hex": "a215af",
+      "expected": "�\u0015�"
+    },
+    {
+      "hex": "51420943",
+      "expected": "QB\tC"
+    },
+    {
+      "hex": "9d1f8d",
+      "expected": "�\u001f�"
+    },
+    {
+      "hex": "0bdf0d1b4041fb",
+      "expected": "\u000b�\r\u001b@A�"
+    },
+    {
+      "hex": "b303c160322f54c3",
+      "expected": "�\u0003�`2/T�"
+    },
+    {
+      "hex": "99c86a9206",
+      "expected": "��j�\u0006"
+    },
+    {
+      "hex": "dc93ae0901b58f0b",
+      "expected": "ܓ�\t\u0001��\u000b"
+    },
+    {
+      "hex": "cb470e",
+      "expected": "�G\u000e"
+    },
+    {
+      "hex": "64ea7705b17eb0c4",
+      "expected": "d�w\u0005�~��"
+    },
+    {
+      "hex": "057f1bd4ad0575",
+      "expected": "\u0005\u001bԭ\u0005u"
+    },
+    {
+      "hex": "4af8b0",
+      "expected": "J��"
+    },
+    {
+      "hex": "e689573d05",
+      "expected": "�W=\u0005"
+    },
+    {
+      "hex": "b8539d17",
+      "expected": "�S�\u0017"
+    },
+    {
+      "hex": "e9cd6ecf",
+      "expected": "��n�"
+    },
+    {
+      "hex": "e9ffc49f",
+      "expected": "��ğ"
+    },
+    {
+      "hex": "cf",
+      "expected": "�"
+    },
+    {
+      "hex": "94",
+      "expected": "�"
+    },
+    {
+      "hex": "8e8a",
+      "expected": "��"
+    },
+    {
+      "hex": "206f235e36",
+      "expected": " o#^6"
+    },
+    {
+      "hex": "81ee473384ca9eff",
+      "expected": "��G3�ʞ�"
+    },
+    {
+      "hex": "e6c3302468",
+      "expected": "��0$h"
+    },
+    {
+      "hex": "1694d3668243ba",
+      "expected": "\u0016��f�C�"
+    },
+    {
+      "hex": "b06a6edca822",
+      "expected": "�jnܨ\""
+    },
+    {
+      "hex": "b4476790a2ba18",
+      "expected": "�Gg���\u0018"
+    },
+    {
+      "hex": "95",
+      "expected": "�"
+    },
+    {
+      "hex": "d2383e321e1ba9",
+      "expected": "�8>2\u001e\u001b�"
+    },
+    {
+      "hex": "8cc29a5d",
+      "expected": "�]"
+    },
+    {
+      "hex": "73",
+      "expected": "s"
+    },
+    {
+      "hex": "e4",
+      "expected": "�"
+    },
+    {
+      "hex": "cf6615abfb",
+      "expected": "�f\u0015��"
+    },
+    {
+      "hex": "f6969beea7c6",
+      "expected": "�����"
+    },
+    {
+      "hex": "ffa109af4afc8150",
+      "expected": "��\t�J��P"
+    },
+    {
+      "hex": "c0abe7d66a0bb025",
+      "expected": "����j\u000b�%"
+    },
+    {
+      "hex": "d4",
+      "expected": "�"
+    },
+    {
+      "hex": "2328a7bb83dcd939",
+      "expected": "#(�����9"
+    },
+    {
+      "hex": "a256b0ad",
+      "expected": "�V��"
+    },
+    {
+      "hex": "94",
+      "expected": "�"
+    },
+    {
+      "hex": "138e",
+      "expected": "\u0013�"
+    },
+    {
+      "hex": "dc",
+      "expected": "�"
+    },
+    {
+      "hex": "7b788bb36f72",
+      "expected": "{x��or"
+    },
+    {
+      "hex": "886753b0b1",
+      "expected": "�gS��"
+    },
+    {
+      "hex": "38fc256c6a6314e9",
+      "expected": "8�%ljc\u0014�"
+    },
+    {
+      "hex": "8b5af5ffdab5",
+      "expected": "�Z��ڵ"
+    },
+    {
+      "hex": "7588",
+      "expected": "u�"
+    },
+    {
+      "hex": "4ca9c24efe",
+      "expected": "L��N�"
+    },
+    {
+      "hex": "651654b9",
+      "expected": "e\u0016T�"
+    },
+    {
+      "hex": "6b22709e0fd42ec6",
+      "expected": "k\"p�\u000f�.�"
+    },
+    {
+      "hex": "97e1ac26",
+      "expected": "��&"
+    },
+    {
+      "hex": "c3",
+      "expected": "�"
+    },
+    {
+      "hex": "0ba7ba0a8594",
+      "expected": "\u000b��\n��"
+    },
+    {
+      "hex": "f0a1cc1e2d",
+      "expected": "��\u001e-"
+    },
+    {
+      "hex": "26b7a28a06a4",
+      "expected": "&���\u0006�"
+    },
+    {
+      "hex": "03832a3e1f2efe",
+      "expected": "\u0003�*>\u001f.�"
+    },
+    {
+      "hex": "84",
+      "expected": "�"
+    },
+    {
+      "hex": "31548229",
+      "expected": "1T�)"
+    },
+    {
+      "hex": "82",
+      "expected": "�"
+    },
+    {
+      "hex": "9002",
+      "expected": "�\u0002"
+    },
+    {
+      "hex": "fb0ba9b8d1e038",
+      "expected": "�\u000b����8"
+    },
+    {
+      "hex": "4191470b60",
+      "expected": "A�G\u000b`"
+    },
+    {
+      "hex": "443d18c72b",
+      "expected": "D=\u0018�+"
+    },
+    {
+      "hex": "f1f1c71bb627c5",
+      "expected": "���\u001b�'�"
+    },
+    {
+      "hex": "76f6e4dc",
+      "expected": "v���"
+    },
+    {
+      "hex": "37c6",
+      "expected": "7�"
+    },
+    {
+      "hex": "0bf08917df28f386",
+      "expected": "\u000b��\u0017�(�"
+    },
+    {
+      "hex": "302dbc055f",
+      "expected": "0-�\u0005_"
+    },
+    {
+      "hex": "3c52e8",
+      "expected": "<R�"
+    },
+    {
+      "hex": "335259ff",
+      "expected": "3RY�"
+    },
+    {
+      "hex": "ce7b94984a",
+      "expected": "�{��J"
+    },
+    {
+      "hex": "73e665f1a8d7",
+      "expected": "s�e��"
+    },
+    {
+      "hex": "4d5cde",
+      "expected": "M\\�"
+    },
+    {
+      "hex": "7d13feffe8de",
+      "expected": "}\u0013����"
+    },
+    {
+      "hex": "2a1f731b83",
+      "expected": "*\u001fs\u001b�"
+    },
+    {
+      "hex": "dfb749ea7d7a75",
+      "expected": "߷I�}zu"
+    },
+    {
+      "hex": "79665c10",
+      "expected": "yf\\\u0010"
+    },
+    {
+      "hex": "9d",
+      "expected": "�"
+    },
+    {
+      "hex": "4301149f44",
+      "expected": "C\u0001\u0014�D"
+    },
+    {
+      "hex": "4855c0",
+      "expected": "HU�"
+    },
+    {
+      "hex": "1c8a7433",
+      "expected": "\u001c�t3"
+    },
+    {
+      "hex": "d5b8",
+      "expected": "ո"
+    },
+    {
+      "hex": "feb663b5d0e5c8",
+      "expected": "��c����"
+    },
+    {
+      "hex": "682529f508",
+      "expected": "h%)�\b"
+    },
+    {
+      "hex": "ac6b",
+      "expected": "�k"
+    },
+    {
+      "hex": "cbaf0d9bd35f",
+      "expected": "˯\r��_"
+    },
+    {
+      "hex": "9eaa39b26b",
+      "expected": "��9�k"
+    },
+    {
+      "hex": "8211f5d0",
+      "expected": "�\u0011��"
+    },
+    {
+      "hex": "f91ef4d0b83532",
+      "expected": "�\u001e�и52"
+    },
+    {
+      "hex": "98eaba4833",
+      "expected": "��H3"
+    },
+    {
+      "hex": "afdd5d95c74427",
+      "expected": "��]��D'"
+    },
+    {
+      "hex": "ec81cf",
+      "expected": "��"
+    },
+    {
+      "hex": "f76e9e11679e",
+      "expected": "�n�\u0011g�"
+    },
+    {
+      "hex": "32",
+      "expected": "2"
+    },
+    {
+      "hex": "2c",
+      "expected": ","
+    },
+    {
+      "hex": "d1eb14",
+      "expected": "��\u0014"
+    },
+    {
+      "hex": "cf41ded515",
+      "expected": "�A��\u0015"
+    },
+    {
+      "hex": "ea400924edf0a8",
+      "expected": "�@\t$��"
+    },
+    {
+      "hex": "53f59a1adcf0dc3b",
+      "expected": "S��\u001a���;"
+    },
+    {
+      "hex": "40",
+      "expected": "@"
+    },
+    {
+      "hex": "fa929cc5",
+      "expected": "����"
+    },
+    {
+      "hex": "c7377608b05349",
+      "expected": "�7v\b�SI"
+    },
+    {
+      "hex": "cfcc07",
+      "expected": "��\u0007"
+    },
+    {
+      "hex": "896bb9a0d6",
+      "expected": "�k���"
+    },
+    {
+      "hex": "38",
+      "expected": "8"
+    },
+    {
+      "hex": "467089eb848500",
+      "expected": "Fp�넅\u0000"
+    },
+    {
+      "hex": "883fb5b6",
+      "expected": "�?��"
+    },
+    {
+      "hex": "2d012551",
+      "expected": "-\u0001%Q"
+    },
+    {
+      "hex": "271c3da25998",
+      "expected": "'\u001c=�Y�"
+    },
+    {
+      "hex": "0b",
+      "expected": "\u000b"
+    },
+    {
+      "hex": "f5f48943a58cd7d1",
+      "expected": "��C����"
+    },
+    {
+      "hex": "778ef841",
+      "expected": "w��A"
+    },
+    {
+      "hex": "39a5",
+      "expected": "9�"
+    },
+    {
+      "hex": "5805651b89e8",
+      "expected": "X\u0005e\u001b��"
+    },
+    {
+      "hex": "744604",
+      "expected": "tF\u0004"
+    },
+    {
+      "hex": "73",
+      "expected": "s"
+    },
+    {
+      "hex": "ff36",
+      "expected": "�6"
+    },
+    {
+      "hex": "994a44ab",
+      "expected": "�JD�"
+    },
+    {
+      "hex": "85d96060c779d326",
+      "expected": "��``�y�&"
+    },
+    {
+      "hex": "a1",
+      "expected": "�"
+    },
+    {
+      "hex": "c4c7",
+      "expected": "��"
+    },
+    {
+      "hex": "9b72ee3f",
+      "expected": "�r�?"
+    },
+    {
+      "hex": "60a640ba6118",
+      "expected": "`�@�a\u0018"
+    },
+    {
+      "hex": "fe246da9b02c",
+      "expected": "�$m��,"
+    },
+    {
+      "hex": "638079",
+      "expected": "c�y"
+    },
+    {
+      "hex": "d02e0bc461be34",
+      "expected": "�.\u000b�a�4"
+    },
+    {
+      "hex": "b5ece501c7",
+      "expected": "���\u0001�"
+    },
+    {
+      "hex": "5c581d",
+      "expected": "\\X\u001d"
+    },
+    {
+      "hex": "771c",
+      "expected": "w\u001c"
+    },
+    {
+      "hex": "c407",
+      "expected": "�\u0007"
+    },
+    {
+      "hex": "53a959a05059",
+      "expected": "S�Y�PY"
+    },
+    {
+      "hex": "c5339b2055e187",
+      "expected": "�3� U�"
+    },
+    {
+      "hex": "db",
+      "expected": "�"
+    },
+    {
+      "hex": "8b54b89f",
+      "expected": "�T��"
+    },
+    {
+      "hex": "918cd8",
+      "expected": "���"
+    },
+    {
+      "hex": "74",
+      "expected": "t"
+    },
+    {
+      "hex": "f8",
+      "expected": "�"
+    },
+    {
+      "hex": "b393",
+      "expected": "��"
+    },
+    {
+      "hex": "f40f25e46a31eec8",
+      "expected": "�\u000f%�j1��"
+    },
+    {
+      "hex": "32137922a84e5a",
+      "expected": "2\u0013y\"�NZ"
+    },
+    {
+      "hex": "a3626b",
+      "expected": "�bk"
+    },
+    {
+      "hex": "1d975428",
+      "expected": "\u001d�T("
+    },
+    {
+      "hex": "0350aa45398d60",
+      "expected": "\u0003P�E9�`"
+    },
+    {
+      "hex": "bd28703011",
+      "expected": "�(p0\u0011"
+    },
+    {
+      "hex": "a2f377570b53f202",
+      "expected": "��wW\u000bS�\u0002"
+    },
+    {
+      "hex": "dd80525f0c962a",
+      "expected": "݀R_\f�*"
+    },
+    {
+      "hex": "51",
+      "expected": "Q"
+    },
+    {
+      "hex": "d637c345a02e",
+      "expected": "�7�E�."
+    },
+    {
+      "hex": "666a6f980bcda7d1",
+      "expected": "fjo�\u000bͧ�"
+    },
+    {
+      "hex": "5e13745e6238",
+      "expected": "^\u0013t^b8"
+    },
+    {
+      "hex": "846b5ddfe6",
+      "expected": "�k]��"
+    },
+    {
+      "hex": "396fd2",
+      "expected": "9o�"
+    },
+    {
+      "hex": "7e03",
+      "expected": "~\u0003"
+    },
+    {
+      "hex": "53c9",
+      "expected": "S�"
+    },
+    {
+      "hex": "5e87f456b71378",
+      "expected": "^��V�\u0013x"
+    },
+    {
+      "hex": "d66c4d0d",
+      "expected": "�lM\r"
+    },
+    {
+      "hex": "7c86",
+      "expected": "|�"
+    },
+    {
+      "hex": "e21cec",
+      "expected": "�\u001c�"
+    },
+    {
+      "hex": "8b0d4b12665d",
+      "expected": "�\rK\u0012f]"
+    },
+    {
+      "hex": "99",
+      "expected": "�"
+    },
+    {
+      "hex": "77",
+      "expected": "w"
+    },
+    {
+      "hex": "7d55d5939298",
+      "expected": "}UՓ��"
+    },
+    {
+      "hex": "756986653f",
+      "expected": "ui�e?"
+    },
+    {
+      "hex": "96f81c5aac26",
+      "expected": "��\u001cZ�&"
+    },
+    {
+      "hex": "48ee",
+      "expected": "H�"
+    },
+    {
+      "hex": "42de2384",
+      "expected": "B�#�"
+    },
+    {
+      "hex": "0ac1",
+      "expected": "\n�"
+    },
+    {
+      "hex": "ebb6312343a49e",
+      "expected": "�1#C��"
+    },
+    {
+      "hex": "6651",
+      "expected": "fQ"
+    },
+    {
+      "hex": "8c",
+      "expected": "�"
+    },
+    {
+      "hex": "dbce353014",
+      "expected": "��50\u0014"
+    },
+    {
+      "hex": "309665bca7",
+      "expected": "0�e��"
+    },
+    {
+      "hex": "5b",
+      "expected": "["
+    },
+    {
+      "hex": "84ec9c61c7",
+      "expected": "��a�"
+    },
+    {
+      "hex": "61278e397c",
+      "expected": "a'�9|"
+    },
+    {
+      "hex": "1c",
+      "expected": "\u001c"
+    },
+    {
+      "hex": "26b183c2db",
+      "expected": "&����"
+    },
+    {
+      "hex": "20fcb06abc",
+      "expected": " ��j�"
+    },
+    {
+      "hex": "98d6b141049a",
+      "expected": "�ֱA\u0004�"
+    },
+    {
+      "hex": "b6f9e7",
+      "expected": "���"
+    },
+    {
+      "hex": "954d62cb3fbaf316",
+      "expected": "�Mb�?��\u0016"
+    },
+    {
+      "hex": "a4a1e2d1e7",
+      "expected": "�����"
+    },
+    {
+      "hex": "a91f",
+      "expected": "�\u001f"
+    },
+    {
+      "hex": "52c570e52726df",
+      "expected": "R�p�'&�"
+    },
+    {
+      "hex": "e0846309bf897669",
+      "expected": "��c\t��vi"
+    },
+    {
+      "hex": "c19ae5ccbb",
+      "expected": "���̻"
+    },
+    {
+      "hex": "17337122",
+      "expected": "\u00173q\""
+    },
+    {
+      "hex": "3e4dba01df7f2a0d",
+      "expected": ">M�\u0001�*\r"
+    },
+    {
+      "hex": "dcee335c5fc7400d",
+      "expected": "��3\\_�@\r"
+    },
+    {
+      "hex": "58163eb865258675",
+      "expected": "X\u0016>�e%�u"
+    },
+    {
+      "hex": "3e",
+      "expected": ">"
+    },
+    {
+      "hex": "b8af",
+      "expected": "��"
+    },
+    {
+      "hex": "d84e8cc62b18",
+      "expected": "�N��+\u0018"
+    },
+    {
+      "hex": "e6",
+      "expected": "�"
+    },
+    {
+      "hex": "e72be4aea3bc",
+      "expected": "�+䮣�"
+    },
+    {
+      "hex": "2026358088bb99",
+      "expected": " &5����"
+    },
+    {
+      "hex": "f4c13f987d7542",
+      "expected": "��?�}uB"
+    },
+    {
+      "hex": "ed22cf4c8f",
+      "expected": "�\"�L�"
+    },
+    {
+      "hex": "4fa8e6dbf08f",
+      "expected": "O�����"
+    },
+    {
+      "hex": "816225dd",
+      "expected": "�b%�"
+    },
+    {
+      "hex": "e7",
+      "expected": "�"
+    },
+    {
+      "hex": "ce8848",
+      "expected": "ΈH"
+    },
+    {
+      "hex": "b5a309e67397",
+      "expected": "��\t�s�"
+    },
+    {
+      "hex": "c26561",
+      "expected": "�ea"
+    },
+    {
+      "hex": "756886",
+      "expected": "uh�"
+    },
+    {
+      "hex": "be39e813",
+      "expected": "�9�\u0013"
+    },
+    {
+      "hex": "d05074",
+      "expected": "�Pt"
+    },
+    {
+      "hex": "ced10e6b7576d1",
+      "expected": "��\u000ekuv�"
+    },
+    {
+      "hex": "d299d0",
+      "expected": "ҙ�"
+    },
+    {
+      "hex": "13",
+      "expected": "\u0013"
+    },
+    {
+      "hex": "98",
+      "expected": "�"
+    },
+    {
+      "hex": "83e3ed7848f617",
+      "expected": "���xH�\u0017"
+    },
+    {
+      "hex": "a58b78298ec27bf7",
+      "expected": "��x)��{�"
+    },
+    {
+      "hex": "02",
+      "expected": "\u0002"
+    },
+    {
+      "hex": "94a890",
+      "expected": "���"
+    },
+    {
+      "hex": "595f96",
+      "expected": "Y_�"
+    },
+    {
+      "hex": "6095846860",
+      "expected": "`��h`"
+    },
+    {
+      "hex": "77340126c64a57ac",
+      "expected": "w4\u0001&�JW�"
+    },
+    {
+      "hex": "dcbf5495e6ef",
+      "expected": "ܿT���"
+    },
+    {
+      "hex": "1789856f3f4278",
+      "expected": "\u0017��o?Bx"
+    },
+    {
+      "hex": "7d8456",
+      "expected": "}�V"
+    },
+    {
+      "hex": "2db2",
+      "expected": "-�"
+    },
+    {
+      "hex": "ba93415e",
+      "expected": "��A^"
+    },
+    {
+      "hex": "a464",
+      "expected": "�d"
+    },
+    {
+      "hex": "f4bde399155c",
+      "expected": "���\u0015\\"
+    },
+    {
+      "hex": "62",
+      "expected": "b"
+    },
+    {
+      "hex": "14fe",
+      "expected": "\u0014�"
+    },
+    {
+      "hex": "ddcfd309",
+      "expected": "���\t"
+    },
+    {
+      "hex": "8df3706dda",
+      "expected": "��pm�"
+    },
+    {
+      "hex": "ea1a8ada800f",
+      "expected": "�\u001a�ڀ\u000f"
+    },
+    {
+      "hex": "525beb95",
+      "expected": "R[�"
+    },
+    {
+      "hex": "b4",
+      "expected": "�"
+    },
+    {
+      "hex": "642b3b",
+      "expected": "d+;"
+    },
+    {
+      "hex": "ea3f252a7a",
+      "expected": "�?%*z"
+    },
+    {
+      "hex": "9875",
+      "expected": "�u"
+    },
+    {
+      "hex": "0dca6a4718",
+      "expected": "\r�jG\u0018"
+    },
+    {
+      "hex": "6d7dbf7e",
+      "expected": "m}�~"
+    },
+    {
+      "hex": "96056c4d",
+      "expected": "�\u0005lM"
+    },
+    {
+      "hex": "e46e940ce6a953",
+      "expected": "�n�\f�S"
+    },
+    {
+      "hex": "02",
+      "expected": "\u0002"
+    },
+    {
+      "hex": "9d",
+      "expected": "�"
+    },
+    {
+      "hex": "90fce525",
+      "expected": "���%"
+    },
+    {
+      "hex": "4a0908374e",
+      "expected": "J\t\b7N"
+    },
+    {
+      "hex": "6b85293eab3c",
+      "expected": "k�)>�<"
+    },
+    {
+      "hex": "1d24a597a425828c",
+      "expected": "\u001d$���%��"
+    },
+    {
+      "hex": "8e04593c8e86",
+      "expected": "�\u0004Y<��"
+    },
+    {
+      "hex": "dd0d",
+      "expected": "�\r"
+    },
+    {
+      "hex": "dc7d",
+      "expected": "�}"
+    },
+    {
+      "hex": "d57dfa29608b7a2d",
+      "expected": "�}�)`�z-"
+    },
+    {
+      "hex": "bffcc2",
+      "expected": "���"
+    },
+    {
+      "hex": "810f40a02f7b1fbf",
+      "expected": "�\u000f@�/{\u001f�"
+    },
+    {
+      "hex": "f7725ec417b2ef",
+      "expected": "�r^�\u0017��"
+    },
+    {
+      "hex": "953c",
+      "expected": "�<"
+    },
+    {
+      "hex": "1ee65718ee39",
+      "expected": "\u001e�W\u0018�9"
+    },
+    {
+      "hex": "580e546b34b0",
+      "expected": "X\u000eTk4�"
+    },
+    {
+      "hex": "ee63dd",
+      "expected": "�c�"
+    },
+    {
+      "hex": "0eb4",
+      "expected": "\u000e�"
+    },
+    {
+      "hex": "ee",
+      "expected": "�"
+    },
+    {
+      "hex": "0cbad0f52a",
+      "expected": "\f���*"
+    },
+    {
+      "hex": "93bd902f",
+      "expected": "���/"
+    },
+    {
+      "hex": "5b17f1e8",
+      "expected": "[\u0017��"
+    },
+    {
+      "hex": "032e",
+      "expected": "\u0003."
+    },
+    {
+      "hex": "67f20d097298",
+      "expected": "g�\r\tr�"
+    },
+    {
+      "hex": "2b062a",
+      "expected": "+\u0006*"
+    },
+    {
+      "hex": "991ba2ca",
+      "expected": "�\u001b��"
+    },
+    {
+      "hex": "1a964727e6c3",
+      "expected": "\u001a�G'��"
+    },
+    {
+      "hex": "a84fe38c25",
+      "expected": "�O�%"
+    },
+    {
+      "hex": "6ef719b34478e760",
+      "expected": "n�\u0019�Dx�`"
+    },
+    {
+      "hex": "74d65520a0fa41",
+      "expected": "t�U ��A"
+    },
+    {
+      "hex": "d4c82e",
+      "expected": "��."
+    },
+    {
+      "hex": "b16e02e14d21",
+      "expected": "�n\u0002�M!"
+    },
+    {
+      "hex": "8c48b08e18a6ba1a",
+      "expected": "�H��\u0018��\u001a"
+    },
+    {
+      "hex": "c5427b836ccb",
+      "expected": "�B{�l�"
+    },
+    {
+      "hex": "977171",
+      "expected": "�qq"
+    },
+    {
+      "hex": "39e3f3",
+      "expected": "9��"
+    },
+    {
+      "hex": "0784",
+      "expected": "\u0007�"
+    },
+    {
+      "hex": "b45d",
+      "expected": "�]"
+    },
+    {
+      "hex": "db7f625fdacfafa5",
+      "expected": "�b_�ϯ�"
+    },
+    {
+      "hex": "1a26f446a2b267",
+      "expected": "\u001a&�F��g"
+    },
+    {
+      "hex": "6504758e9661cc",
+      "expected": "e\u0004u��a�"
+    },
+    {
+      "hex": "cbf2f2329c6b3ab7",
+      "expected": "���2�k:�"
+    },
+    {
+      "hex": "432028116620",
+      "expected": "C (\u0011f "
+    },
+    {
+      "hex": "87bc",
+      "expected": "��"
+    },
+    {
+      "hex": "e39efd4032eaa4",
+      "expected": "��@2�"
+    },
+    {
+      "hex": "e2cb9497bf",
+      "expected": "�˔��"
+    },
+    {
+      "hex": "fd5e",
+      "expected": "�^"
+    },
+    {
+      "hex": "966e",
+      "expected": "�n"
+    },
+    {
+      "hex": "c0f6229f",
+      "expected": "��\"�"
+    },
+    {
+      "hex": "1c16f7a859",
+      "expected": "\u001c\u0016��Y"
+    },
+    {
+      "hex": "b0",
+      "expected": "�"
+    },
+    {
+      "hex": "00f7a3",
+      "expected": "\u0000��"
+    },
+    {
+      "hex": "38f5",
+      "expected": "8�"
+    },
+    {
+      "hex": "3858",
+      "expected": "8X"
+    },
+    {
+      "hex": "88",
+      "expected": "�"
+    },
+    {
+      "hex": "627d6242dde9",
+      "expected": "b}bB��"
+    },
+    {
+      "hex": "67bfaa7427b8",
+      "expected": "g��t'�"
+    },
+    {
+      "hex": "ec7dc30e13397773",
+      "expected": "�}�\u000e\u00139ws"
+    },
+    {
+      "hex": "8981a2ed",
+      "expected": "����"
+    },
+    {
+      "hex": "1b4fd7c0",
+      "expected": "\u001bO��"
+    },
+    {
+      "hex": "3d40825ee8",
+      "expected": "=@�^�"
+    },
+    {
+      "hex": "6d",
+      "expected": "m"
+    },
+    {
+      "hex": "c98586eff3ad62fc",
+      "expected": "Ʌ���b�"
+    },
+    {
+      "hex": "09017c",
+      "expected": "\t\u0001|"
+    },
+    {
+      "hex": "6ef8909a406b",
+      "expected": "n���@k"
+    },
+    {
+      "hex": "9424d3",
+      "expected": "�$�"
+    },
+    {
+      "hex": "44e9",
+      "expected": "D�"
+    },
+    {
+      "hex": "a9",
+      "expected": "�"
+    },
+    {
+      "hex": "7d0209",
+      "expected": "}\u0002\t"
+    },
+    {
+      "hex": "408a462e",
+      "expected": "@�F."
+    },
+    {
+      "hex": "62",
+      "expected": "b"
+    },
+    {
+      "hex": "4f33",
+      "expected": "O3"
+    },
+    {
+      "hex": "b626",
+      "expected": "�&"
+    },
+    {
+      "hex": "2446c15b7ea16a",
+      "expected": "$F�[~�j"
+    },
+    {
+      "hex": "3458",
+      "expected": "4X"
+    },
+    {
+      "hex": "d7cd",
+      "expected": "��"
+    },
+    {
+      "hex": "394ffe63efbf17",
+      "expected": "9O�c�\u0017"
+    },
+    {
+      "hex": "c5",
+      "expected": "�"
+    },
+    {
+      "hex": "d4df16b14a9968",
+      "expected": "��\u0016�J�h"
+    },
+    {
+      "hex": "ec051c8a89599d",
+      "expected": "�\u0005\u001c��Y�"
+    },
+    {
+      "hex": "665677",
+      "expected": "fVw"
+    },
+    {
+      "hex": "838c5234",
+      "expected": "��R4"
+    },
+    {
+      "hex": "92ae",
+      "expected": "��"
+    },
+    {
+      "hex": "f0a22f",
+      "expected": "�/"
+    },
+    {
+      "hex": "8b",
+      "expected": "�"
+    },
+    {
+      "hex": "a2",
+      "expected": "�"
+    },
+    {
+      "hex": "f2a587f03d",
+      "expected": "��="
+    },
+    {
+      "hex": "ed0de8447d",
+      "expected": "�\r�D}"
+    },
+    {
+      "hex": "50a103ee3a1c",
+      "expected": "P�\u0003�:\u001c"
+    },
+    {
+      "hex": "fe215421dd",
+      "expected": "�!T!�"
+    },
+    {
+      "hex": "5e801f",
+      "expected": "^�\u001f"
+    },
+    {
+      "hex": "97e1ff",
+      "expected": "���"
+    },
+    {
+      "hex": "1f23079fd5f8",
+      "expected": "\u001f#\u0007���"
+    },
+    {
+      "hex": "af1a41",
+      "expected": "�\u001aA"
+    },
+    {
+      "hex": "2c",
+      "expected": ","
+    },
+    {
+      "hex": "cb3f2abd44",
+      "expected": "�?*�D"
+    },
+    {
+      "hex": "982c",
+      "expected": "�,"
+    },
+    {
+      "hex": "3a",
+      "expected": ":"
+    },
+    {
+      "hex": "ad4b121273e9",
+      "expected": "�K\u0012\u0012s�"
+    },
+    {
+      "hex": "af",
+      "expected": "�"
+    },
+    {
+      "hex": "74",
+      "expected": "t"
+    },
+    {
+      "hex": "612e04d3",
+      "expected": "a.\u0004�"
+    },
+    {
+      "hex": "1fe8b430ff88bd",
+      "expected": "\u001f�0���"
+    },
+    {
+      "hex": "5fef8c9733fb59",
+      "expected": "_3�Y"
+    },
+    {
+      "hex": "b710b81fab8bca19",
+      "expected": "�\u0010�\u001f���\u0019"
+    },
+    {
+      "hex": "6da54c7314",
+      "expected": "m�Ls\u0014"
+    },
+    {
+      "hex": "38fc7f37cb66",
+      "expected": "8�7�f"
+    },
+    {
+      "hex": "301826c62342",
+      "expected": "0\u0018&�#B"
+    },
+    {
+      "hex": "98cb805d",
+      "expected": "�ˀ]"
+    },
+    {
+      "hex": "1bb4bb84eb96522d",
+      "expected": "\u001b����R-"
+    },
+    {
+      "hex": "7d",
+      "expected": "}"
+    },
+    {
+      "hex": "b485",
+      "expected": "��"
+    },
+    {
+      "hex": "86e2af12f4b1f8",
+      "expected": "��\u0012���"
+    },
+    {
+      "hex": "ea1c",
+      "expected": "�\u001c"
+    },
+    {
+      "hex": "3b925b244ac221",
+      "expected": ";�[$J�!"
+    },
+    {
+      "hex": "93d4bbe3e40c57",
+      "expected": "�Ի��\fW"
+    },
+    {
+      "hex": "44ccfc7dc057dc",
+      "expected": "D��}�W�"
+    },
+    {
+      "hex": "5f0bebea35956f",
+      "expected": "_\u000b��5�o"
+    },
+    {
+      "hex": "1d7ff356c5ce",
+      "expected": "\u001d�V��"
+    },
+    {
+      "hex": "2518816648431903",
+      "expected": "%\u0018�fHC\u0019\u0003"
+    },
+    {
+      "hex": "b8586cc656a4e5",
+      "expected": "�Xl�V��"
+    },
+    {
+      "hex": "a02786f8",
+      "expected": "�'��"
+    },
+    {
+      "hex": "d63145",
+      "expected": "�1E"
+    },
+    {
+      "hex": "9779fc3d1a324e",
+      "expected": "�y�=\u001a2N"
+    },
+    {
+      "hex": "e3",
+      "expected": "�"
+    },
+    {
+      "hex": "39ce24436c3bee0a",
+      "expected": "9�$Cl;�\n"
+    },
+    {
+      "hex": "b6346608fdc2db",
+      "expected": "�4f\b���"
+    },
+    {
+      "hex": "41",
+      "expected": "A"
+    },
+    {
+      "hex": "8d7700415f2457ca",
+      "expected": "�w\u0000A_$W�"
+    },
+    {
+      "hex": "5ecc8079dc7789",
+      "expected": "^̀y�w�"
+    },
+    {
+      "hex": "5ac2aaaf02d75f",
+      "expected": "Zª�\u0002�_"
+    },
+    {
+      "hex": "45b2cd",
+      "expected": "E��"
+    },
+    {
+      "hex": "9f24e5e504bd",
+      "expected": "�$��\u0004�"
+    },
+    {
+      "hex": "92d3",
+      "expected": "��"
+    },
+    {
+      "hex": "4823d1011c79",
+      "expected": "H#�\u0001\u001cy"
+    },
+    {
+      "hex": "2525e4ff29",
+      "expected": "%%��)"
+    },
+    {
+      "hex": "e276f17566",
+      "expected": "�v�uf"
+    },
+    {
+      "hex": "b5c2997c",
+      "expected": "�|"
+    },
+    {
+      "hex": "78",
+      "expected": "x"
+    },
+    {
+      "hex": "8cc5a955f05a940c",
+      "expected": "�ũU�Z�\f"
+    },
+    {
+      "hex": "7bedfe24e0",
+      "expected": "{��$�"
+    },
+    {
+      "hex": "c3fbec18",
+      "expected": "���\u0018"
+    },
+    {
+      "hex": "adef",
+      "expected": "��"
+    },
+    {
+      "hex": "346a67161d",
+      "expected": "4jg\u0016\u001d"
+    },
+    {
+      "hex": "04ad99ec",
+      "expected": "\u0004���"
+    },
+    {
+      "hex": "ff5eae60",
+      "expected": "�^�`"
+    },
+    {
+      "hex": "31f02f64",
+      "expected": "1�/d"
+    },
+    {
+      "hex": "dfef",
+      "expected": "��"
+    },
+    {
+      "hex": "d7a0d7",
+      "expected": "נ�"
+    },
+    {
+      "hex": "1d9326",
+      "expected": "\u001d�&"
+    },
+    {
+      "hex": "ba34cfc7",
+      "expected": "�4��"
+    },
+    {
+      "hex": "9c8745dfa8d878",
+      "expected": "��Eߨ�x"
+    },
+    {
+      "hex": "d64066d5",
+      "expected": "�@f�"
+    },
+    {
+      "hex": "4bfd",
+      "expected": "K�"
+    },
+    {
+      "hex": "f7d114127b",
+      "expected": "��\u0014\u0012{"
+    },
+    {
+      "hex": "0e5241bc586f8e",
+      "expected": "\u000eRA�Xo�"
+    },
+    {
+      "hex": "52bd6f34cb3bbc60",
+      "expected": "R�o4�;�`"
+    },
+    {
+      "hex": "a3",
+      "expected": "�"
+    },
+    {
+      "hex": "479f7a7fc9",
+      "expected": "G�z�"
+    },
+    {
+      "hex": "71b2bdbd",
+      "expected": "q���"
+    },
+    {
+      "hex": "6c8bacbb08",
+      "expected": "l���\b"
+    },
+    {
+      "hex": "19e9d4294c51",
+      "expected": "\u0019��)LQ"
+    },
+    {
+      "hex": "4976",
+      "expected": "Iv"
+    },
+    {
+      "hex": "6272e706",
+      "expected": "br�\u0006"
+    },
+    {
+      "hex": "798d7635ffed",
+      "expected": "y�v5��"
+    },
+    {
+      "hex": "02",
+      "expected": "\u0002"
+    },
+    {
+      "hex": "ee26a63f20dc",
+      "expected": "�&�? �"
+    },
+    {
+      "hex": "b566d33e72",
+      "expected": "�f�>r"
+    },
+    {
+      "hex": "05d671195d0a",
+      "expected": "\u0005�q\u0019]\n"
+    },
+    {
+      "hex": "f37e05",
+      "expected": "�~\u0005"
+    },
+    {
+      "hex": "0f74ac82",
+      "expected": "\u000ft��"
+    },
+    {
+      "hex": "ed62f306a567",
+      "expected": "�b�\u0006�g"
+    },
+    {
+      "hex": "0840db",
+      "expected": "\b@�"
+    },
+    {
+      "hex": "99c07d",
+      "expected": "��}"
+    },
+    {
+      "hex": "a808d3a9",
+      "expected": "�\bө"
+    },
+    {
+      "hex": "e1e7",
+      "expected": "��"
+    },
+    {
+      "hex": "4739",
+      "expected": "G9"
+    },
+    {
+      "hex": "44f78e80d12ed2",
+      "expected": "D����.�"
+    },
+    {
+      "hex": "f0c64c781719adc8",
+      "expected": "��Lx\u0017\u0019��"
+    },
+    {
+      "hex": "920f06",
+      "expected": "�\u000f\u0006"
+    },
+    {
+      "hex": "10ed39d6b1006a",
+      "expected": "\u0010�9ֱ\u0000j"
+    },
+    {
+      "hex": "c860",
+      "expected": "�`"
+    },
+    {
+      "hex": "00eca260",
+      "expected": "\u0000�`"
+    },
+    {
+      "hex": "f097d5e1c517ff",
+      "expected": "����\u0017�"
+    },
+    {
+      "hex": "047ea6dd7ba3",
+      "expected": "\u0004~��{�"
+    },
+    {
+      "hex": "222598274c93",
+      "expected": "\"%�'L�"
+    },
+    {
+      "hex": "062960",
+      "expected": "\u0006)`"
+    },
+    {
+      "hex": "7a3804cff4",
+      "expected": "z8\u0004��"
+    },
+    {
+      "hex": "44af5b9dd26108",
+      "expected": "D�[��a\b"
+    },
+    {
+      "hex": "7b4f324d6227",
+      "expected": "{O2Mb'"
+    },
+    {
+      "hex": "9c97445fbd507aa1",
+      "expected": "��D_�Pz�"
+    },
+    {
+      "hex": "abea84",
+      "expected": "��"
+    },
+    {
+      "hex": "aee2",
+      "expected": "��"
+    },
+    {
+      "hex": "6d94126a",
+      "expected": "m�\u0012j"
+    },
+    {
+      "hex": "5dc0",
+      "expected": "]�"
+    },
+    {
+      "hex": "1c28df",
+      "expected": "\u001c(�"
+    },
+    {
+      "hex": "a118c6",
+      "expected": "�\u0018�"
+    },
+    {
+      "hex": "541e",
+      "expected": "T\u001e"
+    },
+    {
+      "hex": "612214d71fba869d",
+      "expected": "a\"\u0014�\u001f���"
+    },
+    {
+      "hex": "ce5dcdfad4",
+      "expected": "�]���"
+    },
+    {
+      "hex": "71f6601b",
+      "expected": "q�`\u001b"
+    },
+    {
+      "hex": "deb0a446fd",
+      "expected": "ް�F�"
+    },
+    {
+      "hex": "8d8ad78502414a",
+      "expected": "��ׅ\u0002AJ"
+    },
+    {
+      "hex": "bb",
+      "expected": "�"
+    },
+    {
+      "hex": "c89a",
+      "expected": "Ț"
+    },
+    {
+      "hex": "200e",
+      "expected": " \u000e"
+    },
+    {
+      "hex": "27",
+      "expected": "'"
+    },
+    {
+      "hex": "222b2093",
+      "expected": "\"+ �"
+    },
+    {
+      "hex": "d93c7b0121222a3b",
+      "expected": "�<{\u0001!\"*;"
+    },
+    {
+      "hex": "d120dc2da10e7666",
+      "expected": "� �-�\u000evf"
+    },
+    {
+      "hex": "75ee5e77",
+      "expected": "u�^w"
+    },
+    {
+      "hex": "8057295d5c42e2",
+      "expected": "�W)]\\B�"
+    },
+    {
+      "hex": "6d9baba42b9c",
+      "expected": "m���+�"
+    },
+    {
+      "hex": "a7982459ba2e",
+      "expected": "��$Y�."
+    },
+    {
+      "hex": "7ba26a8421",
+      "expected": "{�j�!"
+    },
+    {
+      "hex": "c0e19921",
+      "expected": "��!"
+    },
+    {
+      "hex": "e47d61d3a94aea",
+      "expected": "�}aөJ�"
+    },
+    {
+      "hex": "3ff584",
+      "expected": "?��"
+    },
+    {
+      "hex": "a1afe45dbc716f16",
+      "expected": "���]�qo\u0016"
+    },
+    {
+      "hex": "96b5c7004a",
+      "expected": "���\u0000J"
+    },
+    {
+      "hex": "6e0a85bd682864",
+      "expected": "n\n��h(d"
+    },
+    {
+      "hex": "895535",
+      "expected": "�U5"
+    },
+    {
+      "hex": "12ad",
+      "expected": "\u0012�"
+    },
+    {
+      "hex": "50fcf4",
+      "expected": "P��"
+    },
+    {
+      "hex": "ff691182",
+      "expected": "�i\u0011�"
+    },
+    {
+      "hex": "ae6dbd2661a3cb35",
+      "expected": "�m�&a��5"
+    },
+    {
+      "hex": "67b75e5b76f9",
+      "expected": "g�^[v�"
+    },
+    {
+      "hex": "b63d",
+      "expected": "�="
+    },
+    {
+      "hex": "3d5cbc68574ebb6a",
+      "expected": "=\\�hWN�j"
+    },
+    {
+      "hex": "6b",
+      "expected": "k"
+    },
+    {
+      "hex": "53d305f28f59",
+      "expected": "S�\u0005�Y"
+    },
+    {
+      "hex": "c5f9656117",
+      "expected": "��ea\u0017"
+    },
+    {
+      "hex": "953000fee00038e2",
+      "expected": "�0\u0000��\u00008�"
+    },
+    {
+      "hex": "5aef902fc6",
+      "expected": "Z�/�"
+    },
+    {
+      "hex": "fb78955494a5361b",
+      "expected": "�x�T��6\u001b"
+    },
+    {
+      "hex": "6864654975e5",
+      "expected": "hdeIu�"
+    },
+    {
+      "hex": "5a75f6",
+      "expected": "Zu�"
+    },
+    {
+      "hex": "4f",
+      "expected": "O"
+    },
+    {
+      "hex": "89ba24a0eea6",
+      "expected": "��$��"
+    },
+    {
+      "hex": "77aed143a2",
+      "expected": "w��C�"
+    },
+    {
+      "hex": "63211ba1",
+      "expected": "c!\u001b�"
+    },
+    {
+      "hex": "ed",
+      "expected": "�"
+    },
+    {
+      "hex": "086ed37ba31a54e8",
+      "expected": "\bn�{�\u001aT�"
+    },
+    {
+      "hex": "4346c4dae340",
+      "expected": "CF���@"
+    },
+    {
+      "hex": "d3e794",
+      "expected": "��"
+    },
+    {
+      "hex": "af",
+      "expected": "�"
+    },
+    {
+      "hex": "189264c9",
+      "expected": "\u0018�d�"
+    },
+    {
+      "hex": "a3a7830d",
+      "expected": "���\r"
+    },
+    {
+      "hex": "12a1a873fe",
+      "expected": "\u0012��s�"
+    },
+    {
+      "hex": "575915e26ed9",
+      "expected": "WY\u0015�n�"
+    },
+    {
+      "hex": "350505d2df",
+      "expected": "5\u0005\u0005��"
+    },
+    {
+      "hex": "07f01701ad724a",
+      "expected": "\u0007�\u0017\u0001�rJ"
+    },
+    {
+      "hex": "43eda94a8896",
+      "expected": "C��J��"
+    },
+    {
+      "hex": "25ad2fef8a0313",
+      "expected": "%�/�\u0003\u0013"
+    },
+    {
+      "hex": "4691e042241cbd",
+      "expected": "F��B$\u001c�"
+    },
+    {
+      "hex": "e371df06",
+      "expected": "�q�\u0006"
+    },
+    {
+      "hex": "952ca658e5a4",
+      "expected": "�,�X�"
+    },
+    {
+      "hex": "6471ba",
+      "expected": "dq�"
+    },
+    {
+      "hex": "913e85960d",
+      "expected": "�>��\r"
+    },
+    {
+      "hex": "a1775e2239",
+      "expected": "�w^\"9"
+    },
+    {
+      "hex": "80ecb324d835",
+      "expected": "��$�5"
+    },
+    {
+      "hex": "f5052d52",
+      "expected": "�\u0005-R"
+    },
+    {
+      "hex": "30c66901",
+      "expected": "0�i\u0001"
+    },
+    {
+      "hex": "d2b3574e20d74ba4",
+      "expected": "ҳWN �K�"
+    },
+    {
+      "hex": "90ed9a709a",
+      "expected": "��p�"
+    },
+    {
+      "hex": "be58ad0e1c62",
+      "expected": "�X�\u000e\u001cb"
+    },
+    {
+      "hex": "64197d",
+      "expected": "d\u0019}"
+    },
+    {
+      "hex": "a83705",
+      "expected": "�7\u0005"
+    },
+    {
+      "hex": "36cecd4ad52d3d",
+      "expected": "6��J�-="
+    },
+    {
+      "hex": "649d1fce02",
+      "expected": "d�\u001f�\u0002"
+    },
+    {
+      "hex": "fa7a",
+      "expected": "�z"
+    },
+    {
+      "hex": "d335fa6e23",
+      "expected": "�5�n#"
+    },
+    {
+      "hex": "79",
+      "expected": "y"
+    },
+    {
+      "hex": "2a65",
+      "expected": "*e"
+    },
+    {
+      "hex": "17e62d3a47",
+      "expected": "\u0017�-:G"
+    },
+    {
+      "hex": "0e36",
+      "expected": "\u000e6"
+    },
+    {
+      "hex": "8a8b2f0ea790",
+      "expected": "��/\u000e��"
+    },
+    {
+      "hex": "22ff4028771e",
+      "expected": "\"�@(w\u001e"
+    },
+    {
+      "hex": "6552ccc1",
+      "expected": "eR��"
+    },
+    {
+      "hex": "aeaf958560b63d0c",
+      "expected": "����`�=\f"
+    },
+    {
+      "hex": "9091509f6a51",
+      "expected": "��P�jQ"
+    },
+    {
+      "hex": "a7d6e1b9",
+      "expected": "���"
+    },
+    {
+      "hex": "3b73ba8c08727321",
+      "expected": ";s��\brs!"
+    },
+    {
+      "hex": "aa41",
+      "expected": "�A"
+    },
+    {
+      "hex": "5145ccb5",
+      "expected": "QE̵"
+    },
+    {
+      "hex": "722d72b713ab6c",
+      "expected": "r-r�\u0013�l"
+    },
+    {
+      "hex": "ce39641c6422f1",
+      "expected": "�9d\u001cd\"�"
+    },
+    {
+      "hex": "c87575",
+      "expected": "�uu"
+    },
+    {
+      "hex": "46f253336732b85f",
+      "expected": "F�S3g2�_"
+    },
+    {
+      "hex": "44",
+      "expected": "D"
+    },
+    {
+      "hex": "710748be",
+      "expected": "q\u0007H�"
+    },
+    {
+      "hex": "90fa",
+      "expected": "��"
+    },
+    {
+      "hex": "5f23420f7c0d3281",
+      "expected": "_#B\u000f|\r2�"
+    },
+    {
+      "hex": "6e",
+      "expected": "n"
+    },
+    {
+      "hex": "4112b6",
+      "expected": "A\u0012�"
+    },
+    {
+      "hex": "9dba",
+      "expected": "��"
+    },
+    {
+      "hex": "4ccd92",
+      "expected": "L͒"
+    },
+    {
+      "hex": "4f",
+      "expected": "O"
+    },
+    {
+      "hex": "baa58f2fc7",
+      "expected": "���/�"
+    },
+    {
+      "hex": "279e7623cfb6fd",
+      "expected": "'�v#϶�"
+    },
+    {
+      "hex": "5c6a",
+      "expected": "\\j"
+    },
+    {
+      "hex": "e7ad6d7cff",
+      "expected": "�m|�"
+    },
+    {
+      "hex": "bf975828dd",
+      "expected": "��X(�"
+    },
+    {
+      "hex": "63f3862c1d395c",
+      "expected": "c�,\u001d9\\"
+    },
+    {
+      "hex": "51b61c",
+      "expected": "Q�\u001c"
+    },
+    {
+      "hex": "f774397d067014",
+      "expected": "�t9}\u0006p\u0014"
+    },
+    {
+      "hex": "8aa3c8f0d81f7e",
+      "expected": "�����\u001f~"
+    },
+    {
+      "hex": "132798",
+      "expected": "\u0013'�"
+    },
+    {
+      "hex": "96a508c02bb3",
+      "expected": "��\b�+�"
+    },
+    {
+      "hex": "736737f08a",
+      "expected": "sg7��"
+    },
+    {
+      "hex": "8d0969391962",
+      "expected": "�\ti9\u0019b"
+    },
+    {
+      "hex": "2fb59f59d75d3aaa",
+      "expected": "/��Y�]:�"
+    },
+    {
+      "hex": "cedc271b8e062252",
+      "expected": "��'\u001b�\u0006\"R"
+    },
+    {
+      "hex": "31e8ad2f5ceac2",
+      "expected": "1�/\\��"
+    },
+    {
+      "hex": "38",
+      "expected": "8"
+    },
+    {
+      "hex": "0ef7d5",
+      "expected": "\u000e��"
+    },
+    {
+      "hex": "52b4dfbd5725",
+      "expected": "R�߽W%"
+    },
+    {
+      "hex": "5b321ba7",
+      "expected": "[2\u001b�"
+    },
+    {
+      "hex": "86a7b93eaad840fd",
+      "expected": "���>��@�"
+    },
+    {
+      "hex": "049fb6b1b3",
+      "expected": "\u0004����"
+    },
+    {
+      "hex": "a9eead092ff896cc",
+      "expected": "��\t/���"
+    },
+    {
+      "hex": "c5",
+      "expected": "�"
+    },
+    {
+      "hex": "413f94363ec239",
+      "expected": "A?�6>�9"
+    },
+    {
+      "hex": "e5000970bbab50",
+      "expected": "�\u0000\tp��P"
+    },
+    {
+      "hex": "84bba5dd",
+      "expected": "����"
+    },
+    {
+      "hex": "213a78a51f91",
+      "expected": "!:x�\u001f�"
+    },
+    {
+      "hex": "ec8d",
+      "expected": "�"
+    },
+    {
+      "hex": "58bc",
+      "expected": "X�"
+    },
+    {
+      "hex": "3de8",
+      "expected": "=�"
+    },
+    {
+      "hex": "eb176432b323",
+      "expected": "�\u0017d2�#"
+    },
+    {
+      "hex": "962864563a",
+      "expected": "�(dV:"
+    },
+    {
+      "hex": "c1256d",
+      "expected": "�%m"
+    },
+    {
+      "hex": "829d24c9d42b",
+      "expected": "��$��+"
+    },
+    {
+      "hex": "93acdcd454092df5",
+      "expected": "����T\t-�"
+    },
+    {
+      "hex": "e0b4c9da9e7e",
+      "expected": "��ڞ~"
+    },
+    {
+      "hex": "daf8c9792f3fa3",
+      "expected": "���y/?�"
+    },
+    {
+      "hex": "53962a76bd",
+      "expected": "S�*v�"
+    },
+    {
+      "hex": "422e662ab48b",
+      "expected": "B.f*��"
+    },
+    {
+      "hex": "10d409ae",
+      "expected": "\u0010�\t�"
+    },
+    {
+      "hex": "c0a0e51bb0d5a5",
+      "expected": "���\u001b�ե"
+    },
+    {
+      "hex": "c58c2ad6024ebe",
+      "expected": "Ō*�\u0002N�"
+    },
+    {
+      "hex": "9447545c590b",
+      "expected": "�GT\\Y\u000b"
+    },
+    {
+      "hex": "24d595",
+      "expected": "$Օ"
+    },
+    {
+      "hex": "45",
+      "expected": "E"
+    },
+    {
+      "hex": "dffaa4cf655d77",
+      "expected": "����e]w"
+    },
+    {
+      "hex": "9e41",
+      "expected": "�A"
+    },
+    {
+      "hex": "eb62d8bd231286",
+      "expected": "�bؽ#\u0012�"
+    },
+    {
+      "hex": "3d0cf94434ec0524",
+      "expected": "=\f�D4�\u0005$"
+    },
+    {
+      "hex": "8b34eea2",
+      "expected": "�4�"
+    },
+    {
+      "hex": "67fd1c2187d933",
+      "expected": "g�\u001c!��3"
+    },
+    {
+      "hex": "33",
+      "expected": "3"
+    },
+    {
+      "hex": "95",
+      "expected": "�"
+    },
+    {
+      "hex": "39386d",
+      "expected": "98m"
+    },
+    {
+      "hex": "8c01cd0bb0fe0462",
+      "expected": "�\u0001�\u000b��\u0004b"
+    },
+    {
+      "hex": "06b7b3f9adf86287",
+      "expected": "\u0006�����b�"
+    },
+    {
+      "hex": "fbd355853c3a6f17",
+      "expected": "��U�<:o\u0017"
+    },
+    {
+      "hex": "334164d9b613f5",
+      "expected": "3Adٶ\u0013�"
+    },
+    {
+      "hex": "49790370b5",
+      "expected": "Iy\u0003p�"
+    },
+    {
+      "hex": "4be2",
+      "expected": "K�"
+    },
+    {
+      "hex": "179d",
+      "expected": "\u0017�"
+    },
+    {
+      "hex": "c72149b782f65add",
+      "expected": "�!I���Z�"
+    },
+    {
+      "hex": "bc",
+      "expected": "�"
+    },
+    {
+      "hex": "edf520c40565b000",
+      "expected": "�� �\u0005e�\u0000"
+    },
+    {
+      "hex": "d65f3affadd98e2b",
+      "expected": "�_:��َ+"
+    },
+    {
+      "hex": "f6",
+      "expected": "�"
+    },
+    {
+      "hex": "51",
+      "expected": "Q"
+    },
+    {
+      "hex": "b7f2afd4090df4",
+      "expected": "���\t\r�"
+    },
+    {
+      "hex": "9825bd01",
+      "expected": "�%�\u0001"
+    },
+    {
+      "hex": "9e2118fb5c",
+      "expected": "�!\u0018�\\"
+    },
+    {
+      "hex": "88a089f9c6",
+      "expected": "�����"
+    },
+    {
+      "hex": "938f3be8d7720f",
+      "expected": "��;��r\u000f"
+    },
+    {
+      "hex": "ab0f6d8d60be8f",
+      "expected": "�\u000fm�`��"
+    },
+    {
+      "hex": "08624d",
+      "expected": "\bbM"
+    },
+    {
+      "hex": "0b50d8",
+      "expected": "\u000bP�"
+    },
+    {
+      "hex": "c5",
+      "expected": "�"
+    },
+    {
+      "hex": "4901b99986c0",
+      "expected": "I\u0001����"
+    },
+    {
+      "hex": "4a",
+      "expected": "J"
+    },
+    {
+      "hex": "264b607621fb63",
+      "expected": "&K`v!�c"
+    },
+    {
+      "hex": "e6",
+      "expected": "�"
+    },
+    {
+      "hex": "06",
+      "expected": "\u0006"
+    },
+    {
+      "hex": "f96ace718d2c35",
+      "expected": "�j�q�,5"
+    },
+    {
+      "hex": "d9d51f18a80c",
+      "expected": "��\u001f\u0018�\f"
+    },
+    {
+      "hex": "037f79c81f32",
+      "expected": "\u0003y�\u001f2"
+    },
+    {
+      "hex": "ef7d9b",
+      "expected": "�}�"
+    },
+    {
+      "hex": "45a8",
+      "expected": "E�"
+    },
+    {
+      "hex": "6c6851d9d4f4c493",
+      "expected": "lhQ���ē"
+    },
+    {
+      "hex": "74bb",
+      "expected": "t�"
+    },
+    {
+      "hex": "06",
+      "expected": "\u0006"
+    },
+    {
+      "hex": "1c9783457096c7b7",
+      "expected": "\u001c��Ep�Ƿ"
+    },
+    {
+      "hex": "13abf55f79",
+      "expected": "\u0013��_y"
+    },
+    {
+      "hex": "4bc15e84d687",
+      "expected": "K�^�և"
+    },
+    {
+      "hex": "f8974e",
+      "expected": "��N"
+    },
+    {
+      "hex": "6af2",
+      "expected": "j�"
+    },
+    {
+      "hex": "25",
+      "expected": "%"
+    },
+    {
+      "hex": "5b3f",
+      "expected": "[?"
+    },
+    {
+      "hex": "8137b22d766ae4",
+      "expected": "�7�-vj�"
+    },
+    {
+      "hex": "166f",
+      "expected": "\u0016o"
+    },
+    {
+      "hex": "67d4566598dd575a",
+      "expected": "g�Ve��WZ"
+    },
+    {
+      "hex": "12f5fdf0",
+      "expected": "\u0012���"
+    },
+    {
+      "hex": "06e5e6",
+      "expected": "\u0006��"
+    },
+    {
+      "hex": "0c",
+      "expected": "\f"
+    },
+    {
+      "hex": "a856",
+      "expected": "�V"
+    },
+    {
+      "hex": "e8c3326d08759069",
+      "expected": "��2m\bu�i"
+    },
+    {
+      "hex": "ba745e296204c0",
+      "expected": "�t^)b\u0004�"
+    },
+    {
+      "hex": "6039f92a5e6ebc",
+      "expected": "`9�*^n�"
+    },
+    {
+      "hex": "b9f8f8",
+      "expected": "���"
+    },
+    {
+      "hex": "c16286d2ba",
+      "expected": "�b�Һ"
+    },
+    {
+      "hex": "53b93d5a",
+      "expected": "S�=Z"
+    },
+    {
+      "hex": "84e229",
+      "expected": "��)"
+    },
+    {
+      "hex": "03e68966ab7634",
+      "expected": "\u0003�f�v4"
+    },
+    {
+      "hex": "8879c3caf279",
+      "expected": "�y���y"
+    },
+    {
+      "hex": "91e98376",
+      "expected": "��v"
+    },
+    {
+      "hex": "b39fe1fa3c",
+      "expected": "����<"
+    },
+    {
+      "hex": "451dab5eb589e9",
+      "expected": "E\u001d�^���"
+    },
+    {
+      "hex": "221345accb8ac840",
+      "expected": "\"\u0013E�ˊ�@"
+    },
+    {
+      "hex": "b1",
+      "expected": "�"
+    },
+    {
+      "hex": "ba6193154fd2a4fc",
+      "expected": "�a�\u0015OҤ�"
+    },
+    {
+      "hex": "c1",
+      "expected": "�"
+    },
+    {
+      "hex": "13ead1d5de",
+      "expected": "\u0013����"
+    },
+    {
+      "hex": "60e6a5",
+      "expected": "`�"
+    },
+    {
+      "hex": "3c",
+      "expected": "<"
+    },
+    {
+      "hex": "4d99e237",
+      "expected": "M��7"
+    },
+    {
+      "hex": "aecf",
+      "expected": "��"
+    },
+    {
+      "hex": "70f359f533d8d3",
+      "expected": "p�Y�3��"
+    },
+    {
+      "hex": "ebf6fc4eea",
+      "expected": "���N�"
+    },
+    {
+      "hex": "29dd9699d093",
+      "expected": ")ݖ�Г"
+    },
+    {
+      "hex": "b07bcb1dddbfe04c",
+      "expected": "�{�\u001dݿ�L"
+    },
+    {
+      "hex": "96821c9fb76ad934",
+      "expected": "��\u001c��j�4"
+    },
+    {
+      "hex": "9f22af862145f1a2",
+      "expected": "�\"��!E�"
+    },
+    {
+      "hex": "8b9461ad4336ed",
+      "expected": "��a�C6�"
+    },
+    {
+      "hex": "e0e4157442",
+      "expected": "��\u0015tB"
+    },
+    {
+      "hex": "d1578d3fc2",
+      "expected": "�W�?�"
+    },
+    {
+      "hex": "e1f9",
+      "expected": "��"
+    },
+    {
+      "hex": "19",
+      "expected": "\u0019"
+    },
+    {
+      "hex": "82702a2371edc5",
+      "expected": "�p*#q��"
+    },
+    {
+      "hex": "34",
+      "expected": "4"
+    },
+    {
+      "hex": "497d762709258b1d",
+      "expected": "I}v'\t%�\u001d"
+    },
+    {
+      "hex": "fe87dc",
+      "expected": "���"
+    },
+    {
+      "hex": "46e9066b",
+      "expected": "F�\u0006k"
+    },
+    {
+      "hex": "97",
+      "expected": "�"
+    },
+    {
+      "hex": "568cee3b3daa",
+      "expected": "V��;=�"
+    },
+    {
+      "hex": "09ff083a9013",
+      "expected": "\t�\b:�\u0013"
+    },
+    {
+      "hex": "d1a7ec54f4",
+      "expected": "ѧ�T�"
+    },
+    {
+      "hex": "278052b3f11fd2",
+      "expected": "'�R��\u001f�"
+    },
+    {
+      "hex": "1f",
+      "expected": "\u001f"
+    },
+    {
+      "hex": "11d81ceb6137360f",
+      "expected": "\u0011�\u001c�a76\u000f"
+    },
+    {
+      "hex": "184e",
+      "expected": "\u0018N"
+    },
+    {
+      "hex": "f7bb8c",
+      "expected": "���"
+    },
+    {
+      "hex": "7c",
+      "expected": "|"
+    },
+    {
+      "hex": "ec7755128e42745a",
+      "expected": "�wU\u0012�BtZ"
+    },
+    {
+      "hex": "4c",
+      "expected": "L"
+    },
+    {
+      "hex": "a3d5",
+      "expected": "��"
+    },
+    {
+      "hex": "60b7b818",
+      "expected": "`��\u0018"
+    },
+    {
+      "hex": "415effda316b1617",
+      "expected": "A^��1k\u0016\u0017"
+    },
+    {
+      "hex": "7598df9e04d6a5",
+      "expected": "u�ߞ\u0004֥"
+    },
+    {
+      "hex": "631f625d09f5",
+      "expected": "c\u001fb]\t�"
+    },
+    {
+      "hex": "4c475d463d7752c6",
+      "expected": "LG]F=wR�"
+    },
+    {
+      "hex": "e5d437b0",
+      "expected": "��7�"
+    },
+    {
+      "hex": "fe8f",
+      "expected": "��"
+    },
+    {
+      "hex": "17243e8e568d68b4",
+      "expected": "\u0017$>�V�h�"
+    },
+    {
+      "hex": "74",
+      "expected": "t"
+    },
+    {
+      "hex": "d4971aa05fda2a",
+      "expected": "ԗ\u001a�_�*"
+    },
+    {
+      "hex": "2d9b",
+      "expected": "-�"
+    },
+    {
+      "hex": "515e7196",
+      "expected": "Q^q�"
+    },
+    {
+      "hex": "d0d5fdcb27",
+      "expected": "����'"
+    },
+    {
+      "hex": "f67068",
+      "expected": "�ph"
+    },
+    {
+      "hex": "6bfd689752ca",
+      "expected": "k�h�R�"
+    },
+    {
+      "hex": "04ab",
+      "expected": "\u0004�"
+    },
+    {
+      "hex": "baf93e470c8907",
+      "expected": "��>G\f�\u0007"
+    },
+    {
+      "hex": "c5b724a9",
+      "expected": "ŷ$�"
+    },
+    {
+      "hex": "ad29",
+      "expected": "�)"
+    },
+    {
+      "hex": "536aa945c08d15cb",
+      "expected": "Sj�E��\u0015�"
+    },
+    {
+      "hex": "c1",
+      "expected": "�"
+    },
+    {
+      "hex": "35691aeafb5ff6",
+      "expected": "5i\u001a��_�"
+    },
+    {
+      "hex": "71d305ad1661",
+      "expected": "q�\u0005�\u0016a"
+    },
+    {
+      "hex": "8c",
+      "expected": "�"
+    },
+    {
+      "hex": "f4a4",
+      "expected": "��"
+    },
+    {
+      "hex": "547a0c01aa2ffeb3",
+      "expected": "Tz\f\u0001�/��"
+    },
+    {
+      "hex": "4aa22375559ff6",
+      "expected": "J�#uU��"
+    },
+    {
+      "hex": "478b05ded35044",
+      "expected": "G�\u0005��PD"
+    },
+    {
+      "hex": "090bfb9efea41d",
+      "expected": "\t\u000b����\u001d"
+    },
+    {
+      "hex": "4854857330a3",
+      "expected": "HT�s0�"
+    },
+    {
+      "hex": "7329e4",
+      "expected": "s)�"
+    },
+    {
+      "hex": "9f8dacb63c",
+      "expected": "����<"
+    },
+    {
+      "hex": "1477",
+      "expected": "\u0014w"
+    },
+    {
+      "hex": "0d68",
+      "expected": "\rh"
+    },
+    {
+      "hex": "b82f",
+      "expected": "�/"
+    },
+    {
+      "hex": "39f0302f1083",
+      "expected": "9�0/\u0010�"
+    },
+    {
+      "hex": "7ca3e2b5",
+      "expected": "|��"
+    },
+    {
+      "hex": "5ddc31fef2",
+      "expected": "]�1��"
+    },
+    {
+      "hex": "8803b1df0208",
+      "expected": "�\u0003��\u0002\b"
+    },
+    {
+      "hex": "aab063b755d8",
+      "expected": "��c�U�"
+    },
+    {
+      "hex": "7fd23f543801",
+      "expected": "�?T8\u0001"
+    },
+    {
+      "hex": "f49ec0",
+      "expected": "���"
+    },
+    {
+      "hex": "f2dc6689e7273770",
+      "expected": "��f��'7p"
+    },
+    {
+      "hex": "8e9fd6",
+      "expected": "���"
+    },
+    {
+      "hex": "fe3ce39d443b93",
+      "expected": "�<�D;�"
+    },
+    {
+      "hex": "27cc",
+      "expected": "'�"
+    },
+    {
+      "hex": "58",
+      "expected": "X"
+    },
+    {
+      "hex": "d7e204a555085e",
+      "expected": "��\u0004�U\b^"
+    },
+    {
+      "hex": "faf49b1af7c79c9f",
+      "expected": "���\u001a�ǜ�"
+    },
+    {
+      "hex": "b0ee",
+      "expected": "��"
+    },
+    {
+      "hex": "9ba8",
+      "expected": "��"
+    },
+    {
+      "hex": "ed9519",
+      "expected": "�\u0019"
+    },
+    {
+      "hex": "4db49ac30a",
+      "expected": "M���\n"
+    },
+    {
+      "hex": "de6069",
+      "expected": "�`i"
+    },
+    {
+      "hex": "4b7d1acf098d",
+      "expected": "K}\u001a�\t�"
+    },
+    {
+      "hex": "8780",
+      "expected": "��"
+    },
+    {
+      "hex": "cb52db4a",
+      "expected": "�R�J"
+    },
+    {
+      "hex": "b626021655",
+      "expected": "�&\u0002\u0016U"
+    },
+    {
+      "hex": "1777528397c4a3",
+      "expected": "\u0017wR��ģ"
+    },
+    {
+      "hex": "9fa7cf832c",
+      "expected": "��σ,"
+    },
+    {
+      "hex": "a4edd5ccf4c0",
+      "expected": "������"
+    },
+    {
+      "hex": "f4d5",
+      "expected": "��"
+    },
+    {
+      "hex": "258ad93bad3d",
+      "expected": "%��;�="
+    },
+    {
+      "hex": "c0cf00ca4822fca7",
+      "expected": "��\u0000�H\"��"
+    },
+    {
+      "hex": "3f0b191dfb64",
+      "expected": "?\u000b\u0019\u001d�d"
+    },
+    {
+      "hex": "6911042956ad",
+      "expected": "i\u0011\u0004)V�"
+    },
+    {
+      "hex": "6b8728dc4429",
+      "expected": "k�(�D)"
+    },
+    {
+      "hex": "a48465",
+      "expected": "��e"
+    },
+    {
+      "hex": "f0ffe92d83",
+      "expected": "���-�"
+    },
+    {
+      "hex": "ed45eb84",
+      "expected": "�E�"
+    },
+    {
+      "hex": "13d086b30f85ed52",
+      "expected": "\u0013І�\u000f��R"
+    },
+    {
+      "hex": "28",
+      "expected": "("
+    },
+    {
+      "hex": "21a908",
+      "expected": "!�\b"
+    },
+    {
+      "hex": "62f2b801c85bb8",
+      "expected": "b�\u0001�[�"
+    },
+    {
+      "hex": "d36c242ff79bca",
+      "expected": "�l$/���"
+    },
+    {
+      "hex": "a4f8",
+      "expected": "��"
+    },
+    {
+      "hex": "5b91a91b86",
+      "expected": "[��\u001b�"
+    },
+    {
+      "hex": "56e4eb5dbb08",
+      "expected": "V��]�\b"
+    },
+    {
+      "hex": "02a9e6e66f06",
+      "expected": "\u0002���o\u0006"
+    },
+    {
+      "hex": "92c3b338f5",
+      "expected": "�ó8�"
+    },
+    {
+      "hex": "c5",
+      "expected": "�"
+    },
+    {
+      "hex": "1acc70104b46",
+      "expected": "\u001a�p\u0010KF"
+    },
+    {
+      "hex": "ed3061a1ff10",
+      "expected": "�0a��\u0010"
+    },
+    {
+      "hex": "d71531a250c962",
+      "expected": "�\u00151�P�b"
+    },
+    {
+      "hex": "6182",
+      "expected": "a�"
+    },
+    {
+      "hex": "e4abf2",
+      "expected": "��"
+    },
+    {
+      "hex": "5302da",
+      "expected": "S\u0002�"
+    },
+    {
+      "hex": "9fc5f1f92b",
+      "expected": "����+"
+    },
+    {
+      "hex": "2fea4e246d9820",
+      "expected": "/�N$m� "
+    },
+    {
+      "hex": "c1154d89",
+      "expected": "�\u0015M�"
+    },
+    {
+      "hex": "c038097581",
+      "expected": "�8\tu�"
+    },
+    {
+      "hex": "5d113f0a70",
+      "expected": "]\u0011?\np"
+    },
+    {
+      "hex": "c63492e6f1e5",
+      "expected": "�4����"
+    },
+    {
+      "hex": "956dfb01",
+      "expected": "�m�\u0001"
+    },
+    {
+      "hex": "48be2075d1fd17ae",
+      "expected": "H� u��\u0017�"
+    },
+    {
+      "hex": "d752cf10839f5c",
+      "expected": "�R�\u0010��\\"
+    },
+    {
+      "hex": "8602",
+      "expected": "�\u0002"
+    },
+    {
+      "hex": "fe",
+      "expected": "�"
+    },
+    {
+      "hex": "7e7b2eb37076b2",
+      "expected": "~{.�pv�"
+    },
+    {
+      "hex": "d4",
+      "expected": "�"
+    },
+    {
+      "hex": "2fdb4b45",
+      "expected": "/�KE"
+    },
+    {
+      "hex": "03e385dde4",
+      "expected": "\u0003���"
+    },
+    {
+      "hex": "56f9d9392621",
+      "expected": "V��9&!"
+    },
+    {
+      "hex": "0a1584cf",
+      "expected": "\n\u0015��"
+    },
+    {
+      "hex": "2f80894a86e59e16",
+      "expected": "/��J��\u0016"
+    },
+    {
+      "hex": "989fac8a39",
+      "expected": "����9"
+    },
+    {
+      "hex": "9d55c9c6cf5333",
+      "expected": "�U���S3"
+    },
+    {
+      "hex": "84f9",
+      "expected": "��"
+    },
+    {
+      "hex": "9e2624e7",
+      "expected": "�&$�"
+    },
+    {
+      "hex": "c7423147d3",
+      "expected": "�B1G�"
+    },
+    {
+      "hex": "1acf565621d9",
+      "expected": "\u001a�VV!�"
+    },
+    {
+      "hex": "707a",
+      "expected": "pz"
+    },
+    {
+      "hex": "aeae0a",
+      "expected": "��\n"
+    },
+    {
+      "hex": "b64a086cc3ae3b57",
+      "expected": "�J\blî;W"
+    },
+    {
+      "hex": "5b2d3e",
+      "expected": "[->"
+    },
+    {
+      "hex": "b90107ec1d",
+      "expected": "�\u0001\u0007�\u001d"
+    },
+    {
+      "hex": "c8",
+      "expected": "�"
+    },
+    {
+      "hex": "11406ad8d50c",
+      "expected": "\u0011@j��\f"
+    },
+    {
+      "hex": "55dcf5",
+      "expected": "U��"
+    },
+    {
+      "hex": "f1a74bc0a9976d25",
+      "expected": "�K���m%"
+    },
+    {
+      "hex": "bc2de5dbd9ad93",
+      "expected": "�-��٭�"
+    },
+    {
+      "hex": "251a",
+      "expected": "%\u001a"
+    },
+    {
+      "hex": "03a8d3ccb4",
+      "expected": "\u0003��̴"
+    },
+    {
+      "hex": "86686aa73293",
+      "expected": "�hj�2�"
+    },
+    {
+      "hex": "bb04983d886d2b",
+      "expected": "�\u0004�=�m+"
+    },
+    {
+      "hex": "5c0ddabc9c9d867c",
+      "expected": "\\\rڼ���|"
+    },
+    {
+      "hex": "9040335f2020d0",
+      "expected": "�@3_  �"
+    },
+    {
+      "hex": "3af8f4fd10",
+      "expected": ":���\u0010"
+    },
+    {
+      "hex": "2efbaf6a4f",
+      "expected": ".��jO"
+    },
+    {
+      "hex": "b5eecb",
+      "expected": "���"
+    },
+    {
+      "hex": "18c2",
+      "expected": "\u0018�"
+    },
+    {
+      "hex": "3e33bbcf7bf9",
+      "expected": ">3��{�"
+    },
+    {
+      "hex": "2a7b",
+      "expected": "*{"
+    },
+    {
+      "hex": "f1c8688d",
+      "expected": "��h�"
+    },
+    {
+      "hex": "6908",
+      "expected": "i\b"
+    },
+    {
+      "hex": "86c8f3908798",
+      "expected": "��󐇘"
+    },
+    {
+      "hex": "cf0adcaaa564cb04",
+      "expected": "�\nܪ�d�\u0004"
+    },
+    {
+      "hex": "89e4c67e",
+      "expected": "���~"
+    },
+    {
+      "hex": "c42e4e4d6785",
+      "expected": "�.NMg�"
+    },
+    {
+      "hex": "847b19f06f10",
+      "expected": "�{\u0019�o\u0010"
+    },
+    {
+      "hex": "a6d0cd5df922ec",
+      "expected": "���]�\"�"
+    },
+    {
+      "hex": "9fbb92776f",
+      "expected": "���wo"
+    },
+    {
+      "hex": "f85eb814a0",
+      "expected": "�^�\u0014�"
+    },
+    {
+      "hex": "f46ef72c",
+      "expected": "�n�,"
+    },
+    {
+      "hex": "f2",
+      "expected": "�"
+    },
+    {
+      "hex": "44dc6c17044286",
+      "expected": "D�l\u0017\u0004B�"
+    },
+    {
+      "hex": "2ccb2dbb",
+      "expected": ",�-�"
+    },
+    {
+      "hex": "98ec54b2685c",
+      "expected": "��T�h\\"
+    },
+    {
+      "hex": "cb11cad47046948e",
+      "expected": "�\u0011��pF��"
+    },
+    {
+      "hex": "9115eed0276a89",
+      "expected": "�\u0015��'j�"
+    },
+    {
+      "hex": "ed254015",
+      "expected": "�%@\u0015"
+    },
+    {
+      "hex": "ac1e1f5bf6feb766",
+      "expected": "�\u001e\u001f[���f"
+    },
+    {
+      "hex": "2c27138c7246971d",
+      "expected": ",'\u0013�rF�\u001d"
+    },
+    {
+      "hex": "d9ea46",
+      "expected": "��F"
+    },
+    {
+      "hex": "1b1956e4b33c7c",
+      "expected": "\u001b\u0019V�<|"
+    },
+    {
+      "hex": "f008cfd5ec",
+      "expected": "�\b���"
+    },
+    {
+      "hex": "4e04a03d7a",
+      "expected": "N\u0004�=z"
+    },
+    {
+      "hex": "ce6f42",
+      "expected": "�oB"
+    },
+    {
+      "hex": "e39f053512e6",
+      "expected": "�\u00055\u0012�"
+    },
+    {
+      "hex": "93",
+      "expected": "�"
+    },
+    {
+      "hex": "c5fa",
+      "expected": "��"
+    },
+    {
+      "hex": "cca5b4",
+      "expected": "̥�"
+    },
+    {
+      "hex": "5724c39a",
+      "expected": "W$Ú"
+    },
+    {
+      "hex": "de",
+      "expected": "�"
+    },
+    {
+      "hex": "568a326ca9940b",
+      "expected": "V�2l��\u000b"
+    },
+    {
+      "hex": "d11ad349",
+      "expected": "�\u001a�I"
+    },
+    {
+      "hex": "429e1230310043b7",
+      "expected": "B�\u001201\u0000C�"
+    },
+    {
+      "hex": "1e939a38d5",
+      "expected": "\u001e��8�"
+    },
+    {
+      "hex": "69",
+      "expected": "i"
+    },
+    {
+      "hex": "c90a2296fe",
+      "expected": "�\n\"��"
+    },
+    {
+      "hex": "784db1253b",
+      "expected": "xM�%;"
+    },
+    {
+      "hex": "e4",
+      "expected": "�"
+    },
+    {
+      "hex": "45afc30fc46993",
+      "expected": "E��\u000f�i�"
+    },
+    {
+      "hex": "16",
+      "expected": "\u0016"
+    },
+    {
+      "hex": "3c45d1",
+      "expected": "<E�"
+    },
+    {
+      "hex": "2880",
+      "expected": "(�"
+    },
+    {
+      "hex": "e0afd89937a387",
+      "expected": "�ؙ7��"
+    },
+    {
+      "hex": "e78a164f",
+      "expected": "�\u0016O"
+    },
+    {
+      "hex": "e900",
+      "expected": "�\u0000"
+    },
+    {
+      "hex": "cf645a61bf23",
+      "expected": "�dZa�#"
+    },
+    {
+      "hex": "5f42d7d3d7",
+      "expected": "_B���"
+    },
+    {
+      "hex": "ac59c49bcb",
+      "expected": "�Yě�"
+    },
+    {
+      "hex": "210637f147c3",
+      "expected": "!\u00067�G�"
+    },
+    {
+      "hex": "b7468d97e033",
+      "expected": "�F���3"
+    },
+    {
+      "hex": "33392033bd15e478",
+      "expected": "39 3�\u0015�x"
+    },
+    {
+      "hex": "d0b6",
+      "expected": "ж"
+    },
+    {
+      "hex": "493c79e8adab54f2",
+      "expected": "I<y譫T�"
+    },
+    {
+      "hex": "c237b8",
+      "expected": "�7�"
+    },
+    {
+      "hex": "0404263032cb0c7b",
+      "expected": "\u0004\u0004&02�\f{"
+    },
+    {
+      "hex": "cdc52743",
+      "expected": "��'C"
+    },
+    {
+      "hex": "f580c0f1b8",
+      "expected": "����"
+    },
+    {
+      "hex": "5d",
+      "expected": "]"
+    },
+    {
+      "hex": "bbf6c8a51d2e",
+      "expected": "��ȥ\u001d."
+    },
+    {
+      "hex": "93cfa249490e",
+      "expected": "�ϢII\u000e"
+    },
+    {
+      "hex": "46c967",
+      "expected": "F�g"
+    },
+    {
+      "hex": "c2e945",
+      "expected": "��E"
+    },
+    {
+      "hex": "6bcf",
+      "expected": "k�"
+    },
+    {
+      "hex": "7309654ebfa00b",
+      "expected": "s\teN��\u000b"
+    },
+    {
+      "hex": "4e62374d0d882b",
+      "expected": "Nb7M\r�+"
+    },
+    {
+      "hex": "05d5",
+      "expected": "\u0005�"
+    },
+    {
+      "hex": "c5",
+      "expected": "�"
+    },
+    {
+      "hex": "dbe18f",
+      "expected": "��"
+    },
+    {
+      "hex": "9552444c8c",
+      "expected": "�RDL�"
+    },
+    {
+      "hex": "fc49816c97992c1e",
+      "expected": "�I�l��,\u001e"
+    },
+    {
+      "hex": "9d0139",
+      "expected": "�\u00019"
+    },
+    {
+      "hex": "27f301974ded6e65",
+      "expected": "'�\u0001�M�ne"
+    },
+    {
+      "hex": "876c757d",
+      "expected": "�lu}"
+    },
+    {
+      "hex": "dd6b",
+      "expected": "�k"
+    },
+    {
+      "hex": "f5dc9722a3a652e2",
+      "expected": "�ܗ\"��R�"
+    },
+    {
+      "hex": "4d1a0d109f",
+      "expected": "M\u001a\r\u0010�"
+    },
+    {
+      "hex": "47829fd3220fba",
+      "expected": "G���\"\u000f�"
+    },
+    {
+      "hex": "b155dc",
+      "expected": "�U�"
+    },
+    {
+      "hex": "99",
+      "expected": "�"
+    },
+    {
+      "hex": "bf0e87f0ff",
+      "expected": "�\u000e���"
+    },
+    {
+      "hex": "380f6a193b9821a0",
+      "expected": "8\u000fj\u0019;�!�"
+    },
+    {
+      "hex": "d19b547e",
+      "expected": "ћT~"
+    },
+    {
+      "hex": "4a",
+      "expected": "J"
+    },
+    {
+      "hex": "bd2e2115f6feaaaa",
+      "expected": "�.!\u0015����"
+    },
+    {
+      "hex": "91",
+      "expected": "�"
+    },
+    {
+      "hex": "e67c75a2",
+      "expected": "�|u�"
+    },
+    {
+      "hex": "ff700349738f9e49",
+      "expected": "�p\u0003Is��I"
+    },
+    {
+      "hex": "0308d5",
+      "expected": "\u0003\b�"
+    },
+    {
+      "hex": "64c508fd",
+      "expected": "d�\b�"
+    },
+    {
+      "hex": "d28a3b768846c411",
+      "expected": "Ҋ;v�F�\u0011"
+    },
+    {
+      "hex": "39b6d91d",
+      "expected": "9��\u001d"
+    },
+    {
+      "hex": "7559c7",
+      "expected": "uY�"
+    },
+    {
+      "hex": "2ad61197",
+      "expected": "*�\u0011�"
+    },
+    {
+      "hex": "f3ab9e",
+      "expected": "�"
+    },
+    {
+      "hex": "55e52cc2ecea83bc",
+      "expected": "U�,��ꃼ"
+    },
+    {
+      "hex": "93feca9be1132097",
+      "expected": "��ʛ�\u0013 �"
+    },
+    {
+      "hex": "9d18",
+      "expected": "�\u0018"
+    },
+    {
+      "hex": "105dfe",
+      "expected": "\u0010]�"
+    },
+    {
+      "hex": "fc6ff08543475990",
+      "expected": "�o��CGY�"
+    },
+    {
+      "hex": "d6d876",
+      "expected": "��v"
+    },
+    {
+      "hex": "482eab81ea622e",
+      "expected": "H.���b."
+    },
+    {
+      "hex": "34f9dc4f",
+      "expected": "4��O"
+    },
+    {
+      "hex": "803aaf9d0fc087",
+      "expected": "�:��\u000f��"
+    },
+    {
+      "hex": "5b8037ce1c38f50b",
+      "expected": "[�7�\u001c8�\u000b"
+    },
+    {
+      "hex": "73b0",
+      "expected": "s�"
+    },
+    {
+      "hex": "d0460ccfa26b31",
+      "expected": "�F\fϢk1"
+    },
+    {
+      "hex": "d320bccc5a3c",
+      "expected": "� ��Z<"
+    },
+    {
+      "hex": "358a6654",
+      "expected": "5�fT"
+    },
+    {
+      "hex": "d24d67",
+      "expected": "�Mg"
+    },
+    {
+      "hex": "8881e5c998f5c6",
+      "expected": "���ɘ��"
+    },
+    {
+      "hex": "60d6",
+      "expected": "`�"
+    },
+    {
+      "hex": "19e1290a",
+      "expected": "\u0019�)\n"
+    },
+    {
+      "hex": "9fa0a6764b",
+      "expected": "���vK"
+    },
+    {
+      "hex": "8f3ebf",
+      "expected": "�>�"
+    },
+    {
+      "hex": "3c3f306d3d",
+      "expected": "<?0m="
+    },
+    {
+      "hex": "df6e1d8f2a",
+      "expected": "�n\u001d�*"
+    },
+    {
+      "hex": "5ce2e1d68249",
+      "expected": "\\��ւI"
+    },
+    {
+      "hex": "b2fd90ee",
+      "expected": "����"
+    },
+    {
+      "hex": "a1",
+      "expected": "�"
+    },
+    {
+      "hex": "2c9e",
+      "expected": ",�"
+    },
+    {
+      "hex": "6a96c9",
+      "expected": "j��"
+    },
+    {
+      "hex": "75b2f612fdca90",
+      "expected": "u��\u0012�ʐ"
+    },
+    {
+      "hex": "cf",
+      "expected": "�"
+    },
+    {
+      "hex": "d5f3443a",
+      "expected": "��D:"
+    },
+    {
+      "hex": "4423c40baf32c3",
+      "expected": "D#�\u000b�2�"
+    },
+    {
+      "hex": "56c1",
+      "expected": "V�"
+    },
+    {
+      "hex": "82a477957576",
+      "expected": "��w�uv"
+    },
+    {
+      "hex": "eca49d2ee39d",
+      "expected": "줝.�"
+    },
+    {
+      "hex": "cb8a90669dc1f6",
+      "expected": "ˊ�f���"
+    },
+    {
+      "hex": "f4",
+      "expected": "�"
+    },
+    {
+      "hex": "bcf89d",
+      "expected": "���"
+    },
+    {
+      "hex": "44da5bb6",
+      "expected": "D�[�"
+    },
+    {
+      "hex": "3257825b0674e817",
+      "expected": "2W�[\u0006t�\u0017"
+    },
+    {
+      "hex": "1baa14db7fd4cb3c",
+      "expected": "\u001b�\u0014���<"
+    },
+    {
+      "hex": "ce962e6ae8",
+      "expected": "Ζ.j�"
+    },
+    {
+      "hex": "e7",
+      "expected": "�"
+    },
+    {
+      "hex": "f123020660e90e",
+      "expected": "�#\u0002\u0006`�\u000e"
+    },
+    {
+      "hex": "6b9a",
+      "expected": "k�"
+    },
+    {
+      "hex": "cc",
+      "expected": "�"
+    },
+    {
+      "hex": "9767073ff2c52549",
+      "expected": "�g\u0007?��%I"
+    },
+    {
+      "hex": "2fc84b3ba41c25",
+      "expected": "/�K;�\u001c%"
+    },
+    {
+      "hex": "6460b842",
+      "expected": "d`�B"
+    },
+    {
+      "hex": "1fb61d1165ec",
+      "expected": "\u001f�\u001d\u0011e�"
+    },
+    {
+      "hex": "d422",
+      "expected": "�\""
+    },
+    {
+      "hex": "5f10",
+      "expected": "_\u0010"
+    },
+    {
+      "hex": "dce6a84f",
+      "expected": "��O"
+    },
+    {
+      "hex": "0a",
+      "expected": "\n"
+    },
+    {
+      "hex": "c540efb99475b77f",
+      "expected": "�@﹔u�"
+    },
+    {
+      "hex": "5896eeb1",
+      "expected": "X��"
+    },
+    {
+      "hex": "2c46d4100792",
+      "expected": ",F�\u0010\u0007�"
+    },
+    {
+      "hex": "5b3285ad40",
+      "expected": "[2��@"
+    },
+    {
+      "hex": "c876",
+      "expected": "�v"
+    },
+    {
+      "hex": "32",
+      "expected": "2"
+    },
+    {
+      "hex": "eab39c72e3da",
+      "expected": "곜r��"
+    },
+    {
+      "hex": "355fc48c88a209",
+      "expected": "5_Č��\t"
+    },
+    {
+      "hex": "7e65",
+      "expected": "~e"
+    },
+    {
+      "hex": "5bc689",
+      "expected": "[Ɖ"
+    },
+    {
+      "hex": "423e6cadae",
+      "expected": "B>l��"
+    },
+    {
+      "hex": "f57d",
+      "expected": "�}"
+    },
+    {
+      "hex": "bb854be3",
+      "expected": "��K�"
+    },
+    {
+      "hex": "4a",
+      "expected": "J"
+    },
+    {
+      "hex": "57cc3aefa77d2994",
+      "expected": "W�:�})�"
+    },
+    {
+      "hex": "17",
+      "expected": "\u0017"
+    },
+    {
+      "hex": "a56ef2f0fdaa980f",
+      "expected": "�n�����\u000f"
+    },
+    {
+      "hex": "a1ed8ac5c1",
+      "expected": "����"
+    },
+    {
+      "hex": "bee32315e1",
+      "expected": "��#\u0015�"
+    },
+    {
+      "hex": "7b",
+      "expected": "{"
+    },
+    {
+      "hex": "cac3aec113a8",
+      "expected": "�î�\u0013�"
+    },
+    {
+      "hex": "6b",
+      "expected": "k"
+    },
+    {
+      "hex": "9a",
+      "expected": "�"
+    },
+    {
+      "hex": "6995145e",
+      "expected": "i�\u0014^"
+    },
+    {
+      "hex": "acf8426207a3",
+      "expected": "��Bb\u0007�"
+    },
+    {
+      "hex": "3b54062172ce",
+      "expected": ";T\u0006!r�"
+    },
+    {
+      "hex": "b3",
+      "expected": "�"
+    },
+    {
+      "hex": "674b9b2a63",
+      "expected": "gK�*c"
+    },
+    {
+      "hex": "1e2a3b145c7f6c47",
+      "expected": "\u001e*;\u0014\\lG"
+    },
+    {
+      "hex": "372e72123163",
+      "expected": "7.r\u00121c"
+    },
+    {
+      "hex": "25cd847dc5",
+      "expected": "%̈́}�"
+    },
+    {
+      "hex": "987399bee12d",
+      "expected": "�s���-"
+    },
+    {
+      "hex": "51263b7e6bd2",
+      "expected": "Q&;~k�"
+    },
+    {
+      "hex": "b3fb8a",
+      "expected": "���"
+    },
+    {
+      "hex": "d6",
+      "expected": "�"
+    },
+    {
+      "hex": "6542c676",
+      "expected": "eB�v"
+    },
+    {
+      "hex": "39e5005d8b612524",
+      "expected": "9�\u0000]�a%$"
+    },
+    {
+      "hex": "a281",
+      "expected": "��"
+    },
+    {
+      "hex": "00d6f39f15",
+      "expected": "\u0000��\u0015"
+    },
+    {
+      "hex": "d4894995",
+      "expected": "ԉI�"
+    },
+    {
+      "hex": "a7a3c41287dac4",
+      "expected": "���\u0012���"
+    },
+    {
+      "hex": "00f08d37",
+      "expected": "\u0000��7"
+    },
+    {
+      "hex": "1232339cbf1d98",
+      "expected": "\u001223��\u001d�"
+    },
+    {
+      "hex": "16f5dfd86054",
+      "expected": "\u0016���`T"
+    },
+    {
+      "hex": "1d01784763",
+      "expected": "\u001d\u0001xGc"
+    },
+    {
+      "hex": "a9ef",
+      "expected": "��"
+    },
+    {
+      "hex": "5c0d",
+      "expected": "\\\r"
+    },
+    {
+      "hex": "1b7d8621",
+      "expected": "\u001b}�!"
+    },
+    {
+      "hex": "420f",
+      "expected": "B\u000f"
+    },
+    {
+      "hex": "741e",
+      "expected": "t\u001e"
+    },
+    {
+      "hex": "2d8a92586c464d6a",
+      "expected": "-��XlFMj"
+    },
+    {
+      "hex": "91b8082769f3f8",
+      "expected": "��\b'i��"
+    },
+    {
+      "hex": "fa",
+      "expected": "�"
+    },
+    {
+      "hex": "16",
+      "expected": "\u0016"
+    },
+    {
+      "hex": "86f4",
+      "expected": "��"
+    },
+    {
+      "hex": "fda55d8505",
+      "expected": "��]�\u0005"
+    },
+    {
+      "hex": "c268d98d1fb665f7",
+      "expected": "�hٍ\u001f�e�"
+    },
+    {
+      "hex": "f468",
+      "expected": "�h"
+    },
+    {
+      "hex": "e3",
+      "expected": "�"
+    },
+    {
+      "hex": "38eaf1",
+      "expected": "8��"
+    },
+    {
+      "hex": "4d7045130004ae",
+      "expected": "MpE\u0013\u0000\u0004�"
+    },
+    {
+      "hex": "94044556446d",
+      "expected": "�\u0004EVDm"
+    },
+    {
+      "hex": "8785cd5cf0",
+      "expected": "���\\�"
+    },
+    {
+      "hex": "c1453e5c74d9",
+      "expected": "�E>\\t�"
+    },
+    {
+      "hex": "c4da9ed6e9",
+      "expected": "�ڞ��"
+    },
+    {
+      "hex": "a0011601dae00178",
+      "expected": "�\u0001\u0016\u0001��\u0001x"
+    },
+    {
+      "hex": "acf89e",
+      "expected": "���"
+    },
+    {
+      "hex": "1f",
+      "expected": "\u001f"
+    },
+    {
+      "hex": "7946d3c545a7",
+      "expected": "yF��E�"
+    },
+    {
+      "hex": "8773",
+      "expected": "�s"
+    },
+    {
+      "hex": "9b3ea8a8bcb0",
+      "expected": "�>����"
+    },
+    {
+      "hex": "fc37f05cee8d",
+      "expected": "�7�\\�"
+    },
+    {
+      "hex": "3fb944acc2e0",
+      "expected": "?�D���"
+    },
+    {
+      "hex": "27c0c76d",
+      "expected": "'��m"
+    },
+    {
+      "hex": "41d3f835d8f112",
+      "expected": "A��5��\u0012"
+    },
+    {
+      "hex": "da753c8fdbeb",
+      "expected": "�u<���"
+    },
+    {
+      "hex": "a604d0",
+      "expected": "�\u0004�"
+    },
+    {
+      "hex": "dadf",
+      "expected": "��"
+    },
+    {
+      "hex": "320ebd",
+      "expected": "2\u000e�"
+    },
+    {
+      "hex": "1b",
+      "expected": "\u001b"
+    },
+    {
+      "hex": "b94dd93c6434",
+      "expected": "�M�<d4"
+    },
+    {
+      "hex": "7ea723",
+      "expected": "~�#"
+    },
+    {
+      "hex": "68b62a7b76fe5897",
+      "expected": "h�*{v�X�"
+    },
+    {
+      "hex": "7f0a94f84d0fca",
+      "expected": "\n��M\u000f�"
+    },
+    {
+      "hex": "2ebc9c6791",
+      "expected": ".��g�"
+    },
+    {
+      "hex": "ef322cfac3",
+      "expected": "�2,��"
+    },
+    {
+      "hex": "434ff872d7b359",
+      "expected": "CO�r׳Y"
+    },
+    {
+      "hex": "8954e2ac8f2d",
+      "expected": "�T⬏-"
+    },
+    {
+      "hex": "bdc11d47",
+      "expected": "��\u001dG"
+    },
+    {
+      "hex": "ebe344",
+      "expected": "��D"
+    },
+    {
+      "hex": "91",
+      "expected": "�"
+    },
+    {
+      "hex": "5321",
+      "expected": "S!"
+    },
+    {
+      "hex": "375f48e015c706",
+      "expected": "7_H�\u0015�\u0006"
+    },
+    {
+      "hex": "7ac922",
+      "expected": "z�\""
+    },
+    {
+      "hex": "8bf6",
+      "expected": "��"
+    },
+    {
+      "hex": "8c49ed11df3e17",
+      "expected": "�I�\u0011�>\u0017"
+    },
+    {
+      "hex": "ed36ba2aa685",
+      "expected": "�6�*��"
+    },
+    {
+      "hex": "2d",
+      "expected": "-"
+    },
+    {
+      "hex": "50e0099144c7c592",
+      "expected": "P�\t�D�Œ"
+    },
+    {
+      "hex": "3b1125",
+      "expected": ";\u0011%"
+    },
+    {
+      "hex": "14777caf",
+      "expected": "\u0014w|�"
+    },
+    {
+      "hex": "7497fd7e",
+      "expected": "t��~"
+    },
+    {
+      "hex": "d10c301b",
+      "expected": "�\f0\u001b"
+    },
+    {
+      "hex": "dc9977fb",
+      "expected": "ܙw�"
+    },
+    {
+      "hex": "8b44736a5254d4",
+      "expected": "�DsjRT�"
+    },
+    {
+      "hex": "e4ff",
+      "expected": "��"
+    },
+    {
+      "hex": "c1b28fe0ccafcde5",
+      "expected": "����̯��"
+    },
+    {
+      "hex": "419d54e74e500974",
+      "expected": "A�T�NP\tt"
+    },
+    {
+      "hex": "11a1",
+      "expected": "\u0011�"
+    },
+    {
+      "hex": "ef",
+      "expected": "�"
+    },
+    {
+      "hex": "cc2e6007",
+      "expected": "�.`\u0007"
+    },
+    {
+      "hex": "2207f3",
+      "expected": "\"\u0007�"
+    },
+    {
+      "hex": "527b688809",
+      "expected": "R{h�\t"
+    },
+    {
+      "hex": "e362319826",
+      "expected": "�b1�&"
+    },
+    {
+      "hex": "35422c",
+      "expected": "5B,"
+    },
+    {
+      "hex": "a6caf8558c",
+      "expected": "���U�"
+    },
+    {
+      "hex": "bf76",
+      "expected": "�v"
+    },
+    {
+      "hex": "88793f24b7",
+      "expected": "�y?$�"
+    },
+    {
+      "hex": "0a739a",
+      "expected": "\ns�"
+    },
+    {
+      "hex": "77a43f3bf643a9",
+      "expected": "w�?;�C�"
+    },
+    {
+      "hex": "256c6c3f68d1",
+      "expected": "%ll?h�"
+    },
+    {
+      "hex": "4b98c3155e78",
+      "expected": "K��\u0015^x"
+    },
+    {
+      "hex": "ae",
+      "expected": "�"
+    },
+    {
+      "hex": "43d2fa6f6136",
+      "expected": "C��oa6"
+    },
+    {
+      "hex": "b4accb33",
+      "expected": "���3"
+    },
+    {
+      "hex": "faff",
+      "expected": "��"
+    },
+    {
+      "hex": "cf38b554",
+      "expected": "�8�T"
+    },
+    {
+      "hex": "ce",
+      "expected": "�"
+    },
+    {
+      "hex": "16eaf7781e",
+      "expected": "\u0016��x\u001e"
+    },
+    {
+      "hex": "b0ca68a494",
+      "expected": "��h��"
+    },
+    {
+      "hex": "7c56a6",
+      "expected": "|V�"
+    },
+    {
+      "hex": "9bbc1e95e686d8ab",
+      "expected": "��\u001e��ث"
+    },
+    {
+      "hex": "ac0b79293683",
+      "expected": "�\u000by)6�"
+    },
+    {
+      "hex": "ec033c",
+      "expected": "�\u0003<"
+    },
+    {
+      "hex": "7ba2b3dbc0",
+      "expected": "{����"
+    },
+    {
+      "hex": "8ca5e6316995",
+      "expected": "���1i�"
+    },
+    {
+      "hex": "e8285e1cd2",
+      "expected": "�(^\u001c�"
+    },
+    {
+      "hex": "faf63658f77f",
+      "expected": "��6X�"
+    },
+    {
+      "hex": "3b5666",
+      "expected": ";Vf"
+    },
+    {
+      "hex": "ba",
+      "expected": "�"
+    },
+    {
+      "hex": "fd",
+      "expected": "�"
+    },
+    {
+      "hex": "9b49a295",
+      "expected": "�I��"
+    },
+    {
+      "hex": "11fa",
+      "expected": "\u0011�"
+    },
+    {
+      "hex": "88593efd",
+      "expected": "�Y>�"
+    },
+    {
+      "hex": "d31adf9c",
+      "expected": "�\u001aߜ"
+    },
+    {
+      "hex": "fbd06810",
+      "expected": "��h\u0010"
+    },
+    {
+      "hex": "abf45571f643a0e4",
+      "expected": "��Uq�C��"
+    },
+    {
+      "hex": "ad23e49f1a9af37e",
+      "expected": "�#�\u001a��~"
+    },
+    {
+      "hex": "a2457fe2f0",
+      "expected": "�E��"
+    },
+    {
+      "hex": "90",
+      "expected": "�"
+    },
+    {
+      "hex": "1be5a8d34949",
+      "expected": "\u001b��II"
+    },
+    {
+      "hex": "348c",
+      "expected": "4�"
+    },
+    {
+      "hex": "3f",
+      "expected": "?"
+    },
+    {
+      "hex": "aa69",
+      "expected": "�i"
+    },
+    {
+      "hex": "082b",
+      "expected": "\b+"
+    },
+    {
+      "hex": "d74bc69d",
+      "expected": "�KƝ"
+    },
+    {
+      "hex": "aff7c4b03847",
+      "expected": "��İ8G"
+    },
+    {
+      "hex": "e22a1fc7e7034f75",
+      "expected": "�*\u001f��\u0003Ou"
+    },
+    {
+      "hex": "da38adccaf",
+      "expected": "�8�̯"
+    },
+    {
+      "hex": "6796e4f37bdfcc43",
+      "expected": "g���{��C"
+    },
+    {
+      "hex": "b6b73216ec",
+      "expected": "��2\u0016�"
+    },
+    {
+      "hex": "2b",
+      "expected": "+"
+    },
+    {
+      "hex": "004e63540261",
+      "expected": "\u0000NcT\u0002a"
+    },
+    {
+      "hex": "0a67375081e766",
+      "expected": "\ng7P��f"
+    },
+    {
+      "hex": "155e5d86a5",
+      "expected": "\u0015^]��"
+    },
+    {
+      "hex": "0b4a8d18e027f34b",
+      "expected": "\u000bJ�\u0018�'�K"
+    },
+    {
+      "hex": "97",
+      "expected": "�"
+    },
+    {
+      "hex": "ea22f0942346e1",
+      "expected": "�\"�#F�"
+    },
+    {
+      "hex": "de61723cef",
+      "expected": "�ar<�"
+    },
+    {
+      "hex": "7f",
+      "expected": ""
+    },
+    {
+      "hex": "16aba19208e0d7",
+      "expected": "\u0016���\b��"
+    },
+    {
+      "hex": "509ac4e9ffdb4f",
+      "expected": "P�����O"
+    },
+    {
+      "hex": "231884f9d1c0c1e5",
+      "expected": "#\u0018������"
+    },
+    {
+      "hex": "16",
+      "expected": "\u0016"
+    },
+    {
+      "hex": "76d3",
+      "expected": "v�"
+    },
+    {
+      "hex": "6cf59f98ef",
+      "expected": "l����"
+    },
+    {
+      "hex": "50d5ca4545d068",
+      "expected": "P��EE�h"
+    },
+    {
+      "hex": "8637b72109e0a1",
+      "expected": "�7�!\t�"
+    },
+    {
+      "hex": "b26eecbc8c",
+      "expected": "�n켌"
+    },
+    {
+      "hex": "cc28ffa6a5",
+      "expected": "�(���"
+    },
+    {
+      "hex": "8a08fd81",
+      "expected": "�\b��"
+    },
+    {
+      "hex": "a6313aab78",
+      "expected": "�1:�x"
+    },
+    {
+      "hex": "9137c9",
+      "expected": "�7�"
+    },
+    {
+      "hex": "7291a6e710da",
+      "expected": "r���\u0010�"
+    },
+    {
+      "hex": "e8004f3b0c",
+      "expected": "�\u0000O;\f"
+    },
+    {
+      "hex": "ce179fc0bbe256",
+      "expected": "�\u0017����V"
+    },
+    {
+      "hex": "18682cc670967f",
+      "expected": "\u0018h,�p�"
+    },
+    {
+      "hex": "37d1bf50afad63bb",
+      "expected": "7ѿP��c�"
+    },
+    {
+      "hex": "782ea130dac9",
+      "expected": "x.�0��"
+    },
+    {
+      "hex": "54132de9",
+      "expected": "T\u0013-�"
+    },
+    {
+      "hex": "af0a5b73a2ff52",
+      "expected": "�\n[s��R"
+    },
+    {
+      "hex": "5cc939",
+      "expected": "\\�9"
+    },
+    {
+      "hex": "dc",
+      "expected": "�"
+    },
+    {
+      "hex": "cdb035769e2f",
+      "expected": "Ͱ5v�/"
+    },
+    {
+      "hex": "ce675fa86f",
+      "expected": "�g_�o"
+    },
+    {
+      "hex": "352d400aabbc20",
+      "expected": "5-@\n�� "
+    },
+    {
+      "hex": "2cb6",
+      "expected": ",�"
+    },
+    {
+      "hex": "1f",
+      "expected": "\u001f"
+    },
+    {
+      "hex": "56fc1d",
+      "expected": "V�\u001d"
+    },
+    {
+      "hex": "7a9149cb",
+      "expected": "z�I�"
+    },
+    {
+      "hex": "c4a85178e149faae",
+      "expected": "ĨQx�I��"
+    },
+    {
+      "hex": "f6ccda1b6417",
+      "expected": "���\u001bd\u0017"
+    },
+    {
+      "hex": "1a44",
+      "expected": "\u001aD"
+    },
+    {
+      "hex": "7a451c",
+      "expected": "zE\u001c"
+    },
+    {
+      "hex": "d6543edf02cb78e4",
+      "expected": "�T>�\u0002�x�"
+    },
+    {
+      "hex": "833f92bf",
+      "expected": "�?��"
+    },
+    {
+      "hex": "2fa04767c52855",
+      "expected": "/�Gg�(U"
+    },
+    {
+      "hex": "511d1a97",
+      "expected": "Q\u001d\u001a�"
+    },
+    {
+      "hex": "f9ab",
+      "expected": "��"
+    },
+    {
+      "hex": "0e167e820541",
+      "expected": "\u000e\u0016~�\u0005A"
+    },
+    {
+      "hex": "3ba9f92ee9",
+      "expected": ";��.�"
+    },
+    {
+      "hex": "ae30ec",
+      "expected": "�0�"
+    },
+    {
+      "hex": "9e5001c4e2e92441",
+      "expected": "�P\u0001���$A"
+    },
+    {
+      "hex": "6fd42241ed1ff6b6",
+      "expected": "o�\"A�\u001f��"
+    },
+    {
+      "hex": "2d85812dbe2d",
+      "expected": "-��-�-"
+    },
+    {
+      "hex": "d384c88f4c86",
+      "expected": "ӄȏL�"
+    },
+    {
+      "hex": "b53f",
+      "expected": "�?"
+    },
+    {
+      "hex": "600b01988c62",
+      "expected": "`\u000b\u0001��b"
+    },
+    {
+      "hex": "5d78bcf1f678",
+      "expected": "]x���x"
+    },
+    {
+      "hex": "0f040746a6",
+      "expected": "\u000f\u0004\u0007F�"
+    },
+    {
+      "hex": "3355cf0d83",
+      "expected": "3U�\r�"
+    },
+    {
+      "hex": "915cbb",
+      "expected": "�\\�"
+    },
+    {
+      "hex": "95bc50",
+      "expected": "��P"
+    },
+    {
+      "hex": "ee9b0ddefe736db9",
+      "expected": "�\r��sm�"
+    },
+    {
+      "hex": "38da70f68a4a6ec3",
+      "expected": "8�p��Jn�"
+    },
+    {
+      "hex": "9a84535648dd608c",
+      "expected": "��SVH�`�"
+    },
+    {
+      "hex": "d6c31b372a",
+      "expected": "��\u001b7*"
+    },
+    {
+      "hex": "0692959f",
+      "expected": "\u0006���"
+    },
+    {
+      "hex": "5b5b2904",
+      "expected": "[[)\u0004"
+    },
+    {
+      "hex": "a2cbb1",
+      "expected": "�˱"
+    },
+    {
+      "hex": "812f57e042",
+      "expected": "�/W�B"
+    },
+    {
+      "hex": "f2237befa09a",
+      "expected": "�#{"
+    },
+    {
+      "hex": "2ef9",
+      "expected": ".�"
+    },
+    {
+      "hex": "1a6b67",
+      "expected": "\u001akg"
+    },
+    {
+      "hex": "2d0b1f694e",
+      "expected": "-\u000b\u001fiN"
+    },
+    {
+      "hex": "cffe3edf974291",
+      "expected": "��>ߗB�"
+    },
+    {
+      "hex": "9bbca206877479",
+      "expected": "���\u0006�ty"
+    },
+    {
+      "hex": "048051",
+      "expected": "\u0004�Q"
+    },
+    {
+      "hex": "9efd531a9b",
+      "expected": "��S\u001a�"
+    },
+    {
+      "hex": "acc87430e7bd0721",
+      "expected": "��t0�\u0007!"
+    },
+    {
+      "hex": "84ac",
+      "expected": "��"
+    },
+    {
+      "hex": "2de48c91782a03",
+      "expected": "-䌑x*\u0003"
+    },
+    {
+      "hex": "bf9cd4",
+      "expected": "���"
+    },
+    {
+      "hex": "8b780556d302be",
+      "expected": "�x\u0005V�\u0002�"
+    },
+    {
+      "hex": "d2b2b21223d6e686",
+      "expected": "Ҳ�\u0012#��"
+    },
+    {
+      "hex": "7fbb54727cb3d9c2",
+      "expected": "�Tr|���"
+    },
+    {
+      "hex": "399b9eaee493791e",
+      "expected": "9����y\u001e"
+    },
+    {
+      "hex": "a5539e73386c",
+      "expected": "�S�s8l"
+    },
+    {
+      "hex": "68c7f8",
+      "expected": "h��"
+    },
+    {
+      "hex": "e926",
+      "expected": "�&"
+    },
+    {
+      "hex": "aba624de586a3a27",
+      "expected": "��$�Xj:'"
+    },
+    {
+      "hex": "7a6d08",
+      "expected": "zm\b"
+    },
+    {
+      "hex": "7e7988",
+      "expected": "~y�"
+    },
+    {
+      "hex": "d043",
+      "expected": "�C"
+    },
+    {
+      "hex": "c5a3b6817c0e",
+      "expected": "ţ��|\u000e"
+    },
+    {
+      "hex": "1d74e44a4a1ae33b",
+      "expected": "\u001dt�JJ\u001a�;"
+    },
+    {
+      "hex": "1b",
+      "expected": "\u001b"
+    },
+    {
+      "hex": "f719",
+      "expected": "�\u0019"
+    },
+    {
+      "hex": "24",
+      "expected": "$"
+    },
+    {
+      "hex": "362d965d5823c0",
+      "expected": "6-�]X#�"
+    },
+    {
+      "hex": "53f6ebefc0140051",
+      "expected": "S����\u0014\u0000Q"
+    },
+    {
+      "hex": "4e018c",
+      "expected": "N\u0001�"
+    },
+    {
+      "hex": "d531",
+      "expected": "�1"
+    },
+    {
+      "hex": "001f65c07946775a",
+      "expected": "\u0000\u001fe�yFwZ"
+    },
+    {
+      "hex": "12c8de6e15207e",
+      "expected": "\u0012��n\u0015 ~"
+    },
+    {
+      "hex": "f4708e2e019939",
+      "expected": "�p�.\u0001�9"
+    },
+    {
+      "hex": "65ce033d1e0b18",
+      "expected": "e�\u0003=\u001e\u000b\u0018"
+    },
+    {
+      "hex": "adbe1138b57ff2",
+      "expected": "��\u00118��"
+    },
+    {
+      "hex": "66a0",
+      "expected": "f�"
+    },
+    {
+      "hex": "6c22",
+      "expected": "l\""
+    },
+    {
+      "hex": "e8",
+      "expected": "�"
+    },
+    {
+      "hex": "5877dc16729dc1",
+      "expected": "Xw�\u0016r��"
+    },
+    {
+      "hex": "578990e33c",
+      "expected": "W���<"
+    },
+    {
+      "hex": "156833",
+      "expected": "\u0015h3"
+    },
+    {
+      "hex": "88ece89460",
+      "expected": "���`"
+    },
+    {
+      "hex": "986151e050",
+      "expected": "�aQ�P"
+    },
+    {
+      "hex": "131899",
+      "expected": "\u0013\u0018�"
+    },
+    {
+      "hex": "db",
+      "expected": "�"
+    },
+    {
+      "hex": "f53b3db9e0ad3f27",
+      "expected": "�;=��?'"
+    },
+    {
+      "hex": "d7c6",
+      "expected": "��"
+    },
+    {
+      "hex": "b357bcec7dbb",
+      "expected": "�W��}�"
+    },
+    {
+      "hex": "155c83",
+      "expected": "\u0015\\�"
+    },
+    {
+      "hex": "79",
+      "expected": "y"
+    },
+    {
+      "hex": "75",
+      "expected": "u"
+    },
+    {
+      "hex": "1b",
+      "expected": "\u001b"
+    },
+    {
+      "hex": "84cd6d36",
+      "expected": "��m6"
+    },
+    {
+      "hex": "248aa159",
+      "expected": "$��Y"
+    },
+    {
+      "hex": "e3",
+      "expected": "�"
+    },
+    {
+      "hex": "69b7aee80370d4",
+      "expected": "i���\u0003p�"
+    },
+    {
+      "hex": "57c5a9eb2dc3",
+      "expected": "Wũ�-�"
+    },
+    {
+      "hex": "c68bc2a582",
+      "expected": "Ƌ¥�"
+    },
+    {
+      "hex": "fe34be67",
+      "expected": "�4�g"
+    },
+    {
+      "hex": "3ebeed0cd38b72",
+      "expected": ">��\fӋr"
+    },
+    {
+      "hex": "1e",
+      "expected": "\u001e"
+    },
+    {
+      "hex": "ebab9d4baccd76d9",
+      "expected": "뫝K��v�"
+    },
+    {
+      "hex": "6a",
+      "expected": "j"
+    },
+    {
+      "hex": "b8",
+      "expected": "�"
+    },
+    {
+      "hex": "bf",
+      "expected": "�"
+    },
+    {
+      "hex": "85447e9790ba7999",
+      "expected": "�D~���y�"
+    },
+    {
+      "hex": "fa67a4df6d",
+      "expected": "�g��m"
+    },
+    {
+      "hex": "dcbdef",
+      "expected": "ܽ�"
+    },
+    {
+      "hex": "f1543554ea49d7",
+      "expected": "�T5T�I�"
+    },
+    {
+      "hex": "081ed745f7d921",
+      "expected": "\b\u001e�E��!"
+    },
+    {
+      "hex": "f5405f",
+      "expected": "�@_"
+    },
+    {
+      "hex": "260f",
+      "expected": "&\u000f"
+    },
+    {
+      "hex": "c6ec",
+      "expected": "��"
+    },
+    {
+      "hex": "bee5556d8caae4f4",
+      "expected": "��Um����"
+    },
+    {
+      "hex": "180100",
+      "expected": "\u0018\u0001\u0000"
+    },
+    {
+      "hex": "39b2ae13a0a7",
+      "expected": "9��\u0013��"
+    },
+    {
+      "hex": "215b3a80f3e2",
+      "expected": "![:���"
+    },
+    {
+      "hex": "dcd1d2ffd45e3721",
+      "expected": "�����^7!"
+    },
+    {
+      "hex": "9ec8cf84c8",
+      "expected": "��τ�"
+    },
+    {
+      "hex": "8a3202105829",
+      "expected": "�2\u0002\u0010X)"
+    },
+    {
+      "hex": "e1288d0f5e",
+      "expected": "�(�\u000f^"
+    },
+    {
+      "hex": "1c",
+      "expected": "\u001c"
+    },
+    {
+      "hex": "a9518d7435eea390",
+      "expected": "�Q�t5"
+    },
+    {
+      "hex": "76",
+      "expected": "v"
+    },
+    {
+      "hex": "0d",
+      "expected": "\r"
+    },
+    {
+      "hex": "63f8a1b4",
+      "expected": "c���"
+    },
+    {
+      "hex": "b8285f57e0",
+      "expected": "�(_W�"
+    },
+    {
+      "hex": "74",
+      "expected": "t"
+    },
+    {
+      "hex": "fa602a10383d59dc",
+      "expected": "�`*\u00108=Y�"
+    },
+    {
+      "hex": "c9",
+      "expected": "�"
+    },
+    {
+      "hex": "0d68b3",
+      "expected": "\rh�"
+    },
+    {
+      "hex": "0b40ad66",
+      "expected": "\u000b@�f"
+    },
+    {
+      "hex": "946c",
+      "expected": "�l"
+    },
+    {
+      "hex": "d44c3e6a17",
+      "expected": "�L>j\u0017"
+    },
+    {
+      "hex": "1f5a4cf8c6c35e",
+      "expected": "\u001fZL���^"
+    },
+    {
+      "hex": "86",
+      "expected": "�"
+    },
+    {
+      "hex": "e644",
+      "expected": "�D"
+    },
+    {
+      "hex": "297f28",
+      "expected": ")("
+    },
+    {
+      "hex": "6545792dac",
+      "expected": "eEy-�"
+    },
+    {
+      "hex": "ab8f",
+      "expected": "��"
+    },
+    {
+      "hex": "7ccf7c619ffdd7",
+      "expected": "|�|a���"
+    },
+    {
+      "hex": "3d7fbaf37c",
+      "expected": "=��|"
+    },
+    {
+      "hex": "9e61222e40bea8",
+      "expected": "�a\".@��"
+    },
+    {
+      "hex": "3eef827f3ca6f4",
+      "expected": ">�<��"
+    },
+    {
+      "hex": "e5cc",
+      "expected": "��"
+    },
+    {
+      "hex": "848709379614",
+      "expected": "��\t7�\u0014"
+    },
+    {
+      "hex": "6c998167",
+      "expected": "l��g"
+    },
+    {
+      "hex": "6b67",
+      "expected": "kg"
+    },
+    {
+      "hex": "e1a7",
+      "expected": "�"
+    },
+    {
+      "hex": "842788",
+      "expected": "�'�"
+    },
+    {
+      "hex": "8bf1a036d000d0ba",
+      "expected": "��6�\u0000к"
+    },
+    {
+      "hex": "18a8b5de4e06",
+      "expected": "\u0018���N\u0006"
+    },
+    {
+      "hex": "016ebc4a46121a85",
+      "expected": "\u0001n�JF\u0012\u001a�"
+    },
+    {
+      "hex": "ead32ba9c85c0d3e",
+      "expected": "��+��\\\r>"
+    },
+    {
+      "hex": "be2668d6b589",
+      "expected": "�&hֵ�"
+    },
+    {
+      "hex": "9cdd",
+      "expected": "��"
+    },
+    {
+      "hex": "c2a0e2",
+      "expected": " �"
+    },
+    {
+      "hex": "6b982f197297",
+      "expected": "k�/\u0019r�"
+    },
+    {
+      "hex": "f8cbe661",
+      "expected": "���a"
+    },
+    {
+      "hex": "dad0",
+      "expected": "��"
+    },
+    {
+      "hex": "ef637f81bac2e222",
+      "expected": "�c����\""
+    },
+    {
+      "hex": "b428",
+      "expected": "�("
+    },
+    {
+      "hex": "8626",
+      "expected": "�&"
+    },
+    {
+      "hex": "aa7362b4a0",
+      "expected": "�sb��"
+    },
+    {
+      "hex": "9d0fecce35",
+      "expected": "�\u000f��5"
+    },
+    {
+      "hex": "f104e5",
+      "expected": "�\u0004�"
+    },
+    {
+      "hex": "e70062a48125213b",
+      "expected": "�\u0000b��%!;"
+    },
+    {
+      "hex": "eb05",
+      "expected": "�\u0005"
+    },
+    {
+      "hex": "e1",
+      "expected": "�"
+    },
+    {
+      "hex": "1a5539aa",
+      "expected": "\u001aU9�"
+    },
+    {
+      "hex": "66b2",
+      "expected": "f�"
+    },
+    {
+      "hex": "db660f0c",
+      "expected": "�f\u000f\f"
+    },
+    {
+      "hex": "817c",
+      "expected": "�|"
+    },
+    {
+      "hex": "14043e7f9226",
+      "expected": "\u0014\u0004>�&"
+    },
+    {
+      "hex": "f4591e792311",
+      "expected": "�Y\u001ey#\u0011"
+    },
+    {
+      "hex": "a720e6",
+      "expected": "� �"
+    },
+    {
+      "hex": "1c",
+      "expected": "\u001c"
+    },
+    {
+      "hex": "2eec5be9",
+      "expected": ".�[�"
+    },
+    {
+      "hex": "fed4cf3824f8",
+      "expected": "���8$�"
+    },
+    {
+      "hex": "e5",
+      "expected": "�"
+    },
+    {
+      "hex": "b9c9",
+      "expected": "��"
+    },
+    {
+      "hex": "aabfa7fd",
+      "expected": "����"
+    },
+    {
+      "hex": "74ee",
+      "expected": "t�"
+    },
+    {
+      "hex": "00805a",
+      "expected": "\u0000�Z"
+    },
+    {
+      "hex": "de925148",
+      "expected": "ޒQH"
+    },
+    {
+      "hex": "8b59",
+      "expected": "�Y"
+    },
+    {
+      "hex": "2d32831623ba",
+      "expected": "-2�\u0016#�"
+    },
+    {
+      "hex": "fd42",
+      "expected": "�B"
+    },
+    {
+      "hex": "906f1d4e89d8",
+      "expected": "�o\u001dN��"
+    },
+    {
+      "hex": "0bb48f76",
+      "expected": "\u000b��v"
+    },
+    {
+      "hex": "9223d886d85d58ab",
+      "expected": "�#؆�]X�"
+    },
+    {
+      "hex": "7fb1e451819e925d",
+      "expected": "��Q���]"
+    },
+    {
+      "hex": "814bac462d1ad5",
+      "expected": "�K�F-\u001a�"
+    },
+    {
+      "hex": "6f",
+      "expected": "o"
+    },
+    {
+      "hex": "aa2acee787fbde3f",
+      "expected": "�*����?"
+    },
+    {
+      "hex": "7d5e83e03d5427",
+      "expected": "}^��=T'"
+    },
+    {
+      "hex": "79d2",
+      "expected": "y�"
+    },
+    {
+      "hex": "b87fbe0275ea86",
+      "expected": "��\u0002u�"
+    },
+    {
+      "hex": "338b717f",
+      "expected": "3�q"
+    },
+    {
+      "hex": "30",
+      "expected": "0"
+    },
+    {
+      "hex": "dfa4ffc6d3f0b3",
+      "expected": "ߤ����"
+    },
+    {
+      "hex": "40a59510",
+      "expected": "@��\u0010"
+    },
+    {
+      "hex": "d916dd",
+      "expected": "�\u0016�"
+    },
+    {
+      "hex": "cda3fa4d615be814",
+      "expected": "ͣ�Ma[�\u0014"
+    },
+    {
+      "hex": "3ff9",
+      "expected": "?�"
+    },
+    {
+      "hex": "c52d3fbad690",
+      "expected": "�-?�֐"
+    },
+    {
+      "hex": "01d8339997",
+      "expected": "\u0001�3��"
+    },
+    {
+      "hex": "7e7ef5d2c4",
+      "expected": "~~���"
+    },
+    {
+      "hex": "8c29",
+      "expected": "�)"
+    },
+    {
+      "hex": "e4ba8fbaaad6",
+      "expected": "亏���"
+    },
+    {
+      "hex": "86fa373c",
+      "expected": "��7<"
+    },
+    {
+      "hex": "00ed3a1dcade3fc1",
+      "expected": "\u0000�:\u001d��?�"
+    },
+    {
+      "hex": "5e6c4df14f",
+      "expected": "^lM�O"
+    },
+    {
+      "hex": "dff5461fa0",
+      "expected": "��F\u001f�"
+    },
+    {
+      "hex": "37ccce4415b4",
+      "expected": "7��D\u0015�"
+    },
+    {
+      "hex": "a86e5adf",
+      "expected": "�nZ�"
+    },
+    {
+      "hex": "cb98",
+      "expected": "˘"
+    },
+    {
+      "hex": "32855b7e088f982d",
+      "expected": "2�[~\b��-"
+    },
+    {
+      "hex": "cf8ba732c9efd4ff",
+      "expected": "ϋ�2����"
+    },
+    {
+      "hex": "40b2",
+      "expected": "@�"
+    },
+    {
+      "hex": "0a7c53",
+      "expected": "\n|S"
+    },
+    {
+      "hex": "80",
+      "expected": "�"
+    },
+    {
+      "hex": "297d",
+      "expected": ")}"
+    },
+    {
+      "hex": "3677d556388d",
+      "expected": "6w�V8�"
+    },
+    {
+      "hex": "792dc09686de",
+      "expected": "y-����"
+    },
+    {
+      "hex": "67a9",
+      "expected": "g�"
+    },
+    {
+      "hex": "56ddddee261fbe4d",
+      "expected": "V���&\u001f�M"
+    },
+    {
+      "hex": "4a0f37a89b6ca329",
+      "expected": "J\u000f7��l�)"
+    },
+    {
+      "hex": "e78a5eab",
+      "expected": "�^�"
+    },
+    {
+      "hex": "c0060918b59dfa",
+      "expected": "�\u0006\t\u0018���"
+    },
+    {
+      "hex": "c9a6d3d6d5e5",
+      "expected": "ɦ����"
+    },
+    {
+      "hex": "2235",
+      "expected": "\"5"
+    },
+    {
+      "hex": "47fd664a482a",
+      "expected": "G�fJH*"
+    },
+    {
+      "hex": "de391f",
+      "expected": "�9\u001f"
+    },
+    {
+      "hex": "3303daf45955",
+      "expected": "3\u0003��YU"
+    },
+    {
+      "hex": "ed6ed17889e8",
+      "expected": "�n�x��"
+    },
+    {
+      "hex": "b9b95bf4ea707a78",
+      "expected": "��[��pzx"
+    },
+    {
+      "hex": "1ad1",
+      "expected": "\u001a�"
+    },
+    {
+      "hex": "1445286c",
+      "expected": "\u0014E(l"
+    },
+    {
+      "hex": "df",
+      "expected": "�"
+    },
+    {
+      "hex": "5543a335",
+      "expected": "UC�5"
+    },
+    {
+      "hex": "ef5b36",
+      "expected": "�[6"
+    },
+    {
+      "hex": "17c82ea9fc",
+      "expected": "\u0017�.��"
+    },
+    {
+      "hex": "5cbea8f07e62d74b",
+      "expected": "\\���~b�K"
+    },
+    {
+      "hex": "f692beb66f",
+      "expected": "����o"
+    },
+    {
+      "hex": "d249c92f9b",
+      "expected": "�I�/�"
+    },
+    {
+      "hex": "dc6743eb2d688a51",
+      "expected": "�gC�-h�Q"
+    },
+    {
+      "hex": "f659451c2eaa0986",
+      "expected": "�YE\u001c.�\t�"
+    },
+    {
+      "hex": "a3bcb9ad390e9082",
+      "expected": "����9\u000e��"
+    },
+    {
+      "hex": "bb",
+      "expected": "�"
+    },
+    {
+      "hex": "76a29b",
+      "expected": "v��"
+    },
+    {
+      "hex": "d2a7f6cd3fb44ee0",
+      "expected": "ҧ��?�N�"
+    },
+    {
+      "hex": "97b343a18e417512",
+      "expected": "��C��Au\u0012"
+    },
+    {
+      "hex": "b10425ef",
+      "expected": "�\u0004%�"
+    },
+    {
+      "hex": "fb58d84ca7",
+      "expected": "�X�L�"
+    },
+    {
+      "hex": "1ff27a0b5042d49f",
+      "expected": "\u001f�z\u000bPBԟ"
+    },
+    {
+      "hex": "c06361d132",
+      "expected": "�ca�2"
+    },
+    {
+      "hex": "d82710",
+      "expected": "�'\u0010"
+    },
+    {
+      "hex": "bb58e1a8efd0",
+      "expected": "�X���"
+    },
+    {
+      "hex": "6b47",
+      "expected": "kG"
+    },
+    {
+      "hex": "b3a2e0be2675",
+      "expected": "���&u"
+    },
+    {
+      "hex": "30bf",
+      "expected": "0�"
+    },
+    {
+      "hex": "836a5a25b108f4",
+      "expected": "�jZ%�\b�"
+    },
+    {
+      "hex": "7cc99fd1c4560ddd",
+      "expected": "|ɟ��V\r�"
+    },
+    {
+      "hex": "13fae208d231d2bb",
+      "expected": "\u0013��\b�1һ"
+    },
+    {
+      "hex": "a6",
+      "expected": "�"
+    },
+    {
+      "hex": "d7ca22ddbfb3",
+      "expected": "��\"ݿ�"
+    },
+    {
+      "hex": "43",
+      "expected": "C"
+    },
+    {
+      "hex": "10957a",
+      "expected": "\u0010�z"
+    },
+    {
+      "hex": "a34ee1ce246011fb",
+      "expected": "�N��$`\u0011�"
+    },
+    {
+      "hex": "76fc",
+      "expected": "v�"
+    },
+    {
+      "hex": "6130b7233d",
+      "expected": "a0�#="
+    },
+    {
+      "hex": "b93f0e297a",
+      "expected": "�?\u000e)z"
+    },
+    {
+      "hex": "a2ba482234fbb8",
+      "expected": "��H\"4��"
+    },
+    {
+      "hex": "25",
+      "expected": "%"
+    },
+    {
+      "hex": "798de31ec0",
+      "expected": "y��\u001e�"
+    },
+    {
+      "hex": "0195a37e",
+      "expected": "\u0001��~"
+    },
+    {
+      "hex": "1bfd",
+      "expected": "\u001b�"
+    },
+    {
+      "hex": "d0a6c39be0c9",
+      "expected": "ЦÛ��"
+    },
+    {
+      "hex": "ee87",
+      "expected": "�"
+    },
+    {
+      "hex": "d8794bb4",
+      "expected": "�yK�"
+    },
+    {
+      "hex": "270f",
+      "expected": "'\u000f"
+    },
+    {
+      "hex": "2555",
+      "expected": "%U"
+    },
+    {
+      "hex": "357e",
+      "expected": "5~"
+    },
+    {
+      "hex": "888d1ce5de3e65",
+      "expected": "��\u001c��>e"
+    },
+    {
+      "hex": "9942",
+      "expected": "�B"
+    },
+    {
+      "hex": "435c14",
+      "expected": "C\\\u0014"
+    },
+    {
+      "hex": "3c0b737e",
+      "expected": "<\u000bs~"
+    },
+    {
+      "hex": "bbb145377b79",
+      "expected": "��E7{y"
+    },
+    {
+      "hex": "8a4113d6fe8abd5b",
+      "expected": "�A\u0013����["
+    },
+    {
+      "hex": "da8f979c9d65",
+      "expected": "ڏ���e"
+    },
+    {
+      "hex": "2532433a70597b",
+      "expected": "%2C:pY{"
+    },
+    {
+      "hex": "805d67b8",
+      "expected": "�]g�"
+    },
+    {
+      "hex": "7ce5bebccd1d2079",
+      "expected": "|徼�\u001d y"
+    },
+    {
+      "hex": "4f",
+      "expected": "O"
+    },
+    {
+      "hex": "3b15dd7b0f",
+      "expected": ";\u0015�{\u000f"
+    },
+    {
+      "hex": "872331af30",
+      "expected": "�#1�0"
+    },
+    {
+      "hex": "1b2d",
+      "expected": "\u001b-"
+    },
+    {
+      "hex": "fbcb7b5902326d17",
+      "expected": "��{Y\u00022m\u0017"
+    },
+    {
+      "hex": "724680",
+      "expected": "rF�"
+    },
+    {
+      "hex": "209b454280",
+      "expected": " �EB�"
+    },
+    {
+      "hex": "1d4595d3aa9f",
+      "expected": "\u001dE�Ӫ�"
+    },
+    {
+      "hex": "27c5",
+      "expected": "'�"
+    },
+    {
+      "hex": "2213b3",
+      "expected": "\"\u0013�"
+    },
+    {
+      "hex": "a61f0c",
+      "expected": "�\u001f\f"
+    },
+    {
+      "hex": "a18a750bdefa89",
+      "expected": "��u\u000b���"
+    },
+    {
+      "hex": "4a",
+      "expected": "J"
+    },
+    {
+      "hex": "a7",
+      "expected": "�"
+    },
+    {
+      "hex": "eae7f4",
+      "expected": "���"
+    },
+    {
+      "hex": "a1",
+      "expected": "�"
+    },
+    {
+      "hex": "c7a2427026c235",
+      "expected": "ǢBp&�5"
+    },
+    {
+      "hex": "5009e831551d7d",
+      "expected": "P\t�1U\u001d}"
+    },
+    {
+      "hex": "e6eb8cb3f1d2",
+      "expected": "�댳��"
+    },
+    {
+      "hex": "15df24",
+      "expected": "\u0015�$"
+    },
+    {
+      "hex": "e475b09e37c4",
+      "expected": "�u��7�"
+    },
+    {
+      "hex": "a1a8",
+      "expected": "��"
+    },
+    {
+      "hex": "9d492a",
+      "expected": "�I*"
+    },
+    {
+      "hex": "f0ce",
+      "expected": "��"
+    },
+    {
+      "hex": "5e207f",
+      "expected": "^ "
+    },
+    {
+      "hex": "f6",
+      "expected": "�"
+    },
+    {
+      "hex": "26d79aee60aea92c",
+      "expected": "&ך�`��,"
+    },
+    {
+      "hex": "76db55f0",
+      "expected": "v�U�"
+    },
+    {
+      "hex": "6076fe8c60fd6d",
+      "expected": "`v��`�m"
+    },
+    {
+      "hex": "b88a",
+      "expected": "��"
+    },
+    {
+      "hex": "b0e69c1fbe",
+      "expected": "��\u001f�"
+    },
+    {
+      "hex": "46c2b1455697",
+      "expected": "F±EV�"
+    },
+    {
+      "hex": "8f8cbe80",
+      "expected": "����"
+    },
+    {
+      "hex": "aa5d65",
+      "expected": "�]e"
+    },
+    {
+      "hex": "df",
+      "expected": "�"
+    },
+    {
+      "hex": "dc223fa8",
+      "expected": "�\"?�"
+    },
+    {
+      "hex": "7fa1b3b10124dc",
+      "expected": "���\u0001$�"
+    },
+    {
+      "hex": "0b1c85",
+      "expected": "\u000b\u001c�"
+    },
+    {
+      "hex": "614e6f53ddc81e77",
+      "expected": "aNoS��\u001ew"
+    },
+    {
+      "hex": "caf3",
+      "expected": "��"
+    },
+    {
+      "hex": "a699",
+      "expected": "��"
+    },
+    {
+      "hex": "2b782b434d29d1",
+      "expected": "+x+CM)�"
+    },
+    {
+      "hex": "45a4a14e92",
+      "expected": "E��N�"
+    },
+    {
+      "hex": "7366",
+      "expected": "sf"
+    },
+    {
+      "hex": "fd6300422411",
+      "expected": "�c\u0000B$\u0011"
+    },
+    {
+      "hex": "93128b307016c609",
+      "expected": "�\u0012�0p\u0016�\t"
+    },
+    {
+      "hex": "d228f8cd",
+      "expected": "�(��"
+    },
+    {
+      "hex": "8e07e2",
+      "expected": "�\u0007�"
+    },
+    {
+      "hex": "cc72d6d6187dcc",
+      "expected": "�r��\u0018}�"
+    },
+    {
+      "hex": "a78400",
+      "expected": "��\u0000"
+    },
+    {
+      "hex": "9a326e70eb9431",
+      "expected": "�2np�1"
+    },
+    {
+      "hex": "8c",
+      "expected": "�"
+    },
+    {
+      "hex": "298fd4",
+      "expected": ")��"
+    },
+    {
+      "hex": "dc09e849a642",
+      "expected": "�\t�I�B"
+    },
+    {
+      "hex": "d500",
+      "expected": "�\u0000"
+    },
+    {
+      "hex": "ce6a",
+      "expected": "�j"
+    },
+    {
+      "hex": "74924cb6",
+      "expected": "t�L�"
+    },
+    {
+      "hex": "6d1aa3ca",
+      "expected": "m\u001a��"
+    },
+    {
+      "hex": "824ae173",
+      "expected": "�J�s"
+    },
+    {
+      "hex": "30f00ed0ef4d",
+      "expected": "0�\u000e��M"
+    },
+    {
+      "hex": "9f33e2983b47",
+      "expected": "�3�;G"
+    },
+    {
+      "hex": "62",
+      "expected": "b"
+    },
+    {
+      "hex": "b659",
+      "expected": "�Y"
+    },
+    {
+      "hex": "494466dd",
+      "expected": "IDf�"
+    },
+    {
+      "hex": "dc4b25c596ffb8",
+      "expected": "�K%Ŗ��"
+    },
+    {
+      "hex": "bd",
+      "expected": "�"
+    },
+    {
+      "hex": "99222fb00063",
+      "expected": "�\"/�\u0000c"
+    },
+    {
+      "hex": "8354",
+      "expected": "�T"
+    },
+    {
+      "hex": "dd4682c8b1",
+      "expected": "�F�ȱ"
+    },
+    {
+      "hex": "2c9da473",
+      "expected": ",��s"
+    },
+    {
+      "hex": "7b6209ade051",
+      "expected": "{b\t��Q"
+    },
+    {
+      "hex": "34",
+      "expected": "4"
+    },
+    {
+      "hex": "81005a",
+      "expected": "�\u0000Z"
+    },
+    {
+      "hex": "7a",
+      "expected": "z"
+    },
+    {
+      "hex": "9f05eb8664118832",
+      "expected": "�\u0005�d\u0011�2"
+    },
+    {
+      "hex": "043476e0235b",
+      "expected": "\u00044v�#["
+    },
+    {
+      "hex": "369285edcb4f00",
+      "expected": "6����O\u0000"
+    },
+    {
+      "hex": "742b1929e8ac",
+      "expected": "t+\u0019)�"
+    },
+    {
+      "hex": "64e00fb8d05e",
+      "expected": "d�\u000f��^"
+    },
+    {
+      "hex": "00ef",
+      "expected": "\u0000�"
+    },
+    {
+      "hex": "f74c28c8c9626d",
+      "expected": "�L(��bm"
+    },
+    {
+      "hex": "655f5f7937",
+      "expected": "e__y7"
+    },
+    {
+      "hex": "35f3",
+      "expected": "5�"
+    },
+    {
+      "hex": "8671",
+      "expected": "�q"
+    },
+    {
+      "hex": "15f118",
+      "expected": "\u0015�\u0018"
+    },
+    {
+      "hex": "eaca8492",
+      "expected": "�ʄ�"
+    },
+    {
+      "hex": "bb333432923e",
+      "expected": "�342�>"
+    },
+    {
+      "hex": "e69648",
+      "expected": "�H"
+    },
+    {
+      "hex": "07078fb7bd75ed",
+      "expected": "\u0007\u0007���u�"
+    },
+    {
+      "hex": "1a43a5",
+      "expected": "\u001aC�"
+    },
+    {
+      "hex": "fe",
+      "expected": "�"
+    },
+    {
+      "hex": "bfe1b29c3c3b",
+      "expected": "�Ნ<;"
+    },
+    {
+      "hex": "f06d9f072a9279",
+      "expected": "�m�\u0007*�y"
+    },
+    {
+      "hex": "deec5c3aa7",
+      "expected": "��\\:�"
+    },
+    {
+      "hex": "0975bafdea",
+      "expected": "\tu���"
+    },
+    {
+      "hex": "f3",
+      "expected": "�"
+    },
+    {
+      "hex": "5a2aef",
+      "expected": "Z*�"
+    },
+    {
+      "hex": "41",
+      "expected": "A"
+    },
+    {
+      "hex": "48",
+      "expected": "H"
+    },
+    {
+      "hex": "3ec13f537d0d7d",
+      "expected": ">�?S}\r}"
+    },
+    {
+      "hex": "7e0cc52fd0",
+      "expected": "~\f�/�"
+    },
+    {
+      "hex": "0b204bf1",
+      "expected": "\u000b K�"
+    },
+    {
+      "hex": "578720189c1f",
+      "expected": "W� \u0018�\u001f"
+    },
+    {
+      "hex": "ef36c3d5",
+      "expected": "�6��"
+    },
+    {
+      "hex": "e250fe",
+      "expected": "�P�"
+    },
+    {
+      "hex": "77",
+      "expected": "w"
+    },
+    {
+      "hex": "5ea3",
+      "expected": "^�"
+    },
+    {
+      "hex": "1ccf4d",
+      "expected": "\u001c�M"
+    },
+    {
+      "hex": "1f079d50",
+      "expected": "\u001f\u0007�P"
+    },
+    {
+      "hex": "6363a3669df93e",
+      "expected": "cc�f��>"
+    },
+    {
+      "hex": "3c951074",
+      "expected": "<�\u0010t"
+    },
+    {
+      "hex": "dc09a9f5eda0ae",
+      "expected": "�\t�����"
+    },
+    {
+      "hex": "ab",
+      "expected": "�"
+    },
+    {
+      "hex": "96aa",
+      "expected": "��"
+    },
+    {
+      "hex": "81",
+      "expected": "�"
+    },
+    {
+      "hex": "5dd7ebf8",
+      "expected": "]���"
+    },
+    {
+      "hex": "f8",
+      "expected": "�"
+    },
+    {
+      "hex": "1e59",
+      "expected": "\u001eY"
+    },
+    {
+      "hex": "b4cd47d33b7173",
+      "expected": "��G�;qs"
+    },
+    {
+      "hex": "022aeffe799b8a42",
+      "expected": "\u0002*��y��B"
+    },
+    {
+      "hex": "7e",
+      "expected": "~"
+    },
+    {
+      "hex": "a71e791e3fc2",
+      "expected": "�\u001ey\u001e?�"
+    },
+    {
+      "hex": "b34183129136",
+      "expected": "�A�\u0012�6"
+    },
+    {
+      "hex": "3484479231fd25",
+      "expected": "4�G�1�%"
+    },
+    {
+      "hex": "5a80",
+      "expected": "Z�"
+    },
+    {
+      "hex": "e8",
+      "expected": "�"
+    },
+    {
+      "hex": "5db9",
+      "expected": "]�"
+    },
+    {
+      "hex": "ff",
+      "expected": "�"
+    },
+    {
+      "hex": "5b",
+      "expected": "["
+    },
+    {
+      "hex": "17fe7cbc275cf0",
+      "expected": "\u0017�|�'\\�"
+    },
+    {
+      "hex": "bb02e0e0bc",
+      "expected": "�\u0002��"
+    },
+    {
+      "hex": "9506b4",
+      "expected": "�\u0006�"
+    },
+    {
+      "hex": "36752a75f7463c",
+      "expected": "6u*u�F<"
+    },
+    {
+      "hex": "eeba2447",
+      "expected": "�$G"
+    },
+    {
+      "hex": "d53c",
+      "expected": "�<"
+    },
+    {
+      "hex": "5eb06586",
+      "expected": "^�e�"
+    },
+    {
+      "hex": "6f",
+      "expected": "o"
+    },
+    {
+      "hex": "9e638aaf8bd6",
+      "expected": "�c����"
+    },
+    {
+      "hex": "a2b2539edfac",
+      "expected": "��S�߬"
+    },
+    {
+      "hex": "a6",
+      "expected": "�"
+    },
+    {
+      "hex": "01fc2c",
+      "expected": "\u0001�,"
+    },
+    {
+      "hex": "fa0761c5de72",
+      "expected": "�\u0007a��r"
+    },
+    {
+      "hex": "d95214e4591ca10e",
+      "expected": "�R\u0014�Y\u001c�\u000e"
+    },
+    {
+      "hex": "eb37d155863a5c6b",
+      "expected": "�7�U�:\\k"
+    },
+    {
+      "hex": "393274db5fc9",
+      "expected": "92t�_�"
+    },
+    {
+      "hex": "cfb268cd46",
+      "expected": "ϲh�F"
+    },
+    {
+      "hex": "f93ca7cf2b7d46c7",
+      "expected": "�<��+}F�"
+    },
+    {
+      "hex": "58ad005c",
+      "expected": "X�\u0000\\"
+    },
+    {
+      "hex": "448a78ddcba25f",
+      "expected": "D�x�ˢ_"
+    },
+    {
+      "hex": "d35a7523",
+      "expected": "�Zu#"
+    },
+    {
+      "hex": "549ab85e4071f2",
+      "expected": "T��^@q�"
+    },
+    {
+      "hex": "cd6d655ad79860",
+      "expected": "�meZט`"
+    },
+    {
+      "hex": "922b",
+      "expected": "�+"
+    },
+    {
+      "hex": "0befc7",
+      "expected": "\u000b��"
+    },
+    {
+      "hex": "2192",
+      "expected": "!�"
+    },
+    {
+      "hex": "25f5a4",
+      "expected": "%��"
+    },
+    {
+      "hex": "1bcd40faa5cf7b",
+      "expected": "\u001b�@���{"
+    },
+    {
+      "hex": "055eae",
+      "expected": "\u0005^�"
+    },
+    {
+      "hex": "a5c5683a79",
+      "expected": "��h:y"
+    },
+    {
+      "hex": "969cb2",
+      "expected": "���"
+    },
+    {
+      "hex": "2df1a5ba26f114",
+      "expected": "-�&�\u0014"
+    },
+    {
+      "hex": "c00a60",
+      "expected": "�\n`"
+    },
+    {
+      "hex": "46e8",
+      "expected": "F�"
+    },
+    {
+      "hex": "5019",
+      "expected": "P\u0019"
+    },
+    {
+      "hex": "9837",
+      "expected": "�7"
+    },
+    {
+      "hex": "fc43",
+      "expected": "�C"
+    },
+    {
+      "hex": "80ed42e98a",
+      "expected": "��B�"
+    },
+    {
+      "hex": "5f90b9b371",
+      "expected": "_���q"
+    },
+    {
+      "hex": "474f45909784",
+      "expected": "GOE���"
+    },
+    {
+      "hex": "6e604b7c",
+      "expected": "n`K|"
+    },
+    {
+      "hex": "8fef1bd842551f",
+      "expected": "��\u001b�BU\u001f"
+    },
+    {
+      "hex": "db91b2bc7003",
+      "expected": "ۑ��p\u0003"
+    },
+    {
+      "hex": "9e619a8d4bd995",
+      "expected": "�a��Kٕ"
+    },
+    {
+      "hex": "2a428cb13218",
+      "expected": "*B��2\u0018"
+    },
+    {
+      "hex": "5b69d1003797d9",
+      "expected": "[i�\u00007��"
+    },
+    {
+      "hex": "da8a49dcb8cf",
+      "expected": "ڊIܸ�"
+    },
+    {
+      "hex": "2b5b4cd6f7dfc5",
+      "expected": "+[L����"
+    },
+    {
+      "hex": "cfb02637e86f9b",
+      "expected": "ϰ&7�o�"
+    },
+    {
+      "hex": "63",
+      "expected": "c"
+    },
+    {
+      "hex": "90f4db",
+      "expected": "���"
+    },
+    {
+      "hex": "e5d68c",
+      "expected": "�֌"
+    },
+    {
+      "hex": "8ba4cb1eac",
+      "expected": "���\u001e�"
+    },
+    {
+      "hex": "62e07bcac3",
+      "expected": "b�{��"
+    },
+    {
+      "hex": "8d318b8430",
+      "expected": "�1��0"
+    },
+    {
+      "hex": "11281c7cbcd25b",
+      "expected": "\u0011(\u001c|��["
+    },
+    {
+      "hex": "98",
+      "expected": "�"
+    },
+    {
+      "hex": "5d",
+      "expected": "]"
+    },
+    {
+      "hex": "f70273d6",
+      "expected": "�\u0002s�"
+    },
+    {
+      "hex": "1b1692ba1f",
+      "expected": "\u001b\u0016��\u001f"
+    },
+    {
+      "hex": "a7536e6b440b53",
+      "expected": "�SnkD\u000bS"
+    },
+    {
+      "hex": "6c4de88669",
+      "expected": "lM�i"
+    },
+    {
+      "hex": "856a6e68a7",
+      "expected": "�jnh�"
+    },
+    {
+      "hex": "7a37ca",
+      "expected": "z7�"
+    },
+    {
+      "hex": "3b",
+      "expected": ";"
+    },
+    {
+      "hex": "3288b4",
+      "expected": "2��"
+    },
+    {
+      "hex": "cb515e69",
+      "expected": "�Q^i"
+    },
+    {
+      "hex": "2cf941e6741c4dd8",
+      "expected": ",�A�t\u001cM�"
+    },
+    {
+      "hex": "cd8aadf336a82594",
+      "expected": "͊��6�%�"
+    },
+    {
+      "hex": "baf511",
+      "expected": "��\u0011"
+    },
+    {
+      "hex": "6197a2675edd5e",
+      "expected": "a��g^�^"
+    },
+    {
+      "hex": "a41263",
+      "expected": "�\u0012c"
+    },
+    {
+      "hex": "e93bf290",
+      "expected": "�;�"
+    },
+    {
+      "hex": "45734c490668",
+      "expected": "EsLI\u0006h"
+    },
+    {
+      "hex": "e217f74fc40f38",
+      "expected": "�\u0017�O�\u000f8"
+    },
+    {
+      "hex": "7a",
+      "expected": "z"
+    },
+    {
+      "hex": "2811dc5d",
+      "expected": "(\u0011�]"
+    },
+    {
+      "hex": "936126a3",
+      "expected": "�a&�"
+    },
+    {
+      "hex": "8215a6ef098dcf",
+      "expected": "�\u0015��\t��"
+    },
+    {
+      "hex": "5a905cb5ed",
+      "expected": "Z�\\��"
+    },
+    {
+      "hex": "dbf2",
+      "expected": "��"
+    },
+    {
+      "hex": "1be8ea6a10",
+      "expected": "\u001b��j\u0010"
+    },
+    {
+      "hex": "39c455d4ca",
+      "expected": "9�U��"
+    }
+  ]
+}

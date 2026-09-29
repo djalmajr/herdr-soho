@@ -11,7 +11,7 @@
 # .gitignore entry, no state directory).
 id = "djalmajr.herdr-soho"
 name = "herdr-soho"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.9.1"
 description = "Read-only actions (doctor, roster) to diagnose and list the agents of the focused workspace, plus a session picker (pick) that copies a session reference to the clipboard. The actions run the CLI in read-only mode: they inspect the focused project and never write to it (no .gitignore entry, no state directory)."
 platforms = ["linux", "macos", "windows"]
