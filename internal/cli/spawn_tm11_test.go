@@ -220,11 +220,12 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 				tm11SpawnSeed(t, f, rows, `{"result":{"agents":[{"name":"explore","pane_id":"p-explore"},{"name":"review","pane_id":"p-review"},{"name":"extra","pane_id":"p-extra"}]}}`)
 			case 3:
 				tm11SpawnSeed(t, f, [][4]string{{"mix", "implementer", "mix", "grok"}}, `{"result":{"agents":[{"name":"mix","pane_id":"p-mix","agent_status":"idle"}]}}`)
-				_ = tm11SpawnWriteConfig(t, f, "lane.mix.roles = \"implementer,reviewer\"\n", "")
+				_ = tm11SpawnWriteConfig(t, f, "", "lane.mix.roles = \"implementer,reviewer\"\n")
 			case 4:
 				tm11SpawnReset(t, f)
-				_ = tm11SpawnWriteConfig(t, f, "lane.build.kind = \"codex\"\n", "")
+				_ = tm11SpawnWriteConfig(t, f, "", "lane.build.kind = \"codex\"\n")
 			case 5:
+				_ = os.Remove(filepath.Join(f.cwd, ".agents", "herdr-soho.conf"))
 				roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\n" + "implementer\tp-impl\tgrok\timplementer\txai\t1\t" + f.cwd + "\tnow\n"
 				if err := os.WriteFile(filepath.Join(f.state, "agents.tsv"), []byte(roster), 0o600); err != nil {
 					t.Fatal(err)
@@ -577,7 +578,8 @@ func tm11SpawnSeed(t *testing.T, f *tm11SpawnFixture, rows [][4]string, live str
 
 func tm11SpawnWriteConfig(t *testing.T, f *tm11SpawnFixture, user, project string) error {
 	t.Helper()
-	userPath := filepath.Join(f.env["HOME"], ".config", "herdr-soho", "config.toml")
+	// user layer: the file the product reads ($XDG_CONFIG_HOME/herdr-soho/config)
+	userPath := filepath.Join(f.env["XDG_CONFIG_HOME"], "herdr-soho", "config")
 	projectPath := filepath.Join(f.cwd, ".agents", "herdr-soho.conf")
 	if user == "" {
 		_ = os.Remove(userPath)
