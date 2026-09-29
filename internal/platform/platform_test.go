@@ -167,6 +167,19 @@ func capturePanic(run func()) (value any) {
 	return nil
 }
 
+func TestLauncherPath(t *testing.T) {
+	skill := t.TempDir()
+	env := Env{"HERDR_SOHO_SKILL_DIR": skill}
+	name := "herdr-soho"
+	if runtime.GOOS == "windows" {
+		name = "herdr-soho.cmd"
+	}
+	want := filepath.Join(skill, "scripts", name)
+	if got := LauncherPath(env); got != want {
+		t.Fatalf("LauncherPath() = %q, want %q", got, want)
+	}
+}
+
 func TestReadTextFile(t *testing.T) {
 	t.Run("readTextFile: CRLF lines are normalized to LF (decision 7)", func(t *testing.T) { // JS: "readTextFile: CRLF lines are normalized to LF (decision 7)"
 		file := filepath.Join(t.TempDir(), "a.txt")

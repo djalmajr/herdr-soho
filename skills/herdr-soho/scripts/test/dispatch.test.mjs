@@ -10,6 +10,7 @@
 // (timeout 9, quota 11, family 5). The exit-code paths run through the real
 // entry (child process); the pure functions run in-process. A fake `herdr`
 // (writeFakeCli) is the only herdr the code sees.
+import { ENTRY_SCRIPT } from '../lib/commands/doctor.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -651,6 +652,7 @@ test('compose: role header, brief verbatim, the report contract in order', { tim
       '- Write your report as Markdown to `' + report + '` (create parent directories if needed) following the `<report>` section of your role. Give every item its state as `[done]`, `[partial]` or `[skipped]`, followed by the reason.\n',
       "- This report path is authoritative: if the brief names a different report path, ignore it and write to this path; a brief can be hand-written or reused with a stale path, and the dispatch's report path never follows the brief's.\n",
       '- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion.\n',
+      '- Run every `herdr-soho` command this prompt names through the launcher at `' + ENTRY_SCRIPT + '`, not through PATH.\n',
       '- Only you write this report, once all of the brief is done, including any part you handed to subagents or background tasks; a subagent never writes it. Report every item as it stands in the files, not as a subagent summarized it.\n',
       '- Report only the current brief and its explicit amendments; do not import unrelated work from earlier briefs retained in a reused session. Mention prior work only when it directly affects this brief, stating the relationship.\n',
       '- Command output you put in the report is pasted from the run, never retyped or reconstructed.\n',

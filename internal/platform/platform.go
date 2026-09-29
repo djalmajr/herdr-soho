@@ -364,6 +364,16 @@ func SkillDir(env Env) string {
 	return ""
 }
 
+// LauncherPath is the skill launcher the worker runs from: scripts/herdr-soho,
+// scripts/herdr-soho.cmd on Windows, beside the skill entry.
+func LauncherPath(env Env) string {
+	name := "herdr-soho"
+	if Current() == "win32" {
+		name += ".cmd"
+	}
+	return filepath.Join(SkillDir(env), "scripts", name)
+}
+
 func skillDirFromExecutable(executable string) string {
 	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
 		executable = resolved

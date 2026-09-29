@@ -174,6 +174,7 @@ func ComposePrompt(roleFile, role, agent, briefRaw, report string, ctx *core.Con
 	for _, n := range SandboxNotes(kind, args) {
 		out.WriteString(n)
 	}
+	fmt.Fprintf(&out, "- Run every `herdr-soho` command this prompt names through the launcher at `%s`, not through PATH.\n", platform.LauncherPath(env))
 	if shared {
 		out.WriteString(sharedTreeNote)
 	}

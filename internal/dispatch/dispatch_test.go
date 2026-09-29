@@ -3,6 +3,7 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -10,6 +11,13 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
+
+// composeEnv is the env the CLI always has when it composes a prompt: the
+// skill directory resolvable. A throwaway tree stands in for the skill.
+func composeEnv(t *testing.T) platform.Env {
+	t.Helper()
+	return platform.Env{"HERDR_SOHO_SKILL_DIR": t.TempDir()}
+}
 
 func TestDispatchHelpers(t *testing.T) {
 	t.Run(`JS: dispatch workspace path comparison accepts Windows slash and case variants`, func(t *testing.T) {
@@ -254,7 +262,7 @@ func TestDispatchJavaScriptHelperCases(t *testing.T) {
 		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRole text.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		prompt := ComposePrompt(role, "implementer", "worker", full, "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{}, "codex", "", false)
+		prompt := ComposePrompt(role, "implementer", "worker", full, "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, composeEnv(t), "codex", "", false)
 		if !strings.HasPrefix(prompt, "# Role: Implementer") || !strings.Contains(prompt, "# Brief\n\n"+full) || !strings.Contains(prompt, "Write your report as Markdown to `/report.md`") {
 			t.Fatalf("composed prompt misses contract: %s", prompt)
 		}
@@ -267,7 +275,7 @@ func TestDispatchJavaScriptHelperCases(t *testing.T) {
 		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRole text.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_REPORT_LANGUAGE": "pt-BR", "HERDR_SOHO_WORKER_CONTEXT": "lean"}
+		env := platform.Env{"HERDR_SOHO_REPORT_LANGUAGE": "pt-BR", "HERDR_SOHO_WORKER_CONTEXT": "lean", "HERDR_SOHO_SKILL_DIR": t.TempDir()}
 		prompt := ComposePrompt(role, "implementer", "worker", full, "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, env, "codex", "", false)
 		if !strings.Contains(prompt, "- Write the report in pt-BR.\n") || !strings.Contains(prompt, "- This brief is self-contained.") {
 			t.Fatalf("prompt missed language/context: %s", prompt)
@@ -343,8 +351,8 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
-		brief := ComposePrompt(role, "implementer", "agent", "# Goal\nrun", "/report.md", ctx, platform.Env{}, "codex", "", false)
-		amend := ComposeAmendment("# Amend\nfix", "/report.md", ctx, platform.Env{}, "codex", "", false)
+		brief := ComposePrompt(role, "implementer", "agent", "# Goal\nrun", "/report.md", ctx, composeEnv(t), "codex", "", false)
+		amend := ComposeAmendment("# Amend\nfix", "/report.md", ctx, composeEnv(t), "codex", "", false)
 		line := "- Only you write this report, once all of the brief is done, including any part you handed to subagents or background tasks; a subagent never writes it. Report every item as it stands in the files, not as a subagent summarized it.\n"
 		for name, prompt := range map[string]string{"brief": brief, "amendment": amend} {
 			if strings.Count(prompt, line) != 1 || strings.Index(prompt, "- Write the report in one go") > strings.Index(prompt, line) || strings.Index(prompt, line) > strings.Index(prompt, "- Nobody watches this terminal") {
@@ -359,7 +367,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 		}
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 		line := "- Report only the current brief and its explicit amendments; do not import unrelated work from earlier briefs retained in a reused session. Mention prior work only when it directly affects this brief, stating the relationship.\n"
-		for name, prompt := range map[string]string{"brief": ComposePrompt(role, "implementer", "agent", "# Goal\nrun", "/report.md", ctx, platform.Env{}, "codex", "", false), "amendment": ComposeAmendment("# Amend\nfix", "/report.md", ctx, platform.Env{}, "codex", "", false)} {
+		for name, prompt := range map[string]string{"brief": ComposePrompt(role, "implementer", "agent", "# Goal\nrun", "/report.md", ctx, composeEnv(t), "codex", "", false), "amendment": ComposeAmendment("# Amend\nfix", "/report.md", ctx, composeEnv(t), "codex", "", false)} {
 			if strings.Count(prompt, line) != 1 || strings.Index(prompt, "# Report contract") > strings.Index(prompt, line) || strings.Index(prompt, line) > strings.Index(prompt, "- Command output you put in the report") {
 				t.Errorf("%s report-scope rule ordering/count invalid", name)
 			}
@@ -380,6 +388,30 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 			if got := BriefMissingSections(tc.edit, true, nil); got != tc.want {
 				t.Errorf("read-only missing=%q want %q", got, tc.want)
 			}
+		}
+	})
+	t.Run("compose: the prompt names the skill launcher instead of PATH", func(t *testing.T) {
+		role := filepath.Join(t.TempDir(), "implementer.md")
+		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRun `herdr-soho mutation-guard <copy>` before mutating that copy.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		skill := t.TempDir()
+		name := "herdr-soho"
+		if runtime.GOOS == "windows" {
+			name = "herdr-soho.cmd"
+		}
+		launcher := filepath.Join(skill, "scripts", name)
+		p := ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"HERDR_SOHO_SKILL_DIR": skill}, "codex", "", false)
+		want := "- Run every `herdr-soho` command this prompt names through the launcher at `" + launcher + "`, not through PATH.\n"
+		if !strings.Contains(p, want) {
+			t.Fatalf("composed prompt missed the launcher line:\n%s", p)
+		}
+		if strings.Count(p, want) != 1 {
+			t.Fatalf("launcher line is not exactly once:\n%s", p)
+		}
+		after := p[strings.Index(p, want)+len(want):]
+		if !strings.HasPrefix(after, "- Only you write this report,") {
+			t.Fatalf("launcher line must sit right before the standing rules:\n%s", after)
 		}
 	})
 }
