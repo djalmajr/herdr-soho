@@ -65,8 +65,16 @@ const modeFileOf = (t) => {
   try { fs.accessSync(per); return per; } catch { return process.env.FAKE_MODE; }
 };
 const screenOf = (t) => {
-  try { return fs.readFileSync(process.env.FAKE_SCREEN_DIR + '/screen-' + t, 'utf8'); }
-  catch { try { return fs.readFileSync(process.env.FAKE_SCREEN, 'utf8'); } catch { return ''; } }
+  const recent = argv.includes('recent-unwrapped');
+  const dir = recent ? process.env.FAKE_RECENT_DIR : process.env.FAKE_SCREEN_DIR;
+  const file = recent ? process.env.FAKE_RECENT : process.env.FAKE_SCREEN;
+  try { return fs.readFileSync(dir + '/' + (recent ? 'recent-' : 'screen-') + t, 'utf8'); }
+  catch {
+    if (recent) {
+      try { return fs.readFileSync(process.env.FAKE_SCREEN_DIR + '/screen-' + t, 'utf8'); } catch {}
+    }
+    try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
+  }
 };
 if (cmd === 'agent get') {
   const m = modeOf(t);
@@ -127,8 +135,9 @@ function makeFix(prefix) {
   const ws = path.join(state, 'ws');
   const modeDir = path.join(root, 'modes');
   const screenDir = path.join(root, 'screens');
+  const recentDir = path.join(root, 'recent');
   for (const d of [bin, repo, ws, path.join(ws, 'briefs'), path.join(ws, 'reports'), path.join(ws, 'wait'),
-    modeDir, screenDir, path.join(root, 'home'), path.join(root, 'conf'), path.join(root, 'tmp')]) {
+    modeDir, screenDir, recentDir, path.join(root, 'home'), path.join(root, 'conf'), path.join(root, 'tmp')]) {
     fs.mkdirSync(d, { recursive: true });
   }
   writeFakeCli(bin, 'herdr', HERDR_FAKE);
@@ -139,6 +148,7 @@ function makeFix(prefix) {
     TMPDIR: path.join(root, 'tmp'),
     HERDR_SOHO_DIR: state,
     HERDR_WORKSPACE_ID: 'ws',
+    HERDR_SOCKET_PATH: path.join(root, 'missing-herdr.sock'),
     HERDR_ENV: '1',
     HERDR_SOHO_REGRID: 'off',
     HERDR_SOHO_WAIT_POLL_MS: '20',
@@ -146,6 +156,8 @@ function makeFix(prefix) {
     FAKE_MODE_DIR: modeDir,
     FAKE_SCREEN: path.join(root, 'screen'),
     FAKE_SCREEN_DIR: screenDir,
+    FAKE_RECENT: path.join(root, 'recent-screen'),
+    FAKE_RECENT_DIR: recentDir,
     FAKE_LIVE: path.join(root, 'live.json'),
     FAKE_LOG: path.join(root, 'herdr.log'),
     FAKE_SEQ: path.join(root, 'seq'),
@@ -161,6 +173,8 @@ function makeFix(prefix) {
     modeOf(agent, m) { fs.writeFileSync(path.join(modeDir, `mode-${agent}`), `${m}\n`); },
     screen(s) { fs.writeFileSync(env.FAKE_SCREEN, s); },
     screenOf(agent, s) { fs.writeFileSync(path.join(screenDir, `screen-${agent}`), s); },
+    recent(s) { fs.writeFileSync(env.FAKE_RECENT, s); },
+    recentOf(agent, s) { fs.writeFileSync(path.join(recentDir, `recent-${agent}`), s); },
     live(agents) { fs.writeFileSync(env.FAKE_LIVE, JSON.stringify({ agents })); },
     writeRoster(...rows) { fs.writeFileSync(path.join(ws, 'agents.tsv'), H12 + rows.join('\n') + '\n'); },
     waitFile(agent, name, content) { fs.writeFileSync(path.join(ws, 'wait', `${agent}.${name}`), content); },
@@ -386,6 +400,25 @@ test('wait: queued prompt leaves working and is retried with Enter when still in
   } finally { fix.cleanup(); }
 });
 
+test('wait: queued prompt path is recognized from recent unwrapped output', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-wrap-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    const prompt = path.join(fix.ws, 'briefs', 'a-long-composed-prompt-path.md');
+    fix.waitFile('w', 'queued', `${Math.floor(Date.now() / 1000) - 120} 5 ${prompt}\n`);
+    fix.modeOf('w', 'idle');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    const cut = Math.floor(prompt.length / 2);
+    fix.screenOf('w', `> Read the file ${prompt.slice(0, cut)}\n${prompt.slice(cut)} in full\n`);
+    fix.recentOf('w', `> Read the file ${prompt} in full and execute it.\n`);
+    // Mutation captured: reading visible soft wraps instead of unwrapped history fails to recognize the prompt still in the input box.
+    assert.equal(probeAgent(fix.ws, 'w', '', fix.ctx, fix.env), 'working');
+    assert.equal(fix.waitRead('w', 'queued'), null);
+    assert.match(fix.waitRead('w', 'not-received'), /^\d+ 5 .+\n$/);
+    assert.deepEqual(fix.logLines().filter((line) => line.startsWith('agent send-keys')), ['agent send-keys w enter']);
+  } finally { fix.cleanup(); }
+});
+
 test('wait: queued marker is cleared when the worker has a new seq and the report completes', { timeout: 60000 }, () => {
   const fix = makeFix('ha-wait-queued-done-');
   try {
@@ -428,6 +461,23 @@ test('wait: a queued working probe still records stuck-screen activity', { timeo
     assert.equal(fix.waitRead('w', 'stuck-warned'), '');
     assert.match(fs.readFileSync(path.join(fix.ws, 'friction.log'), 'utf8'), /may be stuck in one tool call/);
   } finally { setFrictionLog('', ''); fix.cleanup(); }
+});
+
+test('wait: a queued marker survives a working probe with the same seq', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-same-seq-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    const marker = `${Math.floor(Date.now() / 1000) - 120} 5 ${path.join(fix.ws, 'briefs', 'w.md')}\n`;
+    fix.waitFile('w', 'queued', marker);
+    fix.waitFile('w', 'enter-retry', '1 1234567890\n');
+    fix.modeOf('w', 'working');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    // Mutation captured: clearing queued on every working probe loses the prompt before its turn ends.
+    assert.equal(probeAgent(fix.ws, 'w', '', fix.ctx, fix.env), 'working');
+    assert.equal(fix.waitRead('w', 'queued'), marker);
+    assert.equal(fix.waitRead('w', 'enter-retry'), '1 1234567890\n');
+    assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
+  } finally { fix.cleanup(); }
 });
 
 test('wait: queued prompt with a moved seq and outside the input box ends not-received and persists the result', { timeout: 60000 }, () => {
@@ -505,7 +555,7 @@ test('wait: empty queued marker starts its retry window now', { timeout: 60000 }
   } finally { fix.cleanup(); }
 });
 
-test('wait: normal blocked, gone and unavailable probes clear queued markers', { timeout: 60000 }, () => {
+test('wait: blocked and gone clear queued markers while unavailable preserves retry state', { timeout: 60000 }, () => {
   const fix = makeFix('ha-wait-queued-terminal-');
   try {
     fix.writeRoster(ROW('blocked', 'implementer'), ROW('gone', 'implementer'), ROW('unavailable', 'implementer'));
@@ -513,7 +563,9 @@ test('wait: normal blocked, gone and unavailable probes clear queued markers', {
     for (const agent of ['blocked', 'gone', 'unavailable']) fix.waitFile(agent, 'queued', `1 5 ${prompt}\n`);
     fix.modeOf('blocked', 'blocked');
     fix.screenOf('blocked', 'Allow command?\nPress enter to confirm or esc to cancel\n');
-    fix.waitFile('blocked', 'enter-retry', `1 ${Math.floor(Date.now() / 1000) - 100}\n`);
+    const retryAt = Math.floor(Date.now() / 1000) - 100;
+    fix.waitFile('blocked', 'enter-retry', `1 ${retryAt}\n`);
+    fix.waitFile('unavailable', 'enter-retry', `1 ${retryAt}\n`);
     fix.modeOf('gone', 'missing');
     fix.modeOf('unavailable', 'denied');
     // Mutation captured: retaining queued markers when a terminal state
@@ -523,11 +575,45 @@ test('wait: normal blocked, gone and unavailable probes clear queued markers', {
     assert.equal(probeAgent(fix.ws, 'blocked', '', fix.ctx, fix.env), 'blocked');
     assert.equal(probeAgent(fix.ws, 'gone', '', fix.ctx, fix.env), 'gone');
     assert.match(probeAgent(fix.ws, 'unavailable', '', fix.ctx, fix.env), /^unavailable\t/);
-    for (const agent of ['blocked', 'gone', 'unavailable']) {
+    for (const agent of ['blocked', 'gone']) {
       assert.equal(fix.waitRead(agent, 'queued'), null);
       assert.equal(fix.waitRead(agent, 'enter-retry'), null);
     }
+    assert.equal(fix.waitRead('unavailable', 'queued'), `1 5 ${prompt}\n`);
+    assert.equal(fix.waitRead('unavailable', 'enter-retry'), `1 ${retryAt}\n`);
     assert.deepEqual(fix.logLines().filter((l) => l.startsWith('agent send-keys')), []);
+  } finally { fix.cleanup(); }
+});
+
+test('wait: a transient unavailable probe preserves queued input for the next wait', { timeout: 60000 }, () => {
+  const fix = makeFix('ha-wait-queued-unavailable-');
+  try {
+    fix.writeRoster(ROW('w', 'implementer'));
+    const prompt = path.join(fix.ws, 'briefs', 'w-unavailable.md');
+    const queued = `${Math.floor(Date.now() / 1000) - 120} 5 ${prompt}\n`;
+    fix.waitFile('w', 'queued', queued);
+    fix.waitFile('w', 'enter-retry', '1 1234567890\n');
+    fix.modeOf('w', 'denied');
+    assert.match(probeAgent(fix.ws, 'w', '', fix.ctx, fix.env), /^unavailable\t/);
+    assert.equal(fix.waitRead('w', 'queued'), queued);
+    assert.equal(fix.waitRead('w', 'enter-retry'), '1 1234567890\n');
+
+    fix.modeOf('w', 'idle');
+    fs.writeFileSync(fix.env.FAKE_SEQ, '5\n');
+    fix.screenOf('w', `Welcome\n> Read the file ${prompt} in full and execute it.\n`);
+    fix.recentOf('w', `Welcome\n> Read the file ${prompt} in full and execute it.\n`);
+    fix.env.HERDR_SOHO_PROMPT_CHECK_SECONDS = '1';
+    // Mutation captured: deleting queued after a transient get failure turns the next wait into settled-no-report without an Enter.
+    const status = cmd(fix, ['status', 'w']);
+    assert.equal(status.status, 15, status.stderr);
+    assert.match(status.stdout, /^w\tnot-received\t/);
+    assert.equal(fix.waitRead('w', 'queued'), queued, 'status is read-only');
+    const r = waitCmd(fix, ['w', '--timeout', '15000']);
+    assert.equal(r.status, 15, r.stderr);
+    assert.deepEqual(jsonLines(r.stdout).map((line) => line.status), ['not-received']);
+    assert.equal(fix.waitRead('w', 'queued'), null, 'wait consumes the queued marker after classifying it');
+    assert.match(fix.waitRead('w', 'not-received'), /^\d+ 5 .+\n$/);
+    assert.equal(fix.logLines().filter((line) => line === 'agent send-keys w enter').length, 2);
   } finally { fix.cleanup(); }
 });
 
@@ -2164,6 +2250,8 @@ test('wait: an auth failure returns provider-error on the first probe', { timeou
   try {
     fix.writeRoster(ROW('w', 'implementer', 'grok', 'grok-4.7', 'build'));
     fix.mode('idle');
+    fix.waitFile('w', 'queued', `1 5 ${path.join(fix.ws, 'briefs', 'w.md')}\n`);
+    fix.waitFile('w', 'enter-retry', '1 1234567890\n');
     fix.screenOf('w', 'Error: 401 Unauthorized: Incorrect API key provided\n');
     const sd = fix.ws;
     // Mutation captured: routing auth through the double confirm returns
@@ -2171,6 +2259,8 @@ test('wait: an auth failure returns provider-error on the first probe', { timeou
     assert.equal(probeAgent(sd, 'w', '', fix.ctx, fix.env), 'provider-error', 'the first probe reports');
     assert.equal(fix.waitRead('w', 'provider-cause'), 'Error: 401 Unauthorized: Incorrect API key provided\n');
     assert.equal(fix.waitRead('w', 'provider'), null, 'no double-confirm record for auth');
+    assert.equal(fix.waitRead('w', 'queued'), null, 'terminal auth clears the queued prompt');
+    assert.equal(fix.waitRead('w', 'enter-retry'), null, 'terminal auth clears its retry counter');
     assert.equal(probeAgent(sd, 'w', '', fix.ctx, fix.env), 'provider-error', 'a second identical probe still reports');
     // A transient failure on the next screen still double-confirms.
     fix.screenOf('w', 'Error: Connection error.\n');

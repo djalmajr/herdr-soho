@@ -270,8 +270,6 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
     return 'gone';
   }
   if (st.state === 'unavailable') {
-    fs.rmSync(queuedFile, { force: true });
-    fs.rmSync(retryFile, { force: true });
     return `unavailable\t${st.cause}`;
   }
   // A dispatch that ended not-received recorded the moment and the
@@ -331,7 +329,7 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
         lastEpoch = e;
       }
       const nowS = Math.floor(Date.now() / 1000);
-      const retryScreen = agentRead(env, agent, { source: 'visible' });
+      const retryScreen = agentRead(env, agent, { source: 'recent-unwrapped', lines: 40 });
       const pathInInput = markerHasPromptPath(markText)
         ? queuedPromptSitsInInput(markText, retryScreen, sd, agent)
         : null;
@@ -554,7 +552,7 @@ export function probeAgent(sd, agent, report, ctx, env = process.env) {
     clearProviderMarks();
   }
   if (queuedPending) {
-    const screen = visibleScreen();
+    const screen = agentRead(env, agent, { source: 'recent-unwrapped', lines: 40 });
     const inInput = queuedPromptSitsInInput(queuedText, screen, sd, agent);
     if (!inInput) {
       const promptPath = queuedPromptPath(queuedText, sd, agent) || '-';

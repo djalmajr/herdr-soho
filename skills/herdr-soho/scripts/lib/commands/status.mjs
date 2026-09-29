@@ -54,7 +54,8 @@ function readMarker(p) {
 // is still on the pane. Blocked questions take their existing branch below.
 function queuedPromptIsUnresolved(marker, sd, agent, state, env) {
   const visible = agentRead(env, agent, { source: 'visible' });
-  if (!queuedPromptSitsInInput(marker, visible, sd, agent)) return false;
+  const recent = agentRead(env, agent, { source: 'recent-unwrapped', lines: 40 });
+  if (!queuedPromptSitsInInput(marker, recent, sd, agent)) return false;
   if (quotaDetect(state, visible)) return false;
   return providerDetect(state, agentRead(env, agent, { source: 'recent-unwrapped', lines: 40 })) === null;
 }
