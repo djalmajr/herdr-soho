@@ -1,0 +1,44 @@
+[
+  {
+    "units": [
+      55357
+    ],
+    "expectedHex": "efbfbd"
+  },
+  {
+    "units": [
+      56832
+    ],
+    "expectedHex": "efbfbd"
+  },
+  {
+    "units": [
+      55357,
+      56832
+    ],
+    "expectedHex": "f09f9880"
+  },
+  {
+    "units": [
+      225,
+      55357
+    ],
+    "expectedHex": "c3a1efbfbd"
+  },
+  {
+    "units": [
+      120,
+      55357,
+      121
+    ],
+    "expectedHex": "78efbfbd79"
+  },
+  {
+    "units": [
+      55296,
+      56320,
+      57343
+    ],
+    "expectedHex": "f0908080efbfbd"
+  }
+]

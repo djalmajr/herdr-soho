@@ -1,0 +1,461 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"sort"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/platform"
+	textutil "github.com/djalmajr/herdr-soho/internal/text"
+)
+
+const mutationGuardUsage = "usage: mutation-guard <copy-dir> [--source <dir>] [--env NAME]..."
+
+var (
+	validEnvName      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	jsSpaceClass      = `[\s\v\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]`
+	tomlTargetBasic   = regexp.MustCompile(`^` + jsSpaceClass + `*target-dir` + jsSpaceClass + `*=` + jsSpaceClass + `*"((?:\\[^\r\x{2028}\x{2029}]|[^"\\])*)"` + jsSpaceClass + `*(?:#[^\r\x{2028}\x{2029}]*)?$`)
+	tomlTargetLiteral = regexp.MustCompile(`^` + jsSpaceClass + `*target-dir` + jsSpaceClass + `*=` + jsSpaceClass + `*'([^']*)'` + jsSpaceClass + `*(?:#[^\r\x{2028}\x{2029}]*)?$`)
+)
+
+type mutationGuardArgs struct {
+	copyPath string
+	source   string
+	envNames []string
+}
+
+func parseMutationGuardArgs(args []string) (mutationGuardArgs, bool) {
+	var parsed mutationGuardArgs
+	sourceSeen := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--source" || arg == "--env" {
+			if i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "-") {
+				return mutationGuardArgs{}, false
+			}
+			i++
+			if arg == "--source" {
+				if sourceSeen {
+					return mutationGuardArgs{}, false
+				}
+				sourceSeen = true
+				parsed.source = args[i]
+			} else {
+				if !validEnvName.MatchString(args[i]) {
+					return mutationGuardArgs{}, false
+				}
+				parsed.envNames = append(parsed.envNames, args[i])
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, "--") || parsed.copyPath != "" {
+			return mutationGuardArgs{}, false
+		}
+		parsed.copyPath = arg
+	}
+	if parsed.copyPath == "" {
+		return mutationGuardArgs{}, false
+	}
+	return parsed, true
+}
+
+func runMutationGuard(args []string, env platform.Env) int {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return mutationGuardUsageError()
+	}
+	return runMutationGuardAt(args, env, cwd)
+}
+
+func runMutationGuardAt(args []string, env platform.Env, cwd string) int {
+	parsed, ok := parseMutationGuardArgs(args)
+	if !ok {
+		return mutationGuardUsageError()
+	}
+
+	copyPath, err := filepath.Abs(resolveRelative(cwd, parsed.copyPath))
+	if err != nil {
+		return mutationGuardUsageError()
+	}
+	copyInfo, err := os.Stat(copyPath)
+	if err != nil || !copyInfo.IsDir() {
+		return mutationGuardUsageError()
+	}
+	copyPath, err = filepath.EvalSymlinks(copyPath)
+	if err != nil {
+		return mutationGuardUsageError()
+	}
+
+	sourcePath := parsed.source
+	if sourcePath == "" {
+		sourcePath = platform.ProjectRoot(env, cwd)
+	} else {
+		sourcePath = resolveRelative(cwd, sourcePath)
+	}
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil || !sourceInfo.IsDir() {
+		return mutationGuardUsageError()
+	}
+	sourcePath, err = filepath.EvalSymlinks(sourcePath)
+	if err != nil {
+		return mutationGuardUsageError()
+	}
+
+	failed := printMutationCheck("copy-outside-source", "", inside(sourcePath, copyPath) || inside(copyPath, sourcePath))
+	symlinkDetail := ""
+	if detail, scanErr := symlinkIntoSource(copyPath, sourcePath); scanErr != nil {
+		symlinkDetail = "unable to inspect symlinks safely"
+	} else {
+		symlinkDetail = detail
+	}
+	failed = printMutationCheck("no-symlink-into-source", symlinkDetail, false) || failed
+
+	envNames := []string{"CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR"}
+	seen := map[string]bool{envNames[0]: true, envNames[1]: true}
+	for _, name := range parsed.envNames {
+		if !seen[name] {
+			seen[name] = true
+			envNames = append(envNames, name)
+		}
+	}
+	envDetail := envPointingIntoSource(env, envNames, copyPath, sourcePath)
+	failed = printMutationCheck("build-env", envDetail, false) || failed
+
+	configDetail := cargoTargetInsideSource(copyPath, sourcePath, env)
+	failed = printMutationCheck("cargo-config", configDetail, false) || failed
+	if failed {
+		return 1
+	}
+	return 0
+}
+
+func mutationGuardUsageError() int {
+	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", mutationGuardUsage)
+	return 2
+}
+
+func printMutationCheck(name, detail string, overlap bool) bool {
+	if overlap {
+		detail = "copy and source directories overlap"
+	}
+	if detail != "" {
+		_, _ = fmt.Fprintf(platform.Stdout, "fail %s: %s\n", name, detail)
+		return true
+	}
+	_, _ = fmt.Fprintf(platform.Stdout, "ok %s\n", name)
+	return false
+}
+
+func resolveRelative(base, value string) string {
+	if filepath.IsAbs(value) {
+		return filepath.Clean(value)
+	}
+	return filepath.Clean(filepath.Join(base, value))
+}
+
+func inside(parent, candidate string) bool {
+	relative, err := filepath.Rel(parent, candidate)
+	if err != nil {
+		return false
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative))
+}
+
+func canonicalPath(input string) (string, error) {
+	unresolved, err := filepath.Abs(input)
+	if err != nil {
+		return "", err
+	}
+	var tail []string
+	for {
+		resolved, resolveErr := filepath.EvalSymlinks(unresolved)
+		if resolveErr == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, tail[i])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		if !errors.Is(resolveErr, fs.ErrNotExist) && !errors.Is(resolveErr, syscall.ENOTDIR) {
+			return "", resolveErr
+		}
+		parent := filepath.Dir(unresolved)
+		if parent == unresolved {
+			return "", resolveErr
+		}
+		tail = append(tail, filepath.Base(unresolved))
+		unresolved = parent
+	}
+}
+
+func symlinkIntoSource(copyPath, sourcePath string) (string, error) {
+	pending := []string{copyPath}
+	for len(pending) > 0 {
+		dir := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return "", err
+		}
+		sort.Slice(entries, func(i, j int) bool { return textutil.CompareUTF16(entries[i].Name(), entries[j].Name()) > 0 })
+		for _, entry := range entries {
+			full := filepath.Join(dir, entry.Name())
+			relative, err := filepath.Rel(copyPath, full)
+			if err != nil {
+				return "", err
+			}
+			info, err := os.Lstat(full)
+			if err != nil {
+				return "", err
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				target, err := filepath.EvalSymlinks(full)
+				if err != nil {
+					if errors.Is(err, fs.ErrNotExist) {
+						continue
+					}
+					return "", err
+				}
+				if inside(sourcePath, target) {
+					return fmt.Sprintf("symlink %s -> %s", relative, target), nil
+				}
+			} else if info.IsDir() && entry.Name() != ".git" {
+				pending = append(pending, full)
+			}
+		}
+	}
+	return "", nil
+}
+
+func envPointingIntoSource(env platform.Env, names []string, copyPath, sourcePath string) string {
+	var offenders []string
+	for _, name := range names {
+		value := env.Get(name)
+		if value == "" {
+			continue
+		}
+		resolved, err := canonicalPath(resolveRelative(copyPath, value))
+		if err != nil {
+			offenders = append(offenders, name+" cannot be resolved safely")
+		} else if inside(sourcePath, resolved) {
+			offenders = append(offenders, name+" points into the source tree")
+		}
+	}
+	return strings.Join(offenders, "; ")
+}
+
+func cargoTargetInsideSource(copyPath, sourcePath string, env platform.Env) string {
+	manifest := filepath.Join(copyPath, "Cargo.toml")
+	if _, err := os.Stat(manifest); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return ""
+		}
+		return "cargo metadata failed; target-dir cannot be resolved safely"
+	}
+	if cargo, ok := cargoExecutable(env); ok {
+		return cargoMetadataTargetInsideSource(cargo, copyPath, sourcePath, env)
+	}
+	return textualCargoTargetInsideSource(copyPath, sourcePath, env)
+}
+
+func cargoExecutable(env platform.Env) (string, bool) {
+	pathValue := env.Get("PATH")
+	if pathValue == "" {
+		return "", false
+	}
+	for _, dir := range filepath.SplitList(pathValue) {
+		candidate := filepath.Join(dir, "cargo")
+		info, err := os.Stat(candidate)
+		if err == nil && info.Mode().IsRegular() {
+			return candidate, true
+		}
+		if runtime.GOOS == "windows" {
+			for _, ext := range []string{".exe", ".cmd", ".bat"} {
+				candidate = filepath.Join(dir, "cargo"+ext)
+				info, err = os.Stat(candidate)
+				if err == nil && !info.IsDir() {
+					return candidate, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func cargoMetadataTargetInsideSource(cargo, copyPath, sourcePath string, env platform.Env) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, cargo, "metadata", "--offline", "--no-deps", "--format-version", "1")
+	cmd.Dir = copyPath
+	cmd.Env = env.List()
+	output, err := cmd.Output()
+	if err != nil {
+		return "cargo metadata failed; target-dir cannot be resolved safely"
+	}
+	var metadata struct {
+		TargetDirectory string `json:"target_directory"`
+	}
+	if json.Unmarshal(output, &metadata) != nil || metadata.TargetDirectory == "" {
+		return "cargo metadata failed; target-dir cannot be resolved safely"
+	}
+	resolved, err := canonicalPath(resolveRelative(copyPath, metadata.TargetDirectory))
+	if err != nil {
+		return "cargo metadata failed; target-dir cannot be resolved safely"
+	}
+	if inside(sourcePath, resolved) {
+		return "cargo metadata puts target_directory inside the source tree"
+	}
+	return ""
+}
+
+func textualCargoTargetInsideSource(copyPath, sourcePath string, env platform.Env) string {
+	parse := func(contents string) (string, bool, bool) {
+		inBuild := false
+		foundUnreadable := false
+		for _, line := range strings.Split(contents, "\n") {
+			withoutComment := stripTomlComment(line)
+			if match := regexp.MustCompile(`^` + jsSpaceClass + `*\[` + jsSpaceClass + `*([^\]]+)\]` + jsSpaceClass + `*$`).FindStringSubmatch(withoutComment); match != nil {
+				inBuild = strings.TrimSpace(match[1]) == "build"
+				continue
+			}
+			if !inBuild {
+				if unresolvedCargoTarget.MatchString(withoutComment) {
+					foundUnreadable = true
+				}
+				continue
+			}
+			assignment := `target-dir`
+			basic := regexp.MustCompile(`^` + jsSpaceClass + `*` + assignment + jsSpaceClass + `*=` + jsSpaceClass + `*"((?:\\[^\r\x{2028}\x{2029}]|[^"\\])*)"` + jsSpaceClass + `*$`).FindStringSubmatch(withoutComment)
+			literal := regexp.MustCompile(`^` + jsSpaceClass + `*` + assignment + jsSpaceClass + `*=` + jsSpaceClass + `*'([^']*)'` + jsSpaceClass + `*$`).FindStringSubmatch(withoutComment)
+			if basic != nil {
+				var value string
+				if json.Unmarshal([]byte(`"`+basic[1]+`"`), &value) != nil {
+					return "", true, false
+				}
+				return value, true, true
+			}
+			if literal != nil {
+				return literal[1], true, true
+			}
+			if unresolvedCargoTarget.MatchString(withoutComment) {
+				foundUnreadable = true
+			}
+		}
+		if foundUnreadable {
+			return "", true, false
+		}
+		return "", false, true
+	}
+	for dir := copyPath; ; dir = filepath.Dir(dir) {
+		for _, name := range []string{"config", "config.toml"} {
+			file := filepath.Join(dir, ".cargo", name)
+			relative, _ := filepath.Rel(copyPath, file)
+			contents, err := platform.ReadTextFile(file)
+			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return relative + " cannot be read"
+			}
+			value, found, valid := parse(contents)
+			if !found {
+				break
+			}
+			if !valid {
+				return relative + " target-dir cannot be resolved safely"
+			}
+			if value == "" {
+				break
+			}
+			resolved, err := canonicalPath(resolveRelative(dir, value))
+			if err != nil {
+				return relative + " target-dir cannot be resolved safely"
+			}
+			if inside(sourcePath, resolved) {
+				return relative + " sets target-dir inside the source tree"
+			}
+			return ""
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+	}
+	cargoHome := env.Get("CARGO_HOME")
+	if cargoHome == "" {
+		home := env.Get("HOME")
+		if home == "" {
+			home, _ = os.UserHomeDir()
+		}
+		cargoHome = filepath.Join(home, ".cargo")
+	}
+	for _, name := range []string{"config", "config.toml"} {
+		file := filepath.Join(cargoHome, name)
+		contents, err := platform.ReadTextFile(file)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return file + " cannot be read"
+		}
+		value, found, valid := parse(contents)
+		if !found {
+			break
+		}
+		if !valid {
+			return file + " target-dir cannot be resolved safely"
+		}
+		if value == "" {
+			break
+		}
+		resolved, err := canonicalPath(resolveRelative(filepath.Dir(cargoHome), value))
+		if err != nil {
+			return file + " target-dir cannot be resolved safely"
+		}
+		if inside(sourcePath, resolved) {
+			return file + " sets target-dir inside the source tree"
+		}
+		return ""
+	}
+	return ""
+}
+
+var unresolvedCargoTarget = regexp.MustCompile(`(?i)target-dir|target\\u|"target`)
+
+func stripTomlComment(line string) string {
+	quote := byte(0)
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		char := line[i]
+		if quote == '"' && escaped {
+			escaped = false
+			continue
+		}
+		if quote == '"' && char == '\\' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if char == quote {
+				quote = 0
+			}
+			continue
+		}
+		if char == '"' || char == '\'' {
+			quote = char
+		} else if char == '#' {
+			return line[:i]
+		}
+	}
+	return line
+}

@@ -1,0 +1,385 @@
+package dispatch
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/herdr-soho/internal/jsonjs"
+	"github.com/djalmajr/herdr-soho/internal/platform"
+)
+
+func TestDispatchHelpers(t *testing.T) {
+	t.Run(`JS: dispatch workspace path comparison accepts Windows slash and case variants`, func(t *testing.T) {
+		if !SamePath(`C:\Work\Repo`, `c:/work/repo`, "win32") {
+			t.Fatal("case and slash variants did not match")
+		}
+	})
+	t.Run(`JS: dispatch pair gets a suffix when the report pair collides`, func(t *testing.T) {
+		got := DispatchPairSuffix(func(s string) string { return "brief" + s }, func(s string) string { return "report" + s }, func(path string) bool { return path == "brief" || path == "report-2" }, "")
+		if got != "-3" {
+			t.Fatalf("suffix=%q, want -3", got)
+		}
+	})
+	t.Run(`JS: dispatch sidecar is named beside the composed prompt`, func(t *testing.T) {
+		got := DispatchSidecar(filepath.Join("state", "briefs", "alice-20260929T033919.brief.md"))
+		if got != filepath.Join("state", "briefs", "alice-20260929T033919.dispatch.json") {
+			t.Fatalf("sidecar=%q", got)
+		}
+	})
+	t.Run(`JS: dispatch sidecar records the accepted attempt and arrival`, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "x.dispatch.json")
+		if err := WriteSidecar(path, "codex", "gpt-5", "high", "accepted", "queued"); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := jsonjs.Parse(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		obj := value.(*jsonjs.Object)
+		for key, want := range map[string]any{"submission": "accepted", "arrival": "queued", "kind": "codex", "model": "gpt-5", "effort": "high"} {
+			got, _ := obj.Get(key)
+			if got != want {
+				t.Errorf("%s=%v, want %v", key, got, want)
+			}
+		}
+	})
+	t.Run(`JS: --for resolves family names and fixed-family kinds`, func(t *testing.T) {
+		for spec, want := range map[string]string{"openai": "openai", "codex": "openai", "gemini": "google"} {
+			got, err := ForSpecFamily(spec, t.TempDir(), platform.Env{}, t.TempDir(), &core.Config{Entries: map[string]core.ConfigEntry{}})
+			if err != nil || got != want {
+				t.Errorf("%s: got %q, %v", spec, got, err)
+			}
+		}
+	})
+	t.Run(`JS: forSpecFamily ignores accepted sidecars whose pair belongs to another agent`, func(t *testing.T) { // Mutation captured: counting every filename with the requested prefix assigns another agent's family.
+		sd := t.TempDir()
+		briefs := filepath.Join(sd, "briefs")
+		if err := os.MkdirAll(briefs, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		data := `{"version":1,"kind":"codex","model":"gpt-5","submission":"accepted"}`
+		if err := os.WriteFile(filepath.Join(briefs, "rev-extra-20260929T051905.dispatch.json"), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ForSpecFamily("rev", sd, platform.Env{"HERDR_WORKSPACE_ID": "ws", "TMPDIR": t.TempDir()}, "/work", &core.Config{Entries: map[string]core.ConfigEntry{}})
+		if err == nil || !strings.Contains(err.Error(), "not an agent in the roster") {
+			t.Fatalf("orphan pair resolved as rev family: %v", err)
+		}
+	})
+	t.Run(`JS: --for rejects a reviewer whose edit author shares its family`, func(t *testing.T) {
+		sd := t.TempDir()
+		roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\n" +
+			"author\tp1\tcodex\timplementer\topenai\t0\t/work\tnow\tgpt-5\task\timplementer\n"
+		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := FamilyConflicts(sd, "openai", platform.Env{}, t.TempDir())
+		if len(got) != 1 || !strings.Contains(got[0], "author (codex)") {
+			t.Fatalf("conflicts=%v, want author (codex)", got)
+		}
+	})
+}
+
+func TestDispatchJavaScriptHelperCases(t *testing.T) {
+	const full = "# Goal\n\nDo it.\n# Expected result\n\nDone.\n# Owned files\n\nsrc/a.go\n# Forbidden\n\nDo not commit or push.\n# Report\n\ndone.\n"
+	t.Run(`JS: "lint: a full contract brief passes"`, func(t *testing.T) {
+		if got := BriefMissingSections(full, false, nil); got != "" {
+			t.Fatalf("missing=%q", got)
+		}
+	})
+	t.Run(`JS: "lint: each section absent, each alternative accepted"`, func(t *testing.T) {
+		for _, tc := range []struct{ section, replace, want string }{
+			{"Goal", "# Goal", " [Goal]"},
+			{"Expected result", "# Expected result", " [Expected result]"},
+			{"Owned files", "# Owned files", " [Owned files]"},
+			{"Forbidden", "# Forbidden", " [Forbidden]"},
+			{"Report", "# Report", " [Report]"},
+			{"no-git", "Do not commit or push.", " [no-git line: say 'no commit/push']"},
+		} {
+			t.Run(tc.section, func(t *testing.T) {
+				body := strings.Replace(full, tc.replace, "# Unrelated", 1)
+				if got := BriefMissingSections(body, false, nil); got != tc.want {
+					t.Fatalf("missing=%q want %q", got, tc.want)
+				}
+			})
+		}
+		for _, tc := range []struct{ from, to string }{{"Expected result", "Acceptance"}, {"Expected result", "Definition of done"}, {"Owned files", "Owned"}, {"Owned files", "Scope"}, {"Forbidden", "Non-goals"}, {"Forbidden", "Constraints"}} {
+			body := strings.Replace(full, "# "+tc.from, "# "+tc.to, 1)
+			if got := BriefMissingSections(body, false, nil); got != "" {
+				t.Errorf("alternative %s: missing=%q", tc.to, got)
+			}
+		}
+	})
+	t.Run(`JS: "lint: built-in Portuguese section headings and accentless headings pass"`, func(t *testing.T) {
+		body := "## Objetivo\nDo it.\n## Resultado esperado\nDone.\n## Arquivos\nsrc/a.go\n## Proibido\nNo commit/push.\n## Relatório\nDone.\n"
+		if got := BriefMissingSections(body, false, nil); got != "" {
+			t.Fatalf("Portuguese headings missing: %s", got)
+		}
+		body = strings.Replace(body, "Relatório", "Relatorio", 1)
+		if got := BriefMissingSections(body, false, nil); got != "" {
+			t.Fatalf("accentless heading missing: %s", got)
+		}
+	})
+	t.Run(`JS: "lint and ownership: Portuguese section prefixes reject word continuations"`, func(t *testing.T) {
+		for _, heading := range []string{"Arquivos proibidos", "Escopo fora"} {
+			body := strings.Replace(full, "# Owned files", "## "+heading, 1)
+			if got := BriefMissingSections(body, false, nil); got != " [Owned files]" {
+				t.Errorf("%q missing=%q", heading, got)
+			}
+		}
+	})
+	t.Run(`JS: "lint: Meta is a Portuguese Goal heading but Metadata and Metadados are not"`, func(t *testing.T) {
+		for _, tc := range []struct{ heading, want string }{{"Meta", ""}, {"Metadata", " [Goal]"}, {"Metadados", " [Goal]"}} {
+			body := strings.Replace(full, "# Goal", "## "+tc.heading, 1)
+			if got := BriefMissingSections(body, false, nil); got != tc.want {
+				t.Errorf("%s: missing=%q want %q", tc.heading, got, tc.want)
+			}
+		}
+	})
+	t.Run(`JS: "lint: header level 1-3 only, case-insensitive, a word mid-paragraph does not count"`, func(t *testing.T) {
+		for _, tc := range []struct{ heading, want string }{{"## gOaL", ""}, {"### Goal", ""}, {"#### Goal", " [Goal]"}, {"#Goal", " [Goal]"}, {"Goal: do it.\n# Expected result", " [Goal]"}} {
+			body := strings.Replace(full, "# Goal\n", "", 1)
+			body = strings.Replace(body, "# Expected result", tc.heading+"\n# Expected result", 1)
+			if got := BriefMissingSections(body, false, nil); got != tc.want {
+				t.Errorf("heading %q: missing=%q want %q", tc.heading, got, tc.want)
+			}
+		}
+	})
+	t.Run(`JS: "lint: every missing section in order"`, func(t *testing.T) {
+		want := " [Goal] [Expected result] [Owned files] [Forbidden] [Report] [no-git line: say 'no commit/push']"
+		if got := BriefMissingSections("Just do it.\n", false, nil); got != want {
+			t.Fatalf("missing=%q want %q", got, want)
+		}
+	})
+	t.Run(`JS: "lint: warn prints the message and continues; off is silent"`, func(t *testing.T) {
+		file := filepath.Join(t.TempDir(), "brief.md")
+		if err := os.WriteFile(file, []byte("# Goal\n# Owned files\n# Forbidden\nNo commit/push.\n# Report\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
+		warn := BriefLintFindings(file, ctx, platform.Env{}, BriefLintOptions{})
+		if warn.Mode != "warn" || !strings.Contains(warn.MissingMessage, "[Expected result]") {
+			t.Fatalf("warn=%#v", warn)
+		}
+		off := BriefLintFindings(file, ctx, platform.Env{"HERDR_SOHO_BRIEF_LINT": "off"}, BriefLintOptions{})
+		if off.Mode != "off" || off.MissingMessage != "" || len(off.Warnings) != 0 {
+			t.Fatalf("off=%#v", off)
+		}
+	})
+	t.Run(`JS: "family: unknown and empty families never conflict"`, func(t *testing.T) {
+		sd := t.TempDir()
+		roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\nex\tp1\tgrok\tscouter\txai\t1\t/tmp/work\tnow\tgrok-4.7\ttask\timplementer,scouter\n"
+		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, family := range []string{"", "unknown", "openai"} {
+			if got := FamilyConflicts(sd, family, platform.Env{}, t.TempDir()); len(got) != 0 {
+				t.Errorf("%q conflicts=%v", family, got)
+			}
+		}
+	})
+	t.Run(`JS: "family: edit history counts, the wrong family does not, a plain worker never does"`, func(t *testing.T) {
+		sd := t.TempDir()
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho"}
+		roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\nex\tp1\tgrok\tscouter\txai\t1\t/tmp/work\tnow\tgrok-4.7\ttask\timplementer,scouter\nother\tp2\tcodex\timplementer\topenai\t1\t/tmp/work\tnow\tgpt-5\ttask\timplementer\nplain\tp3\tgrok\tscouter\txai\t1\t/tmp/work\tnow\tgrok-4.7\ttask\tscouter\n"
+		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(FamilyConflicts(sd, "xai", env, cwd), ","); got != "ex (grok)" {
+			t.Fatalf("xai=%q", got)
+		}
+		if got := strings.Join(FamilyConflicts(sd, "openai", env, cwd), ","); got != "other (codex)" {
+			t.Fatalf("openai=%q", got)
+		}
+	})
+	t.Run(`JS: "family: an old 8-column line is counted by its role"`, func(t *testing.T) {
+		sd := t.TempDir()
+		roster := "impl\tp1\tgrok\timplementer\txai\t1\t/tmp/work\tnow\n"
+		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := FamilyConflicts(sd, "xai", platform.Env{}, t.TempDir()); len(got) != 1 || got[0] != "impl (grok)" {
+			t.Fatalf("conflicts=%v", got)
+		}
+	})
+	t.Run(`JS: "family: the 12-column history is column 11 (lane not folded in)"`, func(t *testing.T) {
+		sd := t.TempDir()
+		roster := "ex\tp1\tgrok\tscouter\txai\t1\t/tmp/work\tnow\tgrok-4.7\tfull\timplementer\texplore\n"
+		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := FamilyConflicts(sd, "xai", platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho"}, cwd); len(got) != 1 || got[0] != "ex (grok)" {
+			t.Fatalf("conflicts=%v", got)
+		}
+	})
+	t.Run(`JS: "family: a documenter session is an edit agent only when it edited before"`, func(t *testing.T) {
+		sd := t.TempDir()
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho"}
+		roster := "doc\tp1\tcodex\tdocumenter\topenai\t1\t/tmp/work\tnow\tgpt-5\ttask\timplementer,documenter\n"
+		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := FamilyConflicts(sd, "openai", env, cwd); len(got) != 1 {
+			t.Fatalf("edit history conflicts=%v", got)
+		}
+		roster = strings.Replace(roster, "implementer,documenter", "documenter", 1)
+		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := FamilyConflicts(sd, "openai", env, cwd); len(got) != 0 {
+			t.Fatalf("document-only history conflicts=%v", got)
+		}
+	})
+	t.Run(`JS: "compose: role header, brief verbatim, the report contract in order"`, func(t *testing.T) {
+		role := filepath.Join(t.TempDir(), "implementer.md")
+		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRole text.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		prompt := ComposePrompt(role, "implementer", "worker", full, "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{}, "codex", "", false)
+		if !strings.HasPrefix(prompt, "# Role: Implementer") || !strings.Contains(prompt, "# Brief\n\n"+full) || !strings.Contains(prompt, "Write your report as Markdown to `/report.md`") {
+			t.Fatalf("composed prompt misses contract: %s", prompt)
+		}
+		if strings.Index(prompt, "# Brief") > strings.Index(prompt, "# Report contract") {
+			t.Fatal("report contract precedes brief")
+		}
+	})
+	t.Run(`JS: "compose: report_language and worker_context=lean add their lines"`, func(t *testing.T) {
+		role := filepath.Join(t.TempDir(), "implementer.md")
+		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRole text.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		env := platform.Env{"HERDR_SOHO_REPORT_LANGUAGE": "pt-BR", "HERDR_SOHO_WORKER_CONTEXT": "lean"}
+		prompt := ComposePrompt(role, "implementer", "worker", full, "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, env, "codex", "", false)
+		if !strings.Contains(prompt, "- Write the report in pt-BR.\n") || !strings.Contains(prompt, "- This brief is self-contained.") {
+			t.Fatalf("prompt missed language/context: %s", prompt)
+		}
+	})
+}
+
+func TestDispatchRemainingHelperCases(t *testing.T) {
+	t.Run(`JS: "family: a project role with mode: edit counts via the history"`, func(t *testing.T) {
+		dir := t.TempDir()
+		roles := filepath.Join(t.TempDir(), "roles")
+		if err := os.MkdirAll(roles, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(roles, "custom.md"), []byte("---\nmode: edit\n---\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		roster := "doc\tp1\tcodex\tdocumenter\topenai\t0\t/work\tnow\tgpt-5\ttask\tcustom,documenter\n"
+		if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		env := platform.Env{"HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho"}
+		got := FamilyConflicts(dir, "openai", env, cwd)
+		if len(got) != 1 || got[0] != "doc (codex)" {
+			t.Fatalf("project edit-role history conflicts=%v", got)
+		}
+	})
+	t.Run(`JS: "forSpecFamily: roster agent (col 5, derived when unknown), family name, fixed kind, unresolved"`, func(t *testing.T) {
+		sd := t.TempDir()
+		roster := "build\tp1\tcodex\timplementer\topenai\t0\t/work\tnow\tgpt-5\ttask\timplementer\n" +
+			"derived\tp2\tgrok\timplementer\tunknown\t0\t/work\tnow\tgrok-4.7\ttask\timplementer\n"
+		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
+		for spec, want := range map[string]string{"build": "openai", "derived": "xai", "anthropic": "anthropic", "gemini": "google"} {
+			got, err := ForSpecFamily(spec, sd, platform.Env{"HERDR_WORKSPACE_ID": "ws", "TMPDIR": t.TempDir()}, "/work", ctx)
+			if err != nil || got != want {
+				t.Errorf("%s: got %q, %v; want %q", spec, got, err, want)
+			}
+		}
+		if got, err := ForSpecFamily("mystery", sd, platform.Env{"HERDR_WORKSPACE_ID": "ws", "TMPDIR": t.TempDir()}, "/work", ctx); err == nil || got != "" || !strings.Contains(err.Error(), "not an agent in the roster") {
+			t.Fatalf("unresolved: got %q, %v", got, err)
+		}
+	})
+	t.Run(`JS: "forSpecFamily: conflicting recorded families are reported in code-unit order"`, func(t *testing.T) {
+		sd := t.TempDir()
+		briefs := filepath.Join(sd, "briefs")
+		if err := os.MkdirAll(briefs, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range []struct{ name, family string }{{"released-20260928T000001", "zeta"}, {"released-20260928T000002", "alpha"}} {
+			data := `{"version":1,"kind":"codex","model":"gpt-5","submission":"accepted"}`
+			if row.family == "zeta" {
+				data = `{"version":1,"kind":"claude","model":"sonnet","submission":"accepted"}`
+			}
+			if err := os.WriteFile(filepath.Join(briefs, row.name+".dispatch.json"), []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err := ForSpecFamily("released", sd, platform.Env{"HERDR_WORKSPACE_ID": "ws", "TMPDIR": t.TempDir()}, "/work", &core.Config{Entries: map[string]core.ConfigEntry{}})
+		if err == nil || !strings.Contains(err.Error(), "anthropic ×1, openai ×1") {
+			t.Fatalf("conflict error=%v", err)
+		}
+	})
+	t.Run(`JS: "compose: the report-writer line leads the standing rules in brief and amendment"`, func(t *testing.T) {
+		role := filepath.Join(t.TempDir(), "role.md")
+		if err := os.WriteFile(role, []byte("---\nname: Tester\n---\nRole.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
+		brief := ComposePrompt(role, "implementer", "agent", "# Goal\nrun", "/report.md", ctx, platform.Env{}, "codex", "", false)
+		amend := ComposeAmendment("# Amend\nfix", "/report.md", ctx, platform.Env{}, "codex", "", false)
+		line := "- Only you write this report, once all of the brief is done, including any part you handed to subagents or background tasks; a subagent never writes it. Report every item as it stands in the files, not as a subagent summarized it.\n"
+		for name, prompt := range map[string]string{"brief": brief, "amendment": amend} {
+			if strings.Count(prompt, line) != 1 || strings.Index(prompt, "- Write the report in one go") > strings.Index(prompt, line) || strings.Index(prompt, line) > strings.Index(prompt, "- Nobody watches this terminal") {
+				t.Errorf("%s report-writer ordering/count invalid", name)
+			}
+		}
+	})
+	t.Run(`JS: "compose: the report covers only the current brief and its amendments (R30, in order)"`, func(t *testing.T) {
+		role := filepath.Join(t.TempDir(), "role.md")
+		if err := os.WriteFile(role, []byte("---\nname: Tester\n---\nRole.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
+		line := "- Report only the current brief and its explicit amendments; do not import unrelated work from earlier briefs retained in a reused session. Mention prior work only when it directly affects this brief, stating the relationship.\n"
+		for name, prompt := range map[string]string{"brief": ComposePrompt(role, "implementer", "agent", "# Goal\nrun", "/report.md", ctx, platform.Env{}, "codex", "", false), "amendment": ComposeAmendment("# Amend\nfix", "/report.md", ctx, platform.Env{}, "codex", "", false)} {
+			if strings.Count(prompt, line) != 1 || strings.Index(prompt, "# Report contract") > strings.Index(prompt, line) || strings.Index(prompt, line) > strings.Index(prompt, "- Command output you put in the report") {
+				t.Errorf("%s report-scope rule ordering/count invalid", name)
+			}
+		}
+	})
+	t.Run(`JS: "lint: a read-only brief needs no Owned files; the other sections still hold"`, func(t *testing.T) {
+		body := "# Goal\nrun\n# Expected result\nok\n# Forbidden\nno commit or push\n# Report\ndone\n"
+		if got := BriefMissingSections(body, false, nil); got != " [Owned files]" {
+			t.Fatalf("edit missing=%q", got)
+		}
+		if got := BriefMissingSections(body, true, nil); got != "" {
+			t.Fatalf("read-only missing=%q", got)
+		}
+		for _, tc := range []struct {
+			edit string
+			want string
+		}{{strings.Replace(body, "# Forbidden", "", 1), " [Forbidden]"}, {strings.Replace(body, "no commit or push", "do nothing", 1), " [no-git line: say 'no commit/push']"}} {
+			if got := BriefMissingSections(tc.edit, true, nil); got != tc.want {
+				t.Errorf("read-only missing=%q want %q", got, tc.want)
+			}
+		}
+	})
+}

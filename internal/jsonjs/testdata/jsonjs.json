@@ -1,0 +1,169 @@
+[
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "string",
+      "s": "\"\\\b\f\n\r\t\u0000\u001f <>&  😀"
+    },
+    "compact": "\"\\\"\\\\\\b\\f\\n\\r\\t\\u0000\\u001f <>&  😀\"",
+    "indent": "\"\\\"\\\\\\b\\f\\n\\r\\t\\u0000\\u001f <>&  😀\""
+  },
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "number",
+      "n": 0
+    },
+    "compact": "0",
+    "indent": "0"
+  },
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "number",
+      "n": 1e+21
+    },
+    "compact": "1e+21",
+    "indent": "1e+21"
+  },
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "number",
+      "n": 100000000000000000000
+    },
+    "compact": "100000000000000000000",
+    "indent": "100000000000000000000"
+  },
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "number",
+      "n": 1e-7
+    },
+    "compact": "1e-7",
+    "indent": "1e-7"
+  },
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "number",
+      "n": 0.000001
+    },
+    "compact": "0.000001",
+    "indent": "0.000001"
+  },
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "number",
+      "special": "NaN",
+      "n": null
+    },
+    "compact": "null",
+    "indent": "null"
+  },
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "number",
+      "special": "Infinity",
+      "n": null
+    },
+    "compact": "null",
+    "indent": "null"
+  },
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "undefined"
+    },
+    "compact": "",
+    "indent": ""
+  },
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "array",
+      "values": [
+        1,
+        "á😀",
+        null,
+        true,
+        "__UNDEFINED__"
+      ]
+    },
+    "compact": "[1,\"á😀\",null,true,null]",
+    "indent": "[\n  1,\n  \"á😀\",\n  null,\n  true,\n  null\n]"
+  },
+  {
+    "kind": "stringify",
+    "value": {
+      "type": "object",
+      "pairs": [
+        [
+          "z",
+          1
+        ],
+        [
+          "10",
+          "ten"
+        ],
+        [
+          "2",
+          "two"
+        ],
+        [
+          "a",
+          "__UNDEFINED__"
+        ],
+        [
+          "x",
+          "😀"
+        ]
+      ]
+    },
+    "compact": "{\"2\":\"two\",\"10\":\"ten\",\"z\":1,\"x\":\"😀\"}",
+    "indent": "{\n  \"2\": \"two\",\n  \"10\": \"ten\",\n  \"z\": 1,\n  \"x\": \"😀\"\n}"
+  },
+  {
+    "kind": "parse",
+    "source": "{\"b\":1,\"10\":2,\"2\":3,\"a\":[true,null,1.5]}",
+    "compact": "{\"2\":3,\"10\":2,\"b\":1,\"a\":[true,null,1.5]}",
+    "keys": [
+      "2",
+      "10",
+      "b",
+      "a"
+    ]
+  },
+  {
+    "kind": "parse",
+    "source": "{\"01\":1,\"4294967294\":2,\"4294967295\":3,\"x\":4}",
+    "compact": "{\"4294967294\":2,\"01\":1,\"4294967295\":3,\"x\":4}",
+    "keys": [
+      "4294967294",
+      "01",
+      "4294967295",
+      "x"
+    ]
+  },
+  {
+    "kind": "parse",
+    "source": "[\"á😀\",-0,1e21,1e-7]",
+    "compact": "[\"á😀\",0,1e+21,1e-7]",
+    "keys": []
+  },
+  {
+    "kind": "parse",
+    "source": "1e400",
+    "compact": "null",
+    "keys": []
+  },
+  {
+    "kind": "parse",
+    "source": "[\"\\ud800\",\"\\udc00\",\"\\ud83d\\ude00\"]",
+    "compact": "[\"\\ud800\",\"\\udc00\",\"😀\"]",
+    "keys": []
+  }
+]

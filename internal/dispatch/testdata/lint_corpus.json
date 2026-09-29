@@ -1,0 +1,1129 @@
+[
+  {
+    "path": "testdata/plan-briefs/a1-agy-continue.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/a1-agy-continue.md is missing sections: [Expected result] [Owned files] [Forbidden] [no-git line: say 'no commit/push'] — nothing says when the slice is done; workers without owned files collide; nothing keeps the worker out of other files; the worker may commit or push"
+  },
+  {
+    "path": "testdata/plan-briefs/a1-dispatch-arrival.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/a1-fix-r7.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/a2-queued-dispatch.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/a2b-queued-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/a2c-queued-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/b2-state-worktrees.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/b2b-fix-r12.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/b2c-fix-sonnet.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/b4-brief-lint.md",
+    "mode": "warn",
+    "warnings": [
+      "brief testdata/plan-briefs/b4-brief-lint.md line 59 has empty inline code (``): a shell heredoc without quotes may have run the backticks"
+    ],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/b4-codex-resume.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/b4b-fix-r12.md",
+    "mode": "warn",
+    "warnings": [
+      "brief testdata/plan-briefs/b4b-fix-r12.md line 30 has empty inline code (``): a shell heredoc without quotes may have run the backticks",
+      "brief testdata/plan-briefs/b4b-fix-r12.md line 31 has empty inline code (``): a shell heredoc without quotes may have run the backticks",
+      "brief testdata/plan-briefs/b4b-fix-r12.md line 32 has empty inline code (``): a shell heredoc without quotes may have run the backticks"
+    ],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/c1a-b-herdr-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/c1a-c-toml-parity.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/c1a-go-herdr.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/c1b-b-core-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/c1b-c-amend.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/c1b-c-config-coverage.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/c1b-go-core.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/c1c-b-state-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/c1c-go-state.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/c2-go-lanes.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/d1-codex-env-diagnostic.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/d1b-fix-r9.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/d5a-go-lint.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/d6-amend.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/d6-go-doctor-init.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/f2a-legacy-fallbacks.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/f2b-setup-migration-shim.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/f4-amend-1-activity.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/f4-wait-status.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/f5-brief-lint-matrix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/f6-amend-1-dispatch-tests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/f6-task-report-for-released.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/f7-mutation-guard.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/f8-eval-protocol-kit.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/f8b-eval-kit-fixes.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/g1-go-foundation.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/g1b-go-foundation-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/g1c-runcli-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/g2-go-pure.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/g2b-pure-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/g2c-pure-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/gw1-go-windows-tests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/gw2-go-windows-tests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/gw3-go-windows-tests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/gw4-go-windows-tests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/gw5-go-windows-tests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/h1-go-harness.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/handoff-b4.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/handoff-b4.md is missing sections: [Goal] [Expected result] [Owned files] [Forbidden] [Report] [no-git line: say 'no commit/push'] — the worker does not know what the slice is for; nothing says when the slice is done; workers without owned files collide; nothing keeps the worker out of other files; without a report section the worker may never write one; the worker may commit or push"
+  },
+  {
+    "path": "testdata/plan-briefs/handoff-grok.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/handoff-grok.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/handoff-s4f.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/handoff-s4f.md is missing sections: [Goal] [Expected result] [Owned files] [Forbidden] [Report] [no-git line: say 'no commit/push'] — the worker does not know what the slice is for; nothing says when the slice is done; workers without owned files collide; nothing keeps the worker out of other files; without a report section the worker may never write one; the worker may commit or push"
+  },
+  {
+    "path": "testdata/plan-briefs/handoff-to-agy.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/handoff-to-agy.md is missing sections: [Goal] [Expected result] [Owned files] [Forbidden] — the worker does not know what the slice is for; nothing says when the slice is done; workers without owned files collide; nothing keeps the worker out of other files"
+  },
+  {
+    "path": "testdata/plan-briefs/i20-amend-1.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/i20-win-cmd-timeout-tree.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/k-amend.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/k-go-kinds.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/l-go-layout.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/l2-go-regrid-tabs.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/l3-amend.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/l3-layout-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p1-go-leaf.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p1-linux-hermetic-tests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p1b-guard-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p1c-guard-cargo.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p2-b-peer-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p2-go-peer.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p2a-windows-tests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p2b-windows-tests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p3a-amend-1-state-root.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p3a-windows-setup.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p3b-amend-1-collect-root.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/p3b-amend-1-collect-root.md is missing sections: [Expected result] — nothing says when the slice is done"
+  },
+  {
+    "path": "testdata/plan-briefs/p3b-windows-rest.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p3c-spawn-subtests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p3d-linux-host-root.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p4-windows-last13.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p7a-go-plugin-bridge.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/p7b-go-plugin-picker.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/r-a1-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-a1-review.md is missing sections: [Goal] [Owned files] — the worker does not know what the slice is for; workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-a1b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-a1b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-a2-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-a2-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-a2b-cont.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-a2b-cont.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-a2b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-a2b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-a2c-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-a2c-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-b2-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-b2-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-b2b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-b2b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-b2c-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-b2c-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-b4-review.md",
+    "mode": "warn",
+    "warnings": [
+      "brief testdata/plan-briefs/r-b4-review.md line 22 has empty inline code (``): a shell heredoc without quotes may have run the backticks"
+    ],
+    "missingMessage": "brief testdata/plan-briefs/r-b4-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-b4b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-b4b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-c1a-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-c1a-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-c1ab-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-c1ab-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-c1b-b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-c1b-b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-c1b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-c1b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-c1c-cont.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-c1c-cont.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-c1c-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-c1c-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-c1cb-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-c1cb-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-d1-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-d1-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-d1b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-d1b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-d1c-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-d1c-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-docs-reuse.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-docs-reuse.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-g1-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-g1-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-g1b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-g1b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-g2-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-g2-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-g2b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-g2b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-l2-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-l2-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-p1-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-p1-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-p1b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-p1b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-p2-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-p2-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s2-review-find.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s2-review-find.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s3-review-picker.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s3-review-picker.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s3b-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s3b-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s3d-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s3d-review.md is missing sections: [Goal] [Owned files] — the worker does not know what the slice is for; workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s4-review-send.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s4-review-send.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s4a-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s4a-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s4b-review-send-amend.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s4b-review-send-amend.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s4c-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s4c-review.md is missing sections: [Goal] [Owned files] — the worker does not know what the slice is for; workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s4d-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s4d-review.md is missing sections: [Goal] [Owned files] — the worker does not know what the slice is for; workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s4e-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s4e-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s4f-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s4f-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s4g-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s4g-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s5a-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s5a-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-s6a-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-s6a-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-sr-help.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-sr-help.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-sr-integration.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-sr-integration.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-w-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-w-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-w2-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-w2-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r-w3-review.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r-w3-review.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r1-review-rename-transition.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r1-review-rename-transition.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r10-review-portability-delta.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r10-review-portability-delta.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r11-review-last13.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r11-review-last13.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r12-review-final-delta.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r12-review-final-delta.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r13-review-probe-cleanup.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r13-review-probe-cleanup.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r14-review-bun-timeouts.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r14-review-bun-timeouts.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r1b-review-delta.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r1b-review-delta.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r1c-review-block-rename.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r1c-review-block-rename.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r1d-review-dry-run.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r1d-review-dry-run.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r2-review-f4.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r2-review-f4.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r20-review-treekill.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r20-review-treekill.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r20b-review-amend.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r20b-review-amend.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r20c-review-timing.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r20c-review-timing.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r2b-review-delta.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r2b-review-delta.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r3-review-f5-f7.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r3-review-f5-f7.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r3b-review-delta.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r3b-review-delta.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r4-go-release.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/r4-review-f6.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r4-review-f6.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r4b-review-delta.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r4b-review-delta.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r5-review-f8.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r5-review-f8.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r5b-review-delta.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r5b-review-delta.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r6-review-plugin.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r6-review-plugin.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r7-review-status-test.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r7-review-status-test.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r8-review-test-portability.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r8-review-test-portability.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/r9-review-task-report-per-task.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/r9-review-task-report-per-task.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/s1-research-refs-messages.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/s1-research-refs-messages.md is missing sections: [Owned files] — workers without owned files collide"
+  },
+  {
+    "path": "testdata/plan-briefs/s2-find.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s3-amend-1.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s3-picker.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s3c-notify-ref.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s3d-sigterm-teardown.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s3e-dedupe.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/s3e-dedupe.md is missing sections: [Goal] — the worker does not know what the slice is for"
+  },
+  {
+    "path": "testdata/plan-briefs/s4-amend-1.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s4-send.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s4a-b-stats-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s4a-go-stats-collect.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s4c-quote-and-isolate.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s4d-send-arrival-dialog.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s4e-arrival-proof-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s4f-codex-resume.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s4f-continue.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/plan-briefs/s4f-continue.md is missing sections: [Expected result] [Owned files] [Forbidden] — nothing says when the slice is done; workers without owned files collide; nothing keeps the worker out of other files"
+  },
+  {
+    "path": "testdata/plan-briefs/s4f-proof-tighten.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s4g-dialog-window.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s5a-go-spawn.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s6a-b-amend.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s6a-b-setup-local.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s6a-c-setup-fix.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s6a-go-setup-read.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/s6b-go-setup-write.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/t7-go-windows-treekill.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/w-windows-tests.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/w2-windows-round2.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/plan-briefs/w3-windows-round3.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/variants/sections-missing.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/variants/sections-missing.md is missing sections: [Goal] [Expected result] [Owned files] [Forbidden] [Report] [no-git line: say 'no commit/push'] — the worker does not know what the slice is for; nothing says when the slice is done; workers without owned files collide; nothing keeps the worker out of other files; without a report section the worker may never write one; the worker may commit or push"
+  },
+  {
+    "path": "testdata/variants/aliases-ptbr.md",
+    "aliases": "Goal=Contexto,Expected result=Entrega",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/variants/case-and-accent.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": ""
+  },
+  {
+    "path": "testdata/variants/long-s.md",
+    "mode": "warn",
+    "warnings": [
+      "brief testdata/variants/long-s.md failure matrix is missing: [clock] — a clock that goes backwards is not covered"
+    ],
+    "missingMessage": "brief testdata/variants/long-s.md is missing sections: [no-git line: say 'no commit/push'] — the worker may commit or push"
+  },
+  {
+    "path": "testdata/variants/crlf.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/variants/crlf.md is missing sections: [Goal] [Expected result] [Owned files] [Forbidden] [Report] — the worker does not know what the slice is for; nothing says when the slice is done; workers without owned files collide; nothing keeps the worker out of other files; without a report section the worker may never write one"
+  },
+  {
+    "path": "testdata/variants/bom.md",
+    "mode": "warn",
+    "warnings": [],
+    "missingMessage": "brief testdata/variants/bom.md is missing sections: [Goal] — the worker does not know what the slice is for"
+  }
+]

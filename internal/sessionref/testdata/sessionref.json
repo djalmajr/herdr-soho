@@ -1,0 +1,128 @@
+[
+  {
+    "kind": "parse",
+    "input": "w12:p1",
+    "expected": {
+      "machine": "local",
+      "paneId": "w12:p1"
+    }
+  },
+  {
+    "kind": "parse",
+    "input": "  windows/w3:p1\n",
+    "expected": {
+      "machine": "windows",
+      "paneId": "w3:p1"
+    }
+  },
+  {
+    "kind": "parse",
+    "input": "local/w14:pR",
+    "expected": {
+      "machine": "local",
+      "paneId": "w14:pR"
+    }
+  },
+  {
+    "kind": "parse",
+    "input": "hetzner.eu-1/w3:p2",
+    "expected": {
+      "machine": "hetzner.eu-1",
+      "paneId": "w3:p2"
+    }
+  },
+  {
+    "kind": "parse",
+    "input": " w1:p2 ",
+    "expected": {
+      "machine": "local",
+      "paneId": "w1:p2"
+    }
+  },
+  {
+    "kind": "parse",
+    "input": "",
+    "expected": null
+  },
+  {
+    "kind": "parse",
+    "input": "soho-s1",
+    "expected": null
+  },
+  {
+    "kind": "parse",
+    "input": "w1:p1\rx",
+    "expected": null
+  },
+  {
+    "kind": "parse",
+    "input": "w1:p1\u001b",
+    "expected": null
+  },
+  {
+    "kind": "parse",
+    "input": "w1:p1😀",
+    "expected": null
+  },
+  {
+    "kind": "parse",
+    "input": "wi ndows/w3:p1",
+    "expected": null
+  },
+  {
+    "kind": "parse",
+    "input": "wi ndows/w3:p1",
+    "expected": null
+  },
+  {
+    "kind": "parse",
+    "input": "wi😀ndows/w3:p1",
+    "expected": null
+  },
+  {
+    "kind": "parse",
+    "input": null,
+    "expected": null
+  },
+  {
+    "kind": "parse",
+    "input": 42,
+    "expected": null
+  },
+  {
+    "kind": "format",
+    "machine": "windows",
+    "pane": "w3:p1",
+    "expected": "windows/w3:p1"
+  },
+  {
+    "kind": "format",
+    "machine": "",
+    "pane": "w12:p1",
+    "expected": "local/w12:p1"
+  },
+  {
+    "kind": "format",
+    "machine": "local",
+    "pane": "w1:p9",
+    "expected": "local/w1:p9"
+  },
+  {
+    "kind": "args",
+    "machine": "local",
+    "expected": []
+  },
+  {
+    "kind": "args",
+    "machine": "",
+    "expected": []
+  },
+  {
+    "kind": "args",
+    "machine": "windows",
+    "expected": [
+      "--machine",
+      "windows"
+    ]
+  }
+]

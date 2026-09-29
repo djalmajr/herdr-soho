@@ -1,7 +1,9 @@
 // Read-only preflight for mutation-test copies: reject source-tree build
 // artifacts before a worker mutates or builds in the copy.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { compareCodeUnits } from '../text.mjs';
 import { projectRoot } from '../platform.mjs';
 
@@ -109,34 +111,107 @@ function envPointingIntoSource(env, names, copy, source) {
   return offenders.join('; ');
 }
 
-function cargoTargetInsideSource(copy, source) {
-  for (const relative of ['.cargo/config.toml', '.cargo/config']) {
-    const file = path.join(copy, relative);
+function cargoTargetInsideSource(copy, source, env) {
+  try { fs.statSync(path.join(copy, 'Cargo.toml')); }
+  catch (error) {
+    if (error.code === 'ENOENT') return '';
+    return 'cargo metadata failed; target-dir cannot be resolved safely';
+  }
+  if (cargoOnPath(env)) {
+    const result = spawnSync('cargo', ['metadata', '--offline', '--no-deps', '--format-version', '1'], {
+      cwd: copy, env, encoding: 'utf8', timeout: 30_000,
+    });
+    if (result.error || result.status !== 0) return 'cargo metadata failed; target-dir cannot be resolved safely';
+    let metadata;
+    try { metadata = JSON.parse(result.stdout); } catch { return 'cargo metadata failed; target-dir cannot be resolved safely'; }
+    if (typeof metadata.target_directory !== 'string' || metadata.target_directory === '') {
+      return 'cargo metadata failed; target-dir cannot be resolved safely';
+    }
+    try {
+      return inside(source, canonicalPath(path.resolve(copy, metadata.target_directory)))
+        ? 'cargo metadata puts target_directory inside the source tree'
+        : '';
+    } catch {
+      return 'cargo metadata failed; target-dir cannot be resolved safely';
+    }
+  }
+  return textualCargoTargetInsideSource(copy, source, env);
+}
+
+function cargoOnPath(env) {
+  const dirs = (env.PATH ?? '').split(path.delimiter);
+  const extensions = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
+  for (const dir of dirs) for (const extension of extensions) {
+    try { if (fs.statSync(path.join(dir, `cargo${extension}`)).isFile()) return true; }
+    catch { /* continue through PATH */ }
+  }
+  return false;
+}
+
+function textualCargoTargetInsideSource(copy, source, env) {
+  const unresolvedTarget = /target-dir|target\\u|"target/i;
+  const stripComment = (line) => {
+    let quote = '';
+    let escaped = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (quote === '"' && escaped) { escaped = false; continue; }
+      if (quote === '"' && char === '\\') { escaped = true; continue; }
+      if (quote) { if (char === quote) quote = ''; continue; }
+      if (char === '"' || char === "'") quote = char;
+      else if (char === '#') return line.slice(0, i);
+    }
+    return line;
+  };
+  const parse = (text) => {
+    let inBuild = false;
+    let unresolved = false;
+    for (const line of text.split(/\r?\n/)) {
+      const contents = stripComment(line);
+      const space = '[\\s\\v\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]';
+      const header = new RegExp(`^${space}*\\[${space}*([^\\]]+)\\]${space}*$`).exec(contents);
+      if (header) { inBuild = header[1].trim() === 'build'; continue; }
+      if (!inBuild) {
+        if (unresolvedTarget.test(contents)) unresolved = true;
+        continue;
+      }
+      const assignment = 'target-dir';
+      const basic = new RegExp(`^${space}*${assignment}${space}*=${space}*"((?:\\\\[^\\r\\u2028\\u2029]|[^"\\\\])*)"${space}*$`).exec(contents);
+      const literal = new RegExp(`^${space}*${assignment}${space}*=${space}*'([^']*)'${space}*$`).exec(contents);
+      if (!basic && !literal && unresolvedTarget.test(contents)) unresolved = true;
+      if (basic) { try { return JSON.parse(`"${basic[1]}"`); } catch { return null; } }
+      if (literal) return literal[1];
+    }
+    return unresolved ? null : undefined;
+  };
+  for (let dir = copy; ; dir = path.dirname(dir)) {
+    for (const name of ['config', 'config.toml']) {
+      const file = path.join(dir, '.cargo', name);
+      const relative = path.relative(copy, file) || path.join('.cargo', name);
+      let text;
+      try { text = fs.readFileSync(file, 'utf8'); }
+      catch (error) { if (error.code === 'ENOENT') continue; return `${relative} cannot be read`; }
+      const value = parse(text);
+      if (value === undefined || value === '') break;
+      if (value === null) return `${relative} target-dir cannot be resolved safely`;
+      try { return inside(source, canonicalPath(path.resolve(dir, value))) ? `${relative} sets target-dir inside the source tree` : ''; }
+      catch { return `${relative} target-dir cannot be resolved safely`; }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+  }
+  const cargoHome = env.CARGO_HOME || path.join(env.HOME || os.homedir(), '.cargo');
+  for (const name of ['config', 'config.toml']) {
+    const file = path.join(cargoHome, name);
+    const relative = file;
     let text;
     try { text = fs.readFileSync(file, 'utf8'); }
-    catch (error) {
-      if (error.code === 'ENOENT') continue;
-      return `${relative} cannot be read`;
-    }
-    for (const line of text.split(/\r?\n/)) {
-      // A TOML basic ("…", escapes) or literal ('…', none) string; Cargo
-      // resolves a relative target-dir against the directory holding .cargo.
-      const basic = /^\s*target-dir\s*=\s*"((?:\\.|[^"\\])*)"\s*(?:#.*)?$/.exec(line);
-      const literal = basic ? null : /^\s*target-dir\s*=\s*'([^']*)'\s*(?:#.*)?$/.exec(line);
-      if (!basic && !literal) continue;
-      let value;
-      if (basic) {
-        try { value = JSON.parse(`"${basic[1]}"`); } catch { return `${relative} target-dir cannot be resolved safely`; }
-      } else {
-        value = literal[1];
-      }
-      if (value === '') continue;
-      try {
-        if (inside(source, canonicalPath(path.resolve(copy, value)))) return `${relative} sets target-dir inside the source tree`;
-      } catch {
-        return `${relative} target-dir cannot be resolved safely`;
-      }
-    }
+    catch (error) { if (error.code === 'ENOENT') continue; return `${relative} cannot be read`; }
+    const value = parse(text);
+    if (value === undefined || value === '') break;
+    if (value === null) return `${relative} target-dir cannot be resolved safely`;
+    try { return inside(source, canonicalPath(path.resolve(path.dirname(cargoHome), value))) ? `${relative} sets target-dir inside the source tree` : ''; }
+    catch { return `${relative} target-dir cannot be resolved safely`; }
   }
   return '';
 }
@@ -179,7 +254,7 @@ export function cmdMutationGuard(args, env = process.env, cwd = process.cwd()) {
   const envFailure = envPointingIntoSource(env, [...new Set([...BUILD_ENV, ...parsed.envNames])], copy, source);
   failed = printCheck('build-env', envFailure) || failed;
 
-  const configFailure = cargoTargetInsideSource(copy, source);
+  const configFailure = cargoTargetInsideSource(copy, source, env);
   failed = printCheck('cargo-config', configFailure) || failed;
   if (failed) process.exitCode = 1;
 }

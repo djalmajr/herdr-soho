@@ -65,11 +65,13 @@ if the state directory is not yet Git-ignored. Otherwise `init` can add that
 directory to the fork's tracked `.gitignore` before local setup runs.
 
 ```bash
-test "${HERDR_ENV:-}" = 1 && command -v herdr >/dev/null && { command -v node >/dev/null && [ "$(node -p 'process.versions.node' | cut -d. -f1)" -ge 20 ] || command -v bun >/dev/null; } && $S init
+test "${HERDR_ENV:-}" = 1 && command -v herdr >/dev/null && { command -v herdr-soho >/dev/null || [ -n "${HERDR_SOHO_BIN:-}" ] || { command -v node >/dev/null && [ "$(node -p 'process.versions.node' | cut -d. -f1)" -ge 20 ] || command -v bun >/dev/null; }; } && $S init
 ```
 
-If the check fails, say you are not inside Herdr (or Node.js 20+/Bun is
-missing) and stop. If the check fails and you are running under Codex, run
+If the check fails, say you are not inside Herdr (or the herdr-soho binary,
+Node.js 20+ or Bun is missing) and stop. Install the Go binary with
+`install.sh` (POSIX) or `install.ps1` (Windows) from the GitHub releases. If
+the check fails and you are running under Codex, run
 `herdr-soho doctor` before concluding you are outside Herdr. Never control a
 Herdr session from outside Herdr. The `herdr` skill
 (`herdr --skill`) is the authority for CLI syntax; this skill adds the role
@@ -233,9 +235,13 @@ edit: not restored, and reported), gives that copy its own build output
 mutation-guard <copy>` before mutating — the guard fails when the copy
 sits inside the source (or the source inside it), holds a symlink into
 the source, or when `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR`, a
-`--env NAME` or a `.cargo/config[.toml]` `target-dir` points into the
-source (a relative value resolved against the copy) (exit 1; 0 when isolated, 2 for bad usage; nothing is written, and
-a path it cannot resolve fails closed) — and never cleans a shared cache
+`--env NAME` points into the source, or `cargo metadata --offline --no-deps`
+(when the copy has `Cargo.toml` and Cargo is on `PATH`) resolves its
+`target_directory` inside the source. Without Cargo, a Rust copy uses a narrow
+`.cargo/config[.toml]` fallback that fails closed on an unrecognized
+`target-dir`; copies without `Cargo.toml` ignore Cargo configuration (exit 1
+for a rejected copy; 0 when isolated, 2 for bad usage; the guard writes
+nothing) — and never cleans a shared cache
 or the source's build output to recover; the `implementer`, `tasker` and
 `designer` stop every process they started before writing the report,
 by the PIDs they kept, checked by PID only (never a listing of every
@@ -672,8 +678,10 @@ lane answers `kind-mismatch` (exit 13) until you release its worker.
 
 ## Commands
 
-All mechanics go through `scripts/herdr-soho` (needs `herdr` and Node.js
-20+ or Bun — no `bash`, no `jq`):
+All mechanics go through `scripts/herdr-soho` (needs `herdr` and either the
+installed `herdr-soho` Go binary or Node.js 20+/Bun — no `bash`, no `jq`).
+Install the Go binary with `install.sh` (POSIX) or `install.ps1` (Windows)
+from the GitHub releases:
 
 ```bash
 S=<path-to-this-skill>/scripts/herdr-soho      # POSIX; Windows: <path-to-this-skill>\scripts\herdr-soho.cmd
@@ -750,12 +758,13 @@ machine's pane and queries that machine. Exit 0 with at least one entry,
 remote machine that fails prints a stderr line and the rest is still
 listed.
 
-`scripts/herdr-soho` is a POSIX `sh` launcher: it runs
-`scripts/herdr-soho.mjs` with `node` (20+) — or `bun` when Node.js 20+
-is not available (missing or older) — with the same arguments. If neither
-runtime is usable it prints `herdr-soho: needs Node.js 20+ or Bun` and
-exits 2.
-`scripts/herdr-soho.cmd` is the same launcher for Windows. The `setup`
+`scripts/herdr-soho` is a POSIX `sh` launcher: it prefers the installed
+`herdr-soho` Go binary (or the path in `HERDR_SOHO_BIN`), then falls back to
+`scripts/herdr-soho.mjs` with `node` (20+) or `bun`. Set `HERDR_SOHO_JS=1` to
+force the JavaScript fallback. Install the binary with `install.sh` (POSIX)
+or `install.ps1` (Windows) from the GitHub releases. If no binary or JS
+runtime is available it exits 2 with an installation message.
+`scripts/herdr-soho.cmd` follows the same order for Windows. The `setup`
 SessionStart hook checks these locations in order: project
 `.agents/skills`, project `.claude/skills`, `$HOME/.agents/skills`, then
 `$HOME/.claude/skills`. It invokes the first launcher with

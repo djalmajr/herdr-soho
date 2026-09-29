@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "default",
+      "mode": "default",
+      "script": "#!/bin/sh\nprintf 'out-line\\n'\nprintf 'err-line\\n' >&2\nexit 5\n",
+      "result": {
+        "notFound": false,
+        "status": 5,
+        "signal": null,
+        "stdout": "out-line\n",
+        "stderr": "err-line\n",
+        "timedOut": false,
+        "error": null
+      }
+    },
+    {
+      "name": "merge",
+      "mode": "mergeOutput",
+      "script": "#!/bin/sh\nprintf 'out-line\\n'\nprintf 'err-line\\n' >&2\nexit 5\n",
+      "result": {
+        "notFound": false,
+        "status": 5,
+        "signal": null,
+        "stdout": "out-line\nerr-line\n",
+        "stderr": "",
+        "timedOut": false,
+        "error": null
+      }
+    },
+    {
+      "name": "files",
+      "mode": "outputFiles",
+      "script": "#!/bin/sh\nprintf 'out-line\\n'\nprintf 'err-line\\n' >&2\nexit 5\n",
+      "result": {
+        "notFound": false,
+        "status": 5,
+        "signal": null,
+        "stdout": "out-line\n",
+        "stderr": "err-line\n",
+        "timedOut": false,
+        "error": null
+      }
+    },
+    {
+      "name": "bad-shebang",
+      "mode": "default",
+      "script": "#!/missing/interpreter\n",
+      "result": {
+        "notFound": false,
+        "status": null,
+        "signal": null,
+        "stdout": "",
+        "stderr": "",
+        "timedOut": false,
+        "error": "ENOENT"
+      }
+    },
+    {
+      "name": "no-shebang",
+      "mode": "default",
+      "script": "exit 1\n",
+      "result": {
+        "notFound": false,
+        "status": null,
+        "signal": null,
+        "stdout": "",
+        "stderr": "",
+        "timedOut": false,
+        "error": "ENOEXEC"
+      }
+    },
+    {
+      "name": "signal",
+      "mode": "default",
+      "script": "#!/bin/sh\nkill -KILL $$\n",
+      "result": {
+        "notFound": false,
+        "status": null,
+        "signal": "SIGKILL",
+        "stdout": "",
+        "stderr": "",
+        "timedOut": true,
+        "error": null
+      }
+    },
+    {
+      "name": "timeout",
+      "mode": "timeout",
+      "script": "#!/bin/sh\n/bin/sleep 5\n",
+      "result": {
+        "notFound": false,
+        "status": null,
+        "signal": "SIGTERM",
+        "stdout": "",
+        "stderr": "",
+        "timedOut": true,
+        "error": "ETIMEDOUT"
+      }
+    },
+    {
+      "name": "trap-exit-0",
+      "command": "node",
+      "args": [
+        "-e",
+        "process.on('SIGTERM', () => { console.log('caught'); setTimeout(() => process.exit(0), 20); }); setInterval(() => {}, 50);"
+      ],
+      "mode": "mergeOutput",
+      "timeoutMs": 300,
+      "script": "",
+      "result": {
+        "notFound": false,
+        "status": 0,
+        "signal": null,
+        "stdout": "caught\n",
+        "stderr": "",
+        "timedOut": false,
+        "error": "ETIMEDOUT"
+      }
+    },
+    {
+      "name": "trap-exit-3",
+      "command": "node",
+      "args": [
+        "-e",
+        "process.on('SIGTERM', () => { console.log('caught'); setTimeout(() => process.exit(3), 20); }); setInterval(() => {}, 50);"
+      ],
+      "mode": "mergeOutput",
+      "timeoutMs": 300,
+      "script": "",
+      "result": {
+        "notFound": false,
+        "status": 3,
+        "signal": null,
+        "stdout": "caught\n",
+        "stderr": "",
+        "timedOut": false,
+        "error": "ETIMEDOUT"
+      }
+    },
+    {
+      "name": "daemonize-no-timeout",
+      "mode": "default",
+      "script": "#!/bin/sh\n/bin/sleep 0.3 &\nprintf 'daemonized\\n'\nexit 0\n",
+      "result": {
+        "notFound": false,
+        "status": 0,
+        "signal": null,
+        "stdout": "daemonized\n",
+        "stderr": "",
+        "timedOut": false,
+        "error": null
+      }
+    },
+    {
+      "name": "badutf",
+      "mode": "default",
+      "script": "#!/bin/sh\nprintf 'a\\377b\\300\\200c\\355\\240\\200d\\360\\220\\200e\\342\\202'\nprintf 'x\\376y\\362\\200' >&2\n",
+      "result": {
+        "notFound": false,
+        "status": 0,
+        "signal": null,
+        "stdout": "a�b��c���d�e�",
+        "stderr": "x�y�",
+        "timedOut": false,
+        "error": null
+      }
+    },
+    {
+      "name": "missing",
+      "mode": "missing",
+      "script": "",
+      "result": {
+        "notFound": true,
+        "status": null,
+        "signal": null,
+        "stdout": "",
+        "stderr": "",
+        "timedOut": false,
+        "error": null
+      }
+    }
+  ]
+}

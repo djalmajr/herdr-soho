@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "roots": {
+    "repo": {
+      "projectRoot": "repo",
+      "stateProjectRoot": "repo"
+    },
+    "outside": {
+      "projectRoot": "outside",
+      "stateProjectRoot": "outside"
+    },
+    "linked-worker": {
+      "projectRoot": ".worktrees\\worker",
+      "stateProjectRoot": ""
+    },
+    "bare-linked-worker": {
+      "projectRoot": "worker",
+      "stateProjectRoot": "worker"
+    },
+    "submodule": {
+      "projectRoot": "super\\submodule",
+      "stateProjectRoot": "super\\submodule"
+    },
+    "linked-submodule": {
+      "projectRoot": "sub-linked",
+      "stateProjectRoot": "super\\submodule"
+    },
+    "core-worktree-dotdot": {
+      "projectRoot": "sub-worktree",
+      "stateProjectRoot": "sub-worktree"
+    },
+    "core-worktree-git": {
+      "projectRoot": "sub-worktree",
+      "stateProjectRoot": "sub-worktree"
+    }
+  },
+  "windowsExe": {
+    "resolvedBase": "fakecli.EXE",
+    "status": 7,
+    "stdout": "exe-out\n",
+    "stderr": "exe-err\n"
+  }
+}

@@ -1,0 +1,23 @@
+[
+  {
+    "pointer": {
+      "version": 1,
+      "task_report": "/state/reports/build.md",
+      "current": "/tmp/task report.md",
+      "history": []
+    },
+    "serialized": "{\"version\":1,\"task_report\":\"/state/reports/build.md\",\"current\":\"/tmp/task report.md\",\"history\":[]}\n"
+  },
+  {
+    "pointer": {
+      "version": 1,
+      "task_report": "/state/relatório-🦌.md",
+      "current": "/tmp/時刻.md",
+      "history": [
+        "/state/old.md",
+        "/state/old-2.md"
+      ]
+    },
+    "serialized": "{\"version\":1,\"task_report\":\"/state/relatório-🦌.md\",\"current\":\"/tmp/時刻.md\",\"history\":[\"/state/old.md\",\"/state/old-2.md\"]}\n"
+  }
+]

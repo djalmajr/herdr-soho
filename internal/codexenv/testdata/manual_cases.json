@@ -1,0 +1,390 @@
+[
+  {
+    "name": "scalar-include",
+    "input": "[shell_environment_policy]\ninclude_only = \"HERDR_*\"\n"
+  },
+  {
+    "name": "scalar-exclude",
+    "input": "[shell_environment_policy]\nexclude = \"HERDR_*\"\n"
+  },
+  {
+    "name": "inherit-bare-none",
+    "input": "[shell_environment_policy]\ninherit = none\n"
+  },
+  {
+    "name": "inherit-bare-core",
+    "input": "[shell_environment_policy]\ninherit = core\n"
+  },
+  {
+    "name": "inherit-junk-after",
+    "input": "[shell_environment_policy]\ninherit = \"core\" junk\n"
+  },
+  {
+    "name": "inherit-single",
+    "input": "[shell_environment_policy]\ninherit = 'none'\n"
+  },
+  {
+    "name": "inherit-spaces",
+    "input": "[shell_environment_policy]\ninherit = \" Core \"\n"
+  },
+  {
+    "name": "inherit-upper",
+    "input": "[shell_environment_policy]\ninherit = \"CORE\"\n"
+  },
+  {
+    "name": "inherit-escape",
+    "input": "[shell_environment_policy]\ninherit = \"co\\\"re\"\n"
+  },
+  {
+    "name": "inherit-all",
+    "input": "[shell_environment_policy]\ninherit = \"all\"\n"
+  },
+  {
+    "name": "ml-array-bracket-in-string",
+    "input": "[shell_environment_policy]\nexclude = [\"a]b\",\n \"HERDR_*\"]\n"
+  },
+  {
+    "name": "ml-array-header-inside",
+    "input": "[shell_environment_policy]\ninclude_only = [\n\"HERDR_*\"\n[other]\nk = 1\n"
+  },
+  {
+    "name": "ml-array-comment",
+    "input": "[shell_environment_policy]\nexclude = [ # c\n \"HERDR_ENV\", # c2\n \"X\"\n]\n"
+  },
+  {
+    "name": "ml-array-crlf",
+    "input": "[shell_environment_policy]\r\nexclude = [\r\n \"HERDR_ENV\",\r\n \"X\"\r\n]\r\n"
+  },
+  {
+    "name": "ml-array-nested",
+    "input": "[shell_environment_policy]\nexclude = [[\"a\"], \"HERDR_*\"]\n"
+  },
+  {
+    "name": "array-escapes",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_\\\"ENV\", 'HERDR_\\'X', \"HERDR_*\"]\n"
+  },
+  {
+    "name": "array-single-escape",
+    "input": "[shell_environment_policy]\nexclude = ['HERDR_ENV\\\\']\n"
+  },
+  {
+    "name": "array-unclosed",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_*\"\n"
+  },
+  {
+    "name": "array-unclosed-then-section",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_ENV\",\n[shell_environment_policy.set]\nHERDR_ENV = \"1\"\n"
+  },
+  {
+    "name": "set-inline",
+    "input": "[shell_environment_policy]\nset = { HERDR_ENV = \"1\", HERDR_PANE_ID = \"2\", HERDR_WORKSPACE_ID = \"3\" }\ninclude_only = [\"PATH\"]\n"
+  },
+  {
+    "name": "set-inline-ml",
+    "input": "[shell_environment_policy]\nset = {\n HERDR_ENV = \"1\",\n HERDR_PANE_ID = \"2\",\n HERDR_WORKSPACE_ID = \"3\"\n}\ninherit = \"none\"\n"
+  },
+  {
+    "name": "set-inline-ml-crlf",
+    "input": "[shell_environment_policy]\r\nset = {\r\n HERDR_ENV = \"1\",\r\n HERDR_PANE_ID = \"2\",\r\n HERDR_WORKSPACE_ID = \"3\"\r\n}\r\ninherit = \"none\"\r\n"
+  },
+  {
+    "name": "set-inline-junk",
+    "input": "[shell_environment_policy]\nset = { HERDR_ENV = \"1\", HERDR_PANE_ID = \"2\", HERDR_WORKSPACE_ID = \"3\" } junk\ninherit = \"none\"\n"
+  },
+  {
+    "name": "set-inline-empty",
+    "input": "[shell_environment_policy]\nset = {}\ninherit = \"none\"\n"
+  },
+  {
+    "name": "set-inline-trailing-comma",
+    "input": "[shell_environment_policy]\nset = { HERDR_ENV = \"1\", }\ninherit = \"none\"\n"
+  },
+  {
+    "name": "set-inline-dup",
+    "input": "[shell_environment_policy]\nset = { A = \"1\", A = \"2\" }\n"
+  },
+  {
+    "name": "set-inline-unclosed",
+    "input": "[shell_environment_policy]\nset = { A = \"1\"\n"
+  },
+  {
+    "name": "set-inline-brace-in-string",
+    "input": "[shell_environment_policy]\nset = { A = \"}\", HERDR_ENV = \"x\" }\ninherit = \"none\"\n"
+  },
+  {
+    "name": "set-inline-nested",
+    "input": "[shell_environment_policy]\nset = { A = { b = 1 }, HERDR_ENV = [1, 2], HERDR_PANE_ID = \"p\", HERDR_WORKSPACE_ID = \"w\" }\ninherit = \"none\"\n"
+  },
+  {
+    "name": "set-inline-quoted-keys",
+    "input": "[shell_environment_policy]\nset = { \"HERDR_ENV\" = \"1\", 'HERDR_PANE_ID' = \"2\", HERDR_WORKSPACE_ID = \"3\" }\ninherit = \"none\"\n"
+  },
+  {
+    "name": "set-inline-escaped-key",
+    "input": "[shell_environment_policy]\nset = { \"HERDR_\\ENV\" = \"1\" }\ninherit = \"none\"\n"
+  },
+  {
+    "name": "set-inline-bs-quote",
+    "input": "[shell_environment_policy]\nset = { A = \"x\\\\\", HERDR_ENV = \"1\" }\ninherit = \"none\"\n"
+  },
+  {
+    "name": "set-table-then-policy",
+    "input": "[shell_environment_policy.set]\nHERDR_ENV = \"1\"\n[shell_environment_policy]\ninherit = \"none\"\n"
+  },
+  {
+    "name": "set-table-after",
+    "input": "[shell_environment_policy]\ninherit = \"none\"\n[shell_environment_policy.set]\nHERDR_ENV = \"1\"\nHERDR_PANE_ID = \"1\"\nHERDR_WORKSPACE_ID = \"1\"\n"
+  },
+  {
+    "name": "set-both",
+    "input": "[shell_environment_policy]\nset = { A = \"1\" }\n[shell_environment_policy.set]\nB = \"2\"\n"
+  },
+  {
+    "name": "set-both-reversed",
+    "input": "[shell_environment_policy.set]\nB = \"2\"\n[shell_environment_policy]\nset = { A = \"1\" }\n"
+  },
+  {
+    "name": "set-both-scalar",
+    "input": "[shell_environment_policy.set]\nB = \"2\"\n[shell_environment_policy]\nset = 5\n"
+  },
+  {
+    "name": "set-only-table",
+    "input": "[shell_environment_policy.set]\nHERDR_ENV = \"1\"\n"
+  },
+  {
+    "name": "set-dup-key",
+    "input": "[shell_environment_policy.set]\nA = \"1\"\nA = \"2\"\n"
+  },
+  {
+    "name": "set-dup-table",
+    "input": "[shell_environment_policy]\n[shell_environment_policy.set]\nA = \"1\"\n[shell_environment_policy.set]\nB = \"1\"\n"
+  },
+  {
+    "name": "dup-policy",
+    "input": "[shell_environment_policy]\ninherit = \"core\"\n[shell_environment_policy]\n"
+  },
+  {
+    "name": "dup-key",
+    "input": "[shell_environment_policy]\ninherit = \"core\"\nINHERIT = \"all\"\n"
+  },
+  {
+    "name": "dup-key-quoted",
+    "input": "[shell_environment_policy]\ninherit = \"core\"\n\"inherit\" = \"all\"\n"
+  },
+  {
+    "name": "quoted-section",
+    "input": "[\"shell_environment_policy\"]\ninherit = \"none\"\n"
+  },
+  {
+    "name": "single-quoted-section",
+    "input": "['shell_environment_policy']\ninherit = 'none'\n"
+  },
+  {
+    "name": "spaced-section",
+    "input": "[ shell_environment_policy ]\ninherit = \"none\"\n"
+  },
+  {
+    "name": "upper-section",
+    "input": "[SHELL_ENVIRONMENT_POLICY]\ninherit = \"none\"\n"
+  },
+  {
+    "name": "array-of-tables",
+    "input": "[[shell_environment_policy]]\ninherit = \"none\"\n"
+  },
+  {
+    "name": "section-comment",
+    "input": "[shell_environment_policy] # c\ninherit = \"none\"\n"
+  },
+  {
+    "name": "section-trailing-bracket",
+    "input": "[a]b]\n[shell_environment_policy]\ninherit = \"none\"\n"
+  },
+  {
+    "name": "other-section-then-policy",
+    "input": "[x]\ninherit = \"none\"\n[shell_environment_policy]\nexclude = [\"HERDR_ENV\"]\n"
+  },
+  {
+    "name": "policy-then-other",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_ENV\"]\n[x]\ninherit = \"core\"\n"
+  },
+  {
+    "name": "no-spaces",
+    "input": "[shell_environment_policy]\ninherit=\"none\"\n"
+  },
+  {
+    "name": "tabs",
+    "input": "[shell_environment_policy]\ninherit\t=\t\"none\"\n"
+  },
+  {
+    "name": "quoted-key",
+    "input": "[shell_environment_policy]\n\"inherit\" = \"none\"\n"
+  },
+  {
+    "name": "single-quoted-key",
+    "input": "[shell_environment_policy]\n'exclude' = ['HERDR_ENV']\n"
+  },
+  {
+    "name": "upper-key",
+    "input": "[shell_environment_policy]\nINHERIT = \"none\"\n"
+  },
+  {
+    "name": "key-with-dot",
+    "input": "[shell_environment_policy]\na.b = 1\ninherit = \"none\"\n"
+  },
+  {
+    "name": "value-with-equals",
+    "input": "[shell_environment_policy]\nexclude = [\"a=b\", \"HERDR_ENV\"]\n"
+  },
+  {
+    "name": "hash-in-string",
+    "input": "[shell_environment_policy]\nexclude = [\"a#b\", \"HERDR_ENV\"]\n"
+  },
+  {
+    "name": "hash-in-single",
+    "input": "[shell_environment_policy]\nexclude = ['a#b', 'HERDR_ENV']\n"
+  },
+  {
+    "name": "dq-in-single",
+    "input": "[shell_environment_policy]\nexclude = ['a\"#b', 'HERDR_ENV']\n"
+  },
+  {
+    "name": "bom",
+    "input": "﻿[shell_environment_policy]\ninherit = \"none\"\n"
+  },
+  {
+    "name": "nbsp-lead",
+    "input": " [shell_environment_policy]\ninherit = \"none\"\n"
+  },
+  {
+    "name": "nel",
+    "input": "[shell_environment_policy]\ninherit = \"none\"\n"
+  },
+  {
+    "name": "u2028-in-line",
+    "input": "[shell_environment_policy]\ninherit = \"none\" \n"
+  },
+  {
+    "name": "u2028-mid",
+    "input": "[shell_environment_policy]\ninherit = \"none\"\n"
+  },
+  {
+    "name": "vt-ff-ws",
+    "input": "\u000b[shell_environment_policy]\n\finherit = \"none\"\n"
+  },
+  {
+    "name": "cr-only",
+    "input": "[shell_environment_policy]\rinherit = \"none\"\r"
+  },
+  {
+    "name": "cr-mid-line",
+    "input": "[shell_environment_policy]\ninherit = \"none\" \r x\n"
+  },
+  {
+    "name": "cr-mid-kv",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_ENV\"]\rinherit = \"none\"\n"
+  },
+  {
+    "name": "crlf",
+    "input": "[shell_environment_policy]\r\ninherit = \"none\"\r\n"
+  },
+  {
+    "name": "mixed-eol",
+    "input": "[shell_environment_policy]\r\ninherit = \"none\"\n"
+  },
+  {
+    "name": "accent",
+    "input": "[shell_environment_policy]\nexclude = [\"ação_*\", \"HERDR_ENV\"]\n"
+  },
+  {
+    "name": "kelvin-glob",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_ENVK\"]\n"
+  },
+  {
+    "name": "dotless-i",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_WORKSPACE_ıD\"]\n"
+  },
+  {
+    "name": "long-s",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_WORſSPACE_ID\"]\n"
+  },
+  {
+    "name": "glob-q",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_?NV\"]\n"
+  },
+  {
+    "name": "glob-star-mid",
+    "input": "[shell_environment_policy]\nexclude = [\"H*_ID\"]\n"
+  },
+  {
+    "name": "glob-backslash",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_\\*\"]\n"
+  },
+  {
+    "name": "glob-brackets",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_[EP]*\"]\n"
+  },
+  {
+    "name": "glob-regex-chars",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR.ENV\", \"HERDR+\", \"HERDR(ENV)\"]\n"
+  },
+  {
+    "name": "include-only-set",
+    "input": "[shell_environment_policy]\ninclude_only = [\"PATH\"]\nset = { HERDR_ENV = \"1\", HERDR_PANE_ID = \"1\", HERDR_WORKSPACE_ID = \"1\" }\n"
+  },
+  {
+    "name": "include-partial",
+    "input": "[shell_environment_policy]\ninclude_only = [\"HERDR_ENV\", \"HERDR_PANE_ID\"]\n"
+  },
+  {
+    "name": "include-all",
+    "input": "[shell_environment_policy]\ninclude_only = [\"HERDR_*\"]\n"
+  },
+  {
+    "name": "include-empty",
+    "input": "[shell_environment_policy]\ninclude_only = []\n"
+  },
+  {
+    "name": "exclude-empty",
+    "input": "[shell_environment_policy]\nexclude = []\n"
+  },
+  {
+    "name": "exclude-and-set",
+    "input": "[shell_environment_policy]\nexclude = [\"HERDR_*\"]\n[shell_environment_policy.set]\nHERDR_ENV = \"1\"\nHERDR_PANE_ID = \"1\"\nHERDR_WORKSPACE_ID = \"1\"\n"
+  },
+  {
+    "name": "empty",
+    "input": ""
+  },
+  {
+    "name": "only-comment",
+    "input": "# x\n"
+  },
+  {
+    "name": "other-only",
+    "input": "[x]\na=1\n"
+  },
+  {
+    "name": "kv-no-section",
+    "input": "inherit = \"none\"\n"
+  },
+  {
+    "name": "key-empty-quotes",
+    "input": "[shell_environment_policy]\n\"\" = 1\ninherit = \"none\"\n"
+  },
+  {
+    "name": "value-only-bracket",
+    "input": "[shell_environment_policy]\ninherit = [\"none\"]\n"
+  },
+  {
+    "name": "inherit-no-value",
+    "input": "[shell_environment_policy]\ninherit =\n"
+  },
+  {
+    "name": "inherit-num",
+    "input": "[shell_environment_policy]\ninherit = 5\n"
+  },
+  {
+    "name": "trailing-junk-line",
+    "input": "[shell_environment_policy]\ninherit = \"none\"\n}}}\n===\n"
+  }
+]
