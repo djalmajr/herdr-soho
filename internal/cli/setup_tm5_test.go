@@ -3,9 +3,11 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -43,6 +45,25 @@ func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 	want, ok := goldens[name]
 	if !ok {
 		t.Fatalf("golden %q missing", name)
+	}
+	// The doctor step runs with HERDR_ENV=1, no HERDR_PANE_ID and no herdr on PATH:
+	// the Go doctor reports that context as invalid (PLAN §9 A2), where the frozen
+	// JS golden still says inside Herdr.
+	for i := range want.Steps {
+		if strings.Join(want.Steps[i].Args, " ") == "doctor" {
+			out := want.Steps[i].Out
+			if !strings.Contains(out, "ok     inside Herdr (HERDR_ENV=1)\n") {
+				t.Fatalf("golden %q no longer has the inside-Herdr line", name)
+			}
+			out = strings.Replace(out, "ok     inside Herdr (HERDR_ENV=1)\n", "warn   Herdr context invalid: HERDR_PANE_ID is unset and herdr pane current failed (herdr CLI not found in PATH)\n", 1)
+			// The summary line moves one ok to the warnings.
+			out = regexp.MustCompile(`(?m)^(\d+) ok, (\d+) warning\(s\)$`).ReplaceAllStringFunc(out, func(line string) string {
+				var ok, warn int
+				fmt.Sscanf(line, "%d ok, %d warning(s)", &ok, &warn)
+				return fmt.Sprintf("%d ok, %d warning(s)", ok-1, warn+1)
+			})
+			want.Steps[i].Out = out
+		}
 	}
 	env, repo := setupTM5CommandFixture(t)
 	root := filepath.Dir(repo)
