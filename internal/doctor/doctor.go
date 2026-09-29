@@ -758,21 +758,19 @@ func doctorLaneWarnings(ctx *core.Config, env platform.Env, cwd string, s *Say) 
 	if core.ConfigExplicit(ctx, "split_max_panes", env) {
 		sp := core.Cfg(ctx, "split_max_panes", "", env)
 		n, e := strconv.Atoi(sp)
-		cap := core.PanesValue(ctx, env)
-		pi, _ := strconv.Atoi(cap)
-		flex := mode == "flex"
-		if flex {
-			pi += core.FlexExtra(ctx, env)
-		}
-		if e == nil && n > pi {
-			if flex {
-				s.Warning(fmt.Sprintf("config: split_max_panes=%s is greater than panes=%s + flex_extra=%d. Set split_max_panes=%d (doctor --fix aligns it).", sp, cap, core.FlexExtra(ctx, env), pi))
-			} else {
-				s.Warning(fmt.Sprintf("config: split_max_panes=%s is greater than panes=%s. Set split_max_panes=%s (doctor --fix aligns it).", sp, cap, cap))
+		mw, _ := strconv.Atoi(core.MaxWorkers(ctx, env))
+		ref := 1 + mw
+		if mw == 0 {
+			ref, _ = strconv.Atoi(core.PanesValue(ctx, env))
+			if mode == "flex" {
+				ref += core.FlexExtra(ctx, env)
 			}
 		}
-		if core.LanesEnabled(ctx, env) && flex && e == nil && n < pi {
-			s.Warning(fmt.Sprintf("config: split_max_panes=%s leaves no room for the temporary panel (panes=%s + flex_extra=%d); the extra worker will open in a herd tab. Remove split_max_panes or set %d.", sp, cap, core.FlexExtra(ctx, env), pi))
+		if e == nil && n > ref {
+			s.Warning(fmt.Sprintf("config: split_max_panes=%s is greater than 1 + max_workers=%d. Set split_max_panes=%d (doctor --fix aligns it).", sp, mw, ref))
+		}
+		if core.LanesEnabled(ctx, env) && e == nil && n < ref {
+			s.Warning(fmt.Sprintf("config: split_max_panes=%s leaves no room for the whole team (1 + max_workers=%d); the last workers will open in a herd tab. Remove split_max_panes or set %d.", sp, mw, ref))
 		}
 	}
 	plannerKeys := make([]string, 0, len(ctx.Entries))

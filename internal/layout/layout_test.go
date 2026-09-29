@@ -145,6 +145,49 @@ func TestSplitLimitsFollowConfiguration(t *testing.T) {
 	})
 }
 
+func TestSplitCapFollowsTheWholeTeam(t *testing.T) {
+	// A9: with lanes on and no explicit split_max_panes the cap is the caller
+	// plus the whole team (1 + the effective max_workers), so the team fits in
+	// the caller's tab; max_workers=0 keeps the old panes rule.
+	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
+	t.Run(`panes=4 strict without max_workers: the lanes sum (3) plus the caller`, func(t *testing.T) { // A9: the cap follows the team, not panes
+		if got := SplitCap(ctx, platform.Env{"HERDR_SOHO_PANES": "4"}); got != 4 {
+			t.Fatalf("cap=%d, want 4 (1 + lanes sum 3)", got)
+		}
+	})
+	t.Run(`flex with flex_extra=1 without max_workers`, func(t *testing.T) {
+		if got := SplitCap(ctx, platform.Env{"HERDR_SOHO_PANE_MODE": "flex", "HERDR_SOHO_FLEX_EXTRA": "1"}); got != 5 {
+			t.Fatalf("flex cap=%d, want 5 (1 + lanes 3 + flex 1)", got)
+		}
+	})
+	t.Run(`an explicit max_workers=5 in flex is the whole team`, func(t *testing.T) {
+		if got := SplitCap(ctx, platform.Env{"HERDR_SOHO_MAX_WORKERS": "5", "HERDR_SOHO_PANE_MODE": "flex", "HERDR_SOHO_FLEX_EXTRA": "1"}); got != 6 {
+			t.Fatalf("cap=%d, want 6 (1 + max_workers 5)", got)
+		}
+	})
+	t.Run(`max_workers=0 falls back to the panes rule`, func(t *testing.T) {
+		if got := SplitCap(ctx, platform.Env{"HERDR_SOHO_MAX_WORKERS": "0"}); got != 4 {
+			t.Fatalf("no-cap strict=%d, want 4 (panes)", got)
+		}
+		if got := SplitCap(ctx, platform.Env{"HERDR_SOHO_MAX_WORKERS": "0", "HERDR_SOHO_PANE_MODE": "flex", "HERDR_SOHO_FLEX_EXTRA": "1"}); got != 5 {
+			t.Fatalf("no-cap flex=%d, want 5 (panes + flex)", got)
+		}
+	})
+	t.Run(`an explicit split_max_panes wins`, func(t *testing.T) {
+		if got := SplitCap(ctx, platform.Env{"HERDR_SOHO_SPLIT_MAX_PANES": "3"}); got != 3 {
+			t.Fatalf("explicit cap=%d, want 3", got)
+		}
+	})
+	t.Run(`lanes off keeps today's rule`, func(t *testing.T) {
+		if got := SplitCap(ctx, platform.Env{"HERDR_SOHO_LANES": "off"}); got != 4 {
+			t.Fatalf("lanes-off cap=%d, want 4 (default)", got)
+		}
+		if got := SplitCap(ctx, platform.Env{"HERDR_SOHO_LANES": "off", "HERDR_SOHO_SPLIT_MAX_PANES": "6"}); got != 6 {
+			t.Fatalf("lanes-off explicit=%d, want 6", got)
+		}
+	})
+}
+
 func TestSplitAnchorCapacityAndMinimumCases(t *testing.T) {
 	const raw = `{"result":{"layout":{"area":{"width":100,"height":100},"panes":[{"pane_id":"caller","rect":{"x":0,"y":0,"width":50,"height":100}},{"pane_id":"worker","rect":{"x":50,"y":0,"width":50,"height":100}},{"pane_id":"foreign","rect":{"x":0,"y":0,"width":100,"height":100}}]}}}`
 	t.Run(`split anchor: per-tab capacity`, func(t *testing.T) { // JS: "split anchor: per-tab capacity"

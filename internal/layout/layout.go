@@ -234,6 +234,10 @@ func SplitAnchor(raw []byte, me string, mine []string, cap int, min float64) *An
 
 func SplitCap(ctx *core.Config, env platform.Env) int {
 	if core.LanesEnabled(ctx, env) && !core.ConfigExplicit(ctx, "split_max_panes", env) {
+		mw, _ := strconv.Atoi(core.MaxWorkers(ctx, env))
+		if mw > 0 {
+			return 1 + mw
+		}
 		panes, _ := strconv.Atoi(core.PanesValue(ctx, env))
 		if core.PaneMode(ctx, env) == "flex" {
 			return panes + core.FlexExtra(ctx, env)
