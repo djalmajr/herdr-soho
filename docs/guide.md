@@ -156,9 +156,14 @@ snapshot; an absent snapshot or empty field groups as `(unknown)`. With
 and `review`; with `--by` (including `--by role`), JSON has `by`,
 `groups`, `lost_briefs` and `review`. The review table covers reviewer,
 security-reviewer, ui-reviewer and inspector. Other date formats exit 2.
-Each counted pair is exactly one of a task, amendment or reuse. A
-non-amendment that switches from the agent's previous known role counts
-under `reuses`, not `tasks`. Each group also has `no_report`, `minutes`,
+Each counted pair is exactly one of a task, amendment or reuse. An
+agent's first non-amendment brief is a task; every later non-amendment
+brief to the same agent counts under `reuses`, with or without a role
+change. An amendment belongs to the brief it amends: it is never lost or
+pending on its own, and it does not decide which brief is the agent's
+last. A brief without a report is pending while its agent is in the
+roster and it is the agent's last non-amendment brief, and lost
+otherwise. Each group also has `no_report`, `minutes`,
 `partials` and `not_received`. The last field records a dispatch's
 arrival-check result even if a later wait recovers. JSON
 `lost_briefs` maps each group to the stored composed-prompt paths for
