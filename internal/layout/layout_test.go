@@ -10,7 +10,8 @@ import (
 )
 
 func TestGridSizes(t *testing.T) {
-	// Mutation captured: assigning remainder rows to the first columns changes the grids for 3, 5, 7, and 8 cells.
+	// Mutation captured: assigning remainder rows to the first columns changes the grids for 3, 5 and 8 cells;
+	// 7 is 1+3+3 by the user's decision (the caller alone in its column), which the JS golden does not have.
 	t.Run(`grid sizes: the extra rows go to the last columns`, func(t *testing.T) { // JS: "grid sizes: the extra rows go to the last columns"
 		tests := []struct {
 			n    int
@@ -19,7 +20,7 @@ func TestGridSizes(t *testing.T) {
 		}{
 			{0, 0, []int{}}, {1, 1, []int{1}}, {2, 2, []int{1, 1}},
 			{3, 2, []int{1, 2}}, {4, 2, []int{2, 2}}, {5, 3, []int{1, 2, 2}},
-			{6, 3, []int{2, 2, 2}}, {7, 3, []int{2, 2, 3}}, {8, 3, []int{2, 3, 3}}, {9, 3, []int{3, 3, 3}},
+			{6, 3, []int{2, 2, 2}}, {7, 3, []int{1, 3, 3}}, {8, 3, []int{2, 3, 3}}, {9, 3, []int{3, 3, 3}},
 		}
 		for _, tt := range tests {
 			t.Run("n="+strconv.Itoa(tt.n), func(t *testing.T) {
