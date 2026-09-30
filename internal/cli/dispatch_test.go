@@ -103,6 +103,45 @@ func TestDispatchNoWaitWritesPromptAndTaskState(t *testing.T) {
 	}
 }
 
+func TestDispatchSidecarSession(t *testing.T) {
+	t.Run("the sidecar records the roster started value as the session", func(t *testing.T) {
+		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
+		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
+		if code != 0 {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+		composed, ok := dispatchOutputField(t, out, "composed_prompt")
+		if !ok {
+			t.Fatalf("success JSON omitted composed prompt: %s", out)
+		}
+		value := mustRead(t, dispatch.DispatchSidecar(composed))
+		if !strings.Contains(value, `"session":"now"`) {
+			t.Fatalf("sidecar missing the roster started session: %s", value)
+		}
+	})
+	t.Run("an empty roster started leaves no session field", func(t *testing.T) {
+		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
+		roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\tmode\targs\teffort\nworker\tw0test:p0a\tcodex\timplementer\topenai\t0\t\t\tgpt-5\ttask\timplementer\t\t\t\thigh\n"
+		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
+		if code != 0 {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+		composed, ok := dispatchOutputField(t, out, "composed_prompt")
+		if !ok {
+			t.Fatalf("success JSON omitted composed prompt: %s", out)
+		}
+		value := mustRead(t, dispatch.DispatchSidecar(composed))
+		if strings.Contains(value, "session") {
+			t.Fatalf("sidecar recorded a session for an empty started: %s", value)
+		}
+	})
+}
+
 func TestDispatchUsageErrorsPortedCases(t *testing.T) {
 	// JS: "dispatch: usage errors (missing args, unknown option, brief not found, not in roster)"
 	f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")

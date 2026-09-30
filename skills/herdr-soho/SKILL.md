@@ -746,9 +746,13 @@ and `review`; with `--by` (including `--by role`), JSON has `by`,
 `groups`, `lost_briefs` and `review`. The review table covers reviewer,
 security-reviewer, ui-reviewer and inspector. Other date formats exit 2.
 Each counted pair is exactly one of a task, amendment or reuse. An
-agent's first non-amendment brief is a task; every later non-amendment
-brief to the same agent counts under `reuses`, with or without a role
-change. An amendment belongs to the brief it amends: it is never lost or
+agent's first non-amendment brief of its worker session is a task; every
+later non-amendment brief of the same session counts under `reuses`, with
+or without a role change. Same session means the same `started` value
+recorded in the sidecars; a legacy sidecar without one falls back to the
+same kind and model as the agent's earlier non-amendment brief. `briefs`
+(tasks plus reuses) is shown after `tasks` in the table and in the JSON of
+each group. An amendment belongs to the brief it amends: it is never lost or
 pending on its own, and it does not decide which brief is the agent's
 last. A brief without a report is pending while its agent is in the
 roster and it is the agent's last non-amendment brief, and lost
