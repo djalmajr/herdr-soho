@@ -412,7 +412,8 @@ func gitToplevel(dir string, env platform.Env) (string, bool) {
 	if value == "" {
 		return "", false
 	}
-	return value, true
+	// git prints forward slashes on Windows; report the native path.
+	return filepath.Clean(filepath.FromSlash(value)), true
 }
 
 func hasDotDot(rel string) bool {

@@ -705,7 +705,7 @@ $S roles                                   # roles with the kind, model and effo
 $S role reviewer                           # resolved file + frontmatter
 $S spawn implementer [--name impl] [--kind codex] [--direction right|down]
 $S dispatch impl <brief.md> [--timeout 900000] [--amend]   # role prompt + brief → agent, waits; --amend amends the agent's current brief
-$S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines (exit 16 on changed/missing, 4 when the report cannot be read)
+$S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines, one `<sha256>  <path>` per file as `sha256sum` prints it (exit 16 on changed/missing or when the report has none, 4 when the report cannot be read)
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
 $S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601

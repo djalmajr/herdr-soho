@@ -854,7 +854,7 @@ func TestCollectPortedCases(t *testing.T) {
 			t.Fatalf("code=%d out=%q", code, out)
 		}
 	})
-	t.Run("no hash lines prints the no hashes message", func(t *testing.T) { // JS: "collect --verify: no sha256 lines prints the message and exits 0"
+	t.Run("no hash lines is not a pass", func(t *testing.T) { // JS exits 0 here; the Go exits 16 (PLAN §9, A17)
 		f := newCommandFixture(t)
 		name := "alice-20260928T120000"
 		report := filepath.Join(f.reports, name+".md")
@@ -862,7 +862,13 @@ func TestCollectPortedCases(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(f.state, "ws", "last-report-alice"), []byte(report+"\n"), 0o600)
 		f.roster("alice")
 		out, _, code := f.invoke("collect", "alice", "--verify")
-		if code != 0 || !strings.Contains(out, "no sha256 lines in "+report) {
+		if code != 16 || !strings.Contains(out, "no sha256 lines in "+report+": nothing verified") {
+			t.Fatalf("plain report: code=%d out=%q", code, out)
+		}
+		// A Markdown table of hashes is not read either.
+		_ = os.WriteFile(report, []byte("| file | sha256 |\n|---|---|\n| a.go | "+strings.Repeat("a", 64)+" |\n"), 0o600)
+		out, _, code = f.invoke("collect", "alice", "--verify")
+		if code != 16 || !strings.Contains(out, "no sha256 lines in "+report+": nothing verified") {
 			t.Fatalf("code=%d out=%q", code, out)
 		}
 	})
