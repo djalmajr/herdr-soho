@@ -338,8 +338,9 @@ func TestCompactPiThinkingWarning(t *testing.T) {
 		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
-		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.piFresh},
-		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piFooterMedium},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piFresh},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: compactScreens.piFooterMedium},
 	})
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
 	if code != 0 {
@@ -374,8 +375,8 @@ func TestCompactLaterMentionDoesNotAnchor(t *testing.T) {
 		t.Fatalf("json=%v", value)
 	}
 	calls := f.calls(t)
-	if n := countArgv(calls, compactReadArgv("worker")); n != 1 {
-		t.Fatalf("recent reads=%d want 1 (the proof is on the first read): %#v", n, calls)
+	if n := countArgv(calls, compactReadArgv("worker")); n != 2 {
+		t.Fatalf("recent reads=%d want 2 (the pre-send read, then the proof on the first poll): %#v", n, calls)
 	}
 	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
 		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
@@ -471,8 +472,9 @@ func TestCompactFooterThinkingBoundary(t *testing.T) {
 			{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
 			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
 			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
-			{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.piFresh},
-			{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piFooterCutoff},
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+			{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piFresh},
+			{Argv: compactReadArgv("worker"), Call: 3, Stdout: compactScreens.piFooterCutoff},
 		})
 		code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
 		if code != 0 {
@@ -491,8 +493,9 @@ func TestCompactFooterThinkingBoundary(t *testing.T) {
 			{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
 			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
 			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
-			{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.piFresh},
-			{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piFooterHigh},
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+			{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piFresh},
+			{Argv: compactReadArgv("worker"), Call: 3, Stdout: compactScreens.piFooterHigh},
 		})
 		roleFile := filepath.Join(f.root, "roles", "implementer.md")
 		if err := os.WriteFile(roleFile, []byte("---\nname: implementer\nmode: edit\neffort: medium\n---\nRole body.\n"), 0o600); err != nil {
@@ -696,4 +699,38 @@ func TestDispatchCompactSkipsUnsupportedKind(t *testing.T) {
 	if n := countArgvPrefix(calls, []string{"agent", "prompt", "worker"}); n != 1 {
 		t.Fatalf("prompt calls=%d want 1: %#v", n, calls)
 	}
+}
+
+// TestCompactPiWithoutEcho uses the screen pi really shows: it does not echo
+// the /compact it runs, only a `[compaction]` box with `Compacted from <n>
+// tokens`. A proof line that was not on screen before the send counts; the
+// same line as before the send does not (rc.3 timed out on every pi worker).
+func TestCompactPiWithoutEcho(t *testing.T) {
+	before := "earlier reply\n/path/to/report.md\n"
+	after := before + "[compaction]\nCompacted from 64,446 tokens (ctrl+o to expand)\n"
+	t.Run("a new proof line without the echoed command counts", func(t *testing.T) {
+		f := newCompactFixture(t, "pi", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: before},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: after},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+		if code != 0 || compactJSON(t, out)["status"] != "compacted" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+	})
+	t.Run("the proof of an earlier compaction does not count", func(t *testing.T) {
+		f := newCompactFixture(t, "pi", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: after},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "800")
+		if code != 9 || compactJSON(t, out)["status"] != "timeout" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+	})
 }

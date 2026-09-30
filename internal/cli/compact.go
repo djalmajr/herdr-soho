@@ -96,18 +96,22 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 		core.DieFriction(fmt.Sprintf("compact: agent '%s' is %s; compact only an idle worker", agent, state.State), 10, frictionLogPath, "compact")
 	}
 	compactDieOnDeadWorker(agent, state)
+	proof := compactProof(kind)
+	// The proof lines already on screen before the send: pi does not echo the
+	// /compact it runs, so a proof counts when it sits below the echoed command
+	// (claude, codex) or when it is a line that was not there before the send.
+	seen := compactProofLines(herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines)), proof)
 	if !herdr.PaneSendText(pane, "/compact", env) {
 		core.DieFriction(fmt.Sprintf("compact: could not send /compact to pane '%s'; release --close and spawn --fresh instead", pane), 4, frictionLogPath, "compact")
 	}
 	if !herdr.PaneSendKeys(pane, "Enter", env) {
 		core.DieFriction(fmt.Sprintf("compact: could not send Enter to pane '%s'; release --close and spawn --fresh instead", pane), 4, frictionLogPath, "compact")
 	}
-	proof := compactProof(kind)
 	start := platform.Now()
 	deadline := start.Add(time.Duration(timeoutMS) * time.Millisecond)
 	compacted := false
 	for {
-		if !compacted && compactProofBelow(herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines)), proof) {
+		if !compacted && compactProofNew(herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines)), proof, seen) {
 			compacted = compactWaitIdle(agent, env, deadline)
 		} else if !compacted {
 			// No proof yet: a worker that died meanwhile stops the wait now (6, 4)
@@ -188,6 +192,32 @@ func compactCommandLine(line string) bool {
 // line of the screen that is the sent /compact command; proof above it (an
 // earlier compaction) does not count, and a screen without the sent command
 // has no proof.
+// compactProofLines returns the trimmed screen lines that hold the proof.
+func compactProofLines(screen, proof string) map[string]bool {
+	out := map[string]bool{}
+	for _, line := range strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n") {
+		if strings.Contains(line, proof) {
+			out[strings.TrimSpace(line)] = true
+		}
+	}
+	return out
+}
+
+// compactProofNew reports a proof below the echoed /compact, or a proof line
+// that was not on screen before the send (pi prints `Compacted from <n>
+// tokens` with no echo of the command).
+func compactProofNew(screen, proof string, seen map[string]bool) bool {
+	if compactProofBelow(screen, proof) {
+		return true
+	}
+	for line := range compactProofLines(screen, proof) {
+		if !seen[line] {
+			return true
+		}
+	}
+	return false
+}
+
 func compactProofBelow(screen, proof string) bool {
 	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
 	marker := -1
