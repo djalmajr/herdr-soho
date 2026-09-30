@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/herdr-soho/internal/dispatch"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/kinds"
@@ -194,6 +195,47 @@ func FindReusable(role, kind, workerCwd, name, wantModel, wantApprovals string, 
 		return "", blockedName + "\x00" + blockedCause, true
 	}
 	return crossHit, "", false
+}
+
+// laneReuseCandidate reports whether the lane worker row (state from
+// herdr agent get) is a reuse candidate for this spawn: idle or done, no
+// pending report, not locked for a review role, and kind, resolved model
+// (roster column 8) and cwd (roster column 6, canonical via
+// dispatch.SamePath) all matching the request.
+func laneReuseCandidate(f []string, state, role, kind, model, workerCwd, sd string, env platform.Env, cwd string) bool {
+	if state != "idle" && state != "done" {
+		return false
+	}
+	nm := fieldAt(f, 0)
+	rep := core.LastReport(sd, nm)
+	if rep != "" {
+		info, err := os.Stat(rep)
+		if err != nil || info.Size() == 0 {
+			return false
+		}
+	}
+	if core.IsReviewRole(role) && (core.RoleIsEdit(fieldAt(f, 3), env, cwd) || core.HistoryHasEdit(fieldAt(f, 10), env, cwd)) {
+		return false
+	}
+	return fieldAt(f, 2) == kind && fieldAt(f, 8) == model && dispatch.SamePath(fieldAt(f, 6), workerCwd, platform.Current())
+}
+
+// laneReusePick scans the lane's live workers in roster order and returns the
+// first idle worker that is a reuse candidate for the request, or "" when no
+// idle worker matches (each mismatched idle then counts as occupied).
+func laneReusePick(sd, lane, role, kind, model, workerCwd string, env platform.Env, cwd string) string {
+	for _, row := range core.LaneWorkers(sd, lane) {
+		f := strings.Split(row, "\t")
+		nm := fieldAt(f, 0)
+		if nm == "" {
+			continue
+		}
+		st := herdr.AgentState(nm, env, herdr.Timeout, nil)
+		if laneReuseCandidate(f, st.State, role, kind, model, workerCwd, sd, env, cwd) {
+			return nm
+		}
+	}
+	return ""
 }
 
 func EmitReuse(name, role, kind string, ctx *core.Config, env platform.Env, cwd string) bool {
@@ -471,45 +513,90 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		burst = core.PaneMode(ctx, env) == "flex" && has(core.SplitRoles(core.Cfg(ctx, "flex_roles", "reviewer,documenter", env)), o.role) && (d.Decision == "busy" || d.Capacity == 0 && d.Decision == "absent") && len(core.LiveBurstWorkers(sd, env)) < core.FlexExtra(ctx, env)
 		switch d.Decision {
 		case "reuse":
-			line := core.RosterLine(sd, d.Name)
+			// A12: --name never swaps the names of live lane workers. A live
+			// worker already named o.name is reused as-is when it is a
+			// candidate; when it exists on the lane and is not, the busy-lane
+			// rule applies. Only when no live agent is named o.name does a
+			// different candidate get renamed to it (the rename flow below).
+			selected := ""
+			if o.name != "" {
+				named := false
+				for _, row := range core.LaneWorkers(sd, lane) {
+					rf := strings.Split(row, "\t")
+					if fieldAt(rf, 0) != o.name {
+						continue
+					}
+					named = true
+					st := herdr.AgentState(o.name, env, herdr.Timeout, nil)
+					if laneReuseCandidate(rf, st.State, o.role, kind, o.model, o.cwd, sd, env, cwd) {
+						selected = o.name
+					}
+					break
+				}
+				if named && selected == "" {
+					busyLane(lane, o.name, "", o.role, ctx, env, cwd)
+				}
+			}
+			if selected == "" {
+				line := core.RosterLine(sd, d.Name)
+				f := strings.Split(line, "\t")
+				actual := fieldAt(f, 2)
+				if core.LaneAttr(ctx, lane, "kind", nil, env) == "" {
+					sessionModel := fieldAt(f, 8)
+					sessionEffort := ResolveSpawnEffort(fieldAt(f, 3), lane, actual, kindLayer, ctx, env, cwd, sessionModel)
+					if actual != kind || sessionEffort != o.effort {
+						mismatchLane(d.Name, lane, actual, kind, sessionModel, o.model, sessionEffort, o.effort, ctx, env, cwd)
+					}
+				} else if actual != kind {
+					mismatchSimple(d.Name, lane, actual, kind, ctx, env, cwd)
+				}
+				// A12: the resolved model (roster column 8) and the cwd
+				// (roster column 6, both canonical via dispatch.SamePath) must
+				// match the request too; a mismatched idle is not reused and
+				// the lane decision proceeds as if it were busy — a new pane
+				// when the lane has a slot, exit 13 when it does not.
+				if fieldAt(f, 8) != o.model || !dispatch.SamePath(fieldAt(f, 6), o.cwd, platform.Current()) {
+					selected = laneReusePick(sd, lane, o.role, kind, o.model, o.cwd, env, cwd)
+					if selected == "" {
+						if d.N < d.Capacity {
+							break // the lane has a slot: open a new pane
+						}
+						core.DieFriction(fmt.Sprintf("spawn: lane '%s' has no idle worker matching kind '%s', model '%s' and cwd '%s' (idle: '%s' runs %s %s in %s); release it or raise the lane's panes", lane, kind, o.model, o.cwd, d.Name, actual, fieldAt(f, 8), fieldAt(f, 6)), 13, "", "")
+					}
+				} else {
+					selected = d.Name
+				}
+			}
+			line := core.RosterLine(sd, selected)
 			f := strings.Split(line, "\t")
 			actual := fieldAt(f, 2)
-			if core.LaneAttr(ctx, lane, "kind", nil, env) == "" {
-				sessionModel := fieldAt(f, 8)
-				sessionEffort := ResolveSpawnEffort(fieldAt(f, 3), lane, actual, kindLayer, ctx, env, cwd, sessionModel)
-				if actual != kind || sessionModel != o.model || sessionEffort != o.effort {
-					mismatchLane(d.Name, lane, actual, kind, sessionModel, o.model, sessionEffort, o.effort, ctx, env, cwd)
-				}
-			} else if actual != kind {
-				mismatchSimple(d.Name, lane, actual, kind, ctx, env, cwd)
-			}
 			args := ""
 			if len(f) >= 14 {
 				args = f[13]
 			}
 			wanted := ConfigNativeArgs(kind, lane, o.role, ctx, env, cwd, nil)
 			if args != wanted {
-				obj := jsonjs.O("status", "kind-mismatch", "lane", lane, "name", d.Name, "session_args", args, "requested_args", wanted)
+				obj := jsonjs.O("status", "kind-mismatch", "lane", lane, "name", selected, "session_args", args, "requested_args", wanted)
 				_, _ = fmt.Fprintln(platform.Stdout, jsonjs.Stringify(obj))
-				Warn(fmt.Sprintf("lane '%s' worker '%s' was started with other native args ('%s'); this spawn wants '%s'. Release the lane, then spawn again.", lane, d.Name, args, wanted), ctx, env, "spawn")
+				Warn(fmt.Sprintf("lane '%s' worker '%s' was started with other native args ('%s'); this spawn wants '%s'. Release the lane, then spawn again.", lane, selected, args, wanted), ctx, env, "spawn")
 				platform.Die("", 13)
 			}
-			name := d.Name
+			name := selected
 			renamedTo := ""
-			if o.name != "" && o.name != d.Name {
+			if o.name != "" && o.name != selected {
 				if cause := renameLaneWorker(o.name, fieldAt(f, 1), env); cause != "" {
-					core.DieFriction(fmt.Sprintf("spawn: could not rename worker '%s' to '%s': %s", d.Name, o.name, cause), 4, "", "")
+					core.DieFriction(fmt.Sprintf("spawn: could not rename worker '%s' to '%s': %s", selected, o.name, cause), 4, "", "")
 				}
-				core.RosterRename(sd, d.Name, o.name)
-				moveNameStateFiles(sd, d.Name, o.name, ctx, env)
+				core.RosterRename(sd, selected, o.name)
+				moveNameStateFiles(sd, selected, o.name, ctx, env)
 				name = o.name
 				renamedTo = o.name
 			}
 			EmitReuse(name, o.role, actual, ctx, env, cwd)
 			sameTreeEditors(name, o.role, fieldAt(f, 6), sd, env, cwd, ctx)
-			warnMsg := fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s; its session already holds earlier briefs", lane, d.Name, o.role)
+			warnMsg := fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s; its session already holds earlier briefs", lane, selected, o.role)
 			if renamedTo != "" {
-				warnMsg = fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s, renamed to '%s'; its session already holds earlier briefs", lane, d.Name, o.role, renamedTo)
+				warnMsg = fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s, renamed to '%s'; its session already holds earlier briefs", lane, selected, o.role, renamedTo)
 			}
 			Warn(warnMsg, ctx, env, "spawn")
 			return

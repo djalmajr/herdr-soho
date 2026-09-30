@@ -32,6 +32,7 @@ var knownCommands = map[string]bool{
 	"doctor": true, "explain": true, "init": true, "title": true, "regrid": true,
 	"roster": true, "friction": true, "feedback": true, "tab-label": true,
 	"layout-plan": true, "env": true, "mutation-guard": true,
+	"reopen": true,
 }
 
 var frictionLogPath string
@@ -168,7 +169,7 @@ func Run(args []string, env platform.Env) (code int) {
 	if !knownCommands[command] {
 		platform.Die("unknown command '"+command+"'", 2)
 	}
-	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" {
+	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "reopen" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		commandConfig = &ctx
 		herdr.RequireEnv(decisionEnv, platform.Current(), os.Getpid(), nil)
@@ -246,6 +247,8 @@ func Run(args []string, env platform.Env) (code int) {
 		return 0
 	case "release":
 		return cmdRelease(args[1:], ctx, decisionEnv, commandCwd)
+	case "reopen":
+		return cmdReopen(args[1:], ctx, decisionEnv, commandCwd)
 	case "feedback":
 		return cmdFeedback(args[1:], ctx, decisionEnv, commandCwd)
 	case "spawn":

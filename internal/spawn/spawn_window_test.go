@@ -453,9 +453,10 @@ func TestSpawnSessionAfterSpawnJavaScriptCases(t *testing.T) {
 			f.env["HERDR_SOHO_LANES"] = "on"
 			f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
 			f.ctx.Entries["lane_build_kind"] = core.ConfigEntry{Value: "grok", Source: "project"}
+			f.ctx.Entries["lane_build_model"] = core.ConfigEntry{Value: "grok-4.7", Source: "project"}
 			f.ctx.Entries["lane_build_args"] = core.ConfigEntry{Value: "--new", Source: "session"}
-			f.ctx.Order = []string{"lane_build_roles", "lane_build_kind", "lane_build_args"}
-			f.roster(t, strings.Join([]string{"build", "p-build", "grok", "worker", "xai", "1", "/tmp/work", "now", "grok-4.7", "ask", "worker", "build", "", ""}, "\t"))
+			f.ctx.Order = []string{"lane_build_roles", "lane_build_kind", "lane_build_model", "lane_build_args"}
+			f.roster(t, strings.Join([]string{"build", "p-build", "grok", "worker", "xai", "1", f.cwd, "now", "grok-4.7", "ask", "worker", "build", "", ""}, "\t"))
 			code, stdout, _, calls := runCmdSpawn(t, f, []string{"worker"})
 			if code != 13 || !strings.Contains(stdout, `"status":"kind-mismatch"`) {
 				t.Fatalf("exit=%d stdout=%q calls=%#v", code, stdout, calls)
