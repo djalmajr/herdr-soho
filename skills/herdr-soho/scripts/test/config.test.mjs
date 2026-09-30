@@ -130,7 +130,7 @@ test('config prints the dotted keys as written in the files, rebuilt for env-onl
   } finally { s.cleanup(); }
 });
 
-test('brief_lint_aliases: a scalar key with free one-line text (empty default)', (t) => {
+test('brief_lint_aliases: a scalar key with free one-line text (pt-BR headings by default)', (t) => {
   const s = setup();
   try {
     // Registered right after brief_lint in the scalar key list.
@@ -142,12 +142,12 @@ test('brief_lint_aliases: a scalar key with free one-line text (empty default)',
     assert.ok(!configValueOk('brief_lint_aliases', 'a#b'));
     assert.ok(!configValueOk('brief_lint_aliases', 'a\nb'));
     assert.ok(!configValueOk('brief_lint_aliases', 'a\tb'));
-    // The default is empty.
+    // The default maps the Portuguese headings.
     let r = s.run('config');
     assert.equal(r.rc, 0, r.err);
     let line = r.out.split('\n').find((l) => l.startsWith('brief_lint_aliases'));
     assert.ok(line, 'brief_lint_aliases row missing');
-    assert.ok(line.split(/\s+/).filter(Boolean).length === 2, `the value is empty: ${line}`);
+    assert.ok(line.includes('Owned files=Arquivos próprios') && line.trimEnd().endsWith('defaults'), `the pt-BR default: ${line}`);
     // set writes it like the other scalar keys.
     r = s.run('config', 'set', 'brief_lint_aliases', 'Goal, Acceptance');
     assert.equal(r.rc, 0, r.err);

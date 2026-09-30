@@ -20,7 +20,7 @@ func TestTM9CoreCases(t *testing.T) {
 	t.Run("brief_lint_aliases: a scalar key with free one-line text (empty default)", func(t *testing.T) { // JS: "brief_lint_aliases: a scalar key with free one-line text (empty default)"
 		env, repo := fixture(t)
 		ctx := LoadConfig(env, repo)
-		if Cfg(&ctx, "brief_lint_aliases", "", env) != "" || !ConfigKeyOk("brief_lint_aliases") || !ConfigValueOk("brief_lint_aliases", "Goal, Acceptance", env, repo) || ConfigValueOk("brief_lint_aliases", "a#b", env, repo) || ConfigValueOk("brief_lint_aliases", "a\nb", env, repo) {
+		if !strings.HasPrefix(Cfg(&ctx, "brief_lint_aliases", "", env), "Expected result=Aceite") || !ConfigKeyOk("brief_lint_aliases") || !ConfigValueOk("brief_lint_aliases", "Goal, Acceptance", env, repo) || ConfigValueOk("brief_lint_aliases", "a#b", env, repo) || ConfigValueOk("brief_lint_aliases", "a\nb", env, repo) {
 			t.Fatal("brief_lint_aliases scalar/default/one-line contract changed")
 		}
 	})

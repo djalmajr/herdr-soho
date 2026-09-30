@@ -120,11 +120,20 @@ brief_lint=warn
 # Alternate headings for the brief section lint: comma-separated items
 # Section=Heading|Heading (Section one of Goal, Expected result, Owned
 # files, Forbidden, Report — the no-commit line has no heading to alias).
-# A level 1-3 header that starts with one of a section's headings,
-# case-insensitive, satisfies the section. A malformed item is ignored
-# with a warning; the valid items still apply. Empty = standard headings
-# only. Example: brief_lint_aliases=Goal=Objective|Purpose
-brief_lint_aliases=
+# A level 1-3 header that starts with one of a section's headings, with
+# case and accents folded on both sides, satisfies the section. A malformed
+# item is ignored with a warning; the valid items still apply. The default
+# accepts the Portuguese section headings; a user or project value replaces
+# the whole default. Example: brief_lint_aliases=Goal=Objective|Purpose
+brief_lint_aliases=Expected result=Aceite,Owned files=Arquivos próprios|Arquivos de posse
+
+# Extra unfilled-placeholder markers for the brief lint: comma-separated
+# literal strings, on top of the built-in AGENT_NAME and WORKTREE_PATH. A
+# brief line outside a fenced code block that contains one adds the mark
+# "unfilled placeholder '<marker>' (line <n>)" to the missing list:
+# brief_lint=warn warns, strict refuses. Empty = built-in markers only.
+# Example: brief_lint_placeholders=MY_SLOT
+brief_lint_placeholders=
 
 # Default approvals for roles that do not set one: ask | edits | full.
 approvals=ask
