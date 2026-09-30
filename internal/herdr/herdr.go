@@ -454,6 +454,12 @@ func NotificationShow(title, body string, env platform.Env) {
 func PaneClose(pane string, env platform.Env) bool {
 	return ok(run([]string{"pane", "close", pane}, env))
 }
+func PaneSendText(pane, text string, env platform.Env) bool {
+	return ok(run([]string{"pane", "send-text", pane, text}, env))
+}
+func PaneSendKeys(pane, keys string, env platform.Env) bool {
+	return ok(run([]string{"pane", "send-keys", pane, keys}, env))
+}
 func AgentPrompt(agent, prompt string, env platform.Env) AgentPromptResult {
 	r := platform.RunCli("herdr", []string{"agent", "prompt", agent, prompt}, platform.RunOptions{Env: env, TimeoutMs: int(Timeout / time.Millisecond), MergeOutput: true})
 	raw := strings.TrimRight(r.Stdout, "\n")
