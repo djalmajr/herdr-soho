@@ -107,7 +107,7 @@ func runMutationCopy(args []string, env platform.Env) int {
 			return refuse("link", raw, "target is HOME or above it")
 		}
 		if inside(source, targetPath) {
-			return refuse("link", raw, "target is inside the source")
+			return refuse("link", raw, "target is inside the source; install the dependencies in the copy instead (an offline install from the package manager's store)")
 		}
 		links = append(links, mutationCopyLink{Path: filepath.Clean(rel), Target: targetPath})
 	}

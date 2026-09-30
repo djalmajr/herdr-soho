@@ -150,6 +150,8 @@ var compactScreens = struct {
 	piFooterMedium    string
 	claudeStale       string
 	claudeFresh       string
+	claudeNothing     string
+	claudeFailed      string
 	codexProof        string
 	noProof           string
 	codexLaterMention string
@@ -161,6 +163,8 @@ var compactScreens = struct {
 	piFooterMedium: "old output line\n> /compact\n[compaction] Compacted from 12345 tokens\n• thinking: medium\n",
 	claudeStale:    "old output line\nCompacted\n> /compact\n",
 	claudeFresh:    "old output line\nCompacted\n> /compact\nCompacted the conversation to 42 tokens\n",
+	claudeNothing:  "old output line\n> /compact\nNot enough messages to compact.\n",
+	claudeFailed:   "old output line\n> /compact\nError compacting conversation\n",
 	codexProof:     "> /compact\nContext compacted\n",
 	noProof:        "> /compact\n",
 	// The review's screens: a later line that only mentions /compact must not
@@ -239,6 +243,137 @@ func TestCompactClaudeProofBelowMarker(t *testing.T) {
 	}
 	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
 		t.Fatalf("send-text calls=%d want 1", n)
+	}
+}
+
+// TestCompactClaudeNothingToCompact verifies that claude's answer for a
+// conversation with nothing to compact ends the wait as a success without
+// compaction: no idle wait, no thinking warning, exit 0 with the
+// nothing-to-compact status; the answer already on screen before the send
+// does not count.
+func TestCompactClaudeNothingToCompact(t *testing.T) {
+	t.Run("the answer below the echoed /compact counts", func(t *testing.T) {
+		f := newCompactFixture(t, "claude", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+			{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.claudeNothing},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+		if code != 0 || errText != "" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+		value := compactJSON(t, out)
+		if value["agent"] != "worker" || value["kind"] != "claude" || value["status"] != "nothing-to-compact" {
+			t.Fatalf("json=%v", value)
+		}
+		if elapsed, ok := value["elapsed_ms"].(float64); !ok || elapsed < 0 {
+			t.Fatalf("elapsed_ms=%v", value["elapsed_ms"])
+		}
+		calls := f.calls(t)
+		// The pre-send check is the only state read: the ending does not wait
+		// for the worker back at idle.
+		if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 1 {
+			t.Fatalf("agent get calls=%d want 1: %#v", n, calls)
+		}
+		if n := countArgv(calls, compactReadArgv("worker")); n != 2 {
+			t.Fatalf("recent reads=%d want 2: %#v", n, calls)
+		}
+	})
+	t.Run("the answer already on screen before the send does not count", func(t *testing.T) {
+		screen := "earlier reply\nNot enough messages to compact.\n> /compact\n"
+		f := newCompactFixture(t, "claude", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: screen},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "800")
+		if code != 9 || compactJSON(t, out)["status"] != "timeout" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+	})
+}
+
+// TestCompactClaudeStaleEndingBelowOldCompact verifies the endings' anchor:
+// an ending that already sat below an older /compact on the stable screen
+// (equal before and after the send) does not count, while a new /compact
+// with the same phrase repeated below it does.
+func TestCompactClaudeStaleEndingBelowOldCompact(t *testing.T) {
+	stableNothing := "old output line\n> /compact\nNot enough messages to compact.\n"
+	stableFailed := "old output line\n> /compact\nError compacting conversation\n"
+	t.Run("a stable screen with the old answer times out", func(t *testing.T) {
+		f := newCompactFixture(t, "claude", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: stableNothing},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "800")
+		if code != 9 || compactJSON(t, out)["status"] != "timeout" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+	})
+	t.Run("a stable screen with the old error times out", func(t *testing.T) {
+		f := newCompactFixture(t, "claude", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}`},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: stableFailed},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "800")
+		if code != 9 || compactJSON(t, out)["status"] != "timeout" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+	})
+	t.Run("a new /compact with the same phrase repeated below it counts", func(t *testing.T) {
+		f := newCompactFixture(t, "claude", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: stableNothing},
+			{Argv: compactReadArgv("worker"), Call: 2, Stdout: stableNothing + "> /compact\nNot enough messages to compact.\n"},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+		if code != 0 || compactJSON(t, out)["status"] != "nothing-to-compact" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+	})
+}
+
+// TestCompactClaudeFailedCompaction verifies that claude's compaction error
+// ends the wait as a failure: exit 9 with the failed status and a friction
+// warning, no idle wait, well before the deadline.
+func TestCompactClaudeFailedCompaction(t *testing.T) {
+	f := newCompactFixture(t, "claude", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.claudeFailed},
+	})
+	start := time.Now()
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	elapsed := time.Since(start)
+	if code != 9 {
+		t.Fatalf("code=%d want 9 out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["agent"] != "worker" || value["kind"] != "claude" || value["status"] != "failed" {
+		t.Fatalf("json=%v", value)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("exited after %v; the reported failure must end the wait long before the 30 s deadline", elapsed)
+	}
+	want := `compact: 'worker' reported "Error compacting conversation"; nothing was compacted`
+	if !strings.Contains(errText, want) {
+		t.Fatalf("stderr=%q want %q", errText, want)
+	}
+	calls := f.calls(t)
+	// The failure is found on the first poll, before any liveness or idle wait.
+	if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 1 {
+		t.Fatalf("agent get calls=%d want 1: %#v", n, calls)
 	}
 }
 
@@ -698,6 +833,57 @@ func TestDispatchCompactSkipsUnsupportedKind(t *testing.T) {
 	}
 	if n := countArgvPrefix(calls, []string{"agent", "prompt", "worker"}); n != 1 {
 		t.Fatalf("prompt calls=%d want 1: %#v", n, calls)
+	}
+}
+
+// TestDispatchCompactClaudeNothingToCompact verifies that a claude with
+// nothing to compact inside a dispatch keeps the flow: the compact note is a
+// stderr line, the dispatch's own JSON line stays alone on stdout, and the
+// brief is sent.
+func TestDispatchCompactClaudeNothingToCompact(t *testing.T) {
+	// Call 1 is the compact pre-send check; the ending is found on the first
+	// poll, so calls 2 and 3 are the dispatch's pre-send state and first
+	// arrival probe.
+	extra := []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("working", 2)},
+		{Argv: []string{"pane", "send-text", "w0test:p0a", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "w0test:p0a", "Enter"}, Stdout: `{"result":{}}`},
+		// The pre-send read has no ending; the poll reads the answer below the
+		// newly echoed /compact.
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.claudeNothing},
+	}
+	f := newDispatchArrivalFixture(t, "working", 1, 2, "$CURRENT_PATHS", "0", extra...)
+	roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\tmode\targs\teffort\nworker\tw0test:p0a\tclaude\timplementer\t\t0\t\tnow\tclaude-1\ttask\timplementer\t\t\t\thigh\n"
+	if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errText := f.run(t, "worker", f.brief, "--no-wait", "--compact")
+	if code != 0 {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	if status := dispatchLastLineStatus(t, out); status != "submitted" {
+		t.Fatalf("wait_status=%s out=%s", status, out)
+	}
+	// One JSON line on stdout (the dispatch's); the nothing-to-compact note is
+	// a stderr line, not a compact JSON.
+	if strings.Contains(out, `"status":"nothing-to-compact"`) || strings.Count(strings.TrimSpace(out), "\n") != 0 {
+		t.Fatalf("stdout must hold only the dispatch line: %s", out)
+	}
+	if !strings.Contains(errText, "dispatch: 'worker' had nothing to compact") {
+		t.Fatalf("missing the nothing-to-compact note on stderr: %s", errText)
+	}
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.bin, "herdr.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countArgvPrefix(calls, []string{"agent", "prompt", "worker"}); n != 1 {
+		t.Fatalf("prompt calls=%d want 1: %#v", n, calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-text", "w0test:p0a", "/compact"}); n != 1 {
+		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
 	}
 }
 
