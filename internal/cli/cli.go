@@ -31,7 +31,7 @@ var knownCommands = map[string]bool{
 	"send": true, "stats": true, "release": true, "clean": true, "setup": true,
 	"doctor": true, "explain": true, "init": true, "title": true, "regrid": true,
 	"roster": true, "friction": true, "feedback": true, "tab-label": true,
-	"layout-plan": true, "env": true, "mutation-guard": true,
+	"layout-plan": true, "env": true, "mutation-guard": true, "compact": true,
 }
 
 var frictionLogPath string
@@ -168,7 +168,7 @@ func Run(args []string, env platform.Env) (code int) {
 	if !knownCommands[command] {
 		platform.Die("unknown command '"+command+"'", 2)
 	}
-	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" {
+	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" || command == "compact" {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		commandConfig = &ctx
 		herdr.RequireEnv(decisionEnv, platform.Current(), os.Getpid(), nil)
@@ -253,6 +253,8 @@ func Run(args []string, env platform.Env) (code int) {
 		return 0
 	case "dispatch":
 		return cmdDispatch(args[1:], ctx, decisionEnv, commandCwd)
+	case "compact":
+		return cmdCompact(args[1:], ctx, decisionEnv, commandCwd)
 	case "run":
 		return cmdRun(args[1:], ctx, decisionEnv, commandCwd)
 	case "roles":

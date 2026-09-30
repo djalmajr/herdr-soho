@@ -699,7 +699,8 @@ $S session show | session clear [key]
 $S roles                                   # roles with the kind, model and effort in effect and where each comes from
 $S role reviewer                           # resolved file + frontmatter
 $S spawn implementer [--name impl] [--kind codex] [--direction right|down]
-$S dispatch impl <brief.md> [--timeout 900000] [--amend]   # role prompt + brief → agent, waits; --amend amends the agent's current brief
+$S dispatch impl <brief.md> [--timeout 900000] [--amend] [--compact]   # role prompt + brief → agent, waits; --amend amends the agent's current brief; --compact compacts an idle worker (claude, codex, pi) before the brief and keeps it unsent on a timeout (9) or a busy worker (10)
+$S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, pi): sends /compact once and waits for the CLI's proof plus its return to idle; a kind without a verified command exits 2, a timeout 9
 $S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines (exit 16 on changed/missing, 4 when the report cannot be read)
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
@@ -965,9 +966,12 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   - another subject in the same project: while it is idle, send its CLI's
     compaction command (`/compact` in Claude Code, Codex and pi) with
     `herdr agent prompt <name> "/compact"` (a slash command is not a brief,
-    so `dispatch` does not apply). Then read the pane once with
-    `herdr agent read <name>` until the CLI confirms it (Codex prints
-    `Context compacted`), and dispatch;
+    so `dispatch` does not apply). Prefer `herdr-soho compact <name>`, or
+    `dispatch <name> <brief.md> --compact`, which compacts before the brief:
+    it sends the command once, waits for the CLI's confirmation and the
+    worker's return to idle, and exits 9 on a timeout. Then read the pane
+    once with `herdr agent read <name>` until the CLI confirms it (Codex
+    prints `Context compacted`), and dispatch;
   - nothing of the old context helps (an unrelated subject): clear the
     session the same way instead (`/new` in Codex and pi, `/clear` in
     Claude Code), then dispatch;
