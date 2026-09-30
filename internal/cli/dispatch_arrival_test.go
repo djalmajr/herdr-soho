@@ -429,3 +429,42 @@ func countDispatchCalls(calls []fakecli.Call, command string) int {
 	}
 	return count
 }
+
+// TestDispatchWorkingTargetTakesThePromptAfterItsTurn covers a CLI (Cursor)
+// that holds a prompt sent during a turn in a queue it does not show: the
+// check window sees no evidence, the turn ends later, and the target then
+// starts the prompt. That is not a lost prompt.
+func TestDispatchWorkingTargetTakesThePromptAfterItsTurn(t *testing.T) {
+	state := func(mode string, seq int) string {
+		return fmt.Sprintf(`{"result":{"agent":{"agent_status":"%s","state_change_seq":%d}}}`, mode, seq)
+	}
+	get := []string{"agent", "get", "worker"}
+	var extra []fakecli.Rule
+	for call := 1; call <= 10; call++ {
+		extra = append(extra, fakecli.Rule{Argv: get, Call: call, Stdout: state("working", 5)})
+	}
+	extra = append(extra,
+		fakecli.Rule{Argv: get, Call: 11, Stdout: state("idle", 6)},
+		fakecli.Rule{Argv: get, Stdout: state("working", 7)},
+	)
+	f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\n", "10", extra...)
+	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
+	if code != 0 || dispatchOutputStatus(t, out) != "submitted" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	if strings.Contains(errText, "not confirmed") {
+		t.Fatalf("a prompt taken after the turn was reported unconfirmed: %s", errText)
+	}
+}
+
+// TestDispatchWorkingTargetStillBusyAfterTheSettleWindow keeps the old result
+// when the turn does not end within prompt_settle_seconds.
+func TestDispatchWorkingTargetStillBusyAfterTheSettleWindow(t *testing.T) {
+	f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\n", "2")
+	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
+	if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+}

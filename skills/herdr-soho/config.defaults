@@ -200,8 +200,9 @@ prompt_check_seconds=15
 
 # Seconds `dispatch` waits before sending the prompt for the target to
 # settle (interactive_ready in `herdr agent get` when present and two
-# consecutive identical visible screen reads 500 ms apart). 0 turns the
-# check off.
+# consecutive identical visible screen reads 500 ms apart). For a target
+# already working, the same bound is how long dispatch waits for its turn to
+# end before calling a prompt with no evidence not-received. 0 turns both off.
 prompt_settle_seconds=20
 
 # Minutes a working agent may show the same screen (counters aside) before

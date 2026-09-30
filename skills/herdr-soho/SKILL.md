@@ -540,7 +540,10 @@ marker from an earlier prompt does not count. Only this dispatch's unique
 composed prompt path in the recent screen confirms that the
 prompt is queued; with `--no-wait`, dispatch returns `queued`, and otherwise
 it continues waiting for the report. If a working target shows no evidence,
-dispatch returns `not-received` (exit 15) and says no key was sent. For a
+dispatch waits up to `prompt_settle_seconds` for its turn to end (some CLIs,
+Cursor among them, hold a prompt sent during a turn in a queue they do not
+show) and checks the arrival once more; only then does it return
+`not-received` (exit 15) and say no key was sent. For a
 target that was not working before sending, dispatch keeps the settle and
 arrival checks: it waits up to `prompt_settle_seconds` (20, 0 off) for
 `interactive_ready` true in `herdr agent get` (when present) and two

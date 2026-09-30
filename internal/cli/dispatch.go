@@ -395,7 +395,15 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			}
 		}
 		if wasWorking {
-			if !waitDispatchArrivalExtra(window, env, arrived, promptEvidence) {
+			ok := waitDispatchArrivalExtra(window, env, arrived, promptEvidence)
+			if !ok && settleSecs > 0 {
+				// Some CLIs (Cursor) hold a prompt sent during a turn in a queue they do
+				// not show: wait up to prompt_settle_seconds for that turn to end, then
+				// look for the arrival once more.
+				ok = waitWorkingTurnEnd(agent, preSeq, time.Duration(settleSecs)*time.Second, env) &&
+					waitDispatchArrivalExtra(window, env, arrived, promptEvidence)
+			}
+			if !ok {
 				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, env, true, "the working target showed no prompt evidence")
 			}
 			st := herdr.AgentState(agent, env, herdr.Timeout, nil)
@@ -515,6 +523,31 @@ func waitDispatchArrivalExtra(window time.Duration, env platform.Env, arrived, e
 		}
 		if !platform.Now().Before(deadline) {
 			return arrived() || (extra != nil && extra())
+		}
+		poll := time.Duration(spawn.PollIntervalMs(env)) * time.Millisecond
+		if poll <= 0 {
+			poll = 100 * time.Millisecond
+		}
+		time.Sleep(poll)
+	}
+}
+
+// waitWorkingTurnEnd polls a target that was working when the prompt went out
+// until its turn ends (it leaves working and blocked) or a new turn starts (its
+// state_change_seq moves while working), up to window. It reports whether that
+// happened in time.
+func waitWorkingTurnEnd(agent, preSeq string, window time.Duration, env platform.Env) bool {
+	deadline := platform.Now().Add(window)
+	for {
+		st := herdr.AgentState(agent, env, herdr.Timeout, nil)
+		if st.State != "working" && st.State != "blocked" {
+			return st.State == "idle" || st.State == "done"
+		}
+		if preSeq != "" && seqString(st.Seq) != "" && seqString(st.Seq) != preSeq {
+			return true
+		}
+		if !platform.Now().Before(deadline) {
+			return false
 		}
 		poll := time.Duration(spawn.PollIntervalMs(env)) * time.Millisecond
 		if poll <= 0 {
