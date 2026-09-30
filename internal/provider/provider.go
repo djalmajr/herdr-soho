@@ -48,9 +48,20 @@ var (
 
 // ProviderDetect returns the most recent provider stop from the bottom ten non-empty lines.
 func ProviderDetect(state, screen string) *Detection {
+	return ProviderDetectTexts(state, screen, "", "")
+}
+
+// ProviderDetectTexts is ProviderDetect with the user-configured capacity and
+// error texts (pipe-separated): a line containing one of them, case-insensitively
+// and without the leading box prefix and spaces, is a capacity or
+// provider-error stop even without the Error prefix. The existing rules win;
+// an empty text changes nothing.
+func ProviderDetectTexts(state, screen, capacityTexts, errorTexts string) *Detection {
 	if state == "working" || screen == "" {
 		return nil
 	}
+	capacity := splitTexts(capacityTexts)
+	errTexts := splitTexts(errorTexts)
 	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
 	nonEmpty := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -70,21 +81,55 @@ func ProviderDetect(state, screen string) *Detection {
 		if outputBulletRE.MatchString(line) && !errorStartRE.MatchString(line) {
 			return nil
 		}
-		if !errorGlyphRE.MatchString(line) && !errorStartRE.MatchString(line) {
-			continue
+		if errorGlyphRE.MatchString(line) || errorStartRE.MatchString(line) {
+			cause := text.SanitizeCause(text.RedactSecrets(line))
+			if matchesAny(capacityRes, lowerLine) || capacity529RE.MatchString(line) {
+				return &Detection{Status: "capacity", Cause: cause}
+			}
+			if auth401RE.MatchString(line) || matchesAny(authRes, lowerLine) {
+				return &Detection{Status: "provider-error", Cause: cause, Auth: true}
+			}
+			if matchesAny(providerRes, lowerLine) || providerStatusRE.MatchString(line) || econnRE.MatchString(line) {
+				return &Detection{Status: "provider-error", Cause: cause}
+			}
 		}
-		cause := text.SanitizeCause(text.RedactSecrets(line))
-		if matchesAny(capacityRes, lowerLine) || capacity529RE.MatchString(line) {
-			return &Detection{Status: "capacity", Cause: cause}
+		stripped := text.ASCIILower(stripBoxPrefix(line))
+		if containsText(stripped, capacity) {
+			return &Detection{Status: "capacity", Cause: text.SanitizeCause(text.RedactSecrets(line))}
 		}
-		if auth401RE.MatchString(line) || matchesAny(authRes, lowerLine) {
-			return &Detection{Status: "provider-error", Cause: cause, Auth: true}
-		}
-		if matchesAny(providerRes, lowerLine) || providerStatusRE.MatchString(line) || econnRE.MatchString(line) {
-			return &Detection{Status: "provider-error", Cause: cause}
+		if containsText(stripped, errTexts) {
+			return &Detection{Status: "provider-error", Cause: text.SanitizeCause(text.RedactSecrets(line))}
 		}
 	}
 	return nil
+}
+
+func stripBoxPrefix(line string) string {
+	value := strings.TrimLeft(line, " \t")
+	if strings.HasPrefix(value, "┃") {
+		return strings.TrimLeft(value[len("┃"):], " \t")
+	}
+	return value
+}
+
+func splitTexts(value string) []string {
+	pieces := []string{}
+	for _, piece := range strings.Split(value, "|") {
+		piece = text.ASCIILower(strings.TrimSpace(piece))
+		if piece != "" {
+			pieces = append(pieces, piece)
+		}
+	}
+	return pieces
+}
+
+func containsText(value string, pieces []string) bool {
+	for _, piece := range pieces {
+		if strings.Contains(value, piece) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchesAny(patterns []*regexp.Regexp, value string) bool {

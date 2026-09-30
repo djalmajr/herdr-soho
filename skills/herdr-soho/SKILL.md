@@ -522,7 +522,11 @@ it unattributed even if the line reappears: redraw or replay can mimic a new
 failure. Use `wait` or `status` to inspect the stopped worker.
 `capacity` is a provider that refused because it was full (for example an
 error type naming `capacity` or `overload`, or status 529). The exact
-patterns live in one place, `scripts/lib/provider.mjs`. On `capacity` the
+patterns live in one place, `scripts/lib/provider.mjs`. A private gateway
+whose messages do not start with `Error` adds its own capacity and error
+texts in the user config: `provider_capacity_texts` and `provider_error_texts`
+(pipe-separated, matched case-insensitively, without the `┃` box prefix).
+On `capacity` the
 wait first sends the worker
 "continue" up to `provider_retries` times, `provider_retry_delay` seconds
 apart (each one logged in friction), and reports `capacity` only when that
