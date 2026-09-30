@@ -151,11 +151,12 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 			if compactProofNew(screen, proof, seen) {
 				compacted = compactWaitIdle(agent, env, deadline)
 			} else {
-				// The claude endings count by the same anchor rule as the proof
-				// (below the sent command, or a line not there before the send);
-				// neither waits for the worker back at idle.
+				// A claude ending counts only when it belongs to this attempt:
+				// below a /compact the screen gained since the pre-send read,
+				// or on a line not there before the send; it never waits for
+				// the worker back at idle.
 				for i := range endings {
-					if compactProofNew(screen, endings[i].text, endSeen[i]) {
+					if compactEndingNew(screen, before, endings[i].text, endSeen[i]) {
 						endStatus = endings[i].status
 						break
 					}
@@ -296,6 +297,35 @@ func compactProofBelow(screen, proof string) bool {
 	}
 	for i := marker + 1; i < len(lines); i++ {
 		if strings.Contains(lines[i], proof) {
+			return true
+		}
+	}
+	return false
+}
+
+// compactCommandCount returns how many lines of the screen are the sent
+// /compact command itself.
+func compactCommandCount(screen string) int {
+	n := 0
+	for _, line := range strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n") {
+		if compactCommandLine(line) {
+			n++
+		}
+	}
+	return n
+}
+
+// compactEndingNew reports a claude ending that belongs to this /compact
+// attempt: one below a /compact the screen gained since the pre-send read
+// (its answer may repeat a line already on screen), or one on a line that
+// was not on screen before the send. An ending that sat below an older
+// /compact on the unchanged screen does not count.
+func compactEndingNew(screen, before, text string, seen map[string]bool) bool {
+	if compactCommandCount(screen) > compactCommandCount(before) && compactProofBelow(screen, text) {
+		return true
+	}
+	for line := range compactProofLines(screen, text) {
+		if !seen[line] {
 			return true
 		}
 	}
