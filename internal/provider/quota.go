@@ -31,6 +31,8 @@ var (
 		regexp.MustCompile(`you have hit your( [a-z]+)? limit`),
 		regexp.MustCompile(`you have reached your( specified)?( (workspace )?api)? usage limits?`),
 		regexp.MustCompile(`you've reached your( specified)?( (workspace )?api)? usage limits?`),
+		regexp.MustCompile(`\b402\b.*\b(insufficient|payment required|funds)\b|\b(insufficient|payment required|funds)\b.*\b402\b`),
+		regexp.MustCompile(`insufficient (account )?(funds|balance|credits)`),
 	}
 	renewalLineRes = []*regexp.Regexp{
 		regexp.MustCompile(`resets? (at|in|on) `),
