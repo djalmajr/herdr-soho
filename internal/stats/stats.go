@@ -103,7 +103,9 @@ func warn(msg, logFile string)             { core.Warn(msg, logFile, "stats") }
 func jsObject(pairs ...any) *jsonjs.Object { return jsonjs.O(pairs...) }
 func number(v int) any                     { return v }
 
-func parseSince(value string) (time.Time, bool) {
+// ParseSince reads a `--since` value: AAAA-MM-DD (local midnight) or an ISO
+// 8601 date (with optional seconds, fraction and zone).
+func ParseSince(value string) (time.Time, bool) {
 	if m := dateRE.FindStringSubmatch(value); m != nil {
 		y, _ := strconv.Atoi(m[1])
 		mo, _ := strconv.Atoi(m[2])
@@ -425,7 +427,7 @@ func CmdStats(args []string, command CommandContext) int {
 	hasSince := sinceRaw != ""
 	if hasSince {
 		var ok bool
-		since, ok = parseSince(sinceRaw)
+		since, ok = ParseSince(sinceRaw)
 		if !ok {
 			die("stats: --since expects AAAA-MM-DD or an ISO date (got '"+sinceRaw+"')", 2, "stats", logFile)
 		}

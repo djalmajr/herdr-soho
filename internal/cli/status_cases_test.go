@@ -131,11 +131,31 @@ func (f *waitStatusFixture) calls(t *testing.T) []fakecli.Call {
 
 func TestStatusJavaScriptCases(t *testing.T) {
 	const row = "worker\tp0a\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\timplementer\tbuild\n"
-	t.Run("status: no names points at the roster (exit 2)", func(t *testing.T) { // JS: "status: no names points at the roster (exit 2)"
+	t.Run("status: no names with an empty roster exits 0 pointing at the state dir", func(t *testing.T) {
 		f := newWaitStatusFixture(t, "", nil)
 		code, out, stderr := f.run(t)
-		if code != 2 || out != "" || !strings.Contains(stderr, "status: give at least one agent name") {
+		if code != 0 || out != "" || !strings.Contains(stderr, "status: no agents in the roster (state dir: "+f.state+")") {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, out, stderr)
+		}
+	})
+	t.Run("status: no names covers the whole roster in roster order, same as the named run", func(t *testing.T) {
+		rows := "alpha\tp0a\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\timplementer\tbuild\n" +
+			"beta\tp0b\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\timplementer\tbuild\n"
+		rules := []fakecli.Rule{
+			{Argv: []string{"agent", "get", "alpha"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`},
+			{Argv: []string{"agent", "read", "alpha", "--source", "visible"}, Stdout: "busy\n"},
+			{Argv: []string{"agent", "get", "beta"}, Stdout: `{"result":{"agent":{"agent_status":"idle"}}}`},
+		}
+		f := newWaitStatusFixture(t, rows, rules)
+		code, out, stderr := f.run(t)
+		named := newWaitStatusFixture(t, rows, rules)
+		namedCode, namedOut, namedStderr := named.run(t, "alpha", "beta")
+		if code != 0 || namedCode != 0 || stderr != "" || namedStderr != "" || out != namedOut {
+			t.Fatalf("code=%d named=%d stderr=%q namedStderr=%q out=%q namedOut=%q", code, namedCode, stderr, namedStderr, out, namedOut)
+		}
+		want := "alpha\tworking\t\t-\t-\nbeta\tno-report-yet\t\t-\t-\n"
+		if out != want {
+			t.Fatalf("output=%q want=%q", out, want)
 		}
 	})
 	t.Run("status: an auth screen reports provider-error on the first call, rc 14", func(t *testing.T) { // JS: "status: an auth screen reports provider-error on the first call, rc 14"
