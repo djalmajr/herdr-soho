@@ -723,6 +723,31 @@ func TestCompactPiFailureAfterOffRestores(t *testing.T) {
 	}
 }
 
+// TestCompactPiTimeoutWhileStillCompacting (cinzel): a short timeout while pi
+// shows "Compacting context..." exits 9 with still_compacting and a warning not
+// to send /compact again; a timeout without that line has no such field.
+func TestCompactPiTimeoutWhileStillCompacting(t *testing.T) {
+	run := func(t *testing.T, screen string) (int, map[string]any, string) {
+		f := newCompactFixture(t, "pi", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: screen},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+		return code, compactJSON(t, out), errText
+	}
+	code, value, errText := run(t, "old output line\nCompacting context...\n")
+	if code != 9 || value["status"] != "timeout" || value["still_compacting"] != true || !strings.Contains(errText, "is still compacting") {
+		t.Fatalf("code=%d json=%v stderr=%q", code, value, errText)
+	}
+	code, value, errText = run(t, "old output line\n")
+	if _, has := value["still_compacting"]; code != 9 || has || strings.Contains(errText, "still compacting") {
+		t.Fatalf("code=%d json=%v stderr=%q", code, value, errText)
+	}
+}
+
 // TestCompactClaudeNoMessagesToCompact verifies Claude Code 2.1.285's second
 // nothing-to-compact string: below the echoed /compact it ends the wait as a
 // success without compaction, and the same line already on screen before the

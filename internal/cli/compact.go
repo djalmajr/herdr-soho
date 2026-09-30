@@ -28,6 +28,9 @@ const compactThinkingTaps = 8
 // after `/compact`; a kind without an entry has no verified compact command.
 // The proof only counts below the line where `/compact` was sent: an earlier
 // compaction on the screen is not proof of this one.
+// compactPiRunning is what pi shows while its compaction is still running.
+const compactPiRunning = "Compacting context"
+
 var compactProofByKind = map[string]string{
 	"claude": "Compacted",
 	"codex":  "Context compacted",
@@ -245,6 +248,17 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 		return 0
 	}
 	if !compacted {
+		// pi shows "Compacting context..." while its compaction runs: a timeout
+		// then is the observer giving up, not the compaction failing.
+		if kind == "pi" && strings.Contains(herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines)), compactPiRunning) {
+			core.Warn(fmt.Sprintf("compact: '%s' is still compacting (%q on screen); do not send /compact again: wait and read its screen before the next brief", agent, compactPiRunning), frictionLogPath, "compact")
+			pairs := []any{"agent", agent, "kind", kind, "status", "timeout", "elapsed_ms", elapsed, "still_compacting", true}
+			if thinkingChanged {
+				pairs = append(pairs, "thinking_restored", thinkingRestored)
+			}
+			fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O(pairs...)))
+			return 9
+		}
 		fmt.Fprintln(platform.Stdout, resultJSON("timeout"))
 		return 9
 	}
