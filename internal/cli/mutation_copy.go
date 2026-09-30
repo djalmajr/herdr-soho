@@ -42,7 +42,10 @@ func runMutationCopy(args []string, env platform.Env) int {
 	}
 	source, reason := mutationCopyResolveSource(sourceRaw, cwd, home, env)
 	if reason != "" {
-		return mutationCopyRefuse("source", parsed.source, reason)
+		// The refusal names the path actually attempted (the git toplevel or
+		// the current directory when no --source is given), not the empty
+		// parsed value.
+		return mutationCopyRefuse("source", sourceRaw, reason)
 	}
 
 	dest, destGiven, destCreated, reason := mutationCopyPrepareDest(parsed.dest, cwd, env, home, source)
@@ -86,6 +89,9 @@ func runMutationCopy(args []string, env platform.Env) int {
 		if target == "" {
 			return refuse("link", raw, "target is empty")
 		}
+		if isFilesystemRoot(target) {
+			return refuse("link", raw, "target is the filesystem root")
+		}
 		targetPath, err := canonicalPath(resolveRelative(cwd, target))
 		if err != nil {
 			return refuse("link", raw, "target cannot be resolved: "+err.Error())
@@ -121,6 +127,12 @@ func runMutationCopy(args []string, env platform.Env) int {
 		}
 		srcPath := filepath.Join(source, rel)
 		dstPath := filepath.Join(dest, rel)
+		// A directory component on the listed path may have been replaced by
+		// a symlink to outside the source; lstat every source component before
+		// reading through it.
+		if component := mutationCopySourceDirSymlink(source, rel); component != "" {
+			return refuse("symlink", component, "symlinked directory on a listed path")
+		}
 		info, err := os.Lstat(srcPath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -145,6 +157,9 @@ func runMutationCopy(args []string, env platform.Env) int {
 			if !inside(dest, resolved) {
 				return refuse("symlink", rel, "relative target outside the copy")
 			}
+			if component := mutationCopyDestDirSymlink(dest, rel); component != "" {
+				return refuse("symlink", component, "symlinked directory on a listed path")
+			}
 			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 				return failIO(err.Error())
 			}
@@ -161,10 +176,17 @@ func runMutationCopy(args []string, env platform.Env) int {
 		if err != nil {
 			return failIO(err.Error())
 		}
+		if component := mutationCopyDestDirSymlink(dest, rel); component != "" {
+			return refuse("symlink", component, "symlinked directory on a listed path")
+		}
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 			return failIO(err.Error())
 		}
 		if err := os.WriteFile(dstPath, data, info.Mode().Perm()); err != nil {
+			return failIO(err.Error())
+		}
+		// WriteFile applies the umask; re-apply the on-disk mode.
+		if err := os.Chmod(dstPath, info.Mode().Perm()); err != nil {
 			return failIO(err.Error())
 		}
 		files++
@@ -276,6 +298,9 @@ func mutationCopyResolveSource(raw, cwd, home string, env platform.Env) (string,
 	if raw == "" {
 		return "", "source is empty"
 	}
+	if isFilesystemRoot(raw) {
+		return "", "the filesystem root"
+	}
 	resolved, err := canonicalPath(resolveRelative(cwd, raw))
 	if err != nil {
 		return "", "cannot be resolved"
@@ -336,6 +361,9 @@ func mutationCopyPrepareDest(raw, cwd string, env platform.Env, home, source str
 	if raw == "" {
 		return "", raw, created, "destination is empty"
 	}
+	if isFilesystemRoot(raw) {
+		return "", raw, created, "the filesystem root"
+	}
 	resolved, err := canonicalPath(resolveRelative(cwd, raw))
 	if err != nil {
 		return "", raw, created, "cannot be resolved: " + err.Error()
@@ -394,6 +422,57 @@ func hasDotDot(rel string) bool {
 		}
 	}
 	return false
+}
+
+// isFilesystemRoot reports whether value is the filesystem root or a volume
+// root (C:\ on Windows). It runs on the raw value, before resolution, because
+// on Windows resolving "/" falls back to the current directory.
+func isFilesystemRoot(value string) bool {
+	cleaned := filepath.Clean(value)
+	return filepath.VolumeName(cleaned)+string(filepath.Separator) == cleaned
+}
+
+// mutationCopySourceDirSymlink returns the relative slash-separated directory
+// component of the listed rel path under source that is a symlink, or "" when
+// none of the path's directory components is a symlink.
+func mutationCopySourceDirSymlink(source, rel string) string {
+	parts := strings.Split(rel, "/")
+	dir := source
+	component := ""
+	for _, part := range parts[:len(parts)-1] {
+		dir = filepath.Join(dir, part)
+		if component == "" {
+			component = part
+		} else {
+			component += "/" + part
+		}
+		info, err := os.Lstat(dir)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue // the component is gone; the file check skips the path
+			}
+			return "" // the read below reports the real error
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return component
+		}
+	}
+	return ""
+}
+
+// mutationCopyDestDirSymlink returns the destination's parent directory for
+// the listed rel path (relative to dest, slash-separated) when that parent is
+// a symlink, or "" when it is not.
+func mutationCopyDestDirSymlink(dest, rel string) string {
+	dirRel := "."
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		dirRel = rel[:i]
+	}
+	info, err := os.Lstat(filepath.Join(dest, dirRel))
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return ""
+	}
+	return dirRel
 }
 
 func isWindowsAbsPath(value string) bool {

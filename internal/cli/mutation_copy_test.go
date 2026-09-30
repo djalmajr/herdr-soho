@@ -157,6 +157,13 @@ func TestMutationCopy(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.source, "ignored.txt"), []byte("skip\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		// 0666 on disk: the copy must preserve the mode, not the umask result.
+		if err := os.WriteFile(filepath.Join(f.source, "open.txt"), []byte("open\n"), 0o666); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(filepath.Join(f.source, "open.txt"), 0o666); err != nil {
+			t.Fatal(err)
+		}
 		dest := filepath.Join(f.root, "copy")
 		if err := os.Mkdir(dest, 0o700); err != nil { // an existing empty destination is accepted
 			t.Fatal(err)
@@ -169,14 +176,26 @@ func TestMutationCopy(t *testing.T) {
 		if got.Source != f.source || got.Copy != dest {
 			t.Fatalf("source=%q copy=%q; want %q / %q", got.Source, got.Copy, f.source, dest)
 		}
-		if got.Files != 4 {
-			t.Fatalf("files=%d; want 4 (.gitignore, sub/deep.txt, tracked.txt, untracked.txt)\n%s", got.Files, out)
+		if got.Files != 5 {
+			t.Fatalf("files=%d; want 5 (.gitignore, sub/deep.txt, tracked.txt, untracked.txt, open.txt)\n%s", got.Files, out)
 		}
 		if content, err := os.ReadFile(filepath.Join(dest, "tracked.txt")); err != nil || string(content) != "v2\n" {
 			t.Fatalf("tracked.txt was not copied from the disk: %q %v", content, err)
 		}
-		if info, err := os.Stat(filepath.Join(dest, "tracked.txt")); err != nil || info.Mode().Perm() != 0o640 {
-			t.Fatalf("tracked.txt mode not preserved: %v %v", info, err)
+		if runtime.GOOS != "windows" {
+			// On Windows the permission bits are not preserved by the copy.
+			if info, err := os.Stat(filepath.Join(dest, "tracked.txt")); err != nil || info.Mode().Perm() != 0o640 {
+				t.Fatalf("tracked.txt mode not preserved: %v %v", info, err)
+			}
+		}
+		if content, err := os.ReadFile(filepath.Join(dest, "open.txt")); err != nil || string(content) != "open\n" {
+			t.Fatalf("open.txt missing: %q %v", content, err)
+		}
+		if runtime.GOOS != "windows" {
+			// On Windows the permission bits are not preserved by the copy.
+			if info, err := os.Stat(filepath.Join(dest, "open.txt")); err != nil || info.Mode().Perm() != 0o666 {
+				t.Fatalf("open.txt mode not preserved: %v %v", info, err)
+			}
 		}
 		if content, err := os.ReadFile(filepath.Join(dest, "untracked.txt")); err != nil || string(content) != "new\n" {
 			t.Fatalf("untracked.txt missing: %q %v", content, err)
@@ -219,8 +238,39 @@ func TestMutationCopy(t *testing.T) {
 		if code != 2 || !strings.Contains(errOut, "not a git worktree") {
 			t.Fatalf("non-worktree source: code=%d out=%q err=%q", code, out, errOut)
 		}
+		// Without --source the refusal names the path actually attempted (the
+		// git toplevel or the current directory), not an empty value.
+		gitRepoAll(t, f, f.home, "home-repo.txt", "h\n")
+		code, out, errOut = runMutationCopyCmd(t, f, f.home, nil, "--dest", missing)
+		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing source '"+f.home+"'") || !strings.Contains(errOut, "HOME or above it") {
+			t.Fatalf("default source refusal value: code=%d out=%q err=%q; want the attempted path in the message", code, out, errOut)
+		}
 		if _, err := os.Stat(missing); !os.IsNotExist(err) {
 			t.Fatal("a destination was created for a refused source")
+		}
+		if entries, err := os.ReadDir(f.tmp); err != nil || len(entries) != 0 {
+			t.Fatalf("a temp destination was created for a refused source: %v %v", entries, err)
+		}
+	})
+
+	t.Run("refuses the root and the HOME destinations and creates nothing", func(t *testing.T) {
+		f := newMutationCopyFixture(t)
+		missing := filepath.Join(f.root, "must-not-exist")
+		root := filepath.VolumeName(".") + string(filepath.Separator)
+		code, out, errOut := runMutationCopyCmd(t, f, f.root, nil, "--source", f.source, "--dest", root)
+		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing destination '"+root+"'") || !strings.Contains(errOut, "the filesystem root") {
+			t.Fatalf("root destination: code=%d out=%q err=%q", code, out, errOut)
+		}
+		code, out, errOut = runMutationCopyCmd(t, f, f.root, nil, "--source", f.source, "--dest", f.home)
+		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing destination '") || !strings.Contains(errOut, "HOME or above it") {
+			t.Fatalf("HOME destination: code=%d out=%q err=%q", code, out, errOut)
+		}
+		code, out, errOut = runMutationCopyCmd(t, f, f.root, nil, "--source", f.source, "--dest", f.root)
+		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing destination '") || !strings.Contains(errOut, "HOME or above it") {
+			t.Fatalf("destination above HOME: code=%d out=%q err=%q", code, out, errOut)
+		}
+		if _, err := os.Stat(missing); !os.IsNotExist(err) {
+			t.Fatal("a destination was created for a refused destination")
 		}
 	})
 
@@ -260,6 +310,9 @@ func TestMutationCopy(t *testing.T) {
 	})
 
 	t.Run("links a dependency from outside the worktree and refuses a link into the source", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlinks need elevation on Windows without developer mode")
+		}
 		f := newMutationCopyFixture(t)
 		deps := filepath.Join(f.root, "deps")
 		if err := os.MkdirAll(deps, 0o700); err != nil {
@@ -313,7 +366,9 @@ func TestMutationCopy(t *testing.T) {
 		f := newMutationCopyFixture(t)
 		absLink := filepath.Join(f.source, "abslink")
 		if err := os.Symlink("/nonexistent/absolute-target", absLink); err != nil {
-			t.Skipf("cannot create a symlink in the fixture: %v", err)
+			// The Windows skip above is the only sanctioned skip; on any other
+			// system a symlink that cannot be created is a fixture failure.
+			t.Fatalf("cannot create a symlink in the fixture: %v", err)
 		}
 		dest := filepath.Join(f.root, "symlinkcopy")
 		code, out, errOut := runMutationCopyCmd(t, f, f.root, nil, "--source", f.source, "--dest", dest)
@@ -363,6 +418,9 @@ func TestMutationCopy(t *testing.T) {
 	})
 
 	t.Run("prints the exact JSON line", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlinks need elevation on Windows without developer mode")
+		}
 		f := newMutationCopyFixture(t)
 		deps := filepath.Join(f.root, "deps")
 		if err := os.MkdirAll(deps, 0o700); err != nil {
@@ -386,6 +444,92 @@ func TestMutationCopy(t *testing.T) {
 		want = fmt.Sprintf(`{"copy":%q,"source":%q,"files":3,"links":[]}`+"\n", plain, f.source)
 		if out != want {
 			t.Fatalf("exact JSON mismatch without links:\n got %s\nwant %s", out, want)
+		}
+	})
+
+	t.Run("refuses a link with an empty, a root and a HOME target", func(t *testing.T) {
+		f := newMutationCopyFixture(t)
+		missing := filepath.Join(f.root, "must-not-exist")
+		root := filepath.VolumeName(".") + string(filepath.Separator)
+		code, out, errOut := runMutationCopyCmd(t, f, f.root, nil, "--source", f.source, "--dest", missing, "--link", "nm=")
+		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing link 'nm='") || !strings.Contains(errOut, "target is empty") {
+			t.Fatalf("empty link target: code=%d out=%q err=%q", code, out, errOut)
+		}
+		code, out, errOut = runMutationCopyCmd(t, f, f.root, nil, "--source", f.source, "--dest", missing, "--link", "nm="+root)
+		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing link '") || !strings.Contains(errOut, "target is the filesystem root") {
+			t.Fatalf("root link target: code=%d out=%q err=%q", code, out, errOut)
+		}
+		code, out, errOut = runMutationCopyCmd(t, f, f.root, nil, "--source", f.source, "--dest", missing, "--link", "nm="+f.home)
+		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing link '") || !strings.Contains(errOut, "target is HOME or above it") {
+			t.Fatalf("HOME link target: code=%d out=%q err=%q", code, out, errOut)
+		}
+		if _, err := os.Stat(missing); !os.IsNotExist(err) {
+			t.Fatal("the created destination was not removed for a refused link target")
+		}
+	})
+
+	t.Run("refuses a symlinked directory on a listed path and removes the created destination", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlinks need elevation on Windows without developer mode")
+		}
+		f := newMutationCopyFixture(t)
+		outside := filepath.Join(f.root, "outside")
+		if err := os.MkdirAll(outside, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(outside, "file.txt"), []byte("SECRET_OUTSIDE\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// dir/file.txt is committed before dir goes into the .gitignore, and the
+		// worktree's dir is then replaced by a symlink outside the repository.
+		// The name-only pattern hides the symlink from the untracked listing
+		// (a trailing-slash pattern does not, on some gits), so ls-files emits
+		// dir/file.txt and not dir: the case the component check must cover.
+		gitRepoAll(t, f, f.source, "dir/file.txt", "tracked\n")
+		if err := os.WriteFile(filepath.Join(f.source, ".gitignore"), []byte("dir\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		listed := fixtureGit(t, f, f.source, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+		if !strings.Contains(listed, "dir/file.txt") {
+			t.Fatalf("the fixture does not list dir/file.txt: %q", listed)
+		}
+		for _, name := range strings.Split(listed, "\x00") {
+			if name == "dir" {
+				t.Fatalf("the fixture lists the symlink dir itself; the premise changed: %q", listed)
+			}
+		}
+		if err := os.RemoveAll(filepath.Join(f.source, "dir")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(f.source, "dir")); err != nil {
+			t.Fatalf("cannot create a symlink in the fixture: %v", err)
+		}
+		dest := filepath.Join(f.root, "symlinkdir-abs")
+		code, out, errOut := runMutationCopyCmd(t, f, f.root, nil, "--source", f.source, "--dest", dest)
+		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing symlink 'dir': symlinked directory on a listed path") {
+			t.Fatalf("absolute: code=%d out=%q err=%q", code, out, errOut)
+		}
+		if _, err := os.Stat(dest); !os.IsNotExist(err) {
+			t.Fatal("the created destination was not removed for a symlinked directory on a listed path")
+		}
+		if content, err := os.ReadFile(filepath.Join(outside, "file.txt")); err != nil || string(content) != "SECRET_OUTSIDE\n" {
+			t.Fatalf("the outside file was touched: %q %v", content, err)
+		}
+
+		// The same case with a relative symlink out of the repository.
+		if err := os.RemoveAll(filepath.Join(f.source, "dir")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("../outside", filepath.Join(f.source, "dir")); err != nil {
+			t.Fatalf("cannot create a symlink in the fixture: %v", err)
+		}
+		dest = filepath.Join(f.root, "symlinkdir-rel")
+		code, out, errOut = runMutationCopyCmd(t, f, f.root, nil, "--source", f.source, "--dest", dest)
+		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing symlink 'dir': symlinked directory on a listed path") {
+			t.Fatalf("relative: code=%d out=%q err=%q", code, out, errOut)
+		}
+		if _, err := os.Stat(dest); !os.IsNotExist(err) {
+			t.Fatal("the created destination was not removed for a symlinked directory on a listed path")
 		}
 	})
 
