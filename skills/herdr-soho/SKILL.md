@@ -715,7 +715,7 @@ $S collect impl [--lines N] [--verify]      # prints the report file (or recent 
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
 $S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
-$S friction                                # errors/warnings of this workspace (review at end)
+$S friction [--since <date>] [--level warning|note|error] [--command <cmd>] [--agent <name>] [--summary]  # errors/warnings of this workspace (review at end); the options AND together over the log lines (<date> as in stats --since; --level error matches error(exit N); --agent matches '<name>' in the message); --summary prints a count/level/command table instead of the lines
 $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before sending; no dispatch, no state
 $S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
                                              # peer message to another agent (any kind, local or another machine): ref local/w12:p1 or a name on the local server; waits for a busy target to settle by default
@@ -729,7 +729,7 @@ $S tab-label                               # herd tabs: id, label, auto|manual
 $S tab-label "onda 2" [--tab ID]           # pin a label (newest herd tab, or --tab); --auto goes back
 $S spawn reviewer --tab-label "onda 2"     # place the worker in the herd tab of that name (created if needed)
 $S layout-plan                             # where the next spawn lands (anchor, direction, overflow reason)
-$S status a b                              # non-blocking completion check; no names exits 2 and points to `roster`
+$S status [a b …]                          # non-blocking completion check; no names = the whole team (all roster agents, in roster order, same output and exit code as naming them)
 $S config                                  # effective configuration and sources (incl. the session layer)
 $S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>
 $S roster                                  # live agents with role/kind/pane/state/report and the current task (TASK, from the pane title; '-' when none, cut to 40 characters)

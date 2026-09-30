@@ -71,11 +71,12 @@ func TestStatusParityRemainingCases(t *testing.T) {
 			t.Fatalf("seeded friction: code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})
-	t.Run("parity: status env error paths (usage, outside Herdr, herdr missing)", func(t *testing.T) { // JS: "parity: status env error paths (usage, outside Herdr, herdr missing)"
+	t.Run("parity: status env error paths (no names = the roster, outside Herdr, herdr missing)", func(t *testing.T) {
 		f := newWaitStatusFixture(t, row, nil)
-		code, _, stderr := f.run(t)
-		if code != 2 || !strings.Contains(stderr, "status: give at least one agent name") {
-			t.Fatalf("usage: code=%d stderr=%q", code, stderr)
+		code, out, stderr := f.run(t)
+		namedCode, namedOut, namedStderr := f.run(t, "worker")
+		if code != namedCode || out != namedOut || stderr != namedStderr {
+			t.Fatalf("no names differs from the roster names: code=%d out=%q stderr=%q; want code=%d out=%q stderr=%q", code, out, stderr, namedCode, namedOut, namedStderr)
 		}
 		f.env["HERDR_ENV"] = ""
 		code, _, stderr = f.run(t, "worker")

@@ -45,11 +45,26 @@ func statusJson(agent, state, report string, fields ...any) {
 	jsonLine(jsonjs.O(pairs...))
 }
 
-func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
-	if len(argv) == 0 {
-		core.DieFriction("status: give at least one agent name (herdr-soho roster lists them all)", 2, "", "status")
+func rosterNames(sd string) []string {
+	names := []string{}
+	for _, row := range core.RosterRows(sd) {
+		name := strings.Split(row, "\t")[0]
+		if name != "" {
+			names = append(names, name)
+		}
 	}
+	return names
+}
+
+func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	sd := core.StateDir(ctx, env, cwd)
+	if len(argv) == 0 {
+		argv = rosterNames(sd)
+		if len(argv) == 0 {
+			fmt.Fprintf(platform.Stderr, "status: no agents in the roster (state dir: %s)\n", sd)
+			return 0
+		}
+	}
 	rc := 0
 	for _, agent := range argv {
 		report := core.LastReport(sd, agent)
