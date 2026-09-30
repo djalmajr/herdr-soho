@@ -610,7 +610,15 @@ func dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, si
 	}
 	seq := seqString(herdr.AgentState(agent, env, herdr.Timeout, nil).Seq)
 	marker := strconv.FormatInt(platform.Now().Unix(), 10)
-	if seq != "" {
+	if wasWorking {
+		// The prompt path goes in the marker (as in .queued): the next wait then
+		// sends Enter only when this prompt sits in the last lines (the input),
+		// never for a path it sees in the scrollback of the earlier turn.
+		if seq == "" {
+			seq = "-"
+		}
+		marker += " " + seq + " " + composed
+	} else if seq != "" {
 		marker += " " + seq
 	}
 	marker += "\n"

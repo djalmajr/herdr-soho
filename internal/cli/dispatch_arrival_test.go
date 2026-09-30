@@ -468,6 +468,12 @@ func TestDispatchWorkingTargetStillBusyAfterTheSettleWindow(t *testing.T) {
 	if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 	}
+	// The marker carries this prompt's path, so a later wait sends Enter only
+	// when the prompt sits in the input, not for the path in the scrollback.
+	marker := strings.Fields(mustRead(t, filepath.Join(f.state, "ws", "wait", "worker.not-received")))
+	if len(marker) != 3 || !strings.HasPrefix(marker[2], filepath.Join(f.state, "ws", "briefs", "worker-")) {
+		t.Fatalf("not-received marker without the prompt path: %q", marker)
+	}
 	// The verdict comes only after the turn wait (prompt_settle_seconds=2).
 	if elapsed := time.Since(start); elapsed < 2*time.Second {
 		t.Fatalf("not-received after %v, before the 2 s turn wait", elapsed)
