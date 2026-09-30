@@ -589,7 +589,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 				status = again.Status
 			}
 			log(SenderRefOf(env), t.RefShown, "busy")
-			platform.Die(fmt.Sprintf("send: %s is still %s after %ss; nothing was sent", t.RefShown, status, numberSeconds(timeoutMS)), 17)
+			platform.Die(fmt.Sprintf("send: %s is still %s after %ss; nothing was sent (--now sends it without waiting: a working pi holds it in its Steering queue)", t.RefShown, status, numberSeconds(timeoutMS)), 17)
 		} else {
 			log(SenderRefOf(env), t.RefShown, "error")
 			platform.Die(fmt.Sprintf("send: %s unavailable: %s", t.RefShown, w.Cause), 4)

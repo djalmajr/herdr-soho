@@ -748,6 +748,7 @@ export function composeAmendment(amendRaw, report, ctx, env = process.env, kind 
   out.push(amendRaw);
   out.push(`\n\n# Report contract\n\n`);
   out.push(`- This amendment overrides your current brief where they differ; the rest of that brief still holds.\n`);
+  out.push(`- Check every item again against the files as they are now: rerun the checks it needs, and never copy findings, outputs or states from your earlier report.\n`);
   out.push(`- Write your report as Markdown to \`${report}\` (create parent directories if needed). If you have not written the report of your current brief yet, write one report there that covers the brief and this amendment; otherwise report only on the amendment.\n`);
   out.push(`- This report path is authoritative: if your current brief names a different report path, ignore it and write to this path; a brief can be hand-written or reused with a stale path, and the dispatch's report path never follows the brief's.\n`);
   out.push(`- Give every item its state as \`[done]\`, \`[partial]\` or \`[skipped]\`, followed by the reason.\n`);

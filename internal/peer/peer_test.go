@@ -390,7 +390,8 @@ func TestSend(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 2, Stdout: agentJSON("working", "1")},
 		})
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "1", "hello"})
-		if code != 17 || !strings.Contains(stderr, "nothing was sent") {
+		// The refusal names the way to send at once (cinzel: a 600 s wait on a working pi).
+		if code != 17 || !strings.Contains(stderr, "nothing was sent (--now sends it without waiting: a working pi holds it in its Steering queue)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
