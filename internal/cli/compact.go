@@ -100,7 +100,13 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	// The proof lines already on screen before the send: pi does not echo the
 	// /compact it runs, so a proof counts when it sits below the echoed command
 	// (claude, codex) or when it is a line that was not there before the send.
-	seen := compactProofLines(herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines)), proof)
+	before, readOK := herdr.AgentReadOK(env, agent, "recent", intPtr(compactScreenLines))
+	if !readOK {
+		// Without the screen before the send, an earlier compaction still on screen
+		// would read as this one's proof: send nothing.
+		core.DieFriction(fmt.Sprintf("compact: could not read the screen of '%s' before sending; nothing was sent", agent), 4, frictionLogPath, "compact")
+	}
+	seen := compactProofLines(before, proof)
 	if !herdr.PaneSendText(pane, "/compact", env) {
 		core.DieFriction(fmt.Sprintf("compact: could not send /compact to pane '%s'; release --close and spawn --fresh instead", pane), 4, frictionLogPath, "compact")
 	}

@@ -734,3 +734,22 @@ func TestCompactPiWithoutEcho(t *testing.T) {
 		}
 	})
 }
+
+// TestCompactPreSendReadFailureSendsNothing: without the screen before the
+// send an earlier proof would count as this one, so nothing is sent (exit 4).
+func TestCompactPreSendReadFailureSendsNothing(t *testing.T) {
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), Call: 1, Code: 1, Stderr: `{"error":{"code":"herdr_failed","message":"boom"}}`},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: "[compaction]\nCompacted from 64,446 tokens\n"},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 4 || out != "" || !strings.Contains(errText, "could not read the screen of 'worker' before sending; nothing was sent") {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errText)
+	}
+	if n := countArgv(f.calls(t), []string{"pane", "send-text", "p1", "/compact"}); n != 0 {
+		t.Fatalf("/compact was sent after a failed pre-send read (%d)", n)
+	}
+}
