@@ -83,13 +83,14 @@ func cmdFeedback(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		break
 	}
 	to := core.Cfg(ctx, "feedback_to", "", env)
+	noticeFailed := false
+	noticeErr := ""
 	if to != "" {
 		message := fmt.Sprintf("herdr-soho feedback from %s (%s): %s — %s", project, core.WorkspaceID(ctx, env, cwd), summary, dest)
 		result := herdr.AgentPrompt(to, message, env)
 		if !result.Ok {
-			core.Warn(fmt.Sprintf("feedback send: the notice to %s failed: %s", to, result.Raw), frictionLogPath, "feedback")
-			_, _ = fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O("status", "filed", "file", dest, "notified", nil, "error", result.Raw)))
-			return 4
+			noticeFailed = true
+			noticeErr = result.Raw
 		}
 	}
 	sd := core.StateDir(ctx, env, cwd)
@@ -102,6 +103,11 @@ func cmdFeedback(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	if err != nil {
 		platform.DieFriction(fmt.Sprintf("feedback send: could not write %s", log), 4)
+	}
+	if noticeFailed {
+		core.Warn(fmt.Sprintf("feedback send: the report is saved at %s, but the notice to %s failed: %s", dest, to, noticeErr), frictionLogPath, "feedback")
+		_, _ = fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O("status", "filed", "file", dest, "notified", nil, "error", noticeErr)))
+		return 0
 	}
 	var notified any
 	if to != "" {

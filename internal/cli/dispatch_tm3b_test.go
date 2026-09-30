@@ -330,6 +330,35 @@ func TestDispatchTM3bWaitResultContract(t *testing.T) {
 			t.Fatalf("review fields order=%s", out)
 		}
 	})
+	t.Run("dispatch: a done line with verdict_effective pass lands in the final JSON after the review fields", func(t *testing.T) {
+		last := jsonjs.O("status", "done", "verdict", "pass", "findings", 0, "severity", jsonjs.O("P0", 0, "P1", 0, "P2", 0, "P3", 0), "verdict_effective", "pass")
+		_, out := capture(t, last, "submitted", false)
+		if !strings.Contains(out, `"report_exists":false,"verdict":"pass","findings":0,"severity":{"P0":0,"P1":0,"P2":0,"P3":0},"verdict_effective":"pass","auto_approved":0`) {
+			t.Fatalf("verdict_effective order=%s", out)
+		}
+	})
+	t.Run("dispatch: a done line with a fail verdict and verdict_effective fail lands in the final JSON", func(t *testing.T) {
+		last := jsonjs.O("status", "done", "verdict", "fail", "findings", 1, "severity", jsonjs.O("P0", 1, "P1", 0, "P2", 0, "P3", 0), "verdict_effective", "fail")
+		_, out := capture(t, last, "submitted", false)
+		if !strings.Contains(out, `"verdict":"fail"`) || !strings.Contains(out, `"verdict_effective":"fail"`) {
+			t.Fatalf("fail result=%s", out)
+		}
+	})
+	t.Run("dispatch: a done line with partial and verdict_effective fail lands in the final JSON after partial", func(t *testing.T) {
+		// Mutation captured: dropping verdict_effective from the copied keys
+		// loses the field on this line.
+		last := jsonjs.O("status", "done", "partial", 1, "verdict_effective", "fail")
+		_, out := capture(t, last, "submitted", false)
+		if !strings.Contains(out, `"partial":1,"verdict_effective":"fail"`) {
+			t.Fatalf("partial result order=%s", out)
+		}
+	})
+	t.Run("dispatch: a done line without review fields carries no verdict_effective", func(t *testing.T) {
+		_, out := capture(t, jsonjs.O("status", "done"), "submitted", false)
+		if strings.Contains(out, `"verdict_effective"`) {
+			t.Fatalf("clean result keys=%s", out)
+		}
+	})
 }
 
 func TestDispatchTM3bSandboxAndSharedTreeCases(t *testing.T) {

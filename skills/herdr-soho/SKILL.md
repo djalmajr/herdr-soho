@@ -465,14 +465,20 @@ sum differs from `findings` gets the warning
 `report of '<agent>': findings <N> but P0..P3 add up to <sum>`, and a
 done report of a review role without the header gets
 `report of '<agent>' has no 'findings: N (P0 a, P1 b, P2 c, P3 d) | verdict:
-pass|fail' first line`. The review roles also tell the worker: before
+pass|fail' first line`. Both the `wait` line and the `dispatch` JSON
+gain `verdict_effective` (in `wait` after `partial`, in `dispatch` with
+the review fields): `fail` when the
+header says `fail`, when P0–P2 are open, or when the report carries a
+`partial` item — even with a `pass` header; `pass` otherwise; absent
+when the report has neither a review header nor a `partial` item. The
+review roles also tell the worker: before
 calling a test, assertion or command wrong, run it when the brief allows
 it and quote the output; when it cannot run it, say so and lower its
 confidence — reading the code is not proof that a test fails. The
 `dispatch` JSON carries the same `partial: N` right after `report_exists`
 (after `amend`, when present), and the review fields (`verdict`,
-`findings`, `severity`) right after `report_exists` (after `amend`, when
-present). With `--no-wait`, `dispatch` can also return `wait_status: queued`
+`findings`, `severity`, `verdict_effective`) right after `report_exists`
+(after `amend`, when present). With `--no-wait`, `dispatch` can also return `wait_status: queued`
 when a working target shows prompt evidence; this exits 0 and the prompt is
 picked up when its current turn ends. The JSON is one line with `wait_status` first, so
 `dispatch … | tail -1` returns the whole JSON. When the wait settled on a
@@ -723,7 +729,7 @@ $S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation c
 $S mutation-copy [--source <dir>] [--dest <dir>] [--link <relpath>=<target>]…  # build the throwaway mutation copy from the worktree's repository files, guarded (exit 1 guard, 2 refused, 4 copy error)
 $S find [words] [--machine <label>]… [--all] [--json]   # live panes with a paste-ready reference (<machine>/<ws>:<pane>), filtered by the words
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
-$S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to
+$S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to; a failed notice exits 0 with the file saved (it warns and prints the filed JSON)
 $S regrid                                  # exact grids: caller's tab (split) + every herd tab
 $S tab-label                               # herd tabs: id, label, auto|manual
 $S tab-label "onda 2" [--tab ID]           # pin a label (newest herd tab, or --tab); --auto goes back
@@ -1688,8 +1694,9 @@ issue on the skill's repo so the maintainer can improve it incrementally.
   - The pane or agent in `feedback_to` gets one line with the summary and
     the path.
   - Without `feedback_to`, only the file is written.
-  - It prints one JSON line. Exit 4 means the file was saved but the
-    notice failed: tell the maintainer yourself.
+  - It prints one JSON line. A failed notice exits 0 with the file
+    saved (status `filed`, `notified: null`, the error, and a warning):
+    tell the maintainer yourself.
   - Do not edit the skill, its installed copy, or another project's roles
     or config to work around the friction. The maintainer answers and
     tells you when a change needs your project's config.

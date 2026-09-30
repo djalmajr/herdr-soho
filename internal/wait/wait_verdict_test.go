@@ -47,6 +47,49 @@ func waitVerdictRun(t *testing.T, body string) (string, string, int) {
 	return stdout.String(), stderr.String(), code
 }
 
+func TestWaitVerdictEffective(t *testing.T) {
+	t.Run("wait: a pass header with no open P0-P2 and no partial is verdict_effective pass", func(t *testing.T) {
+		out, _, code := waitVerdictRun(t, reviewReportBody(0, 0, 0, 0, "pass"))
+		if code != 0 || !strings.Contains(out, `"verdict":"pass"`) || !strings.Contains(out, `"P3":0},"verdict_effective":"pass"`) {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+	t.Run("wait: a pass header with an open P2 is verdict_effective fail", func(t *testing.T) {
+		// Mutation captured: dropping P2 from the fail conditions would print
+		// pass on this report.
+		out, _, code := waitVerdictRun(t, reviewReportBody(0, 0, 1, 0, "pass"))
+		if code != 0 || !strings.Contains(out, `"verdict":"pass"`) || !strings.Contains(out, `"verdict_effective":"fail"`) {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+	t.Run("wait: a fail header is verdict_effective fail", func(t *testing.T) {
+		out, _, code := waitVerdictRun(t, reviewReportBody(0, 0, 0, 0, "fail"))
+		if code != 0 || !strings.Contains(out, `"verdict":"fail"`) || !strings.Contains(out, `"verdict_effective":"fail"`) {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+	t.Run("wait: a pass header with a partial item is verdict_effective fail after partial", func(t *testing.T) {
+		// Mutation captured: ignoring partial in the fail conditions would
+		// print pass on this report.
+		out, _, code := waitVerdictRun(t, reviewReportBody(0, 0, 0, 0, "pass")+"| item | state |\n| --- | --- |\n| slice | [partial] |\n")
+		if code != 0 || !strings.Contains(out, `"verdict":"pass"`) || !strings.Contains(out, `"partial":1,"verdict_effective":"fail"`) {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+	t.Run("wait: a report without a header and without partial has no verdict_effective", func(t *testing.T) {
+		out, _, code := waitVerdictRun(t, "# Report\n\nnothing marked\n")
+		if code != 0 || !strings.Contains(out, `"status":"done"`) || strings.Contains(out, `"verdict_effective"`) {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+	t.Run("wait: a report without a header but with a partial item is verdict_effective fail", func(t *testing.T) {
+		out, _, code := waitVerdictRun(t, "# Report\n\n| item | state |\n| --- | --- |\n| slice | [partial] |\n")
+		if code != 0 || strings.Contains(out, `"verdict":`) || !strings.Contains(out, `"partial":1,"verdict_effective":"fail"`) {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+}
+
 func TestWaitVerdictPassOpenFindings(t *testing.T) {
 	t.Run("wait: a verdict pass with an open P2 warns and still exits 0", func(t *testing.T) {
 		// Mutation captured: dropping the P2 from the open count silences the
