@@ -697,6 +697,32 @@ func TestCompactPiTimeoutStillRestores(t *testing.T) {
 	}
 }
 
+// TestCompactPiFailureAfterOffRestores (R-RC7B): a send that fails after the
+// thinking went off exits 4 through DieFriction, and the level goes back first.
+func TestCompactPiFailureAfterOffRestores(t *testing.T) {
+	before := "old output line\n• thinking: high\n"
+	off := "old output line\n• thinking: off\n"
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: before},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: off},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: before},
+		{Argv: []string{"pane", "send-keys", "p1", "shift+tab"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Code: 1, Stderr: `{"error":{"code":"herdr_failed","message":"boom"}}`},
+	})
+	code, _, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 4 || !strings.Contains(errText, "could not send /compact") {
+		t.Fatalf("code=%d stderr=%q", code, errText)
+	}
+	if strings.Contains(errText, "could not restore") {
+		t.Fatalf("the level came back, yet a restore warning: %q", errText)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "shift+tab"}); n != 2 {
+		t.Fatalf("shift+tab calls=%d want 2 (one off, one restore before the exit): %#v", n, calls)
+	}
+}
+
 // TestCompactClaudeNoMessagesToCompact verifies Claude Code 2.1.285's second
 // nothing-to-compact string: below the echoed /compact it ends the wait as a
 // success without compaction, and the same line already on screen before the

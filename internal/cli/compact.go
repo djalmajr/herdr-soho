@@ -146,6 +146,18 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	}
 	thinkingBefore := ""
 	thinkingChanged := false
+	restoreDone := false
+	// A failure after the thinking went off (a send that fails, a worker that
+	// becomes unavailable or dies) exits through DieFriction; the level still
+	// goes back first, so the next brief does not run with thinking off.
+	defer func() {
+		if thinkingChanged && !restoreDone {
+			restoreDone = true
+			if shown := compactThinkingLevel(agent, pane, env, thinkingBefore); shown != thinkingBefore {
+				core.Warn(fmt.Sprintf("compact: could not restore '%s' thinking to '%s' (shows '%s'); set it by hand before the next brief", agent, thinkingBefore, shown), frictionLogPath, "compact")
+			}
+		}
+	}()
 	if kind == "pi" {
 		// pi cuts its summary at a high thinking level: turn it off before the
 		// /compact and give the level back after; a footer without a level or
@@ -199,6 +211,7 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	elapsed := platform.Now().Sub(start).Milliseconds()
 	thinkingRestored := false
 	if thinkingChanged {
+		restoreDone = true
 		// The /compact ran with the thinking off: give the level back before
 		// any exit, a timeout or a failure included; the result reports
 		// whether it came back.
