@@ -226,9 +226,10 @@ alive, such as a cursor designer while a cursor reviewer checks codex code,
 and for code the orchestrator wrote itself (`--for anthropic` when it runs
 on claude).
 The role bodies also carry worker-side rules the orchestrator does not
-repeat in every brief: the `implementer` runs a mutation check in a
-throwaway copy of the project outside the repository whenever other
-workers may share the tree (in place only when alone, and restored only
+repeat in every brief: the `implementer` runs a mutation check when it
+adds signal (a small delta that the brief's gate already covers skips
+it, unless the brief asks for one) in a throwaway copy of the project
+outside the repository whenever other workers may share the tree (in place only when alone, and restored only
 after the file's sha256 still matches — a changed file is someone else's
 edit: not restored, and reported), gives that copy its own build output
 (`CARGO_TARGET_DIR=<copy>/target`, for example) and runs `$S
