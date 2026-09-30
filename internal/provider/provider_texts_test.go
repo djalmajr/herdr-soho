@@ -105,6 +105,13 @@ func TestProviderDetectTexts(t *testing.T) {
 			}
 		}
 	})
+	t.Run("providerDetectTexts: a text with a colon survives the label and the glyph (R-RC6C)", func(t *testing.T) {
+		for _, screen := range []string{"■ server busy: try later\n", "Error: server busy: try later\n", "  ┃  server busy: try later\n"} {
+			if got := ProviderDetectTexts("idle", screen, "server busy: try later", ""); got == nil || got.Status != "capacity" {
+				t.Fatalf("ProviderDetectTexts(%q) = %#v, want capacity", screen, got)
+			}
+		}
+	})
 	t.Run("providerDetectTexts: the cause is the sanitized line", func(t *testing.T) {
 		got := ProviderDetectTexts("idle", "  ┃  vLLM backend unavailable\n", "", errorText)
 		if got == nil || got.Cause != "vLLM backend unavailable" {

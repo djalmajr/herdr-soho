@@ -130,12 +130,10 @@ func splitTexts(value string) []string {
 // brief on screen) is not the provider's answer.
 func configuredTextLine(line string) string {
 	value := stripBoxPrefix(line)
-	if errorGlyphRE.MatchString(value) || errorStartRE.MatchString(value) {
-		if i := strings.Index(value, ":"); i >= 0 {
-			value = value[i+1:]
-		} else {
-			value = strings.TrimLeft(value, " \t■")
-		}
+	if loc := errorStartRE.FindStringIndex(value); loc != nil && strings.HasSuffix(value[:loc[1]], ":") {
+		value = value[loc[1]:]
+	} else if errorGlyphRE.MatchString(value) {
+		value = strings.TrimLeft(value, " \t■")
 	}
 	value = strings.TrimSuffix(strings.TrimSpace(value), ".")
 	return text.ASCIILower(strings.TrimSpace(value))
