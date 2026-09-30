@@ -151,14 +151,14 @@ func TestSkillDirRequiresRolesDirectory(t *testing.T) {
 	previous := currentExecutable
 	currentExecutable = func() (string, error) { return filepath.Join(bin, "herdr-soho"), nil }
 	defer func() { currentExecutable = previous }()
-	defer func() {
-		got := recover()
-		exit, ok := got.(*ExitError)
-		if !ok || exit.Code != 2 {
-			t.Fatalf("SkillDir panic=%#v; want ExitError code 2 when roles is missing", got)
-		}
-	}()
-	_ = SkillDir(Env{}) // Mutation captured: removing the roles/ validation accepts an incomplete skill tree.
+	// A fake HOME: with the home lookup in place, a real home holding an
+	// installed skill would otherwise satisfy the lookup and skip the die.
+	env := Env{"HOME": t.TempDir(), "USERPROFILE": t.TempDir()}
+	got := capturePanic(func() { SkillDir(env) }) // Mutation captured: removing the roles/ validation accepts an incomplete skill tree.
+	exit, ok := got.(*ExitError)
+	if !ok || exit.Code != 2 {
+		t.Fatalf("SkillDir panic=%#v; want ExitError code 2 when roles is missing", got)
+	}
 }
 
 func capturePanic(run func()) (value any) {

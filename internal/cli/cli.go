@@ -168,6 +168,13 @@ func Run(args []string, env platform.Env) (code int) {
 	if !knownCommands[command] {
 		platform.Die("unknown command '"+command+"'", 2)
 	}
+	// The first argument after a known command asks for that command's usage
+	// lines; --help anywhere else is a regular argument (a send message may
+	// contain "--help").
+	if len(args) > 1 && (args[1] == "--help" || args[1] == "-h") {
+		_, _ = io.WriteString(platform.Stdout, commandHelp(command))
+		return 0
+	}
 	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		commandConfig = &ctx

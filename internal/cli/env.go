@@ -38,7 +38,7 @@ func uname(args ...string) string {
 }
 func cmdEnv(ctx *core.Config, env platform.Env, cwd string) {
 	lines := []string{}
-	lines = append(lines, "herdr-soho: "+versionOr(envRun("git", []string{"-C", platform.SkillDir(env), "log", "-1", "--format=%h %cs"}, env), "unversioned"))
+	lines = append(lines, "herdr-soho: "+versionOr(envRun("git", []string{"-C", platform.SkillDir(env), "log", "-1", "--format=%h %cs"}, env), strings.TrimPrefix(strings.TrimSpace(versionText(version, vcsRevision())), "herdr-soho ")))
 	lines = append(lines, "herdr: "+versionOr(envRun("herdr", []string{"--version"}, env), "unknown"))
 	osType := uname("-s")
 	if osType == "unknown" {
@@ -51,6 +51,8 @@ func cmdEnv(ctx *core.Config, env platform.Env, cwd string) {
 	}
 	lines = append(lines, fmt.Sprintf("os: %s %s (%s)", osType, osRelease, osMachine))
 	lines = append(lines, "runtime: go "+runtime.Version())
+	skillDir, skillOrigin := platform.SkillDirSource(env)
+	lines = append(lines, "skill dir: "+skillDir+" ("+skillOrigin+")")
 	for _, kind := range kinds.KnownKinds {
 		exe := kinds.KindExe(kind)
 		if _, ok := platform.FindExecutable(exe, env, platform.Current()); !ok {
