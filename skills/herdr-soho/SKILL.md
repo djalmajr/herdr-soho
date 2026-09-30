@@ -254,7 +254,7 @@ command line, which can hold credentials; a sandboxed codex blocks `ps`); and th
 verified (`ui_verification`). The `reviewer` never edits the repository,
 mutates only in a throwaway copy, and runs the project's own gates before
 its verdict; its `verdict:` header stays pass/fail (fail with any open
-P0–P2) whatever scale the brief uses.
+P0–P2) whatever scale the brief uses. A brief that hands the reviewer a frozen package (a snapshot of the owned files) also lists the companion files the checks need to stay coherent (a test that counts a catalog, the interface a store implements): owned files frozen over a tree that moved on make checks fail for reasons outside the change.
 
 ## Effort, model, approvals
 
