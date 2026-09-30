@@ -68,9 +68,10 @@ func TestTM10EnvMirrors(t *testing.T) {
 			t.Fatalf("code=%d out=%q err=%q", code, out, stderr)
 		}
 	})
-	t.Run(`JS: "env: git missing prints unversioned"`, func(t *testing.T) {
+	t.Run(`without git the first line is the binary's version (the JS prints unversioned)`, func(t *testing.T) {
 		out, stderr, code := runTM10Env(t, "git", nil)
-		if code != 0 || stderr != "" || !strings.HasPrefix(out, "herdr-soho: unversioned\n") {
+		want := "herdr-soho: " + strings.TrimPrefix(strings.TrimSpace(versionText(version, vcsRevision())), "herdr-soho ") + "\n"
+		if code != 0 || stderr != "" || !strings.HasPrefix(out, want) || strings.Contains(out, "unversioned") {
 			t.Fatalf("code=%d out=%q err=%q", code, out, stderr)
 		}
 	})
@@ -86,4 +87,16 @@ func TestTM10EnvMirrors(t *testing.T) {
 			t.Fatalf("code=%d out=%q err=%q", code, out, stderr)
 		}
 	})
+}
+
+func TestEnvPrintsTheSkillDirAndItsOrigin(t *testing.T) {
+	fixtureEnv, _ := commandFixture(t)
+	dir := fixtureEnv.Get("HERDR_SOHO_SKILL_DIR")
+	if dir == "" {
+		t.Fatal("the command fixture sets no HERDR_SOHO_SKILL_DIR")
+	}
+	out, stderr, code := runTM10Env(t, "", nil)
+	if code != 0 || stderr != "" || !strings.Contains(out, "\nskill dir: "+dir+" (HERDR_SOHO_SKILL_DIR)\n") {
+		t.Fatalf("code=%d out=%q err=%q", code, out, stderr)
+	}
 }
