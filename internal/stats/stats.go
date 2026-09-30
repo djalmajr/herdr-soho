@@ -31,10 +31,28 @@ var isoRE = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{
 var jsWhitespace = `\t\n\v\f\r \x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}`
 var shaLineRE = regexp.MustCompile(`^[` + jsWhitespace + `]*([0-9a-f]{64})[` + jsWhitespace + `]+\*?([^` + jsWhitespace + `].*?)[` + jsWhitespace + `]*$`)
 
-// shaCommentRE is a trailing comment after the path on a sha256 line
-// ("<sha256>  <path>  # note"): sha256sum never writes one, so it is dropped
-// when the path with it does not exist and the path without it does.
-var shaCommentRE = regexp.MustCompile(`[` + jsWhitespace + `]+#.*$`)
+// shaCommentRE finds each whitespace-then-# that may start a trailing
+// comment after the path on a sha256 line ("<sha256>  <path>  # note").
+var shaCommentRE = regexp.MustCompile(`[` + jsWhitespace + `]+#`)
+
+// shaDropComment reads a path whose sha256 line ends in a comment: sha256sum
+// never writes one. When the path as written does not open, it tries the path
+// cut before each " #" from the right, only while the cut-off text holds no
+// path separator (a " # " inside a directory name is part of the path), and
+// returns the first cut that opens.
+func shaDropComment(p string) (string, []byte, bool) {
+	locs := shaCommentRE.FindAllStringIndex(p, -1)
+	for i := len(locs) - 1; i >= 0; i-- {
+		if strings.ContainsAny(p[locs[i][1]:], `/\`) {
+			break
+		}
+		if b, err := os.ReadFile(p[:locs[i][0]]); err == nil {
+			return p[:locs[i][0]], b, true
+		}
+	}
+	return p, nil, false
+}
+
 var dimensions = []string{"role", "kind", "model", "agent", "effort"}
 var reviewRoles = strings.Fields(core.ReviewRolesAll)
 
@@ -828,11 +846,9 @@ func verifyFiles(sd, agent, report string, env platform.Env, cwd, logFile string
 			p = filepath.Join(worker, p)
 		}
 		b, e := os.ReadFile(p)
-		if e != nil && shaCommentRE.MatchString(p) {
-			if bare := shaCommentRE.ReplaceAllString(p, ""); bare != p {
-				if bb, be := os.ReadFile(bare); be == nil {
-					p, b, e = bare, bb, nil
-				}
+		if e != nil {
+			if bare, bb, found := shaDropComment(p); found {
+				p, b, e = bare, bb, nil
 			}
 		}
 		state := ""

@@ -853,6 +853,28 @@ func TestCollectPortedCases(t *testing.T) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
+	t.Run("collect verify never verifies another file through a # inside a directory", func(t *testing.T) {
+		// R-RC5B: "<sha>  decoy # notes/missing.go" named a file that does not exist; cutting
+		// at the first " #" verified "decoy" instead (a false ok). A cut-off text with a path
+		// separator is part of the path; a name with " # " plus a note still verifies.
+		f := newCommandFixture(t)
+		name := "alice-20260928T120000"
+		body := []byte("contents")
+		sum := sha256.Sum256(body)
+		decoy := filepath.Join(f.tmp, "decoy")
+		_ = os.WriteFile(decoy, body, 0o600)
+		odd := filepath.Join(f.tmp, "odd # name.txt")
+		_ = os.WriteFile(odd, body, 0o600)
+		report := filepath.Join(f.reports, name+".md")
+		lines := fmt.Sprintf("%x  %s # notes/missing.go\n%x  %s  # reviewed\n", sum, decoy, sum, odd)
+		_ = os.WriteFile(report, []byte(lines), 0o600)
+		_ = os.WriteFile(filepath.Join(f.state, "ws", "last-report-alice"), []byte(report+"\n"), 0o600)
+		f.roster("alice")
+		out, _, code := f.invoke("collect", "alice", "--verify")
+		if code != 16 || !strings.Contains(out, "missing "+decoy+" # notes/missing.go\n") || !strings.Contains(out, "ok "+odd+"\n") || !strings.Contains(out, "verified 2: ok 1, changed 0, missing 1") {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
 	t.Run("collect missing agent argument exits 1", func(t *testing.T) { // JS: "collect with no agent uses the parameter error"
 		f := newCommandFixture(t)
 		_, errOut, code := f.invoke("collect")
