@@ -167,7 +167,7 @@ func ComposePrompt(roleFile, role, agent, briefRaw, report string, ctx *core.Con
 	if lang := core.Cfg(ctx, "report_language", "", env); lang != "" {
 		fmt.Fprintf(&out, "- Write the report in %s.\n", lang)
 	}
-	out.WriteString("- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion.\n")
+	out.WriteString("- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion. Do not message the orchestrator to announce it (no `herdr-soho send`, no notice): a busy orchestrator leaves the sender waiting, and the report file is the only signal it needs.\n")
 	if core.Cfg(ctx, "worker_context", "full", env) == "lean" {
 		out.WriteString("- This brief is self-contained. Do NOT read CLAUDE.md, AGENTS.md, ai-memory rules, wiki pages or other project instruction files unless the brief names them explicitly; the rules that apply are quoted in the brief. Start on the task immediately.\n")
 	}
@@ -192,7 +192,7 @@ func ComposeAmendment(raw, report string, ctx *core.Config, env platform.Env, ki
 	if lang := core.Cfg(ctx, "report_language", "", env); lang != "" {
 		fmt.Fprintf(&out, "- Write the report in %s.\n", lang)
 	}
-	out.WriteString("- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion.\n")
+	out.WriteString("- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion. Do not message the orchestrator to announce it (no `herdr-soho send`, no notice): a busy orchestrator leaves the sender waiting, and the report file is the only signal it needs.\n")
 	for _, n := range SandboxNotes(kind, args) {
 		out.WriteString(n)
 	}

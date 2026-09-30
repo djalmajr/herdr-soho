@@ -700,7 +700,7 @@ export function composePrompt(roleFile, role, agent, briefRaw, report, ctx, env 
   out.push(`- This report path is authoritative: if the brief names a different report path, ignore it and write to this path; a brief can be hand-written or reused with a stale path, and the dispatch's report path never follows the brief's.\n`);
   const lang = cfg(ctx, 'report_language', '', env);
   if (lang !== '') out.push(`- Write the report in ${lang}.\n`);
-  out.push(`- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion.\n`);
+  out.push(`- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion. Do not message the orchestrator to announce it (no \`herdr-soho send\`, no notice): a busy orchestrator leaves the sender waiting, and the report file is the only signal it needs.\n`);
   if (cfg(ctx, 'worker_context', 'full', env) === 'lean') {
     out.push(`- This brief is self-contained. Do NOT read CLAUDE.md, AGENTS.md, ai-memory rules, wiki pages or other project instruction files unless the brief names them explicitly; the rules that apply are quoted in the brief. Start on the task immediately.\n`);
   }
@@ -753,7 +753,7 @@ export function composeAmendment(amendRaw, report, ctx, env = process.env, kind 
   out.push(`- Give every item its state as \`[done]\`, \`[partial]\` or \`[skipped]\`, followed by the reason.\n`);
   const lang = cfg(ctx, 'report_language', '', env);
   if (lang !== '') out.push(`- Write the report in ${lang}.\n`);
-  out.push(`- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion.\n`);
+  out.push(`- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion. Do not message the orchestrator to announce it (no \`herdr-soho send\`, no notice): a busy orchestrator leaves the sender waiting, and the report file is the only signal it needs.\n`);
   for (const n of sandboxNotes(kind, agentArgs)) out.push(n);
   if (sharedTree) out.push(SHARED_TREE_NOTE);
   out.push(standingRules());

@@ -251,8 +251,10 @@ or the source's build output to recover; the `implementer`, `tasker` and
 the report, by the PIDs they kept, and never one they did not start
 (an orphan or a busy process is reported, not killed), checked by PID only (never a listing of every
 command line, which can hold credentials; a sandboxed codex blocks `ps`); and the `designer` reports how the UI was
-verified (`ui_verification`). The `reviewer` never edits the repository
-and mutates only in a throwaway copy.
+verified (`ui_verification`). The `reviewer` never edits the repository,
+mutates only in a throwaway copy, and runs the project's own gates before
+its verdict; its `verdict:` header stays pass/fail (fail with any open
+P0–P2) whatever scale the brief uses.
 
 ## Effort, model, approvals
 
