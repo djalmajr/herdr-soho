@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -250,6 +251,27 @@ type lintCorpusRow struct {
 	Mode     string   `json:"mode"`
 }
 
+var unfilledPlaceholderBracket = regexp.MustCompile(` \[unfilled placeholder '[^']*' \(line [0-9]+\)\]`)
+
+// stripUnfilledPlaceholderMarks removes the Go-only unfilled placeholder
+// marks from a missing-sections message before the JS corpus comparison:
+// the corpus rows predate the feature (PLAN: new functions are Go-only
+// after command parity, the JS is frozen). The marks are dropped from the
+// list and a message that held only marks becomes empty; everything else —
+// sections, reasons, warnings, mode — is compared strictly.
+func stripUnfilledPlaceholderMarks(message string) string {
+	const separator = "is missing sections:"
+	idx := strings.Index(message, separator)
+	if idx < 0 {
+		return message
+	}
+	rest := unfilledPlaceholderBracket.ReplaceAllString(message[idx+len(separator):], "")
+	if strings.TrimSpace(rest) == "" {
+		return ""
+	}
+	return message[:idx] + separator + rest
+}
+
 func TestLintCorpusMatchesJavaScript(t *testing.T) {
 	t.Run("// JS: \"gen_lint.mjs generated brief corpus parity\"", func(t *testing.T) {
 		data, err := os.ReadFile(filepath.Join("testdata", "lint_corpus.json"))
@@ -269,6 +291,7 @@ func TestLintCorpusMatchesJavaScript(t *testing.T) {
 					env["HERDR_SOHO_BRIEF_LINT_ALIASES"] = row.Aliases
 				}
 				got := BriefLintFindings(row.Path, ctx, env, BriefLintOptions{})
+				got.MissingMessage = stripUnfilledPlaceholderMarks(got.MissingMessage)
 				if got.Mode != row.Mode || got.MissingMessage != row.Missing || strings.Join(got.Warnings, "\x00") != strings.Join(row.Warnings, "\x00") {
 					t.Fatalf("Go findings differ from JS: got=%#v want=%#v", got, row)
 				}

@@ -31,7 +31,8 @@ var knownCommands = map[string]bool{
 	"send": true, "stats": true, "release": true, "clean": true, "setup": true,
 	"doctor": true, "explain": true, "init": true, "title": true, "regrid": true,
 	"roster": true, "friction": true, "feedback": true, "tab-label": true,
-	"layout-plan": true, "env": true, "mutation-guard": true,
+	"layout-plan": true, "env": true, "mutation-guard": true, "mutation-copy": true,
+	"reopen": true, "compact": true,
 }
 
 var frictionLogPath string
@@ -168,7 +169,14 @@ func Run(args []string, env platform.Env) (code int) {
 	if !knownCommands[command] {
 		platform.Die("unknown command '"+command+"'", 2)
 	}
-	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" {
+	// The first argument after a known command asks for that command's usage
+	// lines; --help anywhere else is a regular argument (a send message may
+	// contain "--help").
+	if len(args) > 1 && (args[1] == "--help" || args[1] == "-h") {
+		_, _ = io.WriteString(platform.Stdout, commandHelp(command))
+		return 0
+	}
+	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "reopen" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" || command == "compact" {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		commandConfig = &ctx
 		herdr.RequireEnv(decisionEnv, platform.Current(), os.Getpid(), nil)
@@ -192,6 +200,9 @@ func Run(args []string, env platform.Env) (code int) {
 	}
 	if command == "mutation-guard" {
 		return runMutationGuard(args[1:], decisionEnv)
+	}
+	if command == "mutation-copy" {
+		return runMutationCopy(args[1:], decisionEnv)
 	}
 	if command == "config" || command == "session" {
 		if command == "config" {
@@ -246,6 +257,8 @@ func Run(args []string, env platform.Env) (code int) {
 		return 0
 	case "release":
 		return cmdRelease(args[1:], ctx, decisionEnv, commandCwd)
+	case "reopen":
+		return cmdReopen(args[1:], ctx, decisionEnv, commandCwd)
 	case "feedback":
 		return cmdFeedback(args[1:], ctx, decisionEnv, commandCwd)
 	case "spawn":
@@ -253,6 +266,8 @@ func Run(args []string, env platform.Env) (code int) {
 		return 0
 	case "dispatch":
 		return cmdDispatch(args[1:], ctx, decisionEnv, commandCwd)
+	case "compact":
+		return cmdCompact(args[1:], ctx, decisionEnv, commandCwd)
 	case "run":
 		return cmdRun(args[1:], ctx, decisionEnv, commandCwd)
 	case "roles":

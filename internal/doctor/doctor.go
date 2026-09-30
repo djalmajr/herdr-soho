@@ -334,6 +334,11 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 			s.Warning("state dir not writable: " + d)
 		}
 	}
+	if projectConfig := core.ProjectConfigFileUsed(env, cwd); projectConfig == "" {
+		s.Ok("project config: none")
+	} else {
+		s.Ok("project config: " + projectConfig)
+	}
 	for _, w := range core.LegacyDoctorWarnings(env, cwd, platform.Current()) {
 		s.Warning(w)
 	}

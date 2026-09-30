@@ -773,8 +773,10 @@ func verifyFiles(sd, agent, report string, env platform.Env, cwd, logFile string
 		files[m[2]] = m[1]
 	}
 	if len(files) == 0 {
-		output("no sha256 lines in " + report + "\n")
-		return 0
+		// Nothing was verified: that is not a pass. Hashes in a table or in
+		// another layout are not read.
+		output("no sha256 lines in " + report + ": nothing verified (write one line per file: <sha256>  <path>, as sha256sum prints it)\n")
+		return 16
 	}
 	line := core.RosterLine(sd, agent)
 	fields := strings.Split(line, "\t")

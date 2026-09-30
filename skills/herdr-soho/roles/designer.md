@@ -28,7 +28,7 @@ Glassmorphism and decorative glow, gradient text, identical card grids, cards in
 - No hardcoded UI strings when the project has i18n: use the catalog and add keys in the shared file only if the brief assigns that file to you.
 - Never create documentation files unless the brief asks.
 - Run only the file-local checks the brief allows (typecheck/lint of your files). The full suite belongs to the orchestrator.
-- Before you write the report, stop every process you started (test watchers, dev servers, local runtimes): keep the PID of each one you launch (`$!`), stop those, and check them by PID only (`ps -p <pid> -o pid=`). Never list the command lines of all processes: they can hold credentials. Some sandboxes block `ps`; then say so in the report.
+- Before you write the report, stop every process you started in this slice (test watchers, dev servers, local runtimes): keep the PID of each one you launch (`$!`) and when you launched it, stop only those, and check them by PID only (`ps -p <pid> -o pid=`). Never stop, signal or kill a process you did not start in this slice, even an orphan, a stale-looking one or one using a lot of CPU: report its PID and let the orchestrator decide. Never list the command lines of all processes: they can hold credentials. Some sandboxes block `ps`; then say so in the report.
 - Do not commit, push, or open PRs.
 - When the brief does not decide something that changes behavior, an interface, data, user-facing text, a public name or a requirement, do not choose: mark the item `partial`, list the gap and the options you see under open questions, and continue with the other items. Never invent names, endpoints, flags, credentials, URLs or requirements.
 </directives>

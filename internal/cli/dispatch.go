@@ -37,7 +37,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	agent, brief := argv[0], argv[1]
 	role, timeoutRaw := "", ""
-	noWait, allow, amend := false, false, false
+	noWait, allow, amend, compact := false, false, false, false
 	var forValue *string
 	for i := 2; i < len(argv); i++ {
 		a := argv[i]
@@ -62,6 +62,8 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			allow = true
 		case "--amend":
 			amend = true
+		case "--compact":
+			compact = true
 		default:
 			core.DieFriction("dispatch: unknown option "+a, 2, frictionLogPath, "dispatch")
 		}
@@ -214,6 +216,15 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	if len(cols) > 11 {
 		lane = cols[11]
+	}
+	// Compact before any task state is written: a busy worker or a timeout
+	// leaves no pointer to a report that will never come.
+	if compact {
+		if compactProof(kind) == "" {
+			core.Warn(fmt.Sprintf("dispatch: --compact skipped: kind '%s' has no verified compact command", kind), frictionLogPath, "dispatch")
+		} else if code := compactRun(agent, at(1), kind, role, lane, model, compactDefaultTimeoutMS, ctx, env, cwd, true); code != 0 {
+			return code
+		}
 	}
 	sidecar := dispatch.DispatchSidecar(composed)
 	if err := writeDispatchSidecar(sidecar, kind, model, effort, "attempted", ""); err != nil {

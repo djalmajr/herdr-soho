@@ -218,7 +218,9 @@ func TestDoctorTM6CLIAndParity(t *testing.T) {
 			env, cwd := tm6CLIEnv(t)
 			root := filepath.Dir(cwd)
 			conf := filepath.Join(cwd, ".agents", "herdr-soho.conf")
-			if golden.Conf != nil {
+			// golden.Conf is the file after the last step; first-run starts with no
+			// project file (the steps write and remove it), as the JS scenario does.
+			if golden.Conf != nil && tc.golden != "first-run" {
 				seed := *golden.Conf
 				switch tc.golden {
 				case "fix3", "fix4", "setup-tail":

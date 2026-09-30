@@ -31,7 +31,7 @@ var ConfigScalarKeys = []string{
 	"orchestrator_name", "layout", "regrid", "max_workers", "split_max_panes",
 	"split_min_pane", "herd_label", "herd_label_max", "reuse_workers",
 	"multi_role", "panes", "lanes", "pane_mode", "flex_extra", "flex_roles",
-	"worker_context", "brief_lint", "brief_lint_aliases", "approvals",
+	"worker_context", "brief_lint", "brief_lint_aliases", "brief_lint_placeholders", "approvals",
 	"auto_approve", "max_auto_approvals", "max_effort", "family_check",
 	"settled_grace", "spawn_timeout", "dispatch_timeout", "provider_retries",
 	"provider_retry_delay", "prompt_check_seconds", "prompt_settle_seconds", "stuck_warn_minutes", "state_dir",
@@ -72,10 +72,9 @@ func LoadConfig(env platform.Env, cwd string) Config {
 		cwd, _ = os.Getwd()
 	}
 	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0, 4)}
-	root := platform.ProjectRoot(env, cwd)
 	loadConfigFile(filepath.Join(platform.SkillDir(env), "config.defaults"), "defaults", &ctx)
 	loadConfigFile(EffectiveConfigFile(platform.UserConfigPath(platform.Current(), env), LegacyUserConfigPath(platform.Current(), env)), "user", &ctx)
-	loadConfigFile(EffectiveConfigFile(filepath.Join(root, ".agents", "herdr-soho.conf"), LegacyProjectConfigPath(root)), "project", &ctx)
+	loadConfigFile(ProjectConfigFileUsed(env, cwd), "project", &ctx)
 	if file := SessionConfPath(&ctx, env, cwd); file != "" {
 		loadConfigFile(file, "session", &ctx)
 	}
@@ -217,11 +216,41 @@ func contains(values []string, value string) bool {
 	return false
 }
 
+// ProjectConfigFileUsed returns the file the project layer reads for cwd: the
+// checkout's effective config (new, else legacy) when it exists, or, when
+// cwd is a linked worktree without one, the main checkout's (the
+// StateProjectRoot root's) effective config; "" when no project config
+// exists, so the layer contributes nothing.
+func ProjectConfigFileUsed(env platform.Env, cwd string) string {
+	root := platform.ProjectRoot(env, cwd)
+	if file := EffectiveConfigFile(filepath.Join(root, ".agents", "herdr-soho.conf"), LegacyProjectConfigPath(root)); isFile(file) {
+		return file
+	}
+	stateRoot := platform.StateProjectRoot(env, cwd)
+	if stateRoot == root {
+		return ""
+	}
+	main := EffectiveConfigFile(filepath.Join(stateRoot, ".agents", "herdr-soho.conf"), LegacyProjectConfigPath(stateRoot))
+	if isFile(main) {
+		return main
+	}
+	return ""
+}
+
 func ConfigFileFor(where string, env platform.Env, cwd string) string {
 	if where == "user" {
 		return platform.UserConfigPath(platform.Current(), env)
 	}
-	return filepath.Join(platform.ProjectRoot(env, cwd), ".agents", "herdr-soho.conf")
+	root := platform.ProjectRoot(env, cwd)
+	newProject := filepath.Join(root, ".agents", "herdr-soho.conf")
+	if isFile(newProject) || isFile(LegacyProjectConfigPath(root)) {
+		return newProject
+	}
+	stateRoot := platform.StateProjectRoot(env, cwd)
+	if stateRoot == root {
+		return newProject
+	}
+	return EffectiveConfigFile(filepath.Join(stateRoot, ".agents", "herdr-soho.conf"), LegacyProjectConfigPath(stateRoot))
 }
 
 func StateRootPath(ctx *Config, env platform.Env, cwd string) string {
@@ -549,12 +578,12 @@ func CmdConfig(ctx *Config, env platform.Env, cwd string) {
 		legacy = " (legacy)"
 	}
 	lines = append(lines, "user file:    "+userFile+legacy)
-	root := platform.ProjectRoot(env, cwd)
-	newProject := filepath.Join(root, ".agents", "herdr-soho.conf")
-	oldProject := LegacyProjectConfigPath(root)
-	projectFile := EffectiveConfigFile(newProject, oldProject)
+	projectFile := ProjectConfigFileUsed(env, cwd)
+	if projectFile == "" {
+		projectFile = filepath.Join(platform.ProjectRoot(env, cwd), ".agents", "herdr-soho.conf")
+	}
 	legacy = ""
-	if projectFile == oldProject {
+	if projectFile == LegacyProjectConfigPath(platform.ProjectRoot(env, cwd)) || projectFile == LegacyProjectConfigPath(platform.StateProjectRoot(env, cwd)) {
 		legacy = " (legacy)"
 	}
 	lines = append(lines, "project file: "+projectFile+legacy)

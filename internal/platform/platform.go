@@ -351,17 +351,41 @@ func resolveFrom(base, value string) string {
 
 // SkillDir returns the configured skill root or finds it beside the executable.
 func SkillDir(env Env) string {
+	dir, _ := SkillDirSource(env)
+	return dir
+}
+
+// SkillDirSource returns the skill directory and its origin: "HERDR_SOHO_SKILL_DIR"
+// for the configured value, "executable" for a skill tree beside the executable,
+// "home" for <home>/.agents/skills/herdr-soho or <home>/.claude/skills/herdr-soho
+// (tried in that order; <home> is HOME, USERPROFILE on Windows). It dies with the
+// same message as before when no source holds a skill.
+func SkillDirSource(env Env) (string, string) {
 	if configured := env.Get("HERDR_SOHO_SKILL_DIR"); configured != "" {
-		return configured
+		return configured, "HERDR_SOHO_SKILL_DIR"
 	}
 	executable, err := currentExecutable()
 	if err == nil {
 		if dir := skillDirFromExecutable(executable); dir != "" {
-			return dir
+			return dir, "executable"
+		}
+	}
+	home := env.Get("HOME")
+	if runtime.GOOS == "windows" {
+		home = env.Get("USERPROFILE")
+	}
+	if home != "" {
+		for _, dir := range []string{
+			filepath.Join(home, ".agents", "skills", "herdr-soho"),
+			filepath.Join(home, ".claude", "skills", "herdr-soho"),
+		} {
+			if isSkillDir(dir) {
+				return dir, "home"
+			}
 		}
 	}
 	Die("cannot find skill directory; set HERDR_SOHO_SKILL_DIR", 2)
-	return ""
+	return "", ""
 }
 
 // LauncherPath is the skill launcher the worker runs from: scripts/herdr-soho,
@@ -379,10 +403,8 @@ func skillDirFromExecutable(executable string) string {
 		executable = resolved
 	}
 	for dir := filepath.Dir(executable); ; dir = filepath.Dir(dir) {
-		if info, statErr := os.Stat(filepath.Join(dir, "SKILL.md")); statErr == nil && info.Mode().IsRegular() {
-			if info, statErr = os.Stat(filepath.Join(dir, "roles")); statErr == nil && info.IsDir() {
-				return dir
-			}
+		if isSkillDir(dir) {
+			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -390,6 +412,17 @@ func skillDirFromExecutable(executable string) string {
 		}
 	}
 	return ""
+}
+
+// isSkillDir reports whether dir holds a skill: a regular SKILL.md and a roles
+// directory. It is the single mark both skill lookups use.
+func isSkillDir(dir string) bool {
+	mark, err := os.Stat(filepath.Join(dir, "SKILL.md"))
+	if err != nil || !mark.Mode().IsRegular() {
+		return false
+	}
+	roles, err := os.Stat(filepath.Join(dir, "roles"))
+	return err == nil && roles.IsDir()
 }
 
 func isWithin(parent, candidate string) bool {

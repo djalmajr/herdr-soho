@@ -23,7 +23,7 @@ export const CONFIG_SCALAR_KEYS = [
   'orchestrator_name', 'layout', 'regrid', 'max_workers', 'split_max_panes',
   'split_min_pane', 'herd_label', 'herd_label_max', 'reuse_workers',
   'multi_role', 'panes', 'lanes', 'pane_mode', 'flex_extra', 'flex_roles',
-  'worker_context', 'brief_lint', 'brief_lint_aliases', 'approvals',
+  'worker_context', 'brief_lint', 'brief_lint_aliases', 'brief_lint_placeholders', 'approvals',
   'auto_approve', 'max_auto_approvals', 'max_effort', 'family_check',
   'settled_grace', 'spawn_timeout', 'dispatch_timeout', 'provider_retries',
   'provider_retry_delay', 'prompt_check_seconds', 'prompt_settle_seconds', 'stuck_warn_minutes', 'state_dir',

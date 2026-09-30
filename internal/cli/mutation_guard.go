@@ -112,32 +112,70 @@ func runMutationGuardAt(args []string, env platform.Env, cwd string) int {
 		return mutationGuardUsageError()
 	}
 
-	failed := printMutationCheck("copy-outside-source", "", inside(sourcePath, copyPath) || inside(copyPath, sourcePath))
-	symlinkDetail := ""
-	if detail, scanErr := symlinkIntoSource(copyPath, sourcePath); scanErr != nil {
-		symlinkDetail = "unable to inspect symlinks safely"
-	} else {
-		symlinkDetail = detail
+	report := mutationGuardChecks(copyPath, sourcePath, env, parsed.envNames)
+	failed := printMutationCheck("copy-outside-source", "", report.Overlap)
+	failed = printMutationCheck("no-symlink-into-source", report.Symlink, false) || failed
+	failed = printMutationCheck("build-env", report.BuildEnv, false) || failed
+	failed = printMutationCheck("cargo-config", report.Cargo, false) || failed
+	if failed {
+		return 1
 	}
-	failed = printMutationCheck("no-symlink-into-source", symlinkDetail, false) || failed
+	return 0
+}
 
+// mutationGuardReport is one guard run's results: each field is the detail
+// printed for its check ("" passes), Overlap the copy/source overlap flag.
+type mutationGuardReport struct {
+	Overlap  bool
+	Symlink  string
+	BuildEnv string
+	Cargo    string
+}
+
+func (r mutationGuardReport) failed() bool {
+	return r.Overlap || r.Symlink != "" || r.BuildEnv != "" || r.Cargo != ""
+}
+
+// mutationGuardChecks runs the guard's checks for copyPath against sourcePath
+// without printing. extraEnvNames are the `--env NAME` values the guard CLI
+// accepted; mutation-copy passes none.
+func mutationGuardChecks(copyPath, sourcePath string, env platform.Env, extraEnvNames []string) mutationGuardReport {
+	report := mutationGuardReport{Overlap: inside(sourcePath, copyPath) || inside(copyPath, sourcePath)}
+	if detail, scanErr := symlinkIntoSource(copyPath, sourcePath); scanErr != nil {
+		report.Symlink = "unable to inspect symlinks safely"
+	} else {
+		report.Symlink = detail
+	}
 	envNames := []string{"CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR"}
 	seen := map[string]bool{envNames[0]: true, envNames[1]: true}
-	for _, name := range parsed.envNames {
+	for _, name := range extraEnvNames {
 		if !seen[name] {
 			seen[name] = true
 			envNames = append(envNames, name)
 		}
 	}
-	envDetail := envPointingIntoSource(env, envNames, copyPath, sourcePath)
-	failed = printMutationCheck("build-env", envDetail, false) || failed
+	report.BuildEnv = envPointingIntoSource(env, envNames, copyPath, sourcePath)
+	report.Cargo = cargoTargetInsideSource(copyPath, sourcePath, env)
+	return report
+}
 
-	configDetail := cargoTargetInsideSource(copyPath, sourcePath, env)
-	failed = printMutationCheck("cargo-config", configDetail, false) || failed
-	if failed {
-		return 1
+// failingLines is the guard's `fail` output, one line per failed check, for
+// callers that need the reasons without the `ok` lines.
+func (r mutationGuardReport) failingLines() []string {
+	var lines []string
+	if r.Overlap {
+		lines = append(lines, "fail copy-outside-source: copy and source directories overlap")
 	}
-	return 0
+	if r.Symlink != "" {
+		lines = append(lines, "fail no-symlink-into-source: "+r.Symlink)
+	}
+	if r.BuildEnv != "" {
+		lines = append(lines, "fail build-env: "+r.BuildEnv)
+	}
+	if r.Cargo != "" {
+		lines = append(lines, "fail cargo-config: "+r.Cargo)
+	}
+	return lines
 }
 
 func mutationGuardUsageError() int {

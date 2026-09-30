@@ -119,7 +119,13 @@ project config; with none set, the CLI uses its own default. Flags verified
 - `pi`: `--model <provider/id>` (optional `:<thinking>` suffix),
   `--thinking off|minimal|low|medium|high|xhigh|max`, `-p/--print`,
   `--no-session`. It has no tool-approval dialog; restrict tools with
-  `--tools`/`--exclude-tools`.
+  `--tools`/`--exclude-tools`. Compaction summarizes with the same model:
+  keep pi's `compaction.reserveTokens` at or above the model's `maxTokens`
+  plus a margin, or a compaction near the context limit fails
+  (`generation hit the token cap`, then a context-length error). A pi
+  already open keeps the value it started with; reopen it to pick up a new
+  setting. Provider errors such as `402 Insufficient account funds` with
+  `Retrying (n/m)` on the screen mean the worker is not making progress.
 - `opencode`: the TUI takes `-m provider/model` and `--auto` (approves
   permissions not explicitly denied). `--variant` (provider effort) exists
   only on `opencode run`, so the TUI maps no effort: spawn warns, it does

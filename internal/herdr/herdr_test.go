@@ -244,6 +244,44 @@ func TestHerdrArgumentContracts(t *testing.T) {
 	}
 }
 
+func TestPaneSendTextAndSendKeysContracts(t *testing.T) {
+	env := newFake(t, "herdr", []fakecli.Rule{
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-text", "p2", "x"}, Code: 1},
+	})
+	if !PaneSendText("p1", "/compact", env) {
+		t.Fatal("PaneSendText ok=false on exit 0")
+	}
+	if !PaneSendKeys("p1", "Enter", env) {
+		t.Fatal("PaneSendKeys ok=false on exit 0")
+	}
+	if PaneSendText("p2", "x", env) {
+		t.Fatal("PaneSendText ok=true on exit 1")
+	}
+	if PaneSendText("p1", "other", env) {
+		t.Fatal("PaneSendText ok=true for an argv the fake has no rule for")
+	}
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"pane", "send-text", "p1", "/compact"},
+		{"pane", "send-keys", "p1", "Enter"},
+		{"pane", "send-text", "p2", "x"},
+		{"pane", "send-text", "p1", "other"},
+	}
+	if len(calls) != len(want) {
+		t.Fatalf("calls: %#v", calls)
+	}
+	for i := range want {
+		if !reflect.DeepEqual(calls[i].Argv, want[i]) {
+			t.Errorf("call %d argv %#v want %#v", i, calls[i].Argv, want[i])
+		}
+	}
+}
+
 func TestPaneMoveArgumentAndResultContract(t *testing.T) {
 	// Mutation captured: changing --new-tab argument order or omitting --no-focus changes the fake CLI call record.
 	env := newFake(t, "herdr", []fakecli.Rule{

@@ -226,9 +226,10 @@ alive, such as a cursor designer while a cursor reviewer checks codex code,
 and for code the orchestrator wrote itself (`--for anthropic` when it runs
 on claude).
 The role bodies also carry worker-side rules the orchestrator does not
-repeat in every brief: the `implementer` runs a mutation check in a
-throwaway copy of the project outside the repository whenever other
-workers may share the tree (in place only when alone, and restored only
+repeat in every brief: the `implementer` runs a mutation check when it
+adds signal (a small delta that the brief's gate already covers skips
+it, unless the brief asks for one) in a throwaway copy of the project
+outside the repository whenever other workers may share the tree (in place only when alone, and restored only
 after the file's sha256 still matches — a changed file is someone else's
 edit: not restored, and reported), gives that copy its own build output
 (`CARGO_TARGET_DIR=<copy>/target`, for example) and runs `$S
@@ -241,10 +242,14 @@ the source, or when `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR`, a
 `.cargo/config[.toml]` fallback that fails closed on an unrecognized
 `target-dir`; copies without `Cargo.toml` ignore Cargo configuration (exit 1
 for a rejected copy; 0 when isolated, 2 for bad usage; the guard writes
-nothing) — and never cleans a shared cache
+nothing); `$S mutation-copy` builds that copy from the worktree's repository
+files only (never `.git`, never ignored paths), takes `--link
+<relpath>=<target>` for dependencies that live outside the worktree, and
+removes the copy itself when the guard's checks refuse it — and never cleans a shared cache
 or the source's build output to recover; the `implementer`, `tasker` and
-`designer` stop every process they started before writing the report,
-by the PIDs they kept, checked by PID only (never a listing of every
+`designer` stop every process they started in the slice before writing
+the report, by the PIDs they kept, and never one they did not start
+(an orphan or a busy process is reported, not killed), checked by PID only (never a listing of every
 command line, which can hold credentials; a sandboxed codex blocks `ps`); and the `designer` reports how the UI was
 verified (`ui_verification`). The `reviewer` never edits the repository
 and mutates only in a throwaway copy.
@@ -699,8 +704,9 @@ $S session show | session clear [key]
 $S roles                                   # roles with the kind, model and effort in effect and where each comes from
 $S role reviewer                           # resolved file + frontmatter
 $S spawn implementer [--name impl] [--kind codex] [--direction right|down]
-$S dispatch impl <brief.md> [--timeout 900000] [--amend]   # role prompt + brief → agent, waits; --amend amends the agent's current brief
-$S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines (exit 16 on changed/missing, 4 when the report cannot be read)
+$S dispatch impl <brief.md> [--timeout 900000] [--amend] [--compact]   # role prompt + brief → agent, waits; --amend amends the agent's current brief; --compact compacts an idle worker (claude, codex, pi) before the brief and keeps it unsent on a timeout (9) or a busy worker (10)
+$S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, pi): sends /compact once and waits for the CLI's proof plus its return to idle; a kind without a verified command exits 2, a timeout 9
+$S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines, one `<sha256>  <path>` per file as `sha256sum` prints it (exit 16 on changed/missing or when the report has none, 4 when the report cannot be read)
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
 $S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
@@ -709,6 +715,7 @@ $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before
 $S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
                                              # peer message to another agent (any kind, local or another machine): ref local/w12:p1 or a name on the local server; waits for a busy target to settle by default
 $S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation copy that shares source or build output (exit 1)
+$S mutation-copy [--source <dir>] [--dest <dir>] [--link <relpath>=<target>]…  # build the throwaway mutation copy from the worktree's repository files, guarded (exit 1 guard, 2 refused, 4 copy error)
 $S find [words] [--machine <label>]… [--all] [--json]   # live panes with a paste-ready reference (<machine>/<ws>:<pane>), filtered by the words
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
 $S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to
@@ -722,6 +729,7 @@ $S config                                  # effective configuration and sources
 $S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>
 $S roster                                  # live agents with role/kind/pane/state/report and the current task (TASK, from the pane title; '-' when none, cut to 40 characters)
 $S release impl [--close]                  # forget the agent; --close closes a pane we created
+$S reopen impl [--force]                    # release --close + spawn --fresh with the roster's role, kind, model, effort, cwd and native args; output is the spawn JSON
 $S clean [--older-than 7]                  # drop gone agents, delete old briefs/reports
 $S kinds                                   # kind → executable, family, effort ceiling
 $S spawn implementer --effort xhigh --approvals full      # normalized effort + no prompts
@@ -965,9 +973,12 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   - another subject in the same project: while it is idle, send its CLI's
     compaction command (`/compact` in Claude Code, Codex and pi) with
     `herdr agent prompt <name> "/compact"` (a slash command is not a brief,
-    so `dispatch` does not apply). Then read the pane once with
-    `herdr agent read <name>` until the CLI confirms it (Codex prints
-    `Context compacted`), and dispatch;
+    so `dispatch` does not apply). Prefer `herdr-soho compact <name>`, or
+    `dispatch <name> <brief.md> --compact`, which compacts before the brief:
+    it sends the command once, waits for the CLI's confirmation and the
+    worker's return to idle, and exits 9 on a timeout. Then read the pane
+    once with `herdr agent read <name>` until the CLI confirms it (Codex
+    prints `Context compacted`), and dispatch;
   - nothing of the old context helps (an unrelated subject): clear the
     session the same way instead (`/new` in Codex and pi, `/clear` in
     Claude Code), then dispatch;
@@ -1287,7 +1298,13 @@ de aceitação`, `Critérios de aceite`, `Pronto quando`), Owned files
 `Restrições`) and Report (`Relatório`), with case- and accent-insensitive
 matching. Portuguese built-in headings count only when, after the prefix and
 leading spaces, the title ends or continues with a non-letter, non-digit;
-English headings and configured aliases keep simple prefix matching. In
+English headings and configured aliases keep simple prefix matching. The shipped `brief_lint_aliases` adds the multi-word Portuguese headings
+the built-in map rejects (`Aceite`, `Arquivos próprios`, `Arquivos de
+posse`); a user or project value replaces it. A brief line with an unfilled
+marker (`AGENT_NAME`, `WORKTREE_PATH`, `<slot>` inside a path such as
+`/tmp/<slot>/`, or an item of
+`brief_lint_placeholders`), outside a fenced code block, is flagged
+`unfilled placeholder '<marker>' (line <n>)` (`warn` warns, `strict` refuses). In
 `Owned files`, a line
 whose text starts after any list marker and leading spaces or `*`/`_`
 emphasis with `nenhum`, `nenhuma`, `não`, `nunca`, `exceto`, `not`, `never`,

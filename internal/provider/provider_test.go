@@ -406,6 +406,68 @@ func TestQuotaCases(t *testing.T) {
 	})
 }
 
+func TestA14ProviderFundsQuota(t *testing.T) {
+	t.Run("a 402 line with insufficient, payment required or funds is a quota stop", func(t *testing.T) {
+		hits := []string{
+			"opencode API error (402): Insufficient account funds\nRetrying (5/8)",
+			"API error 402: payment required",
+			"HTTP 402 funds depleted",
+			"402 PAYMENT REQUIRED",
+			"insufficient account funds",
+			"Insufficient balance",
+			"insufficient credits",
+			"insufficient account credits",
+		}
+		for _, screen := range hits {
+			if got := QuotaDetect("idle", screen); len(got) != 2 || got[0] == "" {
+				t.Errorf("QuotaDetect(%q) = %#v, want a quota line", screen, got)
+			}
+		}
+	})
+	t.Run("the appliance screen: the 402 line is the cause, the retry line is no renewal", func(t *testing.T) {
+		got := QuotaDetect("idle", "opencode API error (402): Insufficient account funds\nRetrying (5/8)")
+		want := []string{"opencode API error (402): Insufficient account funds", ""}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("QuotaDetect() = %#v, want %#v", got, want)
+		}
+		// The shared working-state gate still holds for the new patterns.
+		if got := QuotaDetect("working", "opencode API error (402): Insufficient account funds"); got != nil {
+			t.Fatalf("working screen matched: %#v", got)
+		}
+	})
+	t.Run("a bare 402, a 4012, or an insufficient without a funds word is no quota", func(t *testing.T) {
+		misses := []string{
+			"Error: 402",
+			"402 too many requests",
+			"error 4012 funds",
+			"insufficient permissions",
+			"insufficient account capacity",
+			"insufficient",
+		}
+		for _, screen := range misses {
+			if got := QuotaDetect("idle", screen); got != nil {
+				t.Errorf("QuotaDetect(%q) = %#v, want nil", screen, got)
+			}
+		}
+	})
+	t.Run("the same 402 line inside source code is no quota (QuotaLineIsCode)", func(t *testing.T) {
+		codeLines := []string{
+			`return "opencode API error (402): Insufficient account funds"`,
+			"# 402 insufficient funds",
+			"x = \"402: insufficient funds\"",
+			"func handler() { // 402 funds }",
+		}
+		for _, line := range codeLines {
+			if !QuotaLineIsCode(line) {
+				t.Fatalf("QuotaLineIsCode(%q) = false", line)
+			}
+			if got := QuotaDetect("idle", line); got != nil {
+				t.Errorf("QuotaDetect(%q) = %#v, want nil", line, got)
+			}
+		}
+	})
+}
+
 func TestDialogCases(t *testing.T) {
 	t.Run("dialogKind: the question-marker table with the counterexamples", func(t *testing.T) {
 		// JS: "dialogKind: the question-marker table with the counterexamples"
