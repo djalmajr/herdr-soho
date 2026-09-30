@@ -428,12 +428,16 @@ exist (7 blocked/`question`, 6 settled/`gone`, 4 `unavailable`, 9 timeout,
 several agents finish in one `wait`, the exit is the most severe of those:
 4, then 11, then 14, then 15, then 7, then 6. Argument order does not
 change it. A `timeout` line carries `elapsed_ms` (this wait's own),
-`state` (the last probe tag, `working` or `pending`), `checkpoint` and
-`activity_age_s`. A worker still `working` whose screen really changed
-within the stuck window (`stuck_warn_minutes`, 20 min when 0 or not a
-number) is a **neutral checkpoint**: `checkpoint: true`, no friction line,
-only `herdr-soho: checkpoint: '<agent>' is still working (screen changed
-<N>s ago); wait again: herdr-soho wait <agent> --timeout <t>` on stderr.
+`state` (the last probe tag, `working` or `pending`), `checkpoint`,
+`activity_age_s` (seconds since the last screen change a wait observed)
+and, when the visible screen already moved away from the hash the last
+wait probe recorded, `activity_changed: true` with `activity_age_s:
+null` — the screen changed since that probe and the change has no age. A
+worker still `working` whose screen really changed within the stuck
+window (`stuck_warn_minutes`, 20 min when 0 or not a number) is a
+**neutral checkpoint**: `checkpoint: true`, no friction line, only
+`herdr-soho: checkpoint: '<agent>' is still working (screen changed <N>s
+ago); wait again: herdr-soho wait <agent> --timeout <t>` on stderr.
 Reading a screen is not activity: a change counts only when the
 normalized screen (counters and progress glyphs do not count) moves away
 from the hash an earlier probe recorded, a failed (empty) read counts for
@@ -603,10 +607,13 @@ once its size stops changing between two polls.
 `status` ends every TSV line with `task_s` (seconds from the dispatch —
 the mtime of `last-report-<agent>` — to the report, or to now while it is
 missing; `-` with no dispatch) and `activity_s` (for a `working` agent,
-seconds since the last screen change a wait observed, dated as above; `-`
-in any other state or with no observed change), and adds both as the last
-keys of its JSON lines (`null` when unknown). It writes no marker and
-prints no screen text. `notify=on` in the config raises a Herdr toast
+seconds since the last screen change a wait observed; `changed` when the
+visible screen already moved away from the hash the last wait probe
+recorded — the change has no age; `-` in any other state or with no
+observed change), and adds both as the last keys of its JSON lines
+(`null` when unknown; `activity_changed: true` right after `activity_s`
+when the screen changed since the last wait probe). It writes no marker
+and prints no screen text. `notify=on` in the config raises a Herdr toast
 per finished worker. `roster` shows a `REPORT` column (`none | pending |
 ready`) for a quick glance.
 
