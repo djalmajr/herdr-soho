@@ -39,6 +39,7 @@ var lintSectionReasons = map[string]string{
 	"no-git line: say 'no commit/push'": "the worker may commit or push",
 }
 var noGitLintMarker = "no-git line: say 'no commit/push'"
+var unfilledPlaceholderBuiltins = []string{"AGENT_NAME", "WORKTREE_PATH"}
 var missingSectionPattern = regexp.MustCompile(`\[([^\]]+)\]`)
 var failureMatrixMarkers = []struct{ marker, reason string }{
 	{"crash", "a crash between publish and prune/delete is not covered"},
@@ -187,12 +188,16 @@ func BriefMissingSections(body string, readOnly bool, aliases map[string][]strin
 	return missing.String()
 }
 
-// MissingSectionsReasons explains each missing label in the input order.
+// MissingSectionsReasons explains each missing label in the input order;
+// labels without a known reason (the unfilled placeholder marks) add none.
 func MissingSectionsReasons(missing string) string {
 	labels := missingSectionPattern.FindAllStringSubmatch(missing, -1)
 	reasons := make([]string, 0, len(labels))
 	for _, label := range labels {
-		reasons = append(reasons, lintSectionReasons[label[1]])
+		reason := lintSectionReasons[label[1]]
+		if reason != "" {
+			reasons = append(reasons, reason)
+		}
 	}
 	return strings.Join(reasons, "; ")
 }
@@ -248,11 +253,12 @@ func lintHeading(line string) (string, int, bool) {
 	return title, level, ok
 }
 
-// EmptyCodeLines reports 1-based lines with an exact double-backtick run
-// outside fenced code blocks.
-func EmptyCodeLines(body string) []int {
-	lines := strings.Split(body, "\n")
-	var out []int
+// briefFenceMask reports, for each line, whether it belongs to a fenced code
+// block: a fence line (three or more ` or ~, up to three leading spaces) or a
+// line inside one. A fence closes only with the same character, at least as
+// many marks, and nothing after but spaces.
+func briefFenceMask(lines []string) []bool {
+	mask := make([]bool, len(lines))
 	inFence := false
 	fenceChar := byte(0)
 	fenceLen := 0
@@ -269,21 +275,79 @@ func EmptyCodeLines(body string) []int {
 			if end-indent >= 3 {
 				if !inFence {
 					inFence, fenceChar, fenceLen = true, line[indent], end-indent
-					continue
-				}
-				if line[indent] == fenceChar && end-indent >= fenceLen && strings.Trim(line[end:], " ") == "" {
+				} else if line[indent] == fenceChar && end-indent >= fenceLen && strings.Trim(line[end:], " ") == "" {
 					inFence = false
 				}
+				mask[i] = true
 				continue
 			}
 		}
-		if inFence {
+		mask[i] = inFence
+	}
+	return mask
+}
+
+// EmptyCodeLines reports 1-based lines with an exact double-backtick run
+// outside fenced code blocks.
+func EmptyCodeLines(body string) []int {
+	lines := strings.Split(body, "\n")
+	mask := briefFenceMask(lines)
+	var out []int
+	for i, line := range lines {
+		if mask[i] {
 			continue
 		}
 		for _, loc := range emptyBacktickRun.FindAllStringIndex(line, -1) {
 			if loc[1]-loc[0] == 2 {
 				out = append(out, i+1)
 				break
+			}
+		}
+	}
+	return out
+}
+
+// briefLintPlaceholderMarkers returns the built-in unfilled placeholder
+// markers followed by the comma-separated items of brief_lint_placeholders,
+// trimmed, de-duplicated, in order.
+func briefLintPlaceholderMarkers(value string) []string {
+	out := make([]string, 0, len(unfilledPlaceholderBuiltins))
+	for _, marker := range unfilledPlaceholderBuiltins {
+		out = append(out, marker)
+	}
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		duplicate := false
+		for _, existing := range out {
+			if existing == item {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// UnfilledPlaceholders returns one mark per brief line (1-based) outside a
+// fenced code block that contains a marker, in line order then marker order:
+// "unfilled placeholder '<marker>' (line <n>)".
+func UnfilledPlaceholders(body string, markers []string) []string {
+	lines := strings.Split(body, "\n")
+	mask := briefFenceMask(lines)
+	var out []string
+	for i, line := range lines {
+		if mask[i] {
+			continue
+		}
+		for _, marker := range markers {
+			if strings.Contains(line, marker) {
+				out = append(out, fmt.Sprintf("unfilled placeholder '%s' (line %d)", marker, i+1))
 			}
 		}
 	}
@@ -338,9 +402,19 @@ func BriefLintFindings(brief string, ctx *core.Config, env platform.Env, options
 		result.Warnings = append(result.Warnings, fmt.Sprintf("brief %s failure matrix is missing: %s — %s", brief, strings.Join(markers, " "), strings.Join(reasons, "; ")))
 	}
 	missing := BriefMissingSections(body, options.ReadOnly, aliases)
-	if missing != "" {
-		result.MissingMessage = fmt.Sprintf("brief %s is missing sections:%s — %s", brief, missing, MissingSectionsReasons(missing))
+	placeholderMarks := UnfilledPlaceholders(body, briefLintPlaceholderMarkers(core.Cfg(ctx, "brief_lint_placeholders", "", env)))
+	if missing == "" && len(placeholderMarks) == 0 {
+		return result
 	}
+	missingList := missing
+	for _, mark := range placeholderMarks {
+		missingList += " [" + mark + "]"
+	}
+	message := fmt.Sprintf("brief %s is missing sections:%s", brief, missingList)
+	if reasons := MissingSectionsReasons(missingList); reasons != "" {
+		message += " — " + reasons
+	}
+	result.MissingMessage = message
 	return result
 }
 
