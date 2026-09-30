@@ -3,6 +3,7 @@ package provider
 import (
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 const PromptMarker = "Read the file "
@@ -39,6 +40,49 @@ func PromptSitsInInput(screen string) bool {
 		}
 	}
 	return false
+}
+
+// boxPrefix starts a line of a full-screen TUI's own message box (opencode
+// draws `┃  ` before every line of a message and wraps it inside the box).
+const boxPrefix = "\u2503"
+
+// PromptEvidence reports whether the screen shows this dispatch's prompt: the
+// composed path whole on a line, or whole once the box lines of a full-screen
+// TUI are joined back (opencode wraps the path inside its box, so a box line
+// holds only a prefix such as `…/briefs/<agent>-`, which every brief of that
+// agent shares). The fragment and queue rules of QueuedPromptEvidence apply
+// only to lines outside such a box.
+func PromptEvidence(screen, composed string) bool {
+	if composed == "" {
+		return false
+	}
+	if strings.Contains(screen, composed) {
+		return true
+	}
+	var joined, outside strings.Builder
+	for _, line := range strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n") {
+		head := strings.TrimLeft(line, " \t")
+		if strings.HasPrefix(head, boxPrefix) {
+			joined.WriteString(strings.TrimPrefix(head, boxPrefix))
+			continue
+		}
+		outside.WriteString(line)
+		outside.WriteString("\n")
+	}
+	if strings.Contains(stripSpace(joined.String()), stripSpace(composed)) {
+		return true
+	}
+	return QueuedPromptEvidence(outside.String(), composed)
+}
+
+// stripSpace drops every whitespace rune: a box wraps at a space as well.
+func stripSpace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // QueuedPromptEvidence reports whether the screen carries the dispatched prompt in the

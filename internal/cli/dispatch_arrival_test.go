@@ -55,6 +55,7 @@ func newDispatchArrivalFixture(t *testing.T, initialMode string, initialSeq, nex
 		if extra[i].Stdout == "$CURRENT_PATHS" {
 			extra[i].Stdout = dispatchPromptEvidence(root)
 		}
+		extra[i].Stdout = strings.ReplaceAll(extra[i].Stdout, "$ROOT", root)
 	}
 	rules := []fakecli.Rule{
 		{Argv: []string{"agent", "list"}, ArgvPrefix: true, Stdout: `{"result":{"agents":[]}}`},
@@ -477,5 +478,68 @@ func TestDispatchWorkingTargetStillBusyAfterTheSettleWindow(t *testing.T) {
 	// The verdict comes only after the turn wait (prompt_settle_seconds=2).
 	if elapsed := time.Since(start); elapsed < 2*time.Second {
 		t.Fatalf("not-received after %v, before the 2 s turn wait", elapsed)
+	}
+}
+
+// altScreenVisible is the visible screen opencode really shows while it works
+// on an amendment (pinar: an amendment to a working opencode came back
+// not-received while the pane showed the prompt): the prompt sits in its own
+// box, wrapped after the agent name, so the stamp is on the next line.
+func altScreenVisible(stamp string) string {
+	briefs := filepath.Join("$ROOT", "state", "ws", "briefs") + string(filepath.Separator)
+	return "  ┃  [✓] earlier step\n" +
+		"     ▣  Build · Qwen3.8-27B NVFP4 (ai01) · 23m 14s\n" +
+		"  ┃\n" +
+		"  ┃  Read the file " + briefs + "worker-\n" +
+		"  ┃  " + stamp + ".md in full and execute it. It amends the brief you are working on. When\n" +
+		"  ┃\n" +
+		"   ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                            126.3K (48%)  ctrl+p commands\n"
+}
+
+// runAltScreenDispatch runs a dispatch to a working target whose recent read
+// Herdr refuses (agent_not_idle), with the clock at 2026-09-30 12:54:55 so the
+// composed prompt is worker-20260930T125455.md.
+func runAltScreenDispatch(t *testing.T, screenStamp string) (int, string, string, time.Duration) {
+	t.Helper()
+	base := time.Date(2026, 9, 30, 12, 54, 55, 0, time.Local)
+	began := time.Now()
+	oldNow := platform.Now
+	platform.Now = func() time.Time { return base.Add(time.Since(began)) }
+	t.Cleanup(func() { platform.Now = oldNow })
+	notIdle := `{"error":{"code":"agent_not_idle","message":"cannot read 40 lines while worker is working: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source visible"}}`
+	f := newDispatchArrivalFixture(t, "working", 5, 5, "", "2",
+		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped"}, ArgvPrefix: true, Code: 1, Stderr: notIdle},
+		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: altScreenVisible(screenStamp)},
+	)
+	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	start := time.Now()
+	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
+	return code, out, errText, time.Since(start)
+}
+
+// TestDispatchWorkingAltScreenTargetShowsThePromptOnTheVisibleScreen: Herdr
+// refuses a recent read of a working full-screen TUI, so the evidence comes
+// from the visible screen, with the wrapped path joined back.
+func TestDispatchWorkingAltScreenTargetShowsThePromptOnTheVisibleScreen(t *testing.T) {
+	code, out, errText, elapsed := runAltScreenDispatch(t, "20260930T125455")
+	if code != 0 || dispatchOutputStatus(t, out) != "queued" || strings.Contains(errText, "not confirmed") {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	if !strings.Contains(out, "worker-20260930T125455.md") {
+		t.Fatalf("the clock did not pin the composed name: %s", out)
+	}
+	// The evidence is on screen within the check window: no wait for the turn.
+	if elapsed >= 2*time.Second {
+		t.Fatalf("queued after %v: the visible prompt should confirm it before the 2 s turn wait", elapsed)
+	}
+}
+
+// TestDispatchWorkingAltScreenEarlierBriefIsNotThisPrompt (R-RC5B): the box
+// line holds only `…/briefs/worker-`, shared by every brief of the agent; an
+// earlier brief still on screen is not this prompt.
+func TestDispatchWorkingAltScreenEarlierBriefIsNotThisPrompt(t *testing.T) {
+	code, out, errText, _ := runAltScreenDispatch(t, "19990101T000000")
+	if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 	}
 }
