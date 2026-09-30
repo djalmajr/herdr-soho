@@ -135,6 +135,26 @@ func TestQueuedPathUsesOnlyFinalThreeInputLines(t *testing.T) { // JS: "wait: qu
 	}
 }
 
+// A not-received marker from a dispatch to a working target carries the prompt
+// path: the path in the scrollback of the earlier turn, outside the final
+// three lines, is not a prompt in the input and gets no Enter.
+func TestNotReceivedPathUsesOnlyFinalThreeInputLines(t *testing.T) {
+	prompt := "/tmp/worker-brief.md"
+	lines := []string{"Read the file " + prompt + " in full and execute it."}
+	for i := 2; i <= 15; i++ {
+		lines = append(lines, fmt.Sprintf("output line %d", i))
+	}
+	f := newQueuedProbeFixture(t, "idle", "5", strings.Join(lines, "\n")+"\n", map[string]string{
+		"not-received": "1 5 " + prompt + "\n",
+	})
+	if got := f.probe(""); got != "not-received" {
+		t.Fatalf("prompt outside the final three lines was treated as in the input: %q", got)
+	}
+	if hasCall(f.calls(), "agent send-keys worker enter") {
+		t.Fatal("prompt echo outside the final three lines received Enter")
+	}
+}
+
 func TestBlockedClearsQueuedAndRetryMarkers(t *testing.T) { // JS: "wait: blocked and gone clear queued markers while unavailable preserves retry state"
 	f := newQueuedProbeFixture(t, "blocked", "5", "Allow command?\nPress enter to confirm or esc to cancel\n", map[string]string{
 		"blocked":     "\n",

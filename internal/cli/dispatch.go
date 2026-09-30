@@ -395,7 +395,17 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			}
 		}
 		if wasWorking {
-			if !waitDispatchArrivalExtra(window, env, arrived, promptEvidence) {
+			ok := waitDispatchArrivalExtra(window, env, arrived, promptEvidence)
+			if !ok && settleSecs > 0 {
+				// Some CLIs (Cursor) hold a prompt sent during a turn in a queue they do
+				// not show: wait up to prompt_settle_seconds for that turn to end, then
+				// look for the arrival once more. After the turn only a new working turn
+				// or the report counts: a path in the scrollback of an idle agent is not
+				// a queued prompt (the next wait would read it as stuck in the input).
+				ok = waitWorkingTurnEnd(agent, preSeq, time.Duration(settleSecs)*time.Second, env) &&
+					waitDispatchArrival(window, env, arrived)
+			}
+			if !ok {
 				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, env, true, "the working target showed no prompt evidence")
 			}
 			st := herdr.AgentState(agent, env, herdr.Timeout, nil)
@@ -523,6 +533,31 @@ func waitDispatchArrivalExtra(window time.Duration, env platform.Env, arrived, e
 		time.Sleep(poll)
 	}
 }
+
+// waitWorkingTurnEnd polls a target that was working when the prompt went out
+// until its turn ends (it leaves working and blocked) or a new turn starts (its
+// state_change_seq moves while working), up to window. It reports whether that
+// happened in time.
+func waitWorkingTurnEnd(agent, preSeq string, window time.Duration, env platform.Env) bool {
+	deadline := platform.Now().Add(window)
+	for {
+		st := herdr.AgentState(agent, env, herdr.Timeout, nil)
+		if st.State != "working" && st.State != "blocked" {
+			return st.State == "idle" || st.State == "done"
+		}
+		if preSeq != "" && seqString(st.Seq) != "" && seqString(st.Seq) != preSeq {
+			return true
+		}
+		if !platform.Now().Before(deadline) {
+			return false
+		}
+		poll := time.Duration(spawn.PollIntervalMs(env)) * time.Millisecond
+		if poll <= 0 {
+			poll = 100 * time.Millisecond
+		}
+		time.Sleep(poll)
+	}
+}
 func intPtr(v int) *int { return &v }
 func composedPathSeenOutsideInput(agent, composed string, env platform.Env) bool {
 	lines := strings.Split(strings.ReplaceAll(herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40)), "\r\n", "\n"), "\n")
@@ -575,7 +610,15 @@ func dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, si
 	}
 	seq := seqString(herdr.AgentState(agent, env, herdr.Timeout, nil).Seq)
 	marker := strconv.FormatInt(platform.Now().Unix(), 10)
-	if seq != "" {
+	if wasWorking {
+		// The prompt path goes in the marker (as in .queued): the next wait then
+		// sends Enter only when this prompt sits in the last lines (the input),
+		// never for a path it sees in the scrollback of the earlier turn.
+		if seq == "" {
+			seq = "-"
+		}
+		marker += " " + seq + " " + composed
+	} else if seq != "" {
 		marker += " " + seq
 	}
 	marker += "\n"
