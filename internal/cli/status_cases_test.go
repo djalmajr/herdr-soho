@@ -647,7 +647,7 @@ func TestWaitTimeoutActivityAgeCases(t *testing.T) {
 		}
 		return line
 	}
-	t.Run("wait: a timeout on a moved screen has no age, activity_changed and no checkpoint", func(t *testing.T) {
+	t.Run("wait: a timeout on a moved screen has no age, activity_changed and a checkpoint (R-RC7D)", func(t *testing.T) {
 		moved := "Linking the binary\n"
 		rules := append(append([]fakecli.Rule{}, working...),
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, Stdout: screen},
@@ -656,7 +656,7 @@ func TestWaitTimeoutActivityAgeCases(t *testing.T) {
 		f := newWaitStatusFixture(t, row, rules)
 		code, out, stderr := f.runWait(t, "worker", "--timeout", "1")
 		line := record(t, out)
-		if code != 9 || line["activity_age_s"] != nil || line["activity_changed"] != true || line["checkpoint"] != false || !strings.Contains(out, `"checkpoint":false,"activity_age_s":null,"activity_changed":true}`) || !strings.Contains(stderr, "timeout waiting for 'worker'") {
+		if code != 9 || line["activity_age_s"] != nil || line["activity_changed"] != true || line["checkpoint"] != true || !strings.Contains(out, `"checkpoint":true,"activity_age_s":null,"activity_changed":true}`) || !strings.Contains(stderr, "is still working (screen changed within the last ") || strings.Contains(stderr, "timeout waiting for 'worker'") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})
