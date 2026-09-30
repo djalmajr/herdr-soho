@@ -1290,7 +1290,8 @@ leading spaces, the title ends or continues with a non-letter, non-digit;
 English headings and configured aliases keep simple prefix matching. The shipped `brief_lint_aliases` adds the multi-word Portuguese headings
 the built-in map rejects (`Aceite`, `Arquivos próprios`, `Arquivos de
 posse`); a user or project value replaces it. A brief line with an unfilled
-marker (`AGENT_NAME`, `WORKTREE_PATH`, `<slot>`, or an item of
+marker (`AGENT_NAME`, `WORKTREE_PATH`, `<slot>` inside a path such as
+`/tmp/<slot>/`, or an item of
 `brief_lint_placeholders`), outside a fenced code block, is flagged
 `unfilled placeholder '<marker>' (line <n>)` (`warn` warns, `strict` refuses). In
 `Owned files`, a line

@@ -206,3 +206,22 @@ func TestUnfilledPlaceholderMarks(t *testing.T) {
 		}
 	})
 }
+
+func TestUnfilledSlotAndCRFence(t *testing.T) {
+	markers := briefLintPlaceholderMarkers("")
+	t.Run("<slot> inside a path is flagged, as a label it is not", func(t *testing.T) {
+		body := "cache em `/tmp/hs-go/<slot>/cache`\n(`<slot>` = `build`)\nsrc/<slot>/main.go\n"
+		got := UnfilledPlaceholders(body, markers)
+		want := []string{"unfilled placeholder '<slot>' (line 1)", "unfilled placeholder '<slot>' (line 3)"}
+		if strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Fatalf("got %#v want %#v", got, want)
+		}
+	})
+	t.Run("a fence closed by a CR-terminated line closes", func(t *testing.T) {
+		body := "```\nAGENT_NAME inside\n```\r\nAGENT_NAME after\n"
+		got := UnfilledPlaceholders(body, markers)
+		if len(got) != 1 || got[0] != "unfilled placeholder 'AGENT_NAME' (line 4)" {
+			t.Fatalf("got %#v", got)
+		}
+	})
+}

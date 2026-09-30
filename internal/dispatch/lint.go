@@ -39,7 +39,11 @@ var lintSectionReasons = map[string]string{
 	"no-git line: say 'no commit/push'": "the worker may commit or push",
 }
 var noGitLintMarker = "no-git line: say 'no commit/push'"
-var unfilledPlaceholderBuiltins = []string{"AGENT_NAME", "WORKTREE_PATH"}
+
+// `<slot>` counts only inside a path (next to a slash): briefs also use it as a
+// label, as in "(`<slot>` = `build`)".
+var unfilledPlaceholderBuiltins = []string{"AGENT_NAME", "WORKTREE_PATH", "<slot>"}
+var slotInPath = regexp.MustCompile(`/<slot>|<slot>/`)
 var missingSectionPattern = regexp.MustCompile(`\[([^\]]+)\]`)
 var failureMatrixMarkers = []struct{ marker, reason string }{
 	{"crash", "a crash between publish and prune/delete is not covered"},
@@ -275,7 +279,7 @@ func briefFenceMask(lines []string) []bool {
 			if end-indent >= 3 {
 				if !inFence {
 					inFence, fenceChar, fenceLen = true, line[indent], end-indent
-				} else if line[indent] == fenceChar && end-indent >= fenceLen && strings.Trim(line[end:], " ") == "" {
+				} else if line[indent] == fenceChar && end-indent >= fenceLen && strings.Trim(line[end:], " \r") == "" {
 					inFence = false
 				}
 				mask[i] = true
@@ -346,7 +350,11 @@ func UnfilledPlaceholders(body string, markers []string) []string {
 			continue
 		}
 		for _, marker := range markers {
-			if strings.Contains(line, marker) {
+			hit := strings.Contains(line, marker)
+			if marker == "<slot>" {
+				hit = slotInPath.MatchString(line)
+			}
+			if hit {
 				out = append(out, fmt.Sprintf("unfilled placeholder '%s' (line %d)", marker, i+1))
 			}
 		}
