@@ -525,7 +525,7 @@ error type naming `capacity` or `overload`, or status 529). The exact
 patterns live in one place, `scripts/lib/provider.mjs`. A private gateway
 whose messages do not start with `Error` adds its own capacity and error
 texts in the user config: `provider_capacity_texts` and `provider_error_texts`
-(pipe-separated, matched case-insensitively, without the `┃` box prefix).
+(pipe-separated; a line counts when, without the `┃` box prefix, an `Error:` label and a final period, it is exactly one of them, case-insensitively: a sentence that only quotes the text does not count).
 On `capacity` the
 wait first sends the worker
 "continue" up to `provider_retries` times, `provider_retry_delay` seconds

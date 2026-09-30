@@ -192,8 +192,9 @@ dispatch_timeout=900000
 provider_retries=3
 provider_retry_delay=60
 # Pipe-separated texts of a private gateway whose messages do not start with
-# `Error` (matched case-insensitively, without the `┃` box prefix): an idle
-# line naming one is `capacity` / `provider-error` respectively.
+# `Error`: an idle line that is exactly one of them (case-insensitively, without
+# the `┃` box prefix, an `Error:` label and a final period) is `capacity` /
+# `provider-error` respectively; a sentence that only quotes the text is not.
 # provider_capacity_texts=server busy, try later|no worker ready
 # provider_error_texts=
 

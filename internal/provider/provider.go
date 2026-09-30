@@ -93,11 +93,11 @@ func ProviderDetectTexts(state, screen, capacityTexts, errorTexts string) *Detec
 				return &Detection{Status: "provider-error", Cause: cause}
 			}
 		}
-		stripped := text.ASCIILower(stripBoxPrefix(line))
-		if containsText(stripped, capacity) {
+		stripped := configuredTextLine(line)
+		if equalsText(stripped, capacity) {
 			return &Detection{Status: "capacity", Cause: text.SanitizeCause(text.RedactSecrets(line))}
 		}
-		if containsText(stripped, errTexts) {
+		if equalsText(stripped, errTexts) {
 			return &Detection{Status: "provider-error", Cause: text.SanitizeCause(text.RedactSecrets(line))}
 		}
 	}
@@ -123,9 +123,27 @@ func splitTexts(value string) []string {
 	return pieces
 }
 
-func containsText(value string, pieces []string) bool {
+// configuredTextLine is the line as a configured text must equal it: without a
+// full-screen TUI's box prefix, an error glyph or an `Error:`-style label, the
+// surrounding spaces and a final period, lowercased. The whole line must be the
+// text: a sentence that only quotes it (the worker writing about the error, a
+// brief on screen) is not the provider's answer.
+func configuredTextLine(line string) string {
+	value := stripBoxPrefix(line)
+	if errorGlyphRE.MatchString(value) || errorStartRE.MatchString(value) {
+		if i := strings.Index(value, ":"); i >= 0 {
+			value = value[i+1:]
+		} else {
+			value = strings.TrimLeft(value, " \t■")
+		}
+	}
+	value = strings.TrimSuffix(strings.TrimSpace(value), ".")
+	return text.ASCIILower(strings.TrimSpace(value))
+}
+
+func equalsText(value string, pieces []string) bool {
 	for _, piece := range pieces {
-		if strings.Contains(value, piece) {
+		if value == strings.TrimSuffix(piece, ".") {
 			return true
 		}
 	}

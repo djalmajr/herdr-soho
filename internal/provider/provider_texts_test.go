@@ -68,10 +68,26 @@ func TestProviderDetectTexts(t *testing.T) {
 			}
 		}
 	})
-	t.Run("providerDetectTexts: a capacity text and an error text on one line is capacity", func(t *testing.T) {
-		got := ProviderDetectTexts("idle", "  ┃  vLLM backend unavailable, nenhum worker de inferência pronto\n", capacityText, errorText)
-		if got == nil || got.Status != "capacity" {
-			t.Fatalf("ProviderDetectTexts() = %#v, want capacity", got)
+	t.Run("providerDetectTexts: only the whole line is the text; a sentence that quotes it is not", func(t *testing.T) {
+		// R-RC6B: a worker writing about the error, or a brief on screen, only quotes
+		// the text; the provider's answer is the text alone on its line.
+		for _, screen := range []string{
+			"  ┃  O gateway devolveu nenhum worker de inferência pronto, então parei.\n",
+			"  ┃  vLLM backend unavailable, nenhum worker de inferência pronto\n",
+			"- Brief: trate `nenhum worker de inferência pronto` como capacidade\n",
+		} {
+			if got := ProviderDetectTexts("idle", screen, capacityText, errorText); got != nil {
+				t.Fatalf("ProviderDetectTexts(%q) = %#v, want nil", screen, got)
+			}
+		}
+		for _, screen := range []string{
+			"  ┃  Nenhum worker de inferência pronto.\n",
+			"Error: nenhum worker de inferência pronto\n",
+			"■ nenhum worker de inferência pronto\n",
+		} {
+			if got := ProviderDetectTexts("idle", screen, capacityText, errorText); got == nil || got.Status != "capacity" {
+				t.Fatalf("ProviderDetectTexts(%q) = %#v, want capacity", screen, got)
+			}
 		}
 	})
 	t.Run("providerDetectTexts: today's rules win over the texts", func(t *testing.T) {
@@ -89,9 +105,9 @@ func TestProviderDetectTexts(t *testing.T) {
 			}
 		}
 	})
-	t.Run("providerDetectTexts: the cause is the redacted, sanitized line", func(t *testing.T) {
-		got := ProviderDetectTexts("idle", "  ┃  vLLM backend unavailable token=sk_live_abcdefghij\n", "", errorText)
-		if got == nil || got.Cause != "vLLM backend unavailable token=[redacted]" {
+	t.Run("providerDetectTexts: the cause is the sanitized line", func(t *testing.T) {
+		got := ProviderDetectTexts("idle", "  ┃  vLLM backend unavailable\n", "", errorText)
+		if got == nil || got.Cause != "vLLM backend unavailable" {
 			t.Fatalf("cause = %#v", got)
 		}
 	})
