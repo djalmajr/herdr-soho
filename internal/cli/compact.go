@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -29,9 +30,10 @@ var compactProofByKind = map[string]string{
 	"pi":     "Compacted from",
 }
 
-// compactThinkingValues are the thinking levels pi can show in its footer,
-// longest first so `xhigh` never falls through to `high`.
-var compactThinkingValues = []string{"minimal", "medium", "xhigh", "high", "off", "low", "max"}
+// compactThinkingFooterRE matches a thinking level at the end of a footer
+// line only when a boundary precedes it (start of line, whitespace, • or :),
+// so a word like `cutoff` does not read as `off`.
+var compactThinkingFooterRE = regexp.MustCompile(`(^|[\s•:])(off|minimal|low|medium|high|xhigh|max)\s*$`)
 
 func compactProof(kind string) string {
 	return compactProofByKind[kind]
@@ -93,16 +95,7 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	if state.State == "working" || state.State == "blocked" {
 		core.DieFriction(fmt.Sprintf("compact: agent '%s' is %s; compact only an idle worker", agent, state.State), 10, frictionLogPath, "compact")
 	}
-	if state.State == "unavailable" {
-		cause := state.Cause
-		if cause == "" {
-			cause = "herdr agent get failed"
-		}
-		core.DieFriction(fmt.Sprintf("compact: agent '%s' is unavailable: %s", agent, cause), 4, frictionLogPath, "compact")
-	}
-	if state.State == "gone" {
-		core.DieFriction(fmt.Sprintf("compact: agent '%s' is no longer live", agent), 6, frictionLogPath, "compact")
-	}
+	compactDieOnDeadWorker(agent, state)
 	if !herdr.PaneSendText(pane, "/compact", env) {
 		core.DieFriction(fmt.Sprintf("compact: could not send /compact to pane '%s'; release --close and spawn --fresh instead", pane), 4, frictionLogPath, "compact")
 	}
@@ -137,15 +130,34 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	return 0
 }
 
+// compactDieOnDeadWorker exits 4 (unavailable) or 6 (gone) with the same
+// message before the send and during the idle wait; it returns when the
+// worker is neither.
+func compactDieOnDeadWorker(agent string, state herdr.AgentStateResult) {
+	if state.State == "unavailable" {
+		cause := state.Cause
+		if cause == "" {
+			cause = "herdr agent get failed"
+		}
+		core.DieFriction(fmt.Sprintf("compact: agent '%s' is unavailable: %s", agent, cause), 4, frictionLogPath, "compact")
+	}
+	if state.State == "gone" {
+		core.DieFriction(fmt.Sprintf("compact: agent '%s' is no longer live", agent), 6, frictionLogPath, "compact")
+	}
+}
+
 // compactWaitIdle polls the agent state until it is idle or done or the
 // deadline passes; a Codex worker stays working for a few seconds after the
-// proof, so this keeps waiting instead of treating working as a failure.
+// proof, so this keeps waiting instead of treating working as a failure. A
+// worker that dies in the meantime (gone, unavailable) exits right away (6,
+// 4) instead of waiting out the deadline as a timeout.
 func compactWaitIdle(agent string, env platform.Env, deadline time.Time) bool {
 	for {
 		state := herdr.AgentState(agent, env, herdr.Timeout, nil)
 		if state.State == "idle" || state.State == "done" {
 			return true
 		}
+		compactDieOnDeadWorker(agent, state)
 		if !platform.Now().Before(deadline) {
 			return false
 		}
@@ -153,15 +165,30 @@ func compactWaitIdle(agent string, env platform.Env, deadline time.Time) bool {
 	}
 }
 
+// compactCommandLine reports whether the line is the sent /compact command
+// itself: exactly /compact once surrounding whitespace and a leading prompt
+// marker (>, ›, ❯, │ or $) are removed. A line that merely mentions /compact
+// inside other text is not the anchor.
+func compactCommandLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	for _, marker := range []string{">", "›", "❯", "│", "$"} {
+		if strings.HasPrefix(trimmed, marker) {
+			trimmed = strings.TrimSpace(trimmed[len(marker):])
+			break
+		}
+	}
+	return trimmed == "/compact"
+}
+
 // compactProofBelow reports whether the kind's proof appears below the last
-// line of the screen containing /compact; proof above it (an earlier
-// compaction) does not count, and a screen without the sent command has no
-// proof.
+// line of the screen that is the sent /compact command; proof above it (an
+// earlier compaction) does not count, and a screen without the sent command
+// has no proof.
 func compactProofBelow(screen, proof string) bool {
 	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
 	marker := -1
 	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.Contains(lines[i], "/compact") {
+		if compactCommandLine(lines[i]) {
 			marker = i
 			break
 		}
@@ -198,7 +225,7 @@ func compactThinkingWarning(agent, kind, role, lane, model string, ctx *core.Con
 
 // compactThinkingFooter returns the thinking value the last footer line of
 // the screen (the last line containing a bullet) ends with, or "" when that
-// line does not end with one.
+// line does not end with a level.
 func compactThinkingFooter(screen string) string {
 	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -206,10 +233,8 @@ func compactThinkingFooter(screen string) string {
 		if !strings.Contains(line, "•") {
 			continue
 		}
-		for _, value := range compactThinkingValues {
-			if strings.HasSuffix(line, value) {
-				return value
-			}
+		if m := compactThinkingFooterRE.FindStringSubmatch(line); m != nil {
+			return m[2]
 		}
 		return ""
 	}

@@ -144,14 +144,16 @@ func compactJSON(t *testing.T, out string) map[string]any {
 }
 
 var compactScreens = struct {
-	piStale        string
-	piFresh        string
-	piFooterHigh   string
-	piFooterMedium string
-	claudeStale    string
-	claudeFresh    string
-	codexProof     string
-	noProof        string
+	piStale           string
+	piFresh           string
+	piFooterHigh      string
+	piFooterMedium    string
+	claudeStale       string
+	claudeFresh       string
+	codexProof        string
+	noProof           string
+	codexLaterMention string
+	piFooterCutoff    string
 }{
 	piStale:        "old output line\n[compaction] Compacted from 99999 tokens\n> /compact\n",
 	piFresh:        "old output line\n[compaction] Compacted from 99999 tokens\n> /compact\n[compaction] Compacted from 12345 tokens\n",
@@ -161,6 +163,10 @@ var compactScreens = struct {
 	claudeFresh:    "old output line\nCompacted\n> /compact\nCompacted the conversation to 42 tokens\n",
 	codexProof:     "> /compact\nContext compacted\n",
 	noProof:        "> /compact\n",
+	// The review's screens: a later line that only mentions /compact must not
+	// become the anchor, and `cutoff` must not read as thinking `off`.
+	codexLaterMention: "> /compact\nContext compacted\nthe history mentions /compact again\n",
+	piFooterCutoff:    "old output line\n> /compact\n[compaction] Compacted from 12345 tokens\n• cutoff\n",
 }
 
 func compactReadArgv(agent string) []string {
@@ -340,6 +346,143 @@ func TestCompactPiThinkingWarning(t *testing.T) {
 	if !strings.Contains(errText, want) {
 		t.Fatalf("stderr=%q want %q", errText, want)
 	}
+}
+
+// TestCompactLaterMentionDoesNotAnchor verifies the review's later-mention
+// screen: a line that only mentions /compact after the proof is not the
+// anchor, so the proof below the sent command still counts (old code: 9).
+func TestCompactLaterMentionDoesNotAnchor(t *testing.T) {
+	f := newCompactFixture(t, "codex", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.codexLaterMention},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["agent"] != "worker" || value["kind"] != "codex" || value["status"] != "compacted" {
+		t.Fatalf("json=%v", value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, compactReadArgv("worker")); n != 1 {
+		t.Fatalf("recent reads=%d want 1 (the proof is on the first read): %#v", n, calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
+		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
+	}
+}
+
+// TestCompactWorkerDiesDuringWait verifies that gone and unavailable during
+// the idle wait exit 6 and 4 right away (well before the deadline) with the
+// same messages the pre-send checks use, instead of waiting out a timeout.
+func TestCompactWorkerDiesDuringWait(t *testing.T) {
+	cases := []struct {
+		name    string
+		rule    fakecli.Rule
+		code    int
+		wantErr string
+	}{
+		{
+			name:    "agent_not_found after the proof is gone",
+			rule:    fakecli.Rule{Stderr: `{"error":{"code":"agent_not_found","message":"gone"}}`},
+			code:    6,
+			wantErr: "compact: agent 'worker' is no longer live",
+		},
+		{
+			name:    "herdr_failed after the proof is unavailable",
+			rule:    fakecli.Rule{Code: 1, Stderr: `{"error":{"code":"herdr_failed","message":"boom"}}`},
+			code:    4,
+			wantErr: "compact: agent 'worker' is unavailable:",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := tc.rule
+			rule.Argv = []string{"agent", "get", "worker"}
+			rule.Call = 2
+			f := newCompactFixture(t, "codex", []fakecli.Rule{
+				{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+				rule,
+				{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+				{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+				{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.codexProof},
+			})
+			start := time.Now()
+			code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+			elapsed := time.Since(start)
+			if code != tc.code {
+				t.Fatalf("code=%d want %d out=%s stderr=%s", code, tc.code, out, errText)
+			}
+			if out != "" {
+				t.Fatalf("stdout on a dead worker: %q", out)
+			}
+			if !strings.Contains(errText, tc.wantErr) {
+				t.Fatalf("stderr=%q want %q", errText, tc.wantErr)
+			}
+			if elapsed > 10*time.Second {
+				t.Fatalf("exited after %v; the worker's death must stop the wait long before the 30 s deadline", elapsed)
+			}
+			calls := f.calls(t)
+			if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 2 {
+				t.Fatalf("agent get calls=%d want 2 (pre-send plus the one that died): %#v", n, calls)
+			}
+		})
+	}
+}
+
+// TestCompactFooterThinkingBoundary verifies the review's footer screens:
+// `• cutoff` is not a thinking level (no warning) and `• thinking: high`
+// against an effective effort of medium warns.
+func TestCompactFooterThinkingBoundary(t *testing.T) {
+	t.Run("`• cutoff` is not a thinking level: no warning", func(t *testing.T) {
+		f := newCompactFixture(t, "pi", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.piFresh},
+			{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piFooterCutoff},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+		if code != 0 {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+		if value := compactJSON(t, out); value["status"] != "compacted" {
+			t.Fatalf("json=%v", value)
+		}
+		if strings.Contains(errText, "shows thinking") {
+			t.Fatalf("`cutoff` was read as a thinking level: %s", errText)
+		}
+	})
+	t.Run("`• thinking: high` with effort medium warns", func(t *testing.T) {
+		f := newCompactFixture(t, "pi", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.piFresh},
+			{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piFooterHigh},
+		})
+		roleFile := filepath.Join(f.root, "roles", "implementer.md")
+		if err := os.WriteFile(roleFile, []byte("---\nname: implementer\nmode: edit\neffort: medium\n---\nRole body.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+		if code != 0 {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+		if value := compactJSON(t, out); value["status"] != "compacted" {
+			t.Fatalf("json=%v", value)
+		}
+		want := "compact: 'worker' shows thinking 'high' after compaction; its effort is 'medium'"
+		if !strings.Contains(errText, want) {
+			t.Fatalf("stderr=%q want %q", errText, want)
+		}
+	})
 }
 
 func TestCompactUnknownAgentExits3(t *testing.T) {
