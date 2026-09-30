@@ -426,7 +426,7 @@ func ProbeAgent(sd, agent, report string, ctx *core.Config, env platform.Env) st
 			return "quota"
 		}
 		ptext := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
-		p := provider.ProviderDetect(st.State, ptext)
+		p := provider.ProviderDetectTexts(st.State, ptext, core.Cfg(ctx, "provider_capacity_texts", "", env), core.Cfg(ctx, "provider_error_texts", "", env))
 		if p != nil {
 			if p.Status == "provider-error" && p.Auth {
 				_ = os.Remove(queuedFile)
@@ -608,6 +608,13 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 				}
 				if partial > 0 {
 					line.Set("partial", partial)
+				}
+				if header != nil || partial > 0 {
+					effective := "pass"
+					if partial > 0 || header.Verdict == "fail" || header.Severity["P0"]+header.Severity["P1"]+header.Severity["P2"] > 0 {
+						effective = "fail"
+					}
+					line.Set("verdict_effective", effective)
 				}
 				jsonLine(line)
 				if partial > 0 {

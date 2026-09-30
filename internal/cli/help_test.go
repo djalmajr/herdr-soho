@@ -59,7 +59,7 @@ func TestCommandHelpFirstPositionOnly(t *testing.T) {
 	})
 
 	t.Run("friction --help stops at the next herdr-soho line", func(t *testing.T) {
-		const want = "  herdr-soho friction                     # every error/warning of this workspace\n"
+		const want = "  herdr-soho friction [--since D] [--level L] [--command C] [--agent A] [--summary]  # errors/warnings of this workspace; options AND together\n"
 		code, out, errOut := runIn(t, []string{"friction", "--help"}, env, cwd)
 		if code != 0 || out != want || errOut != "" {
 			t.Fatalf("code=%d out=%q err=%q; want the first friction usage line on stdout", code, out, errOut)

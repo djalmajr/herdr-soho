@@ -396,7 +396,7 @@ $S dispatch a brief-a.md --no-wait   # fan out…
 $S dispatch b brief-b.md --no-wait
 $S wait a b                          # …then block until every report exists
 $S wait a b --any                    # or until the first one lands
-$S status a b                        # non-blocking: done | working | blocked | question | no-report-yet | gone | unavailable | quota | provider-error | capacity | not-received
+$S status [a b]                      # non-blocking (no names = the whole team): done | working | blocked | question | no-report-yet | gone | unavailable | quota | provider-error | capacity | not-received
 ```
 
 **Amending a brief in flight.** To change a worker's brief — while it is
@@ -465,14 +465,20 @@ sum differs from `findings` gets the warning
 `report of '<agent>': findings <N> but P0..P3 add up to <sum>`, and a
 done report of a review role without the header gets
 `report of '<agent>' has no 'findings: N (P0 a, P1 b, P2 c, P3 d) | verdict:
-pass|fail' first line`. The review roles also tell the worker: before
+pass|fail' first line`. Both the `wait` line and the `dispatch` JSON
+gain `verdict_effective` (in `wait` after `partial`, in `dispatch` with
+the review fields): `fail` when the
+header says `fail`, when P0–P2 are open, or when the report carries a
+`partial` item — even with a `pass` header; `pass` otherwise; absent
+when the report has neither a review header nor a `partial` item. The
+review roles also tell the worker: before
 calling a test, assertion or command wrong, run it when the brief allows
 it and quote the output; when it cannot run it, say so and lower its
 confidence — reading the code is not proof that a test fails. The
 `dispatch` JSON carries the same `partial: N` right after `report_exists`
 (after `amend`, when present), and the review fields (`verdict`,
-`findings`, `severity`) right after `report_exists` (after `amend`, when
-present). With `--no-wait`, `dispatch` can also return `wait_status: queued`
+`findings`, `severity`, `verdict_effective`) right after `report_exists`
+(after `amend`, when present). With `--no-wait`, `dispatch` can also return `wait_status: queued`
 when a working target shows prompt evidence; this exits 0 and the prompt is
 picked up when its current turn ends. The JSON is one line with `wait_status` first, so
 `dispatch … | tail -1` returns the whole JSON. When the wait settled on a
@@ -522,7 +528,11 @@ it unattributed even if the line reappears: redraw or replay can mimic a new
 failure. Use `wait` or `status` to inspect the stopped worker.
 `capacity` is a provider that refused because it was full (for example an
 error type naming `capacity` or `overload`, or status 529). The exact
-patterns live in one place, `scripts/lib/provider.mjs`. On `capacity` the
+patterns live in one place, `scripts/lib/provider.mjs`. A private gateway
+whose messages do not start with `Error` adds its own capacity and error
+texts in the user config: `provider_capacity_texts` and `provider_error_texts`
+(pipe-separated; a line counts when, without the `┃` box prefix, an `Error:` label and a final period, it is exactly one of them, case-insensitively: a sentence that only quotes the text does not count).
+On `capacity` the
 wait first sends the worker
 "continue" up to `provider_retries` times, `provider_retry_delay` seconds
 apart (each one logged in friction), and reports `capacity` only when that
@@ -715,7 +725,7 @@ $S collect impl [--lines N] [--verify]      # prints the report file (or recent 
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
 $S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
-$S friction                                # errors/warnings of this workspace (review at end)
+$S friction [--since <date>] [--level warning|note|error] [--command <cmd>] [--agent <name>] [--summary]  # errors/warnings of this workspace (review at end); the options AND together over the log lines (<date> as in stats --since; --level error matches error(exit N); --agent matches '<name>' in the message); --summary prints a count/level/command table instead of the lines
 $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before sending; no dispatch, no state
 $S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
                                              # peer message to another agent (any kind, local or another machine): ref local/w12:p1 or a name on the local server; waits for a busy target to settle by default
@@ -723,13 +733,13 @@ $S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation c
 $S mutation-copy [--source <dir>] [--dest <dir>] [--link <relpath>=<target>]…  # build the throwaway mutation copy from the worktree's repository files, guarded (exit 1 guard, 2 refused, 4 copy error)
 $S find [words] [--machine <label>]… [--all] [--json]   # live panes with a paste-ready reference (<machine>/<ws>:<pane>), filtered by the words
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
-$S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to
+$S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to; a failed notice exits 0 with the file saved (it warns and prints the filed JSON)
 $S regrid                                  # exact grids: caller's tab (split) + every herd tab
 $S tab-label                               # herd tabs: id, label, auto|manual
 $S tab-label "onda 2" [--tab ID]           # pin a label (newest herd tab, or --tab); --auto goes back
 $S spawn reviewer --tab-label "onda 2"     # place the worker in the herd tab of that name (created if needed)
 $S layout-plan                             # where the next spawn lands (anchor, direction, overflow reason)
-$S status a b                              # non-blocking completion check; no names exits 2 and points to `roster`
+$S status [a b …]                          # non-blocking completion check; no names = the whole team (all roster agents, in roster order, same output and exit code as naming them)
 $S config                                  # effective configuration and sources (incl. the session layer)
 $S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>
 $S roster                                  # live agents with role/kind/pane/state/report and the current task (TASK, from the pane title; '-' when none, cut to 40 characters)
@@ -1688,8 +1698,9 @@ issue on the skill's repo so the maintainer can improve it incrementally.
   - The pane or agent in `feedback_to` gets one line with the summary and
     the path.
   - Without `feedback_to`, only the file is written.
-  - It prints one JSON line. Exit 4 means the file was saved but the
-    notice failed: tell the maintainer yourself.
+  - It prints one JSON line. A failed notice exits 0 with the file
+    saved (status `filed`, `notified: null`, the error, and a warning):
+    tell the maintainer yourself.
   - Do not edit the skill, its installed copy, or another project's roles
     or config to work around the friction. The maintainer answers and
     tells you when a change needs your project's config.
