@@ -159,6 +159,21 @@ func TabList(env platform.Env, ws string) []any {
 	}
 	return []any{}
 }
+
+// AgentReadOK is AgentRead that also reports whether the read succeeded, for
+// callers that must tell an empty screen from a failed read.
+func AgentReadOK(env platform.Env, agent, source string, lines *int) (string, bool) {
+	args := []string{"agent", "read", agent, "--source", source}
+	if lines != nil {
+		args = append(args, "--lines", fmt.Sprint(*lines))
+	}
+	r := run(args, env)
+	if !ok(r) {
+		return "", false
+	}
+	return r.Stdout, true
+}
+
 func AgentRead(env platform.Env, agent, source string, lines *int) string {
 	args := []string{"agent", "read", agent, "--source", source}
 	if lines != nil {

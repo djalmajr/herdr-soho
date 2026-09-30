@@ -1247,6 +1247,35 @@ func TestSendAmendmentCases(t *testing.T) {
 		}
 	})
 
+	t.Run("a busy pi holding the message in its Steering queue is queued: exit 0, no Enter", func(t *testing.T) {
+		oldReader := rand.Reader
+		rand.Reader = bytes.NewReader([]byte{1, 2, 3, 4})
+		defer func() { rand.Reader = oldReader }()
+		steering := "working on the slice\nSteering: [herdr-soho:peer] #01020304 Message from another agent\n> _\n"
+		f := newFixture(t, []fakecli.Rule{
+			{Argv: []string{"agent", "get", "w0test:p0a"}, Stdout: agentJSON("working", "4")},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 1, Stdout: "working on the slice\n"},
+			{Argv: []string{"agent", "prompt", "w0test:p0a"}, ArgvPrefix: true},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stdout: steering},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Stdout: steering},
+			{Argv: []string{"agent", "send-keys", "w0test:p0a", "enter"}},
+		})
+		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		code, stdout, stderr := f.run([]string{"send", "w0test:p0a", "hi", "--now"})
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range calls {
+			if len(call.Argv) > 1 && call.Argv[1] == "send-keys" {
+				t.Fatalf("Enter sent to a busy agent: %+v", calls)
+			}
+		}
+		if code != 0 || !strings.Contains(stdout, "queued for local/w0test:p0a") {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	})
+
 	t.Run("arrival: id never visible exits 15 lost without Enter (pre-Enter check: id not in last 15)", func(t *testing.T) { // JS: "arrival: id never visible exits 15 lost without Enter (pre-Enter check: id not in last 15)"
 		f := newFixture(t, []fakecli.Rule{
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 1, Stdout: agentJSON("idle", "1")},

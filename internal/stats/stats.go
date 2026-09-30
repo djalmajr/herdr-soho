@@ -40,7 +40,20 @@ type CommandContext struct {
 	FrictionLog string
 }
 
-type sidecar struct{ submission, kind, model, effort, arrival string }
+type sidecar struct{ submission, kind, model, effort, arrival, session string }
+type sessionInfo struct{ session, kind, model string }
+
+// sameSession decides whether two counted non-amendment pairs of the same
+// agent belong to one worker session: the recorded session when both
+// sidecars carry it, and the kind and model of the earlier pair when a
+// legacy sidecar has no session.
+func sameSession(prev, cur sessionInfo) bool {
+	if prev.session != "" && cur.session != "" {
+		return prev.session == cur.session
+	}
+	return prev.kind == cur.kind && prev.model == cur.model
+}
+
 type prompt struct {
 	agent, ts, path, report, sidecarPath, role, resolved, noReport string
 	suffix                                                         int
@@ -201,9 +214,11 @@ func readSidecar(p *prompt, logFile string) {
 	model, mok := get("model")
 	effort, eok := get("effort")
 	arrival, aok := get("arrival")
+	session, seok := get("session")
 	av, ap := o.Get("arrival")
+	_, sp := o.Get("session")
 	_ = av
-	if version != float64(1) || !sok || !kok || !mok || !eok || (sub != "attempted" && sub != "accepted" && sub != "failed") || (ap && !aok) {
+	if version != float64(1) || !sok || !kok || !mok || !eok || (sub != "attempted" && sub != "accepted" && sub != "failed") || (ap && !aok) || (sp && !seok) {
 		invalidSidecar(p, logFile)
 		return
 	}
@@ -211,7 +226,11 @@ func readSidecar(p *prompt, logFile string) {
 	if ap {
 		ar = arrival
 	}
-	p.snapshot = &sidecar{sub, kind, model, effort, ar}
+	ses := ""
+	if sp {
+		ses = session
+	}
+	p.snapshot = &sidecar{sub, kind, model, effort, ar, ses}
 	p.counted = sub == "accepted"
 }
 func invalidSidecar(p *prompt, logFile string) {
@@ -335,7 +354,7 @@ func minuteStats(xs []float64) any {
 	return jsObject("avg", round1(sum/float64(len(xs))), "median", round1(med), "max", round1(s[len(s)-1]))
 }
 func aggregateJSON(a aggregate) *jsonjs.Object {
-	return jsObject("tasks", number(a.tasks), "amendments", number(a.amendments), "reuses", number(a.reuses), "no_report", jsObject("pending", number(a.pending), "lost", number(a.lost)), "not_received", number(a.notReceived), "minutes", minuteStats(a.minutes), "partials", number(a.partials))
+	return jsObject("tasks", number(a.tasks), "briefs", number(a.tasks+a.reuses), "amendments", number(a.amendments), "reuses", number(a.reuses), "no_report", jsObject("pending", number(a.pending), "lost", number(a.lost)), "not_received", number(a.notReceived), "minutes", minuteStats(a.minutes), "partials", number(a.partials))
 }
 func reviewJSON(r review) *jsonjs.Object {
 	return jsObject("header", number(r.header), "pass", number(r.pass), "fail", number(r.fail), "severity", jsObject("P0", number(r.p0), "P1", number(r.p1), "P2", number(r.p2), "P3", number(r.p3)), "no_header", number(r.noHeader))
@@ -413,8 +432,9 @@ func CmdStats(args []string, command CommandContext) int {
 		return a.suffix < b.suffix
 	})
 	// A non-amendment pair is a reuse when the agent already had an earlier
-	// counted non-amendment pair (dispatch order), with or without a role change.
-	seenNonAmendment := map[string]bool{}
+	// counted non-amendment pair of the same worker session (dispatch order),
+	// with or without a role change.
+	seenNonAmendment := map[string][]sessionInfo{}
 	prevAgent := ""
 	prevResolved := ""
 	for i := range pairs {
@@ -431,8 +451,17 @@ func CmdStats(args []string, command CommandContext) int {
 			if p.resolved == "" {
 				p.resolved = "(unknown)"
 			}
-			p.reuse = seenNonAmendment[p.agent]
-			seenNonAmendment[p.agent] = true
+			info := sessionInfo{}
+			if p.snapshot != nil {
+				info = sessionInfo{p.snapshot.session, p.snapshot.kind, p.snapshot.model}
+			}
+			for _, prev := range seenNonAmendment[p.agent] {
+				if sameSession(prev, info) {
+					p.reuse = true
+					break
+				}
+			}
+			seenNonAmendment[p.agent] = append(seenNonAmendment[p.agent], info)
 		} else {
 			p.resolved = prevResolved
 			if p.resolved == "" {
@@ -633,12 +662,12 @@ func printStatsText(groups map[string]*aggregate, reviews map[string]*review, by
 			v, _ = o.Get("max")
 			mx = toFixedOne(v.(float64))
 		}
-		rows = append(rows, []string{k, strconv.Itoa(a.tasks), strconv.Itoa(a.amendments), strconv.Itoa(a.reuses), fmt.Sprintf("%d (%d/%d)", a.pending+a.lost, a.pending, a.lost), strconv.Itoa(a.notReceived), av, med, mx, strconv.Itoa(a.partials)})
+		rows = append(rows, []string{k, strconv.Itoa(a.tasks), strconv.Itoa(a.tasks + a.reuses), strconv.Itoa(a.amendments), strconv.Itoa(a.reuses), fmt.Sprintf("%d (%d/%d)", a.pending+a.lost, a.pending, a.lost), strconv.Itoa(a.notReceived), av, med, mx, strconv.Itoa(a.partials)})
 		for _, p := range a.lostBriefs {
 			lost = append(lost, k+": "+p)
 		}
 	}
-	output("tasks by " + dimName + ":\n" + table([]string{dimName, "tasks", "amendments", "reuses", "no-report (pending/lost)", "not-received", "avg min", "median min", "max min", "partials"}, rows) + "\n\n")
+	output("tasks by " + dimName + ":\n" + table([]string{dimName, "tasks", "briefs", "amendments", "reuses", "no-report (pending/lost)", "not-received", "avg min", "median min", "max min", "partials"}, rows) + "\n\n")
 	rRows := [][]string{}
 	keys := sortedKeys(reviews)
 	if !bySet {

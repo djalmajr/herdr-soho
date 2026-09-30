@@ -450,7 +450,7 @@ func TestStatsPortedCases(t *testing.T) {
 		p := filepath.Join(f.briefs, "alice-20260928T120001.md")
 		_ = os.WriteFile(p, []byte("# Amendment to your current brief\n"), 0o600)
 		out, _, code := f.invoke("stats", "--json")
-		if code != 0 || !strings.Contains(out, `"planner":{"tasks":1,"amendments":1`) {
+		if code != 0 || !strings.Contains(out, `"planner":{"tasks":1,"briefs":1,"amendments":1`) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
@@ -461,7 +461,7 @@ func TestStatsPortedCases(t *testing.T) {
 		f.roster("alice")
 		f.pair("bob", "20260928T120001", "tasker", "", 0, "")
 		out, _, code := f.invoke("stats", "--by", "agent", "--json")
-		if code != 0 || !strings.Contains(out, `"alice":{"tasks":1,"amendments":0,"reuses":0,"no_report":{"pending":1,"lost":0}`) || !strings.Contains(out, `"bob":{"tasks":1,"amendments":0,"reuses":0,"no_report":{"pending":0,"lost":1}`) {
+		if code != 0 || !strings.Contains(out, `"alice":{"tasks":1,"briefs":1,"amendments":0,"reuses":0,"no_report":{"pending":1,"lost":0}`) || !strings.Contains(out, `"bob":{"tasks":1,"briefs":1,"amendments":0,"reuses":0,"no_report":{"pending":0,"lost":1}`) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
@@ -586,7 +586,7 @@ func TestStatsPortedCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		out, _, code := f.invoke("stats", "--json")
-		if code != 0 || !strings.Contains(out, `"implementer":{"tasks":1,"amendments":1`) || strings.Contains(out, `"reviewer":`) {
+		if code != 0 || !strings.Contains(out, `"implementer":{"tasks":1,"briefs":1,"amendments":1`) || strings.Contains(out, `"reviewer":`) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
@@ -609,7 +609,7 @@ func TestStatsPortedCases(t *testing.T) {
 		f.pair("alice", "20260928T120000", "implementer", "done\n", time.Minute, "")
 		f.pair("alice", "20260928T120001", "reviewer", "done\n", time.Minute, "")
 		out, _, code := f.invoke("stats", "--json")
-		if code != 0 || !strings.Contains(out, `"reviewer":{"tasks":0,"amendments":0,"reuses":1`) {
+		if code != 0 || !strings.Contains(out, `"reviewer":{"tasks":0,"briefs":1,"amendments":0,"reuses":1`) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
@@ -650,7 +650,7 @@ func TestStatsPortedCases(t *testing.T) {
 		}
 		f.pair("alice", "20260928T120002", "tasker", "done\n", time.Minute, "")
 		out, _, code := f.invoke("stats", "--json")
-		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"amendments":1,"reuses":1,"no_report":{"pending":0,"lost":0}`) || !strings.Contains(out, `"lost_briefs":{}`) {
+		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"briefs":2,"amendments":1,"reuses":1,"no_report":{"pending":0,"lost":0}`) || !strings.Contains(out, `"lost_briefs":{}`) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
@@ -663,7 +663,7 @@ func TestStatsPortedCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		out, _, code := f.invoke("stats", "--json")
-		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"amendments":1,"reuses":0,"no_report":{"pending":1,"lost":0}`) || !strings.Contains(out, `"lost_briefs":{}`) {
+		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"briefs":1,"amendments":1,"reuses":0,"no_report":{"pending":1,"lost":0}`) || !strings.Contains(out, `"lost_briefs":{}`) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
@@ -672,7 +672,7 @@ func TestStatsPortedCases(t *testing.T) {
 		f.pair("alice", "20260928T120000", "tasker", "done\n", time.Minute, "")
 		f.pair("alice", "20260928T120001", "tasker", "done\n", time.Minute, "")
 		out, _, code := f.invoke("stats", "--json")
-		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"amendments":0,"reuses":1,"no_report":{"pending":0,"lost":0}`) {
+		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"briefs":2,"amendments":0,"reuses":1,"no_report":{"pending":0,"lost":0}`) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
@@ -682,7 +682,7 @@ func TestStatsPortedCases(t *testing.T) {
 		f.pair("alice", "20260928T120001", "reviewer", "done\n", time.Minute, "")
 		f.pair("alice", "20260928T120002", "scouter", "done\n", time.Minute, "")
 		out, _, code := f.invoke("stats", "--json")
-		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"amendments":0,"reuses":0`) || !strings.Contains(out, `"reviewer":{"tasks":0,"amendments":0,"reuses":1`) || !strings.Contains(out, `"scouter":{"tasks":0,"amendments":0,"reuses":1`) {
+		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"briefs":1,"amendments":0,"reuses":0`) || !strings.Contains(out, `"reviewer":{"tasks":0,"briefs":1,"amendments":0,"reuses":1`) || !strings.Contains(out, `"scouter":{"tasks":0,"briefs":1,"amendments":0,"reuses":1`) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
@@ -690,7 +690,7 @@ func TestStatsPortedCases(t *testing.T) {
 		f := newCommandFixture(t)
 		f.pair("gone", "20260928T120000", "tasker", "", 0, "")
 		out, _, code := f.invoke("stats", "--json")
-		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"amendments":0,"reuses":0,"no_report":{"pending":0,"lost":1}`) || !strings.Contains(out, `"lost_briefs":{"tasker":[`) || !strings.Contains(out, "gone-20260928T120000.md") {
+		if code != 0 || !strings.Contains(out, `"tasker":{"tasks":1,"briefs":1,"amendments":0,"reuses":0,"no_report":{"pending":0,"lost":1}`) || !strings.Contains(out, `"lost_briefs":{"tasker":[`) || !strings.Contains(out, "gone-20260928T120000.md") {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})

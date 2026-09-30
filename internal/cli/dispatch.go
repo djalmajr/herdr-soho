@@ -204,9 +204,12 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	if err := os.MkdirAll(filepath.Dir(composed), 0o777); err != nil {
 		panic(err)
 	}
-	model, effort, args, lane := "", "", "", ""
+	model, effort, args, lane, session := "", "", "", "", ""
 	if len(cols) > 8 {
 		model = cols[8]
+	}
+	if len(cols) > 7 {
+		session = cols[7]
 	}
 	if len(cols) > 14 {
 		effort = cols[14]
@@ -227,7 +230,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		}
 	}
 	sidecar := dispatch.DispatchSidecar(composed)
-	if err := writeDispatchSidecar(sidecar, kind, model, effort, "attempted", ""); err != nil {
+	if err := writeDispatchSidecar(sidecar, kind, model, effort, "attempted", "", session); err != nil {
 		taskReport := filepath.Join(sd, "reports", strings.TrimSuffix(filepath.Base(report), ".md")+".current.md")
 		return writeDispatchError(agent, role, kind, composed, report, taskReport, "couldn't write the attempt sidecar: "+sanitizeDispatchCause(err.Error()), 4,
 			fmt.Sprintf("could not write the attempt sidecar %s: %s", sidecar, sanitizeDispatchCause(err.Error())))
@@ -338,14 +341,14 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	p := herdr.AgentPrompt(agent, text, env)
 	if !p.Ok {
-		if err := writeDispatchSidecar(sidecar, kind, model, effort, "failed", ""); err != nil {
+		if err := writeDispatchSidecar(sidecar, kind, model, effort, "failed", "", session); err != nil {
 			core.Warn(fmt.Sprintf("could not record the failed submission in the attempt sidecar %s: %s", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 		}
 		_ = restoreTaskDispatch(sd, agent, lastPath, lastData, priorPointer)
 		return writeDispatchError(agent, role, kind, composed, report, taskReport, p.Raw, 4,
 			"prompt submission failed; inspect with: herdr agent get "+agent+" && herdr agent read "+agent+". Do not resend blindly.")
 	}
-	if err := writeDispatchSidecar(sidecar, kind, model, effort, "accepted", ""); err != nil {
+	if err := writeDispatchSidecar(sidecar, kind, model, effort, "accepted", "", session); err != nil {
 		core.Warn(fmt.Sprintf("could not record the accepted submission in the attempt sidecar %s: %s; the prompt went out", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 	}
 	status, resent, enterSent := "submitted", false, false
@@ -372,10 +375,10 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 				enterSent = true
 				core.Warn(fmt.Sprintf("prompt to '%s' sat in the input box; sent Enter", agent), frictionLogPath, "dispatch")
 				if !waitDispatchArrival(window, env, arrived) {
-					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, env, wasWorking, "an Enter on the text left in its input box")
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, env, wasWorking, "an Enter on the text left in its input box")
 				}
 			} else if staleAuthBlock(agent, env, H0, preSeq, enterSent, resent) {
-				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, env, wasWorking, "its block on a provider auth error")
+				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, env, wasWorking, "its block on a provider auth error")
 			} else {
 				core.Warn(fmt.Sprintf("prompt to '%s' did not arrive; sending it once more", agent), frictionLogPath, "dispatch")
 				H0 = strconv.FormatUint(uint64(waitpkg.CksumField(herdr.AgentRead(env, agent, "visible", nil))), 10)
@@ -387,21 +390,31 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 						return (strconv.FormatUint(uint64(waitpkg.CksumField(cur)), 10) != H0 && composedPathSeenOutsideInput(agent, composed, env)) || arrived()
 					}
 					if !waitDispatchArrival(window, env, proof) {
-						return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, env, wasWorking, "one resend")
+						return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, env, wasWorking, "one resend")
 					}
 				} else {
-					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, env, wasWorking, "one resend")
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, env, wasWorking, "one resend")
 				}
 			}
 		}
 		if wasWorking {
-			if !waitDispatchArrivalExtra(window, env, arrived, promptEvidence) {
-				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, env, true, "the working target showed no prompt evidence")
+			ok := waitDispatchArrivalExtra(window, env, arrived, promptEvidence)
+			if !ok && settleSecs > 0 {
+				// Some CLIs (Cursor) hold a prompt sent during a turn in a queue they do
+				// not show: wait up to prompt_settle_seconds for that turn to end, then
+				// look for the arrival once more. After the turn only a new working turn
+				// or the report counts: a path in the scrollback of an idle agent is not
+				// a queued prompt (the next wait would read it as stuck in the input).
+				ok = waitWorkingTurnEnd(agent, preSeq, time.Duration(settleSecs)*time.Second, env) &&
+					waitDispatchArrival(window, env, arrived)
+			}
+			if !ok {
+				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, env, true, "the working target showed no prompt evidence")
 			}
 			st := herdr.AgentState(agent, env, herdr.Timeout, nil)
 			if !(nonEmpty(report) || ((st.State == "working" || st.State == "blocked") && preSeq != "" && seqString(st.Seq) != "" && preSeq != seqString(st.Seq))) {
 				status = "queued"
-				if err := writeDispatchSidecar(sidecar, kind, model, effort, "accepted", "queued"); err != nil {
+				if err := writeDispatchSidecar(sidecar, kind, model, effort, "accepted", "queued", session); err != nil {
 					core.Warn(fmt.Sprintf("could not record the queued arrival in the attempt sidecar %s: %s; the dispatch result stands", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 				}
 				seq := seqString(st.Seq)
@@ -523,6 +536,31 @@ func waitDispatchArrivalExtra(window time.Duration, env platform.Env, arrived, e
 		time.Sleep(poll)
 	}
 }
+
+// waitWorkingTurnEnd polls a target that was working when the prompt went out
+// until its turn ends (it leaves working and blocked) or a new turn starts (its
+// state_change_seq moves while working), up to window. It reports whether that
+// happened in time.
+func waitWorkingTurnEnd(agent, preSeq string, window time.Duration, env platform.Env) bool {
+	deadline := platform.Now().Add(window)
+	for {
+		st := herdr.AgentState(agent, env, herdr.Timeout, nil)
+		if st.State != "working" && st.State != "blocked" {
+			return st.State == "idle" || st.State == "done"
+		}
+		if preSeq != "" && seqString(st.Seq) != "" && seqString(st.Seq) != preSeq {
+			return true
+		}
+		if !platform.Now().Before(deadline) {
+			return false
+		}
+		poll := time.Duration(spawn.PollIntervalMs(env)) * time.Millisecond
+		if poll <= 0 {
+			poll = 100 * time.Millisecond
+		}
+		time.Sleep(poll)
+	}
+}
 func intPtr(v int) *int { return &v }
 func composedPathSeenOutsideInput(agent, composed string, env platform.Env) bool {
 	lines := strings.Split(strings.ReplaceAll(herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40)), "\r\n", "\n"), "\n")
@@ -568,14 +606,22 @@ func writeDispatchError(agent, role, kind, composed, report, taskReport, raw str
 	core.Warn(warning, frictionLogPath, "dispatch")
 	return code
 }
-func dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort string, env platform.Env, wasWorking bool, why string) int {
+func dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session string, env platform.Env, wasWorking bool, why string) int {
 	_ = lane
-	if err := writeDispatchSidecar(sidecar, kind, model, effort, "accepted", "not-received"); err != nil {
+	if err := writeDispatchSidecar(sidecar, kind, model, effort, "accepted", "not-received", session); err != nil {
 		core.Warn(fmt.Sprintf("could not record the not-received arrival in the attempt sidecar %s: %s; the dispatch result stands", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 	}
 	seq := seqString(herdr.AgentState(agent, env, herdr.Timeout, nil).Seq)
 	marker := strconv.FormatInt(platform.Now().Unix(), 10)
-	if seq != "" {
+	if wasWorking {
+		// The prompt path goes in the marker (as in .queued): the next wait then
+		// sends Enter only when this prompt sits in the last lines (the input),
+		// never for a path it sees in the scrollback of the earlier turn.
+		if seq == "" {
+			seq = "-"
+		}
+		marker += " " + seq + " " + composed
+	} else if seq != "" {
 		marker += " " + seq
 	}
 	marker += "\n"

@@ -251,8 +251,10 @@ or the source's build output to recover; the `implementer`, `tasker` and
 the report, by the PIDs they kept, and never one they did not start
 (an orphan or a busy process is reported, not killed), checked by PID only (never a listing of every
 command line, which can hold credentials; a sandboxed codex blocks `ps`); and the `designer` reports how the UI was
-verified (`ui_verification`). The `reviewer` never edits the repository
-and mutates only in a throwaway copy.
+verified (`ui_verification`). The `reviewer` never edits the repository,
+mutates only in a throwaway copy, and runs the project's own gates before
+its verdict; its `verdict:` header stays pass/fail (fail with any open
+P0–P2) whatever scale the brief uses.
 
 ## Effort, model, approvals
 
@@ -540,7 +542,10 @@ marker from an earlier prompt does not count. Only this dispatch's unique
 composed prompt path in the recent screen confirms that the
 prompt is queued; with `--no-wait`, dispatch returns `queued`, and otherwise
 it continues waiting for the report. If a working target shows no evidence,
-dispatch returns `not-received` (exit 15) and says no key was sent. For a
+dispatch waits up to `prompt_settle_seconds` for its turn to end (some CLIs,
+Cursor among them, hold a prompt sent during a turn in a queue they do not
+show) and checks the arrival once more; only then does it return
+`not-received` (exit 15) and say no key was sent. For a
 target that was not working before sending, dispatch keeps the settle and
 arrival checks: it waits up to `prompt_settle_seconds` (20, 0 off) for
 `interactive_ready` true in `herdr agent get` (when present) and two
@@ -746,9 +751,13 @@ and `review`; with `--by` (including `--by role`), JSON has `by`,
 `groups`, `lost_briefs` and `review`. The review table covers reviewer,
 security-reviewer, ui-reviewer and inspector. Other date formats exit 2.
 Each counted pair is exactly one of a task, amendment or reuse. An
-agent's first non-amendment brief is a task; every later non-amendment
-brief to the same agent counts under `reuses`, with or without a role
-change. An amendment belongs to the brief it amends: it is never lost or
+agent's first non-amendment brief of its worker session is a task; every
+later non-amendment brief of the same session counts under `reuses`, with
+or without a role change. Same session means the same `started` value
+recorded in the sidecars; a legacy sidecar without one falls back to the
+same kind and model as the agent's earlier non-amendment brief. `briefs`
+(tasks plus reuses) is shown after `tasks` in the table and in the JSON of
+each group. An amendment belongs to the brief it amends: it is never lost or
 pending on its own, and it does not decide which brief is the agent's
 last. A brief without a report is pending while its agent is in the
 roster and it is the agent's last non-amendment brief, and lost

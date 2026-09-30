@@ -718,6 +718,13 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		platform.Die(fmt.Sprintf("send: could not confirm that %s took the message (%s); read its pane before sending again", t.RefShown, cause), 15)
 	}
 	preEnterVis, readErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
+	if readErr == "" && steeringQueued(preEnterVis, id) {
+		// pi keeps a message sent during a turn in its Steering queue: it is
+		// queued, not lost, and not yet read; no Enter goes to a busy agent.
+		log(senderRef, t.RefShown, "queued")
+		_, _ = fmt.Fprintf(platform.Stdout, "queued for %s: it takes the message when its current turn ends\n", t.RefShown)
+		return 0
+	}
 	if readErr != "" {
 		log(senderRef, t.RefShown, "unverified")
 		platform.Die(fmt.Sprintf("send: could not confirm that %s took the message (%s); read its pane before sending again", t.RefShown, readErr), 15)
@@ -763,6 +770,18 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	log(senderRef, t.RefShown, "lost")
 	platform.Die(fmt.Sprintf("send: %s did not take the message (no sign of it in its state or transcript); read its pane before sending again", t.RefShown), 15)
 	return 15
+}
+
+// steeringQueued reports a visible pi queue line (`Steering: …`) that holds
+// this message's id.
+func steeringQueued(visible, id string) bool {
+	for _, line := range strings.Split(visible, "\n") {
+		head := strings.TrimLeft(NormalizeScreen(line), " \t")
+		if strings.HasPrefix(head, "Steering:") && strings.Contains(head, NormalizeScreen("#"+id)) {
+			return true
+		}
+	}
+	return false
 }
 
 func statusOr(info agentInfo, fallback string) string {
