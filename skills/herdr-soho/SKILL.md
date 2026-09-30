@@ -728,6 +728,7 @@ $S config                                  # effective configuration and sources
 $S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>
 $S roster                                  # live agents with role/kind/pane/state/report and the current task (TASK, from the pane title; '-' when none, cut to 40 characters)
 $S release impl [--close]                  # forget the agent; --close closes a pane we created
+$S reopen impl [--force]                    # release --close + spawn --fresh with the roster's role, kind, model, effort, cwd and native args; output is the spawn JSON
 $S clean [--older-than 7]                  # drop gone agents, delete old briefs/reports
 $S kinds                                   # kind → executable, family, effort ceiling
 $S spawn implementer --effort xhigh --approvals full      # normalized effort + no prompts

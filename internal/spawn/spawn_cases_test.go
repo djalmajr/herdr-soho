@@ -1,6 +1,7 @@
 package spawn
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -792,19 +793,20 @@ func TestSpawnLaneJavaScriptCases(t *testing.T) {
 		}
 	})
 
-	t.Run("spawn: kind mismatch (no lane kind) is 13 with the full hint", func(t *testing.T) {
-		// JS: "spawn: kind mismatch (no lane kind) is 13 with the full hint"
+	t.Run("spawn: a model-mismatched idle on a full lane is 13 with the no-slot message", func(t *testing.T) {
+		// A12: the idle is not a reuse candidate (resolved model differs), the
+		// lane has no slot, so spawn exits 13 naming the idle and what it runs.
 		f := newSpawnFixture(t, []fakecli.Rule{{Argv: []string{"agent", "get", "build"}, Stdout: `{"result":{"agent":{"agent_status":"idle"}}}`}})
 		configureSpawnFixture(t, &f)
 		f.env["HERDR_SOHO_LANES"] = "on"
 		f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
 		f.ctx.Order = []string{"lane_build_roles"}
 		// The recorded session model differs from the requested default model.
-		f.roster(t, strings.Join([]string{"build", "p-build", "grok", "worker", "xai", "1", "/tmp/work", "now", "old-model", "ask", "worker", "build"}, "\t"))
-		code, stdout, _, _ := runCmdSpawn(t, f, []string{"worker"})
-		if code != 13 || !strings.Contains(stdout, `"status":"kind-mismatch"`) {
-			calls, _ := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
-			t.Fatalf("exit=%d stdout=%q calls=%#v", code, stdout, calls)
+		f.roster(t, strings.Join([]string{"build", "p-build", "grok", "worker", "xai", "1", f.cwd, "now", "old-model", "ask", "worker", "build"}, "\t"))
+		code, message, calls := runCmdSpawnExpectError(t, f, []string{"worker"})
+		want := fmt.Sprintf("spawn: lane 'build' has no idle worker matching kind 'grok', model 'grok-4.7' and cwd '%s' (idle: 'build' runs grok old-model in %s); release it or raise the lane's panes", f.cwd, f.cwd)
+		if code != 13 || message != want {
+			t.Fatalf("exit=%d message=%q want %q calls=%#v", code, message, want, calls)
 		}
 	})
 

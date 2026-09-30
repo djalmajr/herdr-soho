@@ -15,8 +15,8 @@ import (
 // laneReuseRow is a 14-column roster line for an idle review-lane worker on
 // the codex kind; the model column is empty so a flagless spawn matches the
 // session (no kind-mismatch) and the reuse path is reached.
-func laneReuseRow(name string) string {
-	return strings.Join([]string{name, "w0test:p0a", "codex", "reviewer", "openai", "1", "/tmp/work", "now", "", "ask", "reviewer", "review", "", ""}, "\t")
+func laneReuseRow(name, cwd string) string {
+	return strings.Join([]string{name, "w0test:p0a", "codex", "reviewer", "openai", "1", cwd, "now", "", "ask", "reviewer", "review", "", ""}, "\t")
 }
 
 func renameCalls(calls []fakecli.Call) int {
@@ -40,7 +40,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		})
 		configureSpawnFixture(t, &f)
 		f.env["HERDR_SOHO_LANES"] = "on"
-		f.roster(t, laneReuseRow("review-2"))
+		f.roster(t, laneReuseRow("review-2", f.cwd))
 		code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"reviewer", "--name", "review"})
 		if code != 0 {
 			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -79,7 +79,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		})
 		configureSpawnFixture(t, &f)
 		f.env["HERDR_SOHO_LANES"] = "on"
-		f.roster(t, laneReuseRow("review"))
+		f.roster(t, laneReuseRow("review", f.cwd))
 		code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"reviewer", "--name", "review-2"})
 		if code != 0 {
 			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -110,7 +110,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		})
 		configureSpawnFixture(t, &f)
 		f.env["HERDR_SOHO_LANES"] = "on"
-		f.roster(t, laneReuseRow("review-2"))
+		f.roster(t, laneReuseRow("review-2", f.cwd))
 		code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"reviewer", "--name", "review-2"})
 		if code != 0 {
 			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -136,7 +136,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		})
 		configureSpawnFixture(t, &f)
 		f.env["HERDR_SOHO_LANES"] = "on"
-		f.roster(t, laneReuseRow("review-2"))
+		f.roster(t, laneReuseRow("review-2", f.cwd))
 		code, message, _ := runCmdSpawnExpectError(t, f, []string{"reviewer", "--name", "review"})
 		want := "spawn: could not rename worker 'review-2' to 'review': agent_name_taken: an agent named review already exists"
 		if code != 4 || message != want {
@@ -160,7 +160,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		})
 		configureSpawnFixture(t, &f)
 		f.env["HERDR_SOHO_LANES"] = "on"
-		f.roster(t, laneReuseRow("review-2"))
+		f.roster(t, laneReuseRow("review-2", f.cwd))
 		code, message, calls := runCmdSpawnExpectError(t, f, []string{"reviewer", "--name", "Review"})
 		want := "invalid agent name 'Review' (must match [a-z][a-z0-9_-]{0,31})"
 		if code != 2 || message != want {
@@ -187,7 +187,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		})
 		configureSpawnFixture(t, &f)
 		f.env["HERDR_SOHO_LANES"] = "on"
-		f.roster(t, laneReuseRow("review-2"))
+		f.roster(t, laneReuseRow("review-2", f.cwd))
 		code, message, calls := runCmdSpawnExpectError(t, f, []string{"reviewer", "--name", "rev\tiew"})
 		want := "invalid agent name 'rev\tiew' (must match [a-z][a-z0-9_-]{0,31})"
 		if code != 2 || message != want {
@@ -219,7 +219,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		})
 		configureSpawnFixture(t, &f)
 		f.env["HERDR_SOHO_LANES"] = "on"
-		f.roster(t, laneReuseRow("review-2"))
+		f.roster(t, laneReuseRow("review-2", f.cwd))
 		sd := filepath.Join(f.state, "ws")
 		report := filepath.Join(sd, "reports", "review-2-old.md")
 		if err := os.MkdirAll(filepath.Dir(report), 0o700); err != nil {
@@ -304,7 +304,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		})
 		configureSpawnFixture(t, &f)
 		f.env["HERDR_SOHO_LANES"] = "on"
-		f.roster(t, laneReuseRow("review-2"))
+		f.roster(t, laneReuseRow("review-2", f.cwd))
 		sd := filepath.Join(f.state, "ws")
 		// a directory where the pointer file should land blocks os.Rename.
 		if err := os.MkdirAll(filepath.Join(sd, "last-report-review"), 0o700); err != nil {
