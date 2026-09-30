@@ -862,7 +862,7 @@ func CmdWait(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	sd := core.StateDir(ctx, env, cwd)
 	for _, agent := range agents {
 		if core.RosterLine(sd, agent) == "" {
-			core.DieFriction("agent '"+agent+"' is not in the roster", 3, "", "wait")
+			core.DieFriction("agent '"+agent+"' is not in the roster (state dir: "+sd+")", 3, "", "wait")
 		}
 	}
 	if math.IsNaN(timeout) {

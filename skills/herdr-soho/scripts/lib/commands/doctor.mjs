@@ -778,6 +778,15 @@ export function doctorCheck(ctx, env = process.env, cwd = process.cwd(), opts = 
       s.warn(`state dir not writable: ${d}`);
     }
   }
+  // Which project file the project layer read (the Go also falls back to the
+  // main checkout's file from a linked worktree; the JS is frozen).
+  {
+    const root = projectRoot(env, cwd);
+    const projectFile = effectiveConfigFile(path.join(root, '.agents', 'herdr-soho.conf'), legacyProjectConfigPath(root));
+    let isFile = false;
+    try { isFile = fs.statSync(projectFile).isFile(); } catch {}
+    s.ok(isFile ? `project config: ${projectFile}` : 'project config: none');
+  }
   // The legacy (herdr-agents) lines: the copied env variables, the legacy
   // user/project config files and the legacy state dir — nothing when
   // the environment has only the new names.

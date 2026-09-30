@@ -33,7 +33,7 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 	sd := core.StateDir(ctx, env, cwd)
 	line := core.RosterLine(sd, agent)
 	if line == "" {
-		core.DieFriction(fmt.Sprintf("agent '%s' is not in the roster", agent), 3, frictionLogPath, "release")
+		core.DieFriction(fmt.Sprintf("agent '%s' is not in the roster (state dir: %s)", agent, sd), 3, frictionLogPath, "release")
 	}
 	fields := strings.Split(line, "\t")
 	field := func(index int) string {
