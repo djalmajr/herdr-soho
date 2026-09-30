@@ -304,7 +304,11 @@ maps to `--thinking` (ceiling `max`) on pi; the opencode TUI maps no effort
 flag (`--variant` is only in `opencode run`) and spawn warns instead of
 failing. Approvals: opencode `full` → `--auto` (`edits` is not mapped;
 warning), and pi has no approval prompts at all (`edits` is a no-op with a
-warning). Family is **by model**: the same-family reviewer check is skipped
+warning). Context: at context use at or above `context_warn_percent`
+(default 60; 0 turns it off), `dispatch` warns before sending, because a
+long context can end opencode's turn empty — release the worker `--close`
+and spawn a fresh one for a new task; the dispatch goes on anyway. Family is
+**by model**: the same-family reviewer check is skipped
 unless the model id is recognizable, so pick the reviewer's family by hand.
 Config and provider examples:
 [references/kinds.md](references/kinds.md#generic-kinds-pi-opencode).
