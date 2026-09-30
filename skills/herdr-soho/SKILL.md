@@ -241,7 +241,10 @@ the source, or when `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR`, a
 `.cargo/config[.toml]` fallback that fails closed on an unrecognized
 `target-dir`; copies without `Cargo.toml` ignore Cargo configuration (exit 1
 for a rejected copy; 0 when isolated, 2 for bad usage; the guard writes
-nothing) — and never cleans a shared cache
+nothing); `$S mutation-copy` builds that copy from the worktree's repository
+files only (never `.git`, never ignored paths), takes `--link
+<relpath>=<target>` for dependencies that live outside the worktree, and
+removes the copy itself when the guard's checks refuse it — and never cleans a shared cache
 or the source's build output to recover; the `implementer`, `tasker` and
 `designer` stop every process they started before writing the report,
 by the PIDs they kept, checked by PID only (never a listing of every
@@ -709,6 +712,7 @@ $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before
 $S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
                                              # peer message to another agent (any kind, local or another machine): ref local/w12:p1 or a name on the local server; waits for a busy target to settle by default
 $S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation copy that shares source or build output (exit 1)
+$S mutation-copy [--source <dir>] [--dest <dir>] [--link <relpath>=<target>]…  # build the throwaway mutation copy from the worktree's repository files, guarded (exit 1 guard, 2 refused, 4 copy error)
 $S find [words] [--machine <label>]… [--all] [--json]   # live panes with a paste-ready reference (<machine>/<ws>:<pane>), filtered by the words
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
 $S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to

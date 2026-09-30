@@ -31,7 +31,7 @@ var knownCommands = map[string]bool{
 	"send": true, "stats": true, "release": true, "clean": true, "setup": true,
 	"doctor": true, "explain": true, "init": true, "title": true, "regrid": true,
 	"roster": true, "friction": true, "feedback": true, "tab-label": true,
-	"layout-plan": true, "env": true, "mutation-guard": true,
+	"layout-plan": true, "env": true, "mutation-guard": true, "mutation-copy": true,
 }
 
 var frictionLogPath string
@@ -192,6 +192,9 @@ func Run(args []string, env platform.Env) (code int) {
 	}
 	if command == "mutation-guard" {
 		return runMutationGuard(args[1:], decisionEnv)
+	}
+	if command == "mutation-copy" {
+		return runMutationCopy(args[1:], decisionEnv)
 	}
 	if command == "config" || command == "session" {
 		if command == "config" {
