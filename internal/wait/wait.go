@@ -609,6 +609,13 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 				if partial > 0 {
 					line.Set("partial", partial)
 				}
+				if header != nil || partial > 0 {
+					effective := "pass"
+					if partial > 0 || header.Verdict == "fail" || header.Severity["P0"]+header.Severity["P1"]+header.Severity["P2"] > 0 {
+						effective = "fail"
+					}
+					line.Set("verdict_effective", effective)
+				}
 				jsonLine(line)
 				if partial > 0 {
 					prev, _ := readWaitFile(sd, agent, "partial-warned")

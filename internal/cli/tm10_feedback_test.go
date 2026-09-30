@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
@@ -117,12 +118,54 @@ func TestTM10FeedbackCases(t *testing.T) {
 			t.Fatalf("calls=%#v", calls)
 		}
 	})
-	t.Run(`JS: "feedback send: a failed prompt keeps the file, prints filed JSON and warns (exit 4)"`, func(t *testing.T) {
-		report, env := tm10FeedbackFixture(t, platform.Env{"HERDR_SOHO_FEEDBACK_TO": "w9:p2"})
+	t.Run("feedback send: a failed notice exits 0 with the file saved, the friction line, the warning and the filed JSON", func(t *testing.T) {
+		fakeDir := t.TempDir()
 		rules := []fakecli.Rule{{ArgvPrefix: true, Argv: []string{"agent", "prompt", "w9:p2"}, Stderr: "prompt refused\n", Code: 1}}
-		code, out, _, _ := runTM10(t, []string{"feedback", "send", report, "summary"}, rules, env)
-		if code != 4 || !strings.Contains(out, `"status":"filed"`) || !strings.Contains(out, `"error":"prompt refused"`) {
-			t.Fatalf("code=%d out=%q", code, out)
+		if _, err := fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
+			t.Fatal(err)
+		}
+		base := platform.Env{}
+		for _, entry := range fakecli.Env(testutil.CleanEnv(t), fakeDir) {
+			key, value, ok := strings.Cut(entry, "=")
+			if ok {
+				base[key] = value
+			}
+		}
+		root := t.TempDir()
+		stateDir := filepath.Join(root, "state")
+		feedbackDir := filepath.Join(root, "feedback")
+		if err := os.Mkdir(feedbackDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		report := filepath.Join(root, "report.md")
+		if err := os.WriteFile(report, []byte("report bytes\r\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		base["HOME"], base["USERPROFILE"], base["XDG_CONFIG_HOME"] = root, root, filepath.Join(root, "config")
+		base["HERDR_SOHO_DIR"], base["HERDR_SOHO_SKILL_DIR"], base["HERDR_WORKSPACE_ID"] = stateDir, testSkillDir(t), "ws"
+		base["HERDR_ENV"], base["PATH"] = "1", fakeDir
+		base["HERDR_SOHO_FAKECLI_CONFIG"] = filepath.Join(fakeDir, "herdr.json")
+		base["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing.sock")
+		base["HERDR_SOHO_FEEDBACK"], base["HERDR_SOHO_FEEDBACK_DIR"], base["HERDR_SOHO_FEEDBACK_TO"] = "local", feedbackDir, "w9:p2"
+		var out, stderr bytes.Buffer
+		oldOut, oldErr := platform.Stdout, platform.Stderr
+		platform.Stdout, platform.Stderr = &out, &stderr
+		code := Run([]string{"feedback", "send", report, "summary"}, base)
+		platform.Stdout, platform.Stderr = oldOut, oldErr
+		var result struct {
+			Status   string `json:"status"`
+			File     string `json:"file"`
+			Notified any    `json:"notified"`
+			Error    string `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(out.String()), &result); err != nil {
+			t.Fatal(err)
+		}
+		saved, saveErr := os.ReadFile(result.File)
+		logText, logErr := os.ReadFile(filepath.Join(stateDir, "ws", "friction.log"))
+		wantWarn := "herdr-soho: warning: feedback send: the report is saved at " + result.File + ", but the notice to w9:p2 failed: prompt refused"
+		if code != 0 || saveErr != nil || string(saved) != "report bytes\r\n" || result.Status != "filed" || result.Notified != nil || result.Error != "prompt refused" || !strings.Contains(stderr.String(), wantWarn) || logErr != nil || !strings.Contains(string(logText), "feedback sent: "+result.File) {
+			t.Fatalf("code=%d result=%#v saved=%q stderr=%q log=%q", code, result, saved, stderr.String(), logText)
 		}
 	})
 	t.Run(`JS: "feedback send: feedback_dir and feedback_to written by config set in a layer are read"`, func(t *testing.T) {
