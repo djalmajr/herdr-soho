@@ -439,3 +439,16 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 		}
 	})
 }
+
+// TestComposeAmendmentAsksForAFreshCheck: an amendment with the same brief made
+// a reviewer copy its earlier report and rerun nothing (cinzel); the amendment
+// contract now asks for every item to be checked again against the current files.
+func TestComposeAmendmentAsksForAFreshCheck(t *testing.T) {
+	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
+	amend := ComposeAmendment("# Amend\nfix", "/report.md", ctx, composeEnv(t), "codex", "", false)
+	want := "- This amendment overrides your current brief where they differ; the rest of that brief still holds.\n" +
+		"- Check every item again against the files as they are now: rerun the checks it needs, and never copy findings, outputs or states from your earlier report.\n"
+	if !strings.Contains(amend, want) {
+		t.Fatalf("amendment contract without the fresh-check line:\n%s", amend)
+	}
+}
