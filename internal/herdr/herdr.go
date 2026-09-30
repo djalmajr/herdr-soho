@@ -163,23 +163,40 @@ func TabList(env platform.Env, ws string) []any {
 // AgentReadOK is AgentRead that also reports whether the read succeeded, for
 // callers that must tell an empty screen from a failed read.
 func AgentReadOK(env platform.Env, agent, source string, lines *int) (string, bool) {
-	args := []string{"agent", "read", agent, "--source", source}
-	if lines != nil {
-		args = append(args, "--lines", fmt.Sprint(*lines))
-	}
-	r := run(args, env)
+	r := agentRead(env, agent, source, lines)
 	if !ok(r) {
 		return "", false
 	}
 	return r.Stdout, true
 }
 
-func AgentRead(env platform.Env, agent, source string, lines *int) string {
+// agentRead runs `herdr agent read`. A full-screen TUI (opencode) keeps its
+// history on the alternate screen, which Herdr captures only while the agent
+// is idle: a `recent` read of a working one fails with agent_not_idle. The
+// visible screen is what such an agent shows, so that read takes its place;
+// without it every check on a working opencode read an empty screen (the
+// prompt of a dispatch or amendment, a quota or auth error).
+func agentRead(env platform.Env, agent, source string, lines *int) platform.RunResult {
 	args := []string{"agent", "read", agent, "--source", source}
 	if lines != nil {
 		args = append(args, "--lines", fmt.Sprint(*lines))
 	}
 	r := run(args, env)
+	if ok(r) || !strings.HasPrefix(source, "recent") {
+		return r
+	}
+	raw := r.Stderr
+	if raw == "" {
+		raw = r.Stdout
+	}
+	if code, _ := errorInfo(raw); code != "agent_not_idle" {
+		return r
+	}
+	return run([]string{"agent", "read", agent, "--source", "visible"}, env)
+}
+
+func AgentRead(env platform.Env, agent, source string, lines *int) string {
+	r := agentRead(env, agent, source, lines)
 	if !ok(r) {
 		return ""
 	}

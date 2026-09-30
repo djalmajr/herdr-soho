@@ -129,7 +129,9 @@ project config; with none set, the CLI uses its own default. Flags verified
 - `opencode`: the TUI takes `-m provider/model` and `--auto` (approves
   permissions not explicitly denied). `--variant` (provider effort) exists
   only on `opencode run`, so the TUI maps no effort: spawn warns, it does
-  not fail.
+  not fail. It draws on the alternate screen: while it works, Herdr refuses
+  a `recent` read (`agent_not_idle`), so the skill reads its visible screen
+  instead (the prompt of a dispatch, a quota or auth error).
 
 ### Configuration examples (fictional names)
 

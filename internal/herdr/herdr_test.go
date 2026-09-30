@@ -513,3 +513,41 @@ func timeoutDelay(timeout time.Duration) int {
 	}
 	return int(delay / time.Millisecond)
 }
+
+// TestAgentReadWorkingAltScreenFallsBackToVisible: Herdr refuses a recent read
+// of a working full-screen TUI (agent_not_idle); the visible screen stands in.
+// Any other failure, or a visible read, is not retried.
+func TestAgentReadWorkingAltScreenFallsBackToVisible(t *testing.T) {
+	notIdle := `{"error":{"code":"agent_not_idle","message":"cannot read 40 lines while x is working"}}`
+	lines := 40
+	t.Run("agent_not_idle on a recent read uses the visible screen", func(t *testing.T) {
+		env := newFake(t, "herdr", []fakecli.Rule{
+			{Argv: []string{"agent", "read", "x", "--source", "recent-unwrapped"}, ArgvPrefix: true, Code: 1, Stderr: notIdle},
+			{Argv: []string{"agent", "read", "x", "--source", "recent"}, ArgvPrefix: true, Code: 1, Stderr: notIdle},
+			{Argv: []string{"agent", "read", "x", "--source", "visible"}, Stdout: "visible screen\n"},
+		})
+		if got := AgentRead(env, "x", "recent-unwrapped", &lines); got != "visible screen\n" {
+			t.Fatalf("AgentRead=%q", got)
+		}
+		if got, ok := AgentReadOK(env, "x", "recent", &lines); !ok || got != "visible screen\n" {
+			t.Fatalf("AgentReadOK=%q %v", got, ok)
+		}
+	})
+	t.Run("another error code is not retried", func(t *testing.T) {
+		env := newFake(t, "herdr", []fakecli.Rule{
+			{Argv: []string{"agent", "read", "x", "--source", "recent-unwrapped"}, ArgvPrefix: true, Code: 1, Stderr: `{"error":{"code":"agent_not_found","message":"gone"}}`},
+			{Argv: []string{"agent", "read", "x", "--source", "visible"}, Stdout: "visible screen\n"},
+		})
+		if got, ok := AgentReadOK(env, "x", "recent-unwrapped", &lines); ok || got != "" {
+			t.Fatalf("AgentReadOK=%q %v", got, ok)
+		}
+	})
+	t.Run("a failed visible read is not retried", func(t *testing.T) {
+		env := newFake(t, "herdr", []fakecli.Rule{
+			{Argv: []string{"agent", "read", "x", "--source", "visible"}, Code: 1, Stderr: notIdle},
+		})
+		if got, ok := AgentReadOK(env, "x", "visible", nil); ok || got != "" {
+			t.Fatalf("AgentReadOK=%q %v", got, ok)
+		}
+	})
+}

@@ -55,6 +55,7 @@ func newDispatchArrivalFixture(t *testing.T, initialMode string, initialSeq, nex
 		if extra[i].Stdout == "$CURRENT_PATHS" {
 			extra[i].Stdout = dispatchPromptEvidence(root)
 		}
+		extra[i].Stdout = strings.ReplaceAll(extra[i].Stdout, "$ROOT", root)
 	}
 	rules := []fakecli.Rule{
 		{Argv: []string{"agent", "list"}, ArgvPrefix: true, Stdout: `{"result":{"agents":[]}}`},
@@ -477,5 +478,36 @@ func TestDispatchWorkingTargetStillBusyAfterTheSettleWindow(t *testing.T) {
 	// The verdict comes only after the turn wait (prompt_settle_seconds=2).
 	if elapsed := time.Since(start); elapsed < 2*time.Second {
 		t.Fatalf("not-received after %v, before the 2 s turn wait", elapsed)
+	}
+}
+
+// TestDispatchWorkingAltScreenTargetShowsThePromptOnTheVisibleScreen uses the
+// screen opencode really shows (pinar: an amendment to a working opencode came
+// back not-received, while the pane showed the prompt). Herdr refuses a recent
+// read of a working full-screen TUI (agent_not_idle), so the evidence comes
+// from the visible screen, where opencode wraps the prompt inside its own box.
+func TestDispatchWorkingAltScreenTargetShowsThePromptOnTheVisibleScreen(t *testing.T) {
+	notIdle := `{"error":{"code":"agent_not_idle","message":"cannot read 40 lines while worker is working: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source visible"}}`
+	briefs := filepath.Join("$ROOT", "state", "ws", "briefs") + string(filepath.Separator)
+	visible := "  ┃  [✓] earlier step\n" +
+		"     ▣  Build · Qwen3.8-27B NVFP4 (ai01) · 23m 14s\n" +
+		"  ┃\n" +
+		"  ┃  Read the file " + briefs + "worker-\n" +
+		"  ┃  20260930T125455.md in full and execute it. It amends the brief you are working on. When\n" +
+		"  ┃\n" +
+		"   ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                            126.3K (48%)  ctrl+p commands\n"
+	f := newDispatchArrivalFixture(t, "working", 5, 5, "", "2",
+		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped"}, ArgvPrefix: true, Code: 1, Stderr: notIdle},
+		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: visible},
+	)
+	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	start := time.Now()
+	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
+	if code != 0 || dispatchOutputStatus(t, out) != "queued" || strings.Contains(errText, "not confirmed") {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	// The evidence is on screen within the check window: no wait for the turn.
+	if elapsed := time.Since(start); elapsed >= 2*time.Second {
+		t.Fatalf("queued after %v: the visible prompt should confirm it before the 2 s turn wait", elapsed)
 	}
 }
