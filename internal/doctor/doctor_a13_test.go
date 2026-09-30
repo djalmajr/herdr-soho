@@ -45,7 +45,9 @@ func a13GitOnlyPath(t *testing.T) string {
 	}
 	bin := t.TempDir()
 	if err := os.Symlink(gitPath, filepath.Join(bin, "git")); err != nil {
-		t.Fatal(err)
+		// Windows without the symlink privilege: git's own directory (the
+		// doctor lines under test do not depend on what else is there).
+		return filepath.Dir(gitPath)
 	}
 	return bin
 }
