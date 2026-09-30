@@ -285,12 +285,12 @@ func TestDispatchRemainingCases(t *testing.T) {
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		realWrite := writeDispatchSidecar
 		writes := make([]string, 0, 2)
-		writeDispatchSidecar = func(path, kind, model, effort, submission, arrival string) error {
+		writeDispatchSidecar = func(path, kind, model, effort, submission, arrival, session string) error {
 			writes = append(writes, submission+"/"+arrival)
 			if len(writes) == 2 {
 				return fmt.Errorf("write failed: simulated EIO")
 			}
-			return realWrite(path, kind, model, effort, submission, arrival)
+			return realWrite(path, kind, model, effort, submission, arrival, session)
 		}
 		t.Cleanup(func() { writeDispatchSidecar = realWrite })
 		code, out, stderr := f.run(t, "worker", f.brief, "--no-wait")
@@ -310,12 +310,12 @@ func TestDispatchRemainingCases(t *testing.T) {
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		realWrite := writeDispatchSidecar
 		writes := make([]string, 0, 2)
-		writeDispatchSidecar = func(path, kind, model, effort, submission, arrival string) error {
+		writeDispatchSidecar = func(path, kind, model, effort, submission, arrival, session string) error {
 			writes = append(writes, submission+"/"+arrival)
 			if len(writes) == 2 {
 				return fmt.Errorf("write failed: simulated EIO")
 			}
-			return realWrite(path, kind, model, effort, submission, arrival)
+			return realWrite(path, kind, model, effort, submission, arrival, session)
 		}
 		t.Cleanup(func() { writeDispatchSidecar = realWrite })
 		code, out, stderr := f.run(t, "worker", f.brief, "--no-wait")
@@ -610,12 +610,12 @@ func TestDispatchRemainingCases(t *testing.T) {
 		)
 		realWrite := writeDispatchSidecar
 		writes := make([]string, 0, 3)
-		writeDispatchSidecar = func(path, kind, model, effort, submission, arrival string) error {
+		writeDispatchSidecar = func(path, kind, model, effort, submission, arrival, session string) error {
 			writes = append(writes, submission+"/"+arrival)
 			if len(writes) == 3 {
 				return fmt.Errorf("write failed: simulated EIO")
 			}
-			return realWrite(path, kind, model, effort, submission, arrival)
+			return realWrite(path, kind, model, effort, submission, arrival, session)
 		}
 		t.Cleanup(func() { writeDispatchSidecar = realWrite })
 		code, out, stderr := f.run(t, "worker", f.brief, "--no-wait")

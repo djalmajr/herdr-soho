@@ -39,7 +39,7 @@ func TestDispatchHelpers(t *testing.T) {
 	})
 	t.Run(`JS: dispatch sidecar records the accepted attempt and arrival`, func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "x.dispatch.json")
-		if err := WriteSidecar(path, "codex", "gpt-5", "high", "accepted", "queued"); err != nil {
+		if err := WriteSidecar(path, "codex", "gpt-5", "high", "accepted", "queued", ""); err != nil {
 			t.Fatal(err)
 		}
 		data, err := os.ReadFile(path)
@@ -56,6 +56,30 @@ func TestDispatchHelpers(t *testing.T) {
 			if got != want {
 				t.Errorf("%s=%v, want %v", key, got, want)
 			}
+		}
+		if _, present := obj.Get("session"); present {
+			t.Error("an empty session must not be recorded in the sidecar")
+		}
+	})
+	t.Run("the sidecar records the roster session value when present", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "y.dispatch.json")
+		if err := WriteSidecar(path, "pi", "m1", "high", "accepted", "", "20260930T085143"); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := jsonjs.Parse(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		obj := value.(*jsonjs.Object)
+		if got, _ := obj.Get("session"); got != "20260930T085143" {
+			t.Fatalf("session=%v, want 20260930T085143", got)
+		}
+		if got, _ := obj.Get("submission"); got != "accepted" {
+			t.Fatalf("submission=%v", got)
 		}
 	})
 	t.Run(`JS: --for resolves family names and fixed-family kinds`, func(t *testing.T) {

@@ -225,10 +225,13 @@ func DispatchSidecar(composed string) string {
 	return filepath.Join(filepath.Dir(composed), base+".dispatch.json")
 }
 
-func WriteSidecar(path string, kind, model, effort, submission, arrival string) error {
+func WriteSidecar(path string, kind, model, effort, submission, arrival, session string) error {
 	pairs := []any{"version", 1, "kind", kind, "model", model, "effort", effort, "submission", submission}
 	if arrival != "" {
 		pairs = append(pairs, "arrival", arrival)
+	}
+	if session != "" {
+		pairs = append(pairs, "session", session)
 	}
 	content := jsonjs.Stringify(jsonjs.O(pairs...))
 	if content == "" {

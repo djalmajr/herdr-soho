@@ -58,6 +58,28 @@ func TestToFixedOneMatchesNodeFixture(t *testing.T) {
 	}
 }
 
+func TestSameSession(t *testing.T) {
+	cases := []struct {
+		name      string
+		prev, cur sessionInfo
+		want      bool
+	}{
+		{"same recorded session ignores kind and model", sessionInfo{"s1", "pi", "m1"}, sessionInfo{"s1", "opencode", "m2"}, true},
+		{"different recorded sessions", sessionInfo{"s1", "pi", "m1"}, sessionInfo{"s2", "pi", "m1"}, false},
+		{"two legacy pairs with the same kind and model", sessionInfo{"", "pi", "m1"}, sessionInfo{"", "pi", "m1"}, true},
+		{"two legacy pairs with a model change", sessionInfo{"", "pi", "m1"}, sessionInfo{"", "pi", "m2"}, false},
+		{"a legacy pair and a session pair fall back to kind and model", sessionInfo{"", "pi", "m1"}, sessionInfo{"s1", "pi", "m1"}, true},
+		{"a legacy pair and a different-model session pair", sessionInfo{"", "pi", "m1"}, sessionInfo{"s1", "opencode", "m1"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sameSession(tc.prev, tc.cur); got != tc.want {
+				t.Fatalf("sameSession(%#v, %#v)=%t want %t", tc.prev, tc.cur, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStatsJSONPreservesRoleInsertionOrder(t *testing.T) {
 	// Mutation captured: sorting group keys changes JavaScript's first-seen role order.
 	groups := map[string]*aggregate{}
