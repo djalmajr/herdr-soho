@@ -396,7 +396,7 @@ $S dispatch a brief-a.md --no-wait   # fan out…
 $S dispatch b brief-b.md --no-wait
 $S wait a b                          # …then block until every report exists
 $S wait a b --any                    # or until the first one lands
-$S status a b                        # non-blocking: done | working | blocked | question | no-report-yet | gone | unavailable | quota | provider-error | capacity | not-received
+$S status [a b]                      # non-blocking (no names = the whole team): done | working | blocked | question | no-report-yet | gone | unavailable | quota | provider-error | capacity | not-received
 ```
 
 **Amending a brief in flight.** To change a worker's brief — while it is
