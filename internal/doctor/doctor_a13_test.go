@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -14,9 +13,16 @@ import (
 
 func a13SkillDir(t *testing.T) string {
 	t.Helper()
-	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	skillDir := filepath.Join(root, "skills", "herdr-soho")
+	// go test runs in the package directory; runtime.Caller would give the
+	// path the binary was built from, which is not this host's on Windows runs.
+	pkg, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	skillDir, err := filepath.Abs(filepath.Join(pkg, "..", "..", "skills", "herdr-soho"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err == nil {
 		return skillDir
 	}
