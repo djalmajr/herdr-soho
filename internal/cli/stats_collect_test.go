@@ -817,6 +817,42 @@ func TestCollectPortedCases(t *testing.T) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
+	t.Run("collect verify drops a trailing comment after the path", func(t *testing.T) {
+		// A report line "<sha256>  <path>  # note" (ai-memory feedback): sha256sum never
+		// writes the comment, so the path without it is the one verified. A file whose
+		// name really holds " # " still verifies under its own name.
+		f := newCommandFixture(t)
+		name := "alice-20260928T120000"
+		body := []byte("contents")
+		workerFile := filepath.Join(f.tmp, "worker file.txt")
+		_ = os.WriteFile(workerFile, body, 0o600)
+		hashFile := filepath.Join(f.tmp, "odd # name.txt")
+		_ = os.WriteFile(hashFile, body, 0o600)
+		sum := sha256.Sum256(body)
+		report := filepath.Join(f.reports, name+".md")
+		lines := fmt.Sprintf("%x  %s  # new file, reviewed\n%x  %s\n", sum, workerFile, sum, hashFile)
+		_ = os.WriteFile(report, []byte(lines), 0o600)
+		_ = os.WriteFile(filepath.Join(f.state, "ws", "last-report-alice"), []byte(report+"\n"), 0o600)
+		f.roster("alice")
+		out, _, code := f.invoke("collect", "alice", "--verify")
+		if code != 0 || !strings.Contains(out, "verified 2: ok 2, changed 0, missing 0") || !strings.Contains(out, "ok "+workerFile+"\n") || !strings.Contains(out, "ok "+hashFile+"\n") {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+	t.Run("collect verify keeps a comment when the bare path is missing too", func(t *testing.T) {
+		f := newCommandFixture(t)
+		name := "alice-20260928T120000"
+		sum := sha256.Sum256([]byte("gone"))
+		gone := filepath.Join(f.tmp, "gone.txt")
+		report := filepath.Join(f.reports, name+".md")
+		_ = os.WriteFile(report, []byte(fmt.Sprintf("%x  %s  # note\n", sum, gone)), 0o600)
+		_ = os.WriteFile(filepath.Join(f.state, "ws", "last-report-alice"), []byte(report+"\n"), 0o600)
+		f.roster("alice")
+		out, _, code := f.invoke("collect", "alice", "--verify")
+		if code != 16 || !strings.Contains(out, "missing "+gone+"  # note\n") || !strings.Contains(out, "verified 1: ok 0, changed 0, missing 1") {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
 	t.Run("collect missing agent argument exits 1", func(t *testing.T) { // JS: "collect with no agent uses the parameter error"
 		f := newCommandFixture(t)
 		_, errOut, code := f.invoke("collect")

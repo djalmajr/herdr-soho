@@ -30,6 +30,11 @@ var dateRE = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})$`)
 var isoRE = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?$`)
 var jsWhitespace = `\t\n\v\f\r \x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}`
 var shaLineRE = regexp.MustCompile(`^[` + jsWhitespace + `]*([0-9a-f]{64})[` + jsWhitespace + `]+\*?([^` + jsWhitespace + `].*?)[` + jsWhitespace + `]*$`)
+
+// shaCommentRE is a trailing comment after the path on a sha256 line
+// ("<sha256>  <path>  # note"): sha256sum never writes one, so it is dropped
+// when the path with it does not exist and the path without it does.
+var shaCommentRE = regexp.MustCompile(`[` + jsWhitespace + `]+#.*$`)
 var dimensions = []string{"role", "kind", "model", "agent", "effort"}
 var reviewRoles = strings.Fields(core.ReviewRolesAll)
 
@@ -823,6 +828,13 @@ func verifyFiles(sd, agent, report string, env platform.Env, cwd, logFile string
 			p = filepath.Join(worker, p)
 		}
 		b, e := os.ReadFile(p)
+		if e != nil && shaCommentRE.MatchString(p) {
+			if bare := shaCommentRE.ReplaceAllString(p, ""); bare != p {
+				if bb, be := os.ReadFile(bare); be == nil {
+					p, b, e = bare, bb, nil
+				}
+			}
+		}
 		state := ""
 		if e != nil {
 			state = "missing"
