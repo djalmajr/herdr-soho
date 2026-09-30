@@ -426,7 +426,7 @@ func ProbeAgent(sd, agent, report string, ctx *core.Config, env platform.Env) st
 			return "quota"
 		}
 		ptext := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
-		p := provider.ProviderDetect(st.State, ptext)
+		p := provider.ProviderDetectTexts(st.State, ptext, core.Cfg(ctx, "provider_capacity_texts", "", env), core.Cfg(ctx, "provider_error_texts", "", env))
 		if p != nil {
 			if p.Status == "provider-error" && p.Auth {
 				_ = os.Remove(queuedFile)

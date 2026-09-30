@@ -100,7 +100,7 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 				if WaitRank(15) > WaitRank(rc) {
 					rc = 15
 				}
-			} else if !stale && markerExists(sd, agent, "queued") && orig != "working" && orig != "blocked" && queuedPromptIsUnresolved(sd, agent, orig, env) {
+			} else if !stale && markerExists(sd, agent, "queued") && orig != "working" && orig != "blocked" && queuedPromptIsUnresolved(sd, agent, orig, ctx, env) {
 				state = "not-received"
 				if WaitRank(15) > WaitRank(rc) {
 					rc = 15
@@ -114,7 +114,7 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 						rc = 7
 					}
 				} else {
-					p = provider.ProviderDetect(orig, herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40)))
+					p = provider.ProviderDetectTexts(orig, herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40)), core.Cfg(ctx, "provider_capacity_texts", "", env), core.Cfg(ctx, "provider_error_texts", "", env))
 					if p != nil && p.Status == "provider-error" && p.Auth {
 						if WaitRank(14) > WaitRank(rc) {
 							rc = 14
@@ -133,7 +133,7 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 					core.Warn(fmt.Sprintf("quota: agent '%s' lane=%s kind=%s model=%s : %s%s", agent, showOr(lane, "?"), kind, showOr(model, "?"), match, renewalSuffix(renewal)), frictionLogFile, "status")
 					rc = 11
 				} else {
-					p = provider.ProviderDetect(orig, herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40)))
+					p = provider.ProviderDetectTexts(orig, herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40)), core.Cfg(ctx, "provider_capacity_texts", "", env), core.Cfg(ctx, "provider_error_texts", "", env))
 					if p != nil && WaitRank(14) > WaitRank(rc) {
 						rc = 14
 					}
@@ -187,7 +187,7 @@ func markerRead(sd, agent, name string) string {
 	value, _ := platform.ReadTextFile(filepath.Join(sd, "wait", agent+"."+name))
 	return value
 }
-func queuedPromptIsUnresolved(sd, agent, state string, env platform.Env) bool {
+func queuedPromptIsUnresolved(sd, agent, state string, ctx *core.Config, env platform.Env) bool {
 	marker := markerRead(sd, agent, "queued")
 	visible := herdr.AgentRead(env, agent, "visible", nil)
 	recent := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
@@ -197,5 +197,5 @@ func queuedPromptIsUnresolved(sd, agent, state string, env platform.Env) bool {
 	if provider.QuotaDetect(state, visible) != nil {
 		return false
 	}
-	return provider.ProviderDetect(state, herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))) == nil
+	return provider.ProviderDetectTexts(state, herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40)), core.Cfg(ctx, "provider_capacity_texts", "", env), core.Cfg(ctx, "provider_error_texts", "", env)) == nil
 }
