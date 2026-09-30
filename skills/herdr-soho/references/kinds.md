@@ -131,7 +131,8 @@ project config; with none set, the CLI uses its own default. Flags verified
   only on `opencode run`, so the TUI maps no effort: spawn warns, it does
   not fail. It draws on the alternate screen: while it works, Herdr refuses
   a `recent` read (`agent_not_idle`), so the skill reads its visible screen
-  instead (the prompt of a dispatch, a quota or auth error).
+  instead; the dispatch finds its prompt there with the wrapped path joined
+  back from opencode's message box.
 
 ### Configuration examples (fictional names)
 
