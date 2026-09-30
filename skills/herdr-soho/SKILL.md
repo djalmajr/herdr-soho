@@ -246,8 +246,9 @@ files only (never `.git`, never ignored paths), takes `--link
 <relpath>=<target>` for dependencies that live outside the worktree, and
 removes the copy itself when the guard's checks refuse it — and never cleans a shared cache
 or the source's build output to recover; the `implementer`, `tasker` and
-`designer` stop every process they started before writing the report,
-by the PIDs they kept, checked by PID only (never a listing of every
+`designer` stop every process they started in the slice before writing
+the report, by the PIDs they kept, and never one they did not start
+(an orphan or a busy process is reported, not killed), checked by PID only (never a listing of every
 command line, which can hold credentials; a sandboxed codex blocks `ps`); and the `designer` reports how the UI was
 verified (`ui_verification`). The `reviewer` never edits the repository
 and mutates only in a throwaway copy.
