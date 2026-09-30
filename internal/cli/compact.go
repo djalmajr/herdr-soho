@@ -109,6 +109,10 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	for {
 		if !compacted && compactProofBelow(herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines)), proof) {
 			compacted = compactWaitIdle(agent, env, deadline)
+		} else if !compacted {
+			// No proof yet: a worker that died meanwhile stops the wait now (6, 4)
+			// instead of running out the deadline.
+			compactDieOnDeadWorker(agent, herdr.AgentState(agent, env, herdr.Timeout, nil))
 		}
 		if compacted || !platform.Now().Before(deadline) {
 			break

@@ -185,6 +185,8 @@ func TestCompactStaleProofAboveMarkerDoesNotCount(t *testing.T) {
 			{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.piStale},
 			{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piFresh},
 			{Argv: compactReadArgv("worker"), Call: 3, Stdout: compactScreens.piFooterHigh},
+			// The polls without a proof also check the worker is alive.
+			{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
 		})
 		code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
 		if code != 0 || errText != "" {
@@ -220,6 +222,8 @@ func TestCompactClaudeProofBelowMarker(t *testing.T) {
 		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
 		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.claudeStale},
 		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.claudeFresh},
+		// The polls without a proof also check the worker is alive.
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
 	})
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
 	if code != 0 || errText != "" {
@@ -307,6 +311,8 @@ func TestCompactTimeoutExits9(t *testing.T) {
 		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
 		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.noProof},
+		// The polls without a proof also check the worker is alive.
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
 	})
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
 	if code != 9 {
@@ -431,6 +437,27 @@ func TestCompactWorkerDiesDuringWait(t *testing.T) {
 				t.Fatalf("agent get calls=%d want 2 (pre-send plus the one that died): %#v", n, calls)
 			}
 		})
+	}
+}
+
+// TestCompactWorkerDiesBeforeProof verifies that a worker that dies while
+// the proof has not appeared yet stops the wait at once (6) instead of
+// running out the deadline.
+func TestCompactWorkerDiesBeforeProof(t *testing.T) {
+	f := newCompactFixture(t, "codex", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stderr: `{"error":{"code":"agent_not_found","message":"gone"}}`},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.noProof},
+	})
+	start := time.Now()
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 6 || out != "" || !strings.Contains(errText, "compact: agent 'worker' is no longer live") {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errText)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("exited after %v; the death must stop the wait long before the 30 s deadline", elapsed)
 	}
 }
 
