@@ -399,9 +399,11 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			if !ok && settleSecs > 0 {
 				// Some CLIs (Cursor) hold a prompt sent during a turn in a queue they do
 				// not show: wait up to prompt_settle_seconds for that turn to end, then
-				// look for the arrival once more.
+				// look for the arrival once more. After the turn only a new working turn
+				// or the report counts: a path in the scrollback of an idle agent is not
+				// a queued prompt (the next wait would read it as stuck in the input).
 				ok = waitWorkingTurnEnd(agent, preSeq, time.Duration(settleSecs)*time.Second, env) &&
-					waitDispatchArrivalExtra(window, env, arrived, promptEvidence)
+					waitDispatchArrival(window, env, arrived)
 			}
 			if !ok {
 				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, env, true, "the working target showed no prompt evidence")

@@ -463,8 +463,13 @@ func TestDispatchWorkingTargetTakesThePromptAfterItsTurn(t *testing.T) {
 func TestDispatchWorkingTargetStillBusyAfterTheSettleWindow(t *testing.T) {
 	f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\n", "2")
 	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	start := time.Now()
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	// The verdict comes only after the turn wait (prompt_settle_seconds=2).
+	if elapsed := time.Since(start); elapsed < 2*time.Second {
+		t.Fatalf("not-received after %v, before the 2 s turn wait", elapsed)
 	}
 }
