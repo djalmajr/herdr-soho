@@ -343,7 +343,7 @@ func TestMutationCopy(t *testing.T) {
 
 		missing := filepath.Join(f.root, "must-not-exist")
 		code, out, errOut = runMutationCopyCmd(t, f, f.root, nil, "--source", f.source, "--dest", missing, "--link", "node_modules="+f.source)
-		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing link '") || !strings.Contains(errOut, "target is inside the source") {
+		if code != 2 || !strings.Contains(errOut, "mutation-copy: refusing link '") || !strings.Contains(errOut, "target is inside the source; install the dependencies in the copy instead (an offline install from the package manager's store)") {
 			t.Fatalf("link into source: code=%d out=%q err=%q", code, out, errOut)
 		}
 		if _, err := os.Stat(missing); !os.IsNotExist(err) {

@@ -710,7 +710,7 @@ $S roles                                   # roles with the kind, model and effo
 $S role reviewer                           # resolved file + frontmatter
 $S spawn implementer [--name impl] [--kind codex] [--direction right|down]
 $S dispatch impl <brief.md> [--timeout 900000] [--amend] [--compact]   # role prompt + brief → agent, waits; --amend amends the agent's current brief; --compact compacts an idle worker (claude, codex, pi) before the brief and keeps it unsent on a timeout (9) or a busy worker (10)
-$S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, pi): sends /compact once and waits for the CLI's proof plus its return to idle; a kind without a verified command exits 2, a timeout 9
+$S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, pi): sends /compact once and waits for the CLI's proof plus its return to idle; a kind without a verified command exits 2, a timeout 9; a claude with nothing to compact exits 0 with `nothing-to-compact`, and `Error compacting conversation` exits 9 with `failed`
 $S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines, one `<sha256>  <path>` per file as `sha256sum` prints it (exit 16 on changed/missing or when the report has none, 4 when the report cannot be read)
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
