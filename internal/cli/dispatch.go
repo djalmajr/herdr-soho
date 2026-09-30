@@ -363,7 +363,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		}
 		promptEvidence := func() bool {
 			screen := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
-			return strings.Contains(screen, composed) || provider.QueuedPromptEvidence(screen, composed)
+			return provider.PromptEvidence(screen, composed)
 		}
 		if !wasWorking && !waitDispatchArrival(window, env, arrived) {
 			screen := herdr.AgentRead(env, agent, "visible", nil)

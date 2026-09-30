@@ -18,7 +18,7 @@ Identify bugs in the change under review that the author would want fixed before
 5. Record findings, then a verdict.
 </procedure>
 
-When the brief includes a `Failure matrix`, independently probe each marker with its own fixture and distinguish local from operational proof. Without that section, do not construct the matrix.
+When the brief includes a `Failure matrix`, independently probe each marker with its own fixture and distinguish local from operational proof. Without that section, do not construct the matrix. Never use `[done]`, `[partial]` or `[skipped]` as the name of a scenario, marker or table value: the orchestrator's tools count each one as an item's state.
 
 <criteria>
 Report an issue only when all hold: provable impact on a specific code path; actionable discrete fix; clearly unintentional; introduced by the patch (not pre-existing); no unstated assumptions; rigor proportionate to the codebase.

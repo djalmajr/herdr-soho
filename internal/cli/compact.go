@@ -39,6 +39,25 @@ func compactProof(kind string) string {
 	return compactProofByKind[kind]
 }
 
+// compactEnding is a claude-specific line that ends the /compact wait
+// without the `Compacted` proof: a conversation with nothing to compact (a
+// success without compaction) and a compaction that failed.
+type compactEnding struct{ status, text string }
+
+// compactEndingsByKind holds the ending texts next to the kind's proof; the
+// failure is listed first, so a failure on screen is the outcome reported.
+// Only claude has verified endings; codex and pi have none.
+var compactEndingsByKind = map[string][]compactEnding{
+	"claude": {
+		{status: "failed", text: "Error compacting conversation"},
+		{status: "nothing-to-compact", text: "Not enough messages to compact."},
+	},
+}
+
+func compactEndings(kind string) []compactEnding {
+	return compactEndingsByKind[kind]
+}
+
 func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	agent := ""
 	timeoutMS := int64(compactDefaultTimeoutMS)
@@ -88,8 +107,12 @@ func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 // worker back at idle or done. It is the shared step behind the `compact`
 // command and `dispatch --compact`. The caller must have checked the roster
 // and the kind. A busy or unreachable worker dies (10, 4, 6); on success it
-// prints the result JSON (a stderr line inside a dispatch) and returns 0, and on timeout it prints the timeout
-// JSON and returns 9. It never uses `agent prompt` and never resends.
+// prints the result JSON (a stderr line inside a dispatch) and returns 0,
+// on timeout it prints the timeout JSON and returns 9; a claude with
+// nothing to compact returns 0 with the nothing-to-compact result (a stderr
+// line inside a dispatch), and a claude that reports a failed compaction
+// returns 9 with the failed result. It never uses `agent prompt` and never
+// resends.
 func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ctx *core.Config, env platform.Env, cwd string, inDispatch bool) int {
 	state := herdr.AgentState(agent, env, herdr.Timeout, nil)
 	if state.State == "working" || state.State == "blocked" {
@@ -107,6 +130,11 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 		core.DieFriction(fmt.Sprintf("compact: could not read the screen of '%s' before sending; nothing was sent", agent), 4, frictionLogPath, "compact")
 	}
 	seen := compactProofLines(before, proof)
+	endings := compactEndings(kind)
+	endSeen := make([]map[string]bool, len(endings))
+	for i := range endings {
+		endSeen[i] = compactProofLines(before, endings[i].text)
+	}
 	if !herdr.PaneSendText(pane, "/compact", env) {
 		core.DieFriction(fmt.Sprintf("compact: could not send /compact to pane '%s'; release --close and spawn --fresh instead", pane), 4, frictionLogPath, "compact")
 	}
@@ -116,20 +144,51 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	start := platform.Now()
 	deadline := start.Add(time.Duration(timeoutMS) * time.Millisecond)
 	compacted := false
+	endStatus := ""
 	for {
-		if !compacted && compactProofNew(herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines)), proof, seen) {
-			compacted = compactWaitIdle(agent, env, deadline)
-		} else if !compacted {
-			// No proof yet: a worker that died meanwhile stops the wait now (6, 4)
-			// instead of running out the deadline.
-			compactDieOnDeadWorker(agent, herdr.AgentState(agent, env, herdr.Timeout, nil))
+		if !compacted && endStatus == "" {
+			screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
+			if compactProofNew(screen, proof, seen) {
+				compacted = compactWaitIdle(agent, env, deadline)
+			} else {
+				// A claude ending counts only when it belongs to this attempt:
+				// below a /compact the screen gained since the pre-send read,
+				// or on a line not there before the send; it never waits for
+				// the worker back at idle.
+				for i := range endings {
+					if compactEndingNew(screen, before, endings[i].text, endSeen[i]) {
+						endStatus = endings[i].status
+						break
+					}
+				}
+				if endStatus == "" {
+					// No proof yet: a worker that died meanwhile stops the wait now (6, 4)
+					// instead of running out the deadline.
+					compactDieOnDeadWorker(agent, herdr.AgentState(agent, env, herdr.Timeout, nil))
+				}
+			}
 		}
-		if compacted || !platform.Now().Before(deadline) {
+		if compacted || endStatus != "" || !platform.Now().Before(deadline) {
 			break
 		}
 		time.Sleep(compactPollInterval)
 	}
 	elapsed := platform.Now().Sub(start).Milliseconds()
+	if endStatus != "" {
+		if endStatus == "failed" {
+			core.Warn(fmt.Sprintf("compact: '%s' reported %q; nothing was compacted", agent, "Error compacting conversation"), frictionLogPath, "compact")
+		}
+		if inDispatch && endStatus == "nothing-to-compact" {
+			// The dispatch keeps one JSON line on stdout: its own result.
+			fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: '%s' had nothing to compact\n", agent)
+			return 0
+		}
+		fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O("agent", agent, "kind", kind, "status", endStatus, "elapsed_ms", elapsed)))
+		if endStatus == "failed" {
+			return 9
+		}
+		return 0
+	}
 	if !compacted {
 		fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O("agent", agent, "kind", kind, "status", "timeout", "elapsed_ms", elapsed)))
 		return 9
@@ -238,6 +297,35 @@ func compactProofBelow(screen, proof string) bool {
 	}
 	for i := marker + 1; i < len(lines); i++ {
 		if strings.Contains(lines[i], proof) {
+			return true
+		}
+	}
+	return false
+}
+
+// compactCommandCount returns how many lines of the screen are the sent
+// /compact command itself.
+func compactCommandCount(screen string) int {
+	n := 0
+	for _, line := range strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n") {
+		if compactCommandLine(line) {
+			n++
+		}
+	}
+	return n
+}
+
+// compactEndingNew reports a claude ending that belongs to this /compact
+// attempt: one below a /compact the screen gained since the pre-send read
+// (its answer may repeat a line already on screen), or one on a line that
+// was not on screen before the send. An ending that sat below an older
+// /compact on the unchanged screen does not count.
+func compactEndingNew(screen, before, text string, seen map[string]bool) bool {
+	if compactCommandCount(screen) > compactCommandCount(before) && compactProofBelow(screen, text) {
+		return true
+	}
+	for line := range compactProofLines(screen, text) {
+		if !seen[line] {
 			return true
 		}
 	}
