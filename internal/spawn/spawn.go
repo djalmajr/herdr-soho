@@ -60,7 +60,14 @@ func approvalsRank(mode string) int {
 func liveAgents(env platform.Env) []any { return herdr.LiveAgents(env, herdr.Timeout) }
 
 func AgentNameTaken(name string, env platform.Env) bool {
-	for _, a := range liveAgents(env) {
+	return AgentNameTakenIn(name, liveAgents(env))
+}
+
+// AgentNameTakenIn is AgentNameTaken over an already-read live list, so the
+// read can be shared with the lane-orphan warning that runs after the name
+// check without making a second agent list call.
+func AgentNameTakenIn(name string, agents []any) bool {
+	for _, a := range agents {
 		if fieldString(a, "name") == name {
 			return true
 		}
@@ -652,6 +659,7 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		}
 	}
 	core.EnforceWorkerCap(ctx, env, cwd)
+	var orphanLive []any
 	if o.name != "" {
 		if AgentNameTaken(o.name, env) {
 			taken := o.name
@@ -670,7 +678,8 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		if !agentNameRE.MatchString(o.name) {
 			core.DieFriction(fmt.Sprintf("invalid agent name '%s' (must match [a-z][a-z0-9_-]{0,31})", o.name), 2, "", "")
 		}
-		if AgentNameTaken(o.name, env) {
+		orphanLive = liveAgents(env)
+		if AgentNameTakenIn(o.name, orphanLive) {
 			core.DieFriction(fmt.Sprintf("agent name '%s' is already live", o.name), 3, "", "")
 		}
 		if o.name != base {
@@ -698,6 +707,13 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		Warn("--tab-label ignored: --pane places the worker in a given pane", ctx, env, "spawn")
 	}
 	if o.pane == "" {
+		if lane != "" {
+			// An idle lane worker released without --close is not re-adopted:
+			// the spawn only names it before opening another pane. It reuses
+			// the live read the name check just made, and spends a workspace
+			// read only when a live worker carries this lane's base name.
+			warnLaneOrphans(lane, ctx, env, cwd, orphanLive)
+		}
 		anchor, autoDir := "overflow", "layout"
 		if layoutMode != "tab" && o.tabLabel == "" {
 			picked := layout.PickSplitAnchor(ctx, env, cwd)
@@ -811,6 +827,31 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 
 func clampSpawnEffort(effort, kind, maxEffort string) string {
 	return kinds.ClampTo(kinds.ClampTo(effort, kinds.KindEffortCeiling(kind)), maxEffort)
+}
+
+// warnLaneOrphans notices the idle orphans that carry this lane's base name
+// (the name alone or <lane>-<n>) before the spawn opens a new pane; it only
+// warns, the spawn proceeds and the orphan is left alone. When no live worker
+// carries the lane's base name it makes no extra herdr reads at all.
+func warnLaneOrphans(lane string, ctx *core.Config, env platform.Env, cwd string, live []any) {
+	if live == nil {
+		live = liveAgents(env)
+	}
+	candidate := false
+	for _, agent := range live {
+		if core.WorkerNameMatches(fieldString(agent, "name"), lane) {
+			candidate = true
+			break
+		}
+	}
+	if !candidate {
+		return
+	}
+	for _, orphan := range core.OrphansOf(ctx, env, cwd, live) {
+		if (orphan.State == "idle" || orphan.State == "done") && core.WorkerNameMatches(orphan.Name, lane) {
+			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: spawn: '%s' is idle outside the roster (%s); close it with: herdr-soho release %s --close\n", orphan.Name, orphan.Pane, orphan.Name)
+		}
+	}
 }
 
 func has(values []string, want string) bool {

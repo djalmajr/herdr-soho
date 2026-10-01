@@ -33,6 +33,9 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 	sd := core.StateDir(ctx, env, cwd)
 	line := core.RosterLine(sd, agent)
 	if line == "" {
+		if closePane && releaseOrphan(agent, force, ctx, env, cwd) {
+			return 0
+		}
 		core.DieFriction(fmt.Sprintf("agent '%s' is not in the roster (state dir: %s)", agent, sd), 3, frictionLogPath, "release")
 	}
 	fields := strings.Split(line, "\t")
@@ -96,6 +99,9 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 			layout.HerdTabsRelabel(ctx, env, cwd)
 		}()
 	}
+	if !closes && pane != "" {
+		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: release: the pane %s stays open; close it later with: herdr-soho release %s --close\n", pane, agent)
+	}
 
 	worktrees := exec.Command("git", "-C", wdir, "worktree", "list")
 	worktrees.Env = env.List()
@@ -115,6 +121,34 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 	}
 	_, _ = fmt.Fprintf(platform.Stdout, "released %s\n", agent)
 	return 0
+}
+
+// releaseOrphan closes the pane of an agent that has already left the roster
+// (a release without --close leaves it alive and idle). Only a lane-worker
+// name live in the current workspace counts as an orphan; the orchestrator's
+// own pane and other names fall through to the plain not-in-roster error.
+// Only a confirmed-idle orphan is closed; a working, blocked or unqueryable
+// one is refused with 10 unless --force is passed.
+func releaseOrphan(name string, force bool, ctx *core.Config, env platform.Env, cwd string) bool {
+	orphan, ok := core.FindOrphan(name, ctx, env, cwd)
+	if !ok {
+		return false
+	}
+	state := ""
+	if !force {
+		state = herdr.AgentState(name, env, herdr.Timeout, nil).State
+	}
+	if !force && state != "idle" && state != "done" {
+		core.DieFriction(fmt.Sprintf("agent '%s' is not in the roster and is %s; pass --force to close its pane", name, state), 10, frictionLogPath, "release")
+	}
+	if herdr.PaneClose(orphan.Pane, env) {
+		_, _ = fmt.Fprintf(platform.Stdout, "released %s (pane %s closed; it was no longer in the roster)\n", name, orphan.Pane)
+	} else {
+		// A failed close keeps the roster release's contract: the release
+		// stands, the pane stays open, and no "closed" claim is printed.
+		_, _ = fmt.Fprintf(platform.Stdout, "released %s\n", name)
+	}
+	return true
 }
 
 func releaseAutoRegrid(ctx *core.Config, env platform.Env, cwd string) {
