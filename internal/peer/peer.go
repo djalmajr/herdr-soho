@@ -751,10 +751,12 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 				if strings.Contains(recent, "#"+id) {
 					visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 					if visibleErr == "" && visible != preScreen && !isDialogScreen(visible, t.Kind, statusOr(curGet, currentStatus)) {
-						// A message in pi's Steering queue or in Claude Code's queued
-						// messages sits above the input box but is not read yet: it is
-						// queued (reported after the window), not delivered.
-						if !messageStillInScreen(t.Kind, visible, endLine, id) && !steeringQueued(visible, id) && !claudeQueued(visible, id) {
+						// A message in pi's Steering queue, in Claude Code's queued
+						// messages, or in codex's follow-up queue sits above the input
+						// area but is not read yet: it is queued (reported after the
+						// window), not delivered.
+						if !messageStillInScreen(t.Kind, visible, endLine, id) && !steeringQueued(visible, id) && !claudeQueued(visible, id) &&
+							!(t.Kind == "codex" && codexQueued(visible, id)) {
 							return proofResult{Proven: true, RecentReadSucceeded: true, LastCause: result.LastCause}
 						}
 					} else if visibleErr != "" {
@@ -825,10 +827,11 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		platform.Die(fmt.Sprintf("send: could not confirm that %s took the message (%s); read its pane before sending again", t.RefShown, cause), 15)
 	}
 	preEnterVis, readErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
-	if readErr == "" && (steeringQueued(preEnterVis, id) || claudeQueued(preEnterVis, id)) {
-		// pi keeps a message sent during a turn in its Steering queue and
-		// Claude Code keeps it in its queued messages: it is queued, not lost,
-		// and not yet read; no Enter (and no ctrl+enter) goes to a busy agent.
+	if readErr == "" && (steeringQueued(preEnterVis, id) || claudeQueued(preEnterVis, id) || (t.Kind == "codex" && codexQueued(preEnterVis, id))) {
+		// pi keeps a message sent during a turn in its Steering queue, Claude
+		// Code keeps it in its queued messages, and codex keeps it in its
+		// follow-up queue: it is queued, not lost, and not yet read; no Enter
+		// (and no ctrl+enter) goes to a busy agent.
 		log(senderRef, t.RefShown, "queued")
 		_, _ = fmt.Fprintf(platform.Stdout, "queued for %s: it takes the message when its current turn ends\n", t.RefShown)
 		return 0
@@ -890,14 +893,50 @@ func piInputRegion(screen string) ([]string, bool) {
 	return lines[start:end], true
 }
 
+// codexComposerRegion returns the visible screen's lines from the codex
+// composer to the end of the screen. The composer starts at the last line
+// whose text, without its left spaces, begins with "› " (U+203A space) or is
+// just "›", and that line must sit inside the last 8 non-empty screen lines.
+// ok is false when no such line is there; the caller then keeps the
+// whole-screen behavior. A taken message sits in the history above the
+// composer, so the composer region is what holds the prompt until it is
+// taken; this adapter hands the lines back like piInputRegion.
+func codexComposerRegion(visible string) ([]string, bool) {
+	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
+	nonEmpty := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimFunc(lines[i], isJSWhitespace) == "" {
+			continue
+		}
+		nonEmpty++
+		head := strings.TrimLeft(lines[i], " \t")
+		if head == "›" || strings.HasPrefix(head, "› ") {
+			// The first such line from the end is the last composer line.
+			return lines[i:], nonEmpty <= 8
+		}
+		if nonEmpty >= 8 {
+			break
+		}
+	}
+	return nil, false
+}
+
 // messageStillInScreen reports whether the visible screen still holds the
 // message's marker, meaning the prompt is typed but not taken yet. For a pi
-// target the marker only counts inside the input box: a taken message stays
-// in the chat history, which is part of the visible screen. Without two box
-// borders, and for every other kind, the whole visible screen still counts.
+// target the marker only counts inside the input box, and for a codex target
+// only inside the composer region: a taken message stays in the chat history,
+// which is part of the visible screen. Without two box borders or the
+// composer line, and for every other kind, the whole visible screen still
+// counts.
 func messageStillInScreen(kind, visible, endLine, id string) bool {
 	if kind == "pi" {
 		if lines, ok := piInputRegion(visible); ok {
+			region := NormalizeScreen(strings.Join(lines, "\n"))
+			return strings.Contains(region, NormalizeScreen("#"+id)) || strings.Contains(region, NormalizeScreen(endLine))
+		}
+	}
+	if kind == "codex" {
+		if lines, ok := codexComposerRegion(visible); ok {
 			region := NormalizeScreen(strings.Join(lines, "\n"))
 			return strings.Contains(region, NormalizeScreen("#"+id)) || strings.Contains(region, NormalizeScreen(endLine))
 		}
@@ -907,12 +946,18 @@ func messageStillInScreen(kind, visible, endLine, id string) bool {
 }
 
 // idInInputBox reports the message's id in the screen's input area. For a pi
-// target the id must sit between the box borders before an Enter goes to a
-// busy agent; without borders, and for every other kind, the last 15 lines
+// target the id must sit between the box borders, and for a codex target
+// inside the composer region, before an Enter goes to a busy agent; without
+// borders or the composer line, and for every other kind, the last 15 lines
 // still count as before.
 func idInInputBox(kind, visible, id string) bool {
 	if kind == "pi" {
 		if lines, ok := piInputRegion(visible); ok {
+			return strings.Contains(NormalizeScreen(strings.Join(lines, "\n")), NormalizeScreen("#"+id))
+		}
+	}
+	if kind == "codex" {
+		if lines, ok := codexComposerRegion(visible); ok {
 			return strings.Contains(NormalizeScreen(strings.Join(lines, "\n")), NormalizeScreen("#"+id))
 		}
 	}
@@ -945,6 +990,27 @@ func claudeQueued(visible, id string) bool {
 	}
 	for _, line := range strings.Split(visible, "\n") {
 		if strings.Contains(NormalizeScreen(line), NormalizeScreen("Press up to edit queued messages")) {
+			return true
+		}
+	}
+	return false
+}
+
+// codexQueued reports a visible codex follow-up queue line above the
+// composer: a line whose text, without its left spaces, begins with "↳"
+// (U+21B3) and holds this message's id. The message is enqueued for a later
+// turn, not delivered yet. Without a composer line the whole visible screen
+// is searched, as the pi and claude queue checks do.
+func codexQueued(visible, id string) bool {
+	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
+	end := len(lines)
+	if region, ok := codexComposerRegion(visible); ok {
+		end = len(lines) - len(region)
+	}
+	want := NormalizeScreen("#" + id)
+	for _, line := range lines[:end] {
+		head := strings.TrimLeft(NormalizeScreen(line), " \t")
+		if strings.HasPrefix(head, "↳") && strings.Contains(head, want) {
 			return true
 		}
 	}
