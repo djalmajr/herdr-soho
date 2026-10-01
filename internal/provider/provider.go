@@ -3,6 +3,7 @@ package provider
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/djalmajr/herdr-soho/internal/text"
 )
@@ -13,8 +14,16 @@ type Detection struct {
 	Auth   bool   `json:"auth"`
 }
 
+// HarnessModuleCause is the cause of a CLI that cannot load one of its own
+// files (the "Error: Cannot find module ... imported from" report, often right
+// after the CLI was updated while it ran). The cause is always this fixed
+// text, never the file path.
+const HarnessModuleCause = "Error: Cannot find module"
+
 var (
 	retryingRE       = regexp.MustCompile(`retrying|retry in|will retry|reconnecting`)
+	errorTailRetryRE = regexp.MustCompile(`error.*(·|-)[ \t]*retrying`)
+	retryCounterRE   = regexp.MustCompile(`retrying.*\d+/\d+`)
 	econnRE          = regexp.MustCompile(`\bECONN(REFUSED|RESET)\b`)
 	providerStatusRE = regexp.MustCompile(`\b(500|502|503|504)\b` + jsWhitespace + `*[:{(]`)
 	capacity529RE    = regexp.MustCompile(`\b529\b`)
@@ -93,6 +102,9 @@ func ProviderDetectTexts(state, screen, capacityTexts, errorTexts string) *Detec
 				return &Detection{Status: "provider-error", Cause: cause}
 			}
 		}
+		if harnessModuleCause(line, nonEmpty, i) {
+			return &Detection{Status: "provider-error", Cause: HarnessModuleCause}
+		}
 		stripped := configuredTextLine(line)
 		if equalsText(stripped, capacity) {
 			return &Detection{Status: "capacity", Cause: text.SanitizeCause(text.RedactSecrets(line))}
@@ -104,11 +116,13 @@ func ProviderDetectTexts(state, screen, capacityTexts, errorTexts string) *Detec
 	return nil
 }
 
-// RetryLine returns the most recent retry line of a working agent: the
-// bottom ten non-empty screen lines, read upward without the leading box
-// prefix, the first one that matches the retrying patterns, sanitized like
-// a cause. A retry is not a terminal stop (ProviderDetect skips the line);
-// this surfaces it. Empty when the state is not working or no line matches.
+// RetryLine returns the most recent provider-retry line of a working agent:
+// the bottom ten non-empty screen lines, read upward without the leading box
+// prefix, the first that is a provider retry (retryLineReports), sanitized
+// like a cause. A retry is not a terminal stop (ProviderDetect skips the
+// line); this surfaces it. The model's own wording about retrying (no retry
+// counter and not the Reconnecting start) is not a provider retry. Empty when
+// the state is not working or no line matches.
 func RetryLine(state, screen string) string {
 	if state != "working" {
 		return ""
@@ -125,7 +139,7 @@ func RetryLine(state, screen string) string {
 		nonEmpty = nonEmpty[len(nonEmpty)-10:]
 	}
 	for i := len(nonEmpty) - 1; i >= 0; i-- {
-		if retryingRE.MatchString(text.ASCIILower(nonEmpty[i])) {
+		if retryLineReports(nonEmpty[i]) {
 			return text.SanitizeCause(text.RedactSecrets(nonEmpty[i]))
 		}
 	}
@@ -138,6 +152,60 @@ func stripBoxPrefix(line string) string {
 		return strings.TrimLeft(value[len("┃"):], " \t")
 	}
 	return value
+}
+
+// stripStatusGlyph removes one leading status glyph (the activity and error
+// bullets the TUI prints before a line) and the spaces after it, the way
+// stripBoxPrefix removes the box prefix and the spaces. A line without a
+// leading glyph is returned unchanged.
+func stripStatusGlyph(value string) string {
+	if value == "" {
+		return value
+	}
+	r, size := utf8.DecodeRuneInString(value)
+	switch r {
+	case '•', '●', '⏺', '✓', '✔', '■':
+		return strings.TrimLeft(value[size:], " \t")
+	}
+	return value
+}
+
+// retryLineReports says whether the box-stripped line is a provider retry,
+// not the model talking about its own retry. It counts only when the line,
+// after the box prefix, the spaces and a single status glyph, starts with
+// Retrying, Reconnecting or Will retry, or carries a `· Retrying`/`- Retrying`
+// tail after an Error, or carries a `retrying` followed later by a `n/m`
+// counter (codex's mid-line "retrying sampling request (1/5 ...)") (a), AND it
+// carries a digit or starts with Reconnecting (b). "Retrying with the correct
+// text." and "Now retrying the build, attempt 2" (no `n/m` counter) fail.
+func retryLineReports(line string) bool {
+	lower := text.ASCIILower(stripStatusGlyph(line))
+	leading := strings.HasPrefix(lower, "retrying") ||
+		strings.HasPrefix(lower, "reconnecting") ||
+		strings.HasPrefix(lower, "will retry")
+	if !leading && !errorTailRetryRE.MatchString(lower) && !retryCounterRE.MatchString(lower) {
+		return false
+	}
+	return strings.ContainsAny(lower, "0123456789") ||
+		strings.HasPrefix(lower, "reconnecting")
+}
+
+// harnessModuleCause reports whether line is the first line of the stop of a
+// CLI that cannot load one of its own files: without its box prefix and spaces
+// it starts with the fixed cause, and the line plus the two following lines,
+// with the spaces collapsed, carry the "imported from" half of the report.
+// Without that half the line is not this stop: a test run or a Require stack
+// can print the same first line, and nothing changes then.
+func harnessModuleCause(line string, lines []string, i int) bool {
+	value := stripBoxPrefix(line)
+	if !strings.HasPrefix(value, "Error: Cannot find module") {
+		return false
+	}
+	words := strings.Fields(value)
+	for j := i + 1; j < len(lines) && j <= i+2; j++ {
+		words = append(words, strings.Fields(stripBoxPrefix(lines[j]))...)
+	}
+	return strings.Contains(strings.Join(words, " "), "imported from")
 }
 
 func splitTexts(value string) []string {

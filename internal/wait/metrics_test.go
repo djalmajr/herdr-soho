@@ -234,7 +234,21 @@ func TestMetricsTypeValue(t *testing.T) { // mutation: accepting any Type: value
 func TestMetricsAmendment(t *testing.T) {
 	t.Run("wait: a report the pointer lists after a history records amendment true", func(t *testing.T) {
 		m := newMetricsFixture(t, "on", metricsImplementerRoster, metricsImplementerReport, "", "")
-		pointer := `{"version":1,"task_report":"` + m.report + `.current.md","current":"` + m.report + `","history":["` + m.sd + `/reports/worker-earlier.md"]}`
+		// The pointer holds real paths; JSON-escape them, because a Windows
+		// path embeds backslashes that would break a hand-joined document.
+		taskJSON, err := json.Marshal(m.report + ".current.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		currentJSON, err := json.Marshal(m.report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		historyJSON, err := json.Marshal(filepath.Join(m.sd, "reports", "worker-earlier.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pointer := `{"version":1,"task_report":` + string(taskJSON) + `,"current":` + string(currentJSON) + `,"history":[` + string(historyJSON) + `]}`
 		if err := os.WriteFile(filepath.Join(m.sd, "task-report-worker.json"), []byte(pointer+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}

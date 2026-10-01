@@ -88,6 +88,12 @@ func setupUnifiedDiff(before, after, label string) string {
 
 func CmdInit(ctx *core.Config, env platform.Env, cwd string) {
 	herdr.RequireEnv(env, platform.Current(), os.Getpid(), nil)
+	// Refuse before DoctorCheck: the state check would create the state dir
+	// inside the skill before the refusal. Decided with StateInSkill/
+	// StateRootPath, so the refusal itself has no side effect.
+	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
+		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was written)", core.StateRootPath(ctx, env, cwd), skill), 2)
+	}
 	oldOut := platform.Stdout
 	platform.Stdout = platform.Stderr
 	DoctorCheck(ctx, env, cwd, platform.Stderr)
@@ -314,24 +320,30 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 	if declared && len(warnings) == 0 {
 		s.Ok("own providers: no known trap")
 	}
-	d := core.StateRoot(ctx, env, cwd)
-	if core.Nowrite(env) {
-		if st, e := os.Stat(d); e != nil {
-			if os.IsNotExist(e) {
-				s.Ok("state dir absent (no-write mode, not created): " + d)
+	// A state dir inside the skill is a warn, not a probe: no StateRoot, no
+	// MkdirAll, and the doctor goes on.
+	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
+		s.Warning(fmt.Sprintf("state dir: '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory", core.StateRootPath(ctx, env, cwd), skill))
+	} else {
+		d := core.StateRoot(ctx, env, cwd)
+		if core.Nowrite(env) {
+			if st, e := os.Stat(d); e != nil {
+				if os.IsNotExist(e) {
+					s.Ok("state dir absent (no-write mode, not created): " + d)
+				} else {
+					s.Warning("state dir not writable: " + d)
+				}
+			} else if st.IsDir() && isWritable(d) {
+				s.Ok("state dir writable: " + d)
 			} else {
 				s.Warning("state dir not writable: " + d)
 			}
-		} else if st.IsDir() && isWritable(d) {
-			s.Ok("state dir writable: " + d)
 		} else {
-			s.Warning("state dir not writable: " + d)
-		}
-	} else {
-		if os.MkdirAll(d, 0777) == nil && isWritable(d) {
-			s.Ok("state dir writable: " + d)
-		} else {
-			s.Warning("state dir not writable: " + d)
+			if os.MkdirAll(d, 0777) == nil && isWritable(d) {
+				s.Ok("state dir writable: " + d)
+			} else {
+				s.Warning("state dir not writable: " + d)
+			}
 		}
 	}
 	if projectConfig := core.ProjectConfigFileUsed(env, cwd); projectConfig == "" {
@@ -378,6 +390,7 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 	doctorDiscardedModels(ctx, env, cwd, s)
 	doctorModelPairs(ctx, env, cwd, s)
 	doctorLaneArgs(ctx, env, s)
+	doctorContextWindow(ctx, env, s)
 	doctorCodexNetwork(ctx, env, cwd, s)
 	codexenv.DoctorCodexPolicyWarnings(env, platform.Current(), s.Warning)
 	doctorFeedback(ctx, env, s)
@@ -961,6 +974,26 @@ func doctorLaneArgs(ctx *core.Config, env platform.Env, s *Say) {
 			suffix = " (" + strings.Join(roles, ", ") + ")"
 		}
 		s.Warning(fmt.Sprintf("config: lane.%s.args is ignored (lanes=off); set role.<role>.args for its roles instead%s", lane, suffix))
+	}
+}
+
+func doctorContextWindow(ctx *core.Config, env platform.Env, s *Say) {
+	entries := core.ContextWindowEntries(ctx, env)
+	kinds := make([]string, 0, len(entries))
+	for kind := range entries {
+		kinds = append(kinds, kind)
+	}
+	textutil.SortUTF16(kinds)
+	for _, kind := range kinds {
+		entry := entries[kind]
+		display := "context_window." + kind
+		if kind != "grok" {
+			s.Warning(fmt.Sprintf("config: %s=%s has no effect (only grok uses context_window.<kind>)", display, entry.Value))
+			continue
+		}
+		if !core.ContextWindowValueOk(entry.Value) {
+			s.Warning(fmt.Sprintf("config: %s='%s' is not a token count like 500k or 256000 (ignored)", display, entry.Value))
+		}
 	}
 }
 

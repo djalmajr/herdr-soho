@@ -43,7 +43,7 @@ var ConfigScalarKeys = []string{
 var KnownKinds = []string{"claude", "codex", "grok", "agy", "gemini", "cursor", "pi", "opencode"}
 var EffortLadder = []string{"low", "medium", "high", "xhigh", "max"}
 
-var dottedKeyRE = regexp.MustCompile(`^(?:role\.[a-z][a-z0-9_-]*\.(?:kind|model|effort|args)|lane\.[a-z][a-z0-9_-]*\.(?:roles|kind|model|effort|approvals|panes|args)|model\.[a-z][a-z0-9_.-]+|effort\.[a-z][a-z0-9_-]+|args\.[a-z][a-z0-9_-]+)$`)
+var dottedKeyRE = regexp.MustCompile(`^(?:role\.[a-z][a-z0-9_-]*\.(?:kind|model|effort|args)|lane\.[a-z][a-z0-9_-]*\.(?:roles|kind|model|effort|approvals|panes|args)|model\.[a-z][a-z0-9_.-]+|effort\.[a-z][a-z0-9_-]+|context_window\.[a-z][a-z0-9_-]+|args\.[a-z][a-z0-9_-]+)$`)
 var decimalRE = regexp.MustCompile(`^[0-9]+$`)
 var positiveDecimalRE = regexp.MustCompile(`^[1-9][0-9]*$`)
 
@@ -215,6 +215,45 @@ func contains(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+var contextWindowValueRE = regexp.MustCompile(`^(?:[1-9][0-9]*k|[1-9][0-9]*)$`)
+
+// ContextWindowValueOk reports whether value is a context_window.<kind>
+// value: a positive integer token count, optionally with a k suffix (500k).
+func ContextWindowValueOk(value string) bool {
+	return contextWindowValueRE.MatchString(value)
+}
+
+// ContextWindowKey is the normalized config key context_window.<kind>.
+func ContextWindowKey(kind string) string {
+	return "context_window_" + kind
+}
+
+// ContextWindowEntries reports the effective context_window.<kind> values,
+// the same layers as Cfg (environment first, then the config files): for
+// every kind present in a config layer or in the environment, kind →
+// (value, source), empty values dropped.
+func ContextWindowEntries(ctx *Config, env platform.Env) map[string]ConfigEntry {
+	kinds := make(map[string]bool)
+	for key := range ctx.Entries {
+		if strings.HasPrefix(key, "context_window_") {
+			kinds[strings.TrimPrefix(key, "context_window_")] = true
+		}
+	}
+	for name := range env {
+		if strings.HasPrefix(name, "HERDR_SOHO_CONTEXT_WINDOW_") {
+			kinds[strings.ToLower(NormalizeKey(strings.TrimPrefix(name, "HERDR_SOHO_CONTEXT_WINDOW_")))] = true
+		}
+	}
+	out := make(map[string]ConfigEntry, len(kinds))
+	for kind := range kinds {
+		key := ContextWindowKey(kind)
+		if value := Cfg(ctx, key, "", env); value != "" {
+			out[kind] = ConfigEntry{Value: value, Source: CfgSource(ctx, key, env)}
+		}
+	}
+	return out
 }
 
 // ProjectConfigFileUsed returns the file the project layer reads for cwd: the
@@ -468,6 +507,9 @@ func DottedKeyName(key string, ctx *Config, env platform.Env, cwd string) string
 	if head == "args" || head == "effort" {
 		return strings.Join(parts, ".")
 	}
+	if head == "context" && len(parts) >= 3 && parts[1] == "window" {
+		return "context_window." + strings.Join(parts[2:], ".")
+	}
 	if head == "model" {
 		position := parts[len(parts)-1]
 		if len(parts) >= 3 && (position == "worker" || position == "orchestrator") {
@@ -597,7 +639,7 @@ func CmdConfig(ctx *Config, env platform.Env, cwd string) {
 }
 
 func isDottedNormalizedKey(key string) bool {
-	return strings.HasPrefix(key, "args_") || strings.HasPrefix(key, "role_") || strings.HasPrefix(key, "model_") || strings.HasPrefix(key, "effort_") || strings.HasPrefix(key, "lane_")
+	return strings.HasPrefix(key, "args_") || strings.HasPrefix(key, "role_") || strings.HasPrefix(key, "model_") || strings.HasPrefix(key, "effort_") || strings.HasPrefix(key, "lane_") || strings.HasPrefix(key, "context_window_")
 }
 
 func padUTF16(value string, width int) string {

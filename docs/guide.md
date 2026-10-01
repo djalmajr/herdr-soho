@@ -321,7 +321,7 @@ busy or showing dialog, 18 refused by `inbound=off`.
 - One agent name is one growing session. Reuse the pane for the next slice
   instead of closing it. Same slice or subject: reuse it as it is (`--amend`
   for fix rounds). Another subject in the same project: send `/compact`
-  (Claude Code, Codex, pi) with `herdr agent prompt <name> "/compact"`
+  (Claude Code, Codex, pi, opencode) with `herdr agent prompt <name> "/compact"`
   while it is idle, read the pane until the CLI confirms it (Codex prints
   `Context compacted`), then dispatch. An unrelated subject: clear the
   session the same way (`/new` in Codex and pi, `/clear` in Claude Code).
@@ -340,7 +340,7 @@ busy or showing dialog, 18 refused by `inbound=off`.
 `<state>/session.conf` (this Herdr workspace, via `session set`, never
 versioned) → `HERDR_SOHO_<KEY>` → flags. `herdr-soho config` shows the
 effective values and where each came from (scalar keys, then the dotted
-`args.*`/`role.*`/`model.*`/`effort.*`/`lane.*` keys in the file's own
+`args.*`/`role.*`/`model.*`/`effort.*`/`context_window.*`/`lane.*` keys in the file's own
 spelling). `brief_lint_aliases` sets alternate brief section headings.
 Projects and machines set up under the former name `herdr-agents` keep
 working: the CLI reads `HERDR_AGENTS_*`, the `herdr-agents` config files and
@@ -420,7 +420,12 @@ file; with none set, the CLI uses its own default
 memory and skills before the task (Codex: `project_doc_max_bytes=0`); the
 brief must quote the rules that apply. `effort.<kind>` spends budget where
 there is headroom (shipped: `effort.grok=xhigh`, `effort.cursor=xhigh`).
-`reuse_workers=on` avoids paying the startup cost again for the same role.
+`context_window.grok` opens new grok spawns with that context window (`500k`
+or a token count like `256000`): the spawn types `/context-window <value>`
+into the fresh grok and confirms the `Context window set to <value>` line
+(a spawn that cannot confirm is warned, not failed); only grok uses the
+key. `reuse_workers=on` avoids paying the startup cost again for the same
+role.
 
 ## Approvals without a human
 

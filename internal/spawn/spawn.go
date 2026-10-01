@@ -28,6 +28,12 @@ var busyRetryDelay = time.Second
 const (
 	herdrStartTimeout = 30 * time.Second
 	startPollWindow   = 5 * time.Second
+	// contextWindowSettle is the pause between typing /context-window and its
+	// Enter, giving grok's menu time to appear before the selection.
+	contextWindowSettle = time.Second
+	// contextWindowWindow is how long spawn waits for grok's
+	// "Context window set to" line on the visible screen.
+	contextWindowWindow = 10 * time.Second
 )
 
 var agentNameRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
@@ -470,6 +476,9 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	}
 	if o.timeout == "" {
 		o.timeout = core.Cfg(ctx, "spawn_timeout", "60000", env)
+	} else if n, ok := text.ParseJSNumber(o.timeout); ok && !math.IsNaN(n) && !math.IsInf(n, 0) && math.Trunc(n) == n {
+		// The value goes to `herdr agent start --timeout`, also in milliseconds.
+		core.WarnShortTimeout("spawn", filepath.Join(core.StateDirPath(ctx, env, cwd), "friction.log"), int64(n))
 	}
 	if o.effort != "" {
 		if !text.HasWord(strings.Join(core.EffortLadder, " "), o.effort) {
@@ -761,12 +770,31 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 			layout.HerdTabsRelabel(ctx, env, cwd)
 		}()
 	}
+	contextWindow := ""
+	if !blocked && kind == "grok" {
+		// context_window.grok opens the fresh grok with the requested window
+		// (grok has no CLI flag for it): the command goes to this new spawn
+		// only — every reuse path returned before reaching it, so a reused or
+		// working grok never takes the command. An invalid value is ignored
+		// here; doctor names it.
+		value := core.Cfg(ctx, core.ContextWindowKey("grok"), "", env)
+		if value != "" && core.ContextWindowValueOk(value) {
+			if confirmGrokContextWindow(o, value, env) {
+				contextWindow = value
+			} else {
+				Warn(fmt.Sprintf("spawn: could not confirm grok's context window %s for '%s' (no \"Context window set to\" line); set it by hand with /context-window", value, o.name), ctx, env, "spawn")
+			}
+		}
+	}
 	out := jsonjs.O("name", o.name, "pane_id", o.pane, "kind", kind, "role", o.role, "family", family, "created_pane", created, "layout", layoutMode, "placement", placement, "effort", defaultValue(o.effort, "default"), "model", defaultValue(o.model, "default"), "model_spec", modelSpec, "approvals", defaultValue(o.approvals, "ask"), "agent_args", strings.Join(agentArgs, " "), "status", func() string {
 		if blocked {
 			return "blocked_at_startup"
 		}
 		return "ready"
 	}())
+	if contextWindow != "" {
+		out.Set("context_window", contextWindow)
+	}
 	if burst {
 		out.Set("burst", true)
 	}
@@ -887,6 +915,9 @@ func startAgent(o spawnOptions, kind string, env platform.Env, created bool, arg
 			if closed {
 				core.DieFriction(fmt.Sprintf("agent start failed for %s (%s) in pane %s; closed the pane this spawn opened (last screen lines: %s)", o.name, kind, o.pane, tail), 4, "", "")
 			}
+			if herdr.PaneGetGone(o.pane, env) {
+				core.DieFriction(fmt.Sprintf("agent start failed for %s (%s) in pane %s; the pane close failed but the pane is already gone (last screen lines: %s)", o.name, kind, o.pane, tail), 4, "", "")
+			}
 			core.DieFriction(fmt.Sprintf("agent start failed for %s (%s) in pane %s; pane close failed and the pane is still open, check it for a running agent (last screen lines: %s)", o.name, kind, o.pane, tail), 4, "", "")
 		}
 		core.DieFriction(fmt.Sprintf("agent start failed for %s (%s) in pane %s; the pane was given (--pane) and stays open: check it for a running agent", o.name, kind, o.pane), 4, "", "")
@@ -898,6 +929,30 @@ func startWrapperTimeoutMs(raw string) float64 {
 		return 30_000
 	}
 	return n + 30_000
+}
+
+// confirmGrokContextWindow opens the requested context window on the fresh
+// grok: it types /context-window <value> into the pane, pauses for the menu,
+// sends the Enter, and then reads the visible screen until grok's
+// "Context window set to <value>" line appears (up to the window). True only
+// when the line was seen — spawn records the window in its JSON; otherwise it
+// warns and the spawn still succeeds. Callers run it on the new-spawn path
+// only, after the start window; a reused or working grok never gets it.
+func confirmGrokContextWindow(o spawnOptions, value string, env platform.Env) bool {
+	_ = herdr.PaneSendText(o.pane, "/context-window "+value, env)
+	time.Sleep(contextWindowSettle)
+	_ = herdr.PaneSendKeys(o.pane, "Enter", env)
+	needle := "Context window set to " + value
+	until := time.Now().Add(contextWindowWindow)
+	for {
+		if strings.Contains(herdr.AgentRead(env, o.name, "visible", intPtr(40)), needle) {
+			return true
+		}
+		if !time.Now().Before(until) {
+			return false
+		}
+		time.Sleep(pollMillis(env))
+	}
 }
 
 func updateGoneWaitMs(raw string) float64 {

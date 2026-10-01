@@ -14,8 +14,10 @@ import (
 	"unicode/utf16"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/provider"
 	"github.com/djalmajr/herdr-soho/internal/sessionref"
 	textutil "github.com/djalmajr/herdr-soho/internal/text"
 )
@@ -475,6 +477,10 @@ func appendPeerLog(stateDir, from, to, result string, chars int, id string, env 
 	if core.Nowrite(env) {
 		return
 	}
+	// Defense: peer logs are state and never land inside the skill.
+	if core.StatePathInSkill(env, stateDir) != "" {
+		return
+	}
 	clean := func(v string) string { return peerLogSeparators.ReplaceAllString(v, " ") }
 	line := fmt.Sprintf("%s\t%s\t%s\t%s\t%d\t%s\n", platform.Now().Format("2006-01-02T15:04:05"), clean(from), clean(to), clean(result), chars, clean(id))
 	if os.MkdirAll(stateDir, 0o755) == nil {
@@ -503,6 +509,7 @@ type proofResult struct {
 func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	target, file := "", ""
 	now, timeoutMS := false, DefaultSendTimeoutMS
+	timeoutGiven := false
 	words := []string{}
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
@@ -522,6 +529,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 					platform.Die("send: --timeout expects the wait in milliseconds (a positive integer)", 2)
 				}
 				timeoutMS = n
+				timeoutGiven = true
 			}
 		default:
 			if strings.HasPrefix(a, "--") {
@@ -552,7 +560,25 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		platform.Die("send: empty message (pass the message words or --file <path>)", 2)
 	}
 	id := RandomPeerID()
+	// Decide with StateInSkill/StateRootPath before any StateDirPath/StateRoot/
+	// WorkspaceID, so the refusal leaves no side effect (no .gitignore append,
+	// no pane current). The path named is the state root.
+	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
+		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was sent)", core.StateRootPath(ctx, env, cwd), skill), 2)
+	}
+	senderRef, senderName, senderKind, senderRole := SenderInfo(ctx, env, cwd)
+	// A rostered worker reports through its report file, not by message: refuse
+	// before any send. The orchestrator (role -) and sub-orchestrators keep
+	// sending; no HERDR_PANE_ID or a failing sender lookup leaves the send alone.
+	if senderName != "-" && senderRole != "-" && senderRole != "sub-orchestrator" {
+		platform.Die(fmt.Sprintf("send: '%s' is a worker of this team (role %s): a worker reports through its report file, not by message (nothing was sent)", senderName, senderRole), 2)
+	}
 	stateDir := core.StateDirPath(ctx, env, cwd)
+	// The short-timeout warning logs under the state dir, so it comes after the
+	// skill refusal above, which must leave no side effect.
+	if timeoutGiven {
+		core.WarnShortTimeout("send", filepath.Join(stateDir, "friction.log"), int64(timeoutMS))
+	}
 	log := func(from, to, result string) { appendPeerLog(stateDir, from, to, result, utf16Length(body), id, env) }
 	t := resolveTarget(target, env)
 	if !t.OK {
@@ -604,7 +630,6 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			platform.Die(fmt.Sprintf("send: %s unavailable: %s", t.RefShown, w.Cause), 4)
 		}
 	}
-	senderRef, senderName, senderKind, senderRole := SenderInfo(ctx, env, cwd)
 	vScreen, cause := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 	if cause != "" {
 		log(senderRef, t.RefShown, "unreadable")
@@ -653,6 +678,31 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	message := PeerHeader(clean(senderRef), clean(senderName), clean(senderKind), clean(senderRole), id) + "\n\n" + quotedBody + "\n" + endLine
 	msgLines := strings.Count(message, "\n") + 1
 	recentLines := msgLines + 60
+	// A Claude Code target writes every taken message to its session
+	// transcript as a "type":"user" line that holds the peer marker, and the
+	// alternate screen can scroll the marker out of the visible area in the
+	// same turn: a line the new id has not held before the send is delivery
+	// proof. The id is new, so the pre-send count is zero. Without a
+	// transcript (no agent_session, a session kind that is not id, or a file
+	// that is missing or unreadable) the send keeps the screen-based path,
+	// with no new warning. The transcript is local to the machine that runs
+	// the Claude Code session, and ClaudeTranscriptPath resolves it with a
+	// local `agent get` plus a local file: it only applies to a local target.
+	// A remote target with a pane of the same id locally would otherwise be
+	// proved by another claude's transcript, so for it the proof is not armed
+	// at all (no machineless get, no file read).
+	claudeTranscriptPath := ""
+	claudeTranscriptPre := 0
+	claudeTranscriptArmed := false
+	if t.Kind == "claude" && (t.Machine == sessionref.LocalMachine || t.Machine == "") {
+		claudeTranscriptPath = herdr.ClaudeTranscriptPath(t.TargetArg, env)
+		if claudeTranscriptPath != "" {
+			if pre, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); ok {
+				claudeTranscriptArmed = true
+				claudeTranscriptPre = pre
+			}
+		}
+	}
 	p := deliverPrompt(t.Machine, t.TargetArg, message, env)
 	if p.Code != "ok" {
 		if p.Code == "agent_prompt_stalled" || p.Code == "agent_blocked" || p.Code == "timeout" {
@@ -675,8 +725,13 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			curGet := agentGet(t.Machine, t.TargetArg, env)
 			if curGet.OK {
 				preIdle := preStatus == "idle" || preStatus == "done"
-				working := curGet.Status == "working" || curGet.Status == "blocked"
-				if preSeq != "" && curGet.Seq != "" && curGet.Seq != preSeq && preIdle && working {
+				// An idle/done agent's state sequence moves only when its
+				// state changes: a new seq since preGet means it just ran a
+				// turn (or took the prompt into a queue). A short turn can be
+				// over before the first state read, so the status no longer
+				// has to be working; the visible screen read below must still
+				// succeed and show no dialog.
+				if preSeq != "" && curGet.Seq != "" && curGet.Seq != preSeq && preIdle {
 					visible, readErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 					if readErr == "" && !isDialogScreen(visible, t.Kind, curGet.Status) {
 						return proofResult{Proven: true, RecentReadSucceeded: result.RecentReadSucceeded, LastCause: result.LastCause}
@@ -687,6 +742,22 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 				}
 			} else if curGet.Cause != "" {
 				result.LastCause = curGet.Cause
+			}
+			if claudeTranscriptArmed {
+				if count, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); ok && count > claudeTranscriptPre {
+					// Claude Code also writes the taken message to the
+					// transcript while it sits unread in its open queue: the
+					// count growth is not proof while the visible queue line
+					// still holds the id.
+					visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
+					if visibleErr == "" {
+						if !claudeQueued(visible, id) {
+							return proofResult{Proven: true, RecentReadSucceeded: result.RecentReadSucceeded, LastCause: result.LastCause}
+						}
+					} else {
+						result.LastCause = visibleErr
+					}
+				}
 			}
 			recent, readErr := readScreen(t.Machine, t.TargetArg, "recent-unwrapped", recentLines, env)
 			if readErr == "" {
@@ -783,30 +854,15 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 // composed only of '─' (U+2500), ignoring whitespace: pi's input box, whose
 // borders are those two separator lines (chat history above, footer below).
 // ok is false when the screen has fewer than two such lines; the caller then
-// keeps the whole-screen behavior.
+// keeps the whole-screen behavior. The region rule lives in provider, where the
+// dispatch arrival check reuses it; this adapter hands it the lines back.
 func piInputRegion(screen string) ([]string, bool) {
 	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
-	borders := make([]int, 0, 2)
-	for i, line := range lines {
-		content := strings.TrimFunc(line, isJSWhitespace)
-		if content == "" {
-			continue
-		}
-		border := true
-		for _, r := range content {
-			if r != '─' {
-				border = false
-				break
-			}
-		}
-		if border {
-			borders = append(borders, i)
-		}
-	}
-	if len(borders) < 2 {
+	start, end, ok := provider.PiInputRegion(screen)
+	if !ok {
 		return nil, false
 	}
-	return lines[borders[len(borders)-2]+1 : borders[len(borders)-1]], true
+	return lines[start:end], true
 }
 
 // messageStillInScreen reports whether the visible screen still holds the

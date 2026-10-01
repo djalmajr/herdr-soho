@@ -147,6 +147,103 @@ func TestClaudeTranscriptPath(t *testing.T) {
 	})
 }
 
+func TestCountClaudeUserMarkerLines(t *testing.T) {
+	marker := "#01020304"
+	userLine := `{"type":"user","message":{"content":"[herdr-soho:peer] ` + marker + ` end of message"}}`
+	t.Run("only the user lines that hold the marker count", func(t *testing.T) {
+		// The assistant line models Claude citing the id back in its own
+		// reply: a marker without the user record type is not delivery.
+		dir := t.TempDir()
+		path := filepath.Join(dir, "session.jsonl")
+		content := strings.Join([]string{
+			`{"type":"assistant","message":{"content":"did you mean ` + marker + `? I am still working"}}`,
+			userLine,
+			`{"type":"user","message":{"content":"an earlier message without the marker"}}`,
+			`{"type":"system","subtype":"file_history_snapshot","content":"` + marker + ` inside system data"}}`,
+			`{"type":"user","message":{"content":"[herdr-soho:peer] #99999999 end of message"}}`,
+			userLine,
+		}, "\n") + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountClaudeUserMarkerLines(path, marker)
+		if !ok || n != 2 {
+			t.Fatalf("count=(%d,%v) want (2,true)", n, ok)
+		}
+	})
+	t.Run("a line that holds the user type and the marker twice still counts once", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "session.jsonl")
+		content := `{"type":"user","message":{"content":"` + marker + ` ` + marker + `"}}` + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountClaudeUserMarkerLines(path, marker)
+		if !ok || n != 1 {
+			t.Fatalf("count=(%d,%v) want (1,true)", n, ok)
+		}
+	})
+	t.Run("a matching line without a trailing newline still counts", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "session.jsonl")
+		content := `{"type":"user","message":{"content":"earlier"}}\n{"type":"user","message":{"content":"` + marker + `"}}`
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountClaudeUserMarkerLines(path, marker)
+		if !ok || n != 1 {
+			t.Fatalf("count=(%d,%v) want (1,true)", n, ok)
+		}
+	})
+	t.Run("a line far past the default 64 KiB token still counts", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "session.jsonl")
+		long := `{"type":"user","message":{"content":"` + strings.Repeat("a", 200*1024) + marker + `"}}` + "\n"
+		if err := os.WriteFile(path, []byte(long), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountClaudeUserMarkerLines(path, marker)
+		if !ok || n != 1 {
+			t.Fatalf("count=(%d,%v) want (1,true)", n, ok)
+		}
+	})
+	t.Run("an empty file counts zero", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "session.jsonl")
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountClaudeUserMarkerLines(path, marker)
+		if !ok || n != 0 {
+			t.Fatalf("count=(%d,%v) want (0,true)", n, ok)
+		}
+	})
+	t.Run("an unreadable file reports not ok with no count", func(t *testing.T) {
+		n, ok := CountClaudeUserMarkerLines(filepath.Join(t.TempDir(), "missing.jsonl"), marker)
+		if ok || n != 0 {
+			t.Fatalf("count=(%d,%v) want (0,false)", n, ok)
+		}
+	})
+	t.Run("the function returns no line text: its result is only the number", func(t *testing.T) {
+		// The signature is the contract (int, bool): no line content leaves
+		// the function. Run it on a transcript whose matching lines hold
+		// distinctive sentinel payloads and check only the count comes back.
+		dir := t.TempDir()
+		path := filepath.Join(dir, "session.jsonl")
+		content := strings.Join([]string{
+			`{"type":"user","message":{"content":"USER-SENTINEL-1 ` + marker + `"}}`,
+			`{"type":"user","message":{"content":"USER-SENTINEL-2 ` + marker + `"}}`,
+			`{"type":"assistant","message":{"content":"ASSISTANT-SENTINEL ` + marker + `"}}`,
+		}, "\n") + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountClaudeUserMarkerLines(path, marker)
+		if !ok || n != 2 {
+			t.Fatalf("count=(%d,%v) want (2,true)", n, ok)
+		}
+	})
+}
+
 func TestClaudeProjectDirEncoding(t *testing.T) {
 	cases := []struct{ cwd, want string }{
 		{"/Users/x/Developer/edger/.worktrees/fix-a", "-Users-x-Developer-edger--worktrees-fix-a"},

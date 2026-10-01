@@ -159,7 +159,17 @@ func StateDirPath(ctx *Config, env platform.Env, cwd string) string {
 	return filepath.Join(StateRoot(ctx, env, cwd), WorkspaceID(ctx, env, cwd))
 }
 
+// StateDir decides with StateInSkill/StateRootPath — neither writes nor calls
+// the herdr CLI — before touching StateDirPath/StateRoot/WorkspaceID, so the
+// refusal leaves no side effect (no .gitignore append, no pane current).
+// The path named in the message is the state root (StateRootPath), not the
+// full state dir.
 func StateDir(ctx *Config, env platform.Env, cwd string) string {
+	if !Nowrite(env) {
+		if skill := StateInSkill(ctx, env, cwd); skill != "" {
+			platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was written)", StateRootPath(ctx, env, cwd), skill), 2)
+		}
+	}
 	dir := StateDirPath(ctx, env, cwd)
 	if Nowrite(env) {
 		return dir
