@@ -583,7 +583,24 @@ func waitWorkingTurnEnd(agent, preSeq string, window time.Duration, env platform
 }
 func intPtr(v int) *int { return &v }
 func composedPathSeenOutsideInput(agent, composed string, env platform.Env) bool {
-	lines := strings.Split(strings.ReplaceAll(herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40)), "\r\n", "\n"), "\n")
+	screen := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
+	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
+	boxStart, boxEnd, inBox := 0, 0, false
+	if s, e, ok := provider.PiInputRegion(screen); ok {
+		boxStart, boxEnd, inBox = s, e, true
+	}
+	if inBox {
+		// With pi's two input-box borders, "outside the input box" is the lines
+		// outside the region between them: the footer below the box counts as
+		// outside, and a line between the borders holds the prompt typed and
+		// not sent yet.
+		for i, line := range lines {
+			if (i < boxStart || i >= boxEnd) && strings.Contains(line, composed) {
+				return true
+			}
+		}
+		return false
+	}
 	kept := []string{}
 	for _, line := range lines {
 		if strings.TrimSpace(line) != "" {
