@@ -14,6 +14,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/provider"
@@ -677,6 +678,31 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	message := PeerHeader(clean(senderRef), clean(senderName), clean(senderKind), clean(senderRole), id) + "\n\n" + quotedBody + "\n" + endLine
 	msgLines := strings.Count(message, "\n") + 1
 	recentLines := msgLines + 60
+	// A Claude Code target writes every taken message to its session
+	// transcript as a "type":"user" line that holds the peer marker, and the
+	// alternate screen can scroll the marker out of the visible area in the
+	// same turn: a line the new id has not held before the send is delivery
+	// proof. The id is new, so the pre-send count is zero. Without a
+	// transcript (no agent_session, a session kind that is not id, or a file
+	// that is missing or unreadable) the send keeps the screen-based path,
+	// with no new warning. The transcript is local to the machine that runs
+	// the Claude Code session, and ClaudeTranscriptPath resolves it with a
+	// local `agent get` plus a local file: it only applies to a local target.
+	// A remote target with a pane of the same id locally would otherwise be
+	// proved by another claude's transcript, so for it the proof is not armed
+	// at all (no machineless get, no file read).
+	claudeTranscriptPath := ""
+	claudeTranscriptPre := 0
+	claudeTranscriptArmed := false
+	if t.Kind == "claude" && (t.Machine == sessionref.LocalMachine || t.Machine == "") {
+		claudeTranscriptPath = herdr.ClaudeTranscriptPath(t.TargetArg, env)
+		if claudeTranscriptPath != "" {
+			if pre, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); ok {
+				claudeTranscriptArmed = true
+				claudeTranscriptPre = pre
+			}
+		}
+	}
 	p := deliverPrompt(t.Machine, t.TargetArg, message, env)
 	if p.Code != "ok" {
 		if p.Code == "agent_prompt_stalled" || p.Code == "agent_blocked" || p.Code == "timeout" {
@@ -699,8 +725,13 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			curGet := agentGet(t.Machine, t.TargetArg, env)
 			if curGet.OK {
 				preIdle := preStatus == "idle" || preStatus == "done"
-				working := curGet.Status == "working" || curGet.Status == "blocked"
-				if preSeq != "" && curGet.Seq != "" && curGet.Seq != preSeq && preIdle && working {
+				// An idle/done agent's state sequence moves only when its
+				// state changes: a new seq since preGet means it just ran a
+				// turn (or took the prompt into a queue). A short turn can be
+				// over before the first state read, so the status no longer
+				// has to be working; the visible screen read below must still
+				// succeed and show no dialog.
+				if preSeq != "" && curGet.Seq != "" && curGet.Seq != preSeq && preIdle {
 					visible, readErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 					if readErr == "" && !isDialogScreen(visible, t.Kind, curGet.Status) {
 						return proofResult{Proven: true, RecentReadSucceeded: result.RecentReadSucceeded, LastCause: result.LastCause}
@@ -711,6 +742,22 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 				}
 			} else if curGet.Cause != "" {
 				result.LastCause = curGet.Cause
+			}
+			if claudeTranscriptArmed {
+				if count, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); ok && count > claudeTranscriptPre {
+					// Claude Code also writes the taken message to the
+					// transcript while it sits unread in its open queue: the
+					// count growth is not proof while the visible queue line
+					// still holds the id.
+					visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
+					if visibleErr == "" {
+						if !claudeQueued(visible, id) {
+							return proofResult{Proven: true, RecentReadSucceeded: result.RecentReadSucceeded, LastCause: result.LastCause}
+						}
+					} else {
+						result.LastCause = visibleErr
+					}
+				}
 			}
 			recent, readErr := readScreen(t.Machine, t.TargetArg, "recent-unwrapped", recentLines, env)
 			if readErr == "" {

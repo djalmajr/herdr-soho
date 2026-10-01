@@ -75,6 +75,41 @@ func ClaudeProjectDir(cwd string) string {
 	return out.String()
 }
 
+// claudeTranscriptUserType marks the transcript records that hold a message
+// taken from Claude Code's input box; the delivered peer message lands there
+// with its #id marker, and later records only cite it.
+const claudeTranscriptUserType = `"type":"user"`
+
+var claudeTranscriptUserTypeBytes = []byte(claudeTranscriptUserType)
+
+// CountClaudeUserMarkerLines counts the transcript lines that contain the
+// user record marker and the given peer marker (#id). Like
+// CountClaudeCompactBoundaries it streams the file line by line and returns
+// only the number: it does not read into, retain, log, or return the content
+// of any line, matching or not. ok is false when the file cannot be read.
+func CountClaudeUserMarkerLines(path, marker string) (int, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, false
+	}
+	defer f.Close()
+	// Transcript lines hold whole messages and run far past the scanner's
+	// 64 KiB default token, so the buffer may grow before a line counts.
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
+	markerBytes := []byte(marker)
+	n := 0
+	for scanner.Scan() {
+		if bytes.Contains(scanner.Bytes(), claudeTranscriptUserTypeBytes) && bytes.Contains(scanner.Bytes(), markerBytes) {
+			n++
+		}
+	}
+	if scanner.Err() != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 // CountClaudeCompactBoundaries counts the transcript lines that contain the
 // compact boundary marker. It streams the file line by line and returns only
 // the number: the content of no line, matching or not, is retained, logged,
