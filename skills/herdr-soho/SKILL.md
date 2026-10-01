@@ -960,7 +960,7 @@ Right before sending the prompt, `send` reads `state_change_seq` (preSeq), statu
 Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000` (it never automatically re-prompts).
 Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof).
 If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
-If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or transcript)`).
+If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or screen)`).
 The target project decides acceptance: the `inbound`
 key (`auto` | `off`, default `auto`) is consulted for a **local** target in
 the target's directory, with the target's session layer (its
