@@ -508,6 +508,7 @@ type proofResult struct {
 func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	target, file := "", ""
 	now, timeoutMS := false, DefaultSendTimeoutMS
+	timeoutGiven := false
 	words := []string{}
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
@@ -527,6 +528,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 					platform.Die("send: --timeout expects the wait in milliseconds (a positive integer)", 2)
 				}
 				timeoutMS = n
+				timeoutGiven = true
 			}
 		default:
 			if strings.HasPrefix(a, "--") {
@@ -571,6 +573,11 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		platform.Die(fmt.Sprintf("send: '%s' is a worker of this team (role %s): a worker reports through its report file, not by message (nothing was sent)", senderName, senderRole), 2)
 	}
 	stateDir := core.StateDirPath(ctx, env, cwd)
+	// The short-timeout warning logs under the state dir, so it comes after the
+	// skill refusal above, which must leave no side effect.
+	if timeoutGiven {
+		core.WarnShortTimeout("send", filepath.Join(stateDir, "friction.log"), int64(timeoutMS))
+	}
 	log := func(from, to, result string) { appendPeerLog(stateDir, from, to, result, utf16Length(body), id, env) }
 	t := resolveTarget(target, env)
 	if !t.OK {

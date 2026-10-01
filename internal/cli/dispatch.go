@@ -53,6 +53,8 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 				role = v
 			case "--timeout":
 				timeoutRaw = v
+				// run forwards its --timeout here, so this is the single warning site.
+				core.WarnShortTimeout("dispatch", frictionLogPath, int64(parseTimeout(v)))
 			case "--for":
 				forValue = &v
 			}

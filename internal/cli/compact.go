@@ -123,6 +123,7 @@ func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 				core.DieFriction("compact: --timeout expects milliseconds", 2, frictionLogPath, "compact")
 			}
 			timeoutMS = value
+			core.WarnShortTimeout("compact", frictionLogPath, value)
 		default:
 			if agent != "" {
 				core.DieFriction(fmt.Sprintf("compact: unexpected argument '%s'", argv[i]), 2, frictionLogPath, "compact")

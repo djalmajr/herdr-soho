@@ -891,6 +891,7 @@ func CmdWait(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 				core.DieFriction("wait: --timeout expects milliseconds, got '"+raw+"'", 2, "", "wait")
 			}
 			timeout, _ = strconv.ParseFloat(raw, 64)
+			core.WarnShortTimeout("wait", frictionLogFile, int64(timeout))
 			i++
 		case "--any":
 			any = true
