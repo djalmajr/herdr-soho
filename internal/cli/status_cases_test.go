@@ -257,7 +257,7 @@ func TestStatusJavaScriptCases(t *testing.T) {
 			t.Fatalf("query did not use the agent name: %#v", f.calls(t))
 		}
 	})
-	t.Run("status: activity_s dates a changed screen at the last probe, the aged one on an equal hash, unknown without activity-at", func(t *testing.T) { // JS: "status: activity_s dates a changed screen at the last probe, the aged one on an equal hash, unknown without activity-at"
+	t.Run("status: activity_s is changed on a moved screen, the age on an equal hash, unknown without markers", func(t *testing.T) {
 		fixed := time.Unix(2_000_000_000, 0)
 		oldNow := platform.Now
 		platform.Now = func() time.Time { return fixed }
@@ -267,26 +267,30 @@ func TestStatusJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: "screen moved\n"},
 		})
 		wd := filepath.Join(f.state, "wait")
-		if err := os.WriteFile(filepath.Join(wd, "worker.stuck-hash"), []byte("999\n"), 0o600); err != nil {
-			t.Fatal(err)
+		writeMarker := func(name, value string) {
+			t.Helper()
+			if err := os.WriteFile(filepath.Join(wd, "worker."+name), []byte(value), 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if err := os.WriteFile(filepath.Join(wd, "worker.probe-at"), []byte("1999999900\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		// (a) no marker: the activity column is unknown.
 		code, out, _ := f.run(t, "worker")
-		if code != 0 || !strings.Contains(out, "\t100\n") {
-			t.Fatalf("changed screen status: %d %q", code, out)
+		if code != 0 || !strings.HasPrefix(out, "worker\tworking\t") || !strings.HasSuffix(out, "\t-\t-\n") {
+			t.Fatalf("no markers: %d %q", code, out)
 		}
-		hash := waitpkg.CksumField(waitpkg.NormalizeScreen("screen moved\n"))
-		if err := os.WriteFile(filepath.Join(wd, "worker.stuck-hash"), []byte(strconv.FormatUint(uint64(hash), 10)+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(wd, "worker.activity-at"), []byte("1999999945\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		// (c) a recorded hash the screen moved away from: changed, no age.
+		writeMarker("stuck-hash", "999\n")
+		writeMarker("probe-at", "1999999900\n")
 		code, out, _ = f.run(t, "worker")
-		if code != 0 || !strings.Contains(out, "\t55\n") {
-			t.Fatalf("unchanged screen status: %d %q", code, out)
+		if code != 0 || !strings.HasPrefix(out, "worker\tworking\t") || !strings.HasSuffix(out, "\tchanged\n") {
+			t.Fatalf("changed screen: %d %q", code, out)
+		}
+		// (b) the equal hash with a change date: the age.
+		writeMarker("stuck-hash", strconv.FormatUint(uint64(waitpkg.CksumField(waitpkg.NormalizeScreen("screen moved\n"))), 10)+"\n")
+		writeMarker("activity-at", "1999999945\n")
+		code, out, _ = f.run(t, "worker")
+		if code != 0 || !strings.HasPrefix(out, "worker\tworking\t") || !strings.HasSuffix(out, "\t55\n") {
+			t.Fatalf("unchanged screen: %d %q", code, out)
 		}
 	})
 	t.Run("status: task_s is the marker-to-report duration (or to now, or unknown)", func(t *testing.T) { // JS: "status: task_s is the marker-to-report duration (or to now, or unknown)"
@@ -356,8 +360,8 @@ func TestStatusJavaScriptAgeColumns(t *testing.T) {
 				if tc.name == "question" {
 					wantCode = 7
 				}
-				if code != wantCode || !strings.Contains(out, `"task_s":null,"activity_s":null`) {
-					t.Fatalf("code=%d stdout=%q want rc=%d with trailing age fields", code, out, wantCode)
+				if code != wantCode || !strings.Contains(out, `"task_s":null,"activity_s":null}`) || strings.Contains(out, "activity_changed") {
+					t.Fatalf("code=%d stdout=%q want rc=%d ending in the two age keys, no activity_changed", code, out, wantCode)
 				}
 			})
 		}
@@ -624,6 +628,61 @@ func TestWaitJavaScriptCheckpointCases(t *testing.T) {
 		code, out, _ := f.runWait(t, "worker", "--timeout", "20")
 		if code != 9 || !strings.Contains(out, `"checkpoint":false`) {
 			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+}
+
+func TestWaitTimeoutActivityAgeCases(t *testing.T) {
+	// --timeout 1: the deadline passes while the first probe runs, so the
+	// wait makes exactly one probe read and one timeout read of the visible
+	// screen.
+	row := "worker\tp0a\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\t\t\n"
+	screen := "Compiling the workspace\n"
+	working := []fakecli.Rule{{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`}}
+	record := func(t *testing.T, out string) map[string]any {
+		t.Helper()
+		var line map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &line); err != nil {
+			t.Fatalf("timeout line %q: %v", out, err)
+		}
+		return line
+	}
+	t.Run("wait: a timeout on a moved screen has no age, activity_changed and a checkpoint (R-RC7D)", func(t *testing.T) {
+		moved := "Linking the binary\n"
+		rules := append(append([]fakecli.Rule{}, working...),
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, Stdout: screen},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, Stdout: moved},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: screen})
+		f := newWaitStatusFixture(t, row, rules)
+		code, out, stderr := f.runWait(t, "worker", "--timeout", "1")
+		line := record(t, out)
+		if code != 9 || line["activity_age_s"] != nil || line["activity_changed"] != true || line["checkpoint"] != true || !strings.Contains(out, `"checkpoint":true,"activity_age_s":null,"activity_changed":true}`) || !strings.Contains(stderr, "is still working (screen changed within the last ") || strings.Contains(stderr, "timeout waiting for 'worker'") {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		}
+	})
+	t.Run("wait: a timeout on an equal screen keeps its age without activity_changed", func(t *testing.T) {
+		f := newWaitStatusFixture(t, row, append(append([]fakecli.Rule{}, working...),
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: screen}))
+		hash := strconv.FormatUint(uint64(waitpkg.CksumField(waitpkg.NormalizeScreen(screen))), 10)
+		for name, value := range map[string]string{"worker.stuck-hash": hash + "\n", "worker.activity-at": strconv.FormatInt(time.Now().Unix()-5, 10) + "\n"} {
+			if err := os.WriteFile(filepath.Join(f.state, "wait", name), []byte(value), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		code, out, stderr := f.runWait(t, "worker", "--timeout", "1")
+		line := record(t, out)
+		age, ok := line["activity_age_s"].(float64)
+		if code != 9 || !ok || age < 4 || age > 7 || line["checkpoint"] != true || line["activity_changed"] != nil || strings.Contains(out, "activity_changed") || !strings.Contains(stderr, "checkpoint: 'worker' is still working") {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		}
+	})
+	t.Run("wait: a timeout with no markers keeps a null age without activity_changed", func(t *testing.T) {
+		f := newWaitStatusFixture(t, row, append(append([]fakecli.Rule{}, working...),
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: screen}))
+		code, out, stderr := f.runWait(t, "worker", "--timeout", "1")
+		line := record(t, out)
+		if code != 9 || line["activity_age_s"] != nil || line["activity_changed"] != nil || line["checkpoint"] != false || strings.Contains(out, "activity_changed") || !strings.Contains(stderr, "timeout waiting for 'worker'") {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})
 }

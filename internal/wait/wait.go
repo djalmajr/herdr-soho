@@ -81,29 +81,42 @@ func NormalizeScreen(value string) string {
 	return progress.ReplaceAllString(digitRuns, "*")
 }
 
-func ActivityAgeSeconds(sd, agent, screen string, now int64) *int64 {
+// ActivityAgeSeconds reports the age, in seconds, of the last observed
+// visible-screen change and whether the visible screen changed since the
+// last probe's recorded hash (stuck-hash). The age is nil when nothing
+// proves it: no recorded hash, a failed (empty) screen read, a recorded
+// empty-screen hash, or a missing or invalid activity-at. A different
+// screen only proves movement since the last probe, never an age: it
+// returns a nil age with changed true.
+func ActivityAgeSeconds(sd, agent, screen string, now int64) (*int64, bool) {
 	hashRaw, ok := readWaitFile(sd, agent, "stuck-hash")
 	if !ok || strings.TrimSpace(hashRaw) == "" || strings.TrimSpace(screen) == "" || strings.TrimSpace(hashRaw) == strconv.FormatUint(uint64(CksumField(NormalizeScreen(""))), 10) {
-		return nil
+		return nil, false
 	}
-	hash := strconv.FormatUint(uint64(CksumField(NormalizeScreen(screen))), 10)
-	if hash != strings.TrimSpace(hashRaw) {
-		since, valid := positiveWaitInt(sd, agent, "probe-at")
-		if !valid {
-			since, valid = positiveWaitInt(sd, agent, "stuck-since")
-		}
-		if !valid {
-			return nil
-		}
-		age := now - since
-		return &age
+	if strconv.FormatUint(uint64(CksumField(NormalizeScreen(screen))), 10) != strings.TrimSpace(hashRaw) {
+		return nil, true
 	}
 	at, valid := positiveWaitInt(sd, agent, "activity-at")
 	if !valid {
-		return nil
+		return nil, false
 	}
 	age := now - at
-	return &age
+	return &age, false
+}
+
+// activityChangeCeiling is how long ago, at most, a screen that changed since
+// the last probe changed: the time since that probe (probe-at, else
+// stuck-since). It decides a checkpoint; it is never published as an age.
+func activityChangeCeiling(sd, agent string, now int64) *int64 {
+	since, valid := positiveWaitInt(sd, agent, "probe-at")
+	if !valid {
+		since, valid = positiveWaitInt(sd, agent, "stuck-since")
+	}
+	if !valid {
+		return nil
+	}
+	ceiling := now - since
+	return &ceiling
 }
 
 func positiveWaitInt(sd, agent, name string) (int64, bool) {
@@ -736,19 +749,35 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 				if tag == "" {
 					tag = "working"
 				}
-				age := ActivityAgeSeconds(sd, agent, herdr.AgentRead(env, agent, "visible", nil), now)
+				age, changed := ActivityAgeSeconds(sd, agent, herdr.AgentRead(env, agent, "visible", nil), now)
 				active := tag == "working" && age != nil && float64(*age) < win*60
+				// A screen that changed since the last probe proves movement within
+				// that interval: it is a checkpoint when the interval is inside the
+				// stuck window, with no age published.
+				var ceiling *int64
+				if changed {
+					ceiling = activityChangeCeiling(sd, agent, now)
+					active = tag == "working" && ceiling != nil && float64(*ceiling) < win*60
+				}
 				var ageValue any
 				if age != nil {
 					ageValue = *age
 				}
-				jsonLine(jsonjs.O("agent", agent, "status", "timeout", "elapsed_ms", platform.Now().Sub(started).Milliseconds(), "state", tag, "checkpoint", active, "activity_age_s", ageValue))
+				line := jsonjs.O("agent", agent, "status", "timeout", "elapsed_ms", platform.Now().Sub(started).Milliseconds(), "state", tag, "checkpoint", active, "activity_age_s", ageValue)
+				if changed {
+					line.Set("activity_changed", true)
+				}
+				jsonLine(line)
 				if active {
 					suffix := ""
 					if !math.IsNaN(timeoutMs) && !math.IsInf(timeoutMs, 0) {
 						suffix = fmt.Sprintf(" --timeout %s", formatTimeout(timeoutMs))
 					}
-					_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: checkpoint: '%s' is still working (screen changed %ds ago); wait again: herdr-soho wait %s%s\n", agent, *age, agent, suffix)
+					if ceiling != nil {
+						_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: checkpoint: '%s' is still working (screen changed within the last %ds); wait again: herdr-soho wait %s%s\n", agent, *ceiling, agent, suffix)
+					} else {
+						_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: checkpoint: '%s' is still working (screen changed %ds ago); wait again: herdr-soho wait %s%s\n", agent, *age, agent, suffix)
+					}
 				} else if !math.IsNaN(timeoutMs) && !math.IsInf(timeoutMs, 0) {
 					sendWarning(fmt.Sprintf("timeout waiting for '%s'; it may still be working (state: %s). Run: herdr-soho wait %s --timeout %s", agent, tag, agent, formatTimeout(timeoutMs*2)))
 				} else {

@@ -150,17 +150,24 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 			}
 			taskS = math.Round(end.Sub(info.ModTime()).Seconds())
 		}
+		activityChanged := false
 		if state == "working" {
-			if age := ActivityAgeSeconds(sd, agent, herdr.AgentRead(env, agent, "visible", nil), platform.Now().Unix()); age != nil {
+			age, changed := ActivityAgeSeconds(sd, agent, herdr.AgentRead(env, agent, "visible", nil), platform.Now().Unix())
+			if age != nil {
 				activityS = *age
 			}
+			activityChanged = changed
+		}
+		ageFields := []any{"task_s", taskS, "activity_s", activityS}
+		if activityChanged {
+			ageFields = append(ageFields, "activity_changed", true)
 		}
 		if quota {
-			statusJson(agent, "quota", report, "lane", lane, "kind", kind, "model", model, "match", match, "renewal", renewal, "task_s", taskS, "activity_s", activityS)
+			statusJson(agent, "quota", report, append([]any{"lane", lane, "kind", kind, "model", model, "match", match, "renewal", renewal}, ageFields...)...)
 		} else if p != nil {
-			statusJson(agent, p.Status, report, "cause", p.Cause, "task_s", taskS, "activity_s", activityS)
+			statusJson(agent, p.Status, report, append([]any{"cause", p.Cause}, ageFields...)...)
 		} else if question != "" {
-			statusJson(agent, "question", report, "question", question, "task_s", taskS, "activity_s", activityS)
+			statusJson(agent, "question", report, append([]any{"question", question}, ageFields...)...)
 		} else {
 			taskCol, activityCol := "-", "-"
 			if taskS != nil {
@@ -168,6 +175,8 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 			}
 			if activityS != nil {
 				activityCol = fmt.Sprint(activityS)
+			} else if activityChanged {
+				activityCol = "changed"
 			}
 			if cause != "" {
 				fmt.Fprintf(platform.Stdout, "%s\t%s\t%s\t%s\t%s\t%s\n", agent, state, report, cause, taskCol, activityCol)
