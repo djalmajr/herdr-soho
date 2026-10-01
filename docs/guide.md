@@ -321,7 +321,7 @@ busy or showing dialog, 18 refused by `inbound=off`.
 - One agent name is one growing session. Reuse the pane for the next slice
   instead of closing it. Same slice or subject: reuse it as it is (`--amend`
   for fix rounds). Another subject in the same project: send `/compact`
-  (Claude Code, Codex, pi) with `herdr agent prompt <name> "/compact"`
+  (Claude Code, Codex, pi, opencode) with `herdr agent prompt <name> "/compact"`
   while it is idle, read the pane until the CLI confirms it (Codex prints
   `Context compacted`), then dispatch. An unrelated subject: clear the
   session the same way (`/new` in Codex and pi, `/clear` in Claude Code).

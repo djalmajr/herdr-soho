@@ -12,6 +12,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/spawn"
+	"github.com/djalmajr/herdr-soho/internal/text"
 )
 
 const compactDefaultTimeoutMS = 300000
@@ -28,13 +29,49 @@ const compactThinkingTaps = 8
 // after `/compact`; a kind without an entry has no verified compact command.
 // The proof only counts below the line where `/compact` was sent: an earlier
 // compaction on the screen is not proof of this one.
+// compactOpenCodeMenuWindow is how long the compact waits for opencode's
+// command menu to show up in the visible screen after the /compact text is
+// sent, before treating the menu as absent.
+const compactOpenCodeMenuWindow = 2 * time.Second
+
+// compactOpenCodeMenuPoll is the pause between visible-screen reads while
+// waiting for opencode's command menu.
+const compactOpenCodeMenuPoll = 200 * time.Millisecond
+
 // compactPiRunning is what pi shows while its compaction is still running.
 const compactPiRunning = "Compacting context"
 
+// compactOpenCodeProofMarker is a non-empty proof marker for opencode: its
+// compaction proof is the line regex compactOpenCodeDoneRE, not a substring,
+// so compactRun routes opencode to the regex. Keeping the marker non-empty
+// lets the "verified compact command" check pass for opencode (cmdCompact and
+// dispatch) while a kind without an entry still gets the no-verified message.
+const compactOpenCodeProofMarker = "opencode: compactOpenCodeDoneRE"
+
+// compactOpenCodeDoneRE matches the opencode line that closes a compaction,
+// with the leading spaces trimmed away:
+// `▣ Compaction · <model> · <duration>`. A line without the duration (the
+// compaction still running) is not proof.
+var compactOpenCodeDoneRE = regexp.MustCompile(`^\x{25A3}\s+Compaction\s+\x{B7}\s+.+\s+\x{B7}\s+\d\S*(\s+\d\S*)*\s*$`)
+
+// compactOpenCodeMenuLineRE matches a line of opencode's command menu, the
+// popup above the input box after / is typed: a box border, one space, and
+// the command name. The input box itself pads with two spaces, so the text
+// typed there does not match.
+var compactOpenCodeMenuLineRE = regexp.MustCompile(`^[│┃] /(\S+)`)
+
+// compactProofByKind holds the compaction proof each supported kind prints
+// after `/compact`; a kind without an entry has no verified compact command.
+// For the kinds that echo the command (claude, codex) the proof only counts
+// below the line where `/compact` was sent: an earlier compaction on the
+// screen is not proof of this one. pi and opencode do not echo it, so their
+// proof counts a line that was not on screen before the send, and opencode
+// also when its count of proof lines grows.
 var compactProofByKind = map[string]string{
-	"claude": "Compacted",
-	"codex":  "Context compacted",
-	"pi":     "Compacted from",
+	"claude":   "Compacted",
+	"codex":    "Context compacted",
+	"pi":       "Compacted from",
+	"opencode": compactOpenCodeProofMarker,
 }
 
 // compactThinkingFooterRE matches a thinking level at the end of a footer
@@ -46,19 +83,24 @@ func compactProof(kind string) string {
 	return compactProofByKind[kind]
 }
 
-// compactEnding is a claude-specific line that ends the /compact wait
-// without the `Compacted` proof: a conversation with nothing to compact (a
-// success without compaction) and a compaction that failed.
+// compactEnding is a screen line that ends the /compact wait without the
+// kind's proof: a conversation with nothing to compact (a success without
+// compaction) and a compaction that failed.
 type compactEnding struct{ status, text string }
 
-// compactEndingsByKind holds the ending texts next to the kind's proof; the
-// failure is listed first, so a failure on screen is the outcome reported.
-// Only claude has verified endings; codex and pi have none.
+// compactEndingsByKind holds the ending texts next to the kind's proof, in
+// the order they must be checked. pi lists the nothing-to-compact line first
+// because that line also contains `Compaction failed:`; claude lists the
+// failure first, so a failure on screen is the outcome reported.
 var compactEndingsByKind = map[string][]compactEnding{
 	"claude": {
 		{status: "failed", text: "Error compacting conversation"},
 		{status: "nothing-to-compact", text: "Not enough messages to compact."},
 		{status: "nothing-to-compact", text: "No messages to compact"},
+	},
+	"pi": {
+		{status: "nothing-to-compact", text: "Nothing to compact"},
+		{status: "failed", text: "Compaction failed:"},
 	},
 }
 
@@ -122,10 +164,15 @@ func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 // thinking_restored. A busy or unreachable worker dies (10, 4, 6); on
 // success it
 // prints the result JSON (a stderr line inside a dispatch) and returns 0,
-// on timeout it prints the timeout JSON and returns 9; a claude with
+// on timeout it prints the timeout JSON and returns 9; a claude or a pi with
 // nothing to compact returns 0 with the nothing-to-compact result (a stderr
-// line inside a dispatch), and a claude that reports a failed compaction
-// returns 9 with the failed result. It never uses `agent prompt` and never
+// line inside a dispatch), and a claude or a pi that reports a failed
+// compaction returns 9 with the failed result and a warning that cites the
+// failing screen line. An opencode worker gets its command menu checked
+// before the Enter: only /compact on the first menu line runs it; a menu
+// without /compact (an empty session) clears the box and reports
+// nothing-to-compact (0), and /compact not on top or a missing menu clears
+// the box and exits 4. It never uses `agent prompt` and never
 // resends.
 func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ctx *core.Config, env platform.Env, cwd string, inDispatch bool) int {
 	state := herdr.AgentState(agent, env, herdr.Timeout, nil)
@@ -143,7 +190,18 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 		// would read as this one's proof: send nothing.
 		core.DieFriction(fmt.Sprintf("compact: could not read the screen of '%s' before sending; nothing was sent", agent), 4, frictionLogPath, "compact")
 	}
-	seen := compactProofLines(before, proof)
+	// opencode proves the compaction with the done-line regex instead of a
+	// substring, and counts a screen whose count of proof lines grew (it does
+	// not echo the /compact it runs); the other kinds keep the substring rule.
+	var seen map[string]bool
+	var proofNew func(screen string) bool
+	if kind == "opencode" {
+		seen = compactOpenCodeProofLines(before)
+		proofNew = func(screen string) bool { return compactOpenCodeProofNew(screen, before, seen) }
+	} else {
+		seen = compactProofLines(before, proof)
+		proofNew = func(screen string) bool { return compactProofNew(screen, proof, seen) }
+	}
 	endings := compactEndings(kind)
 	endSeen := make([]map[string]bool, len(endings))
 	for i := range endings {
@@ -203,40 +261,65 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	if !herdr.PaneSendText(pane, "/compact", env) {
 		core.DieFriction(fmt.Sprintf("compact: could not send /compact to pane '%s'; release --close and spawn --fresh instead", pane), 4, frictionLogPath, "compact")
 	}
-	if !herdr.PaneSendKeys(pane, "Enter", env) {
-		core.DieFriction(fmt.Sprintf("compact: could not send Enter to pane '%s'; release --close and spawn --fresh instead", pane), 4, frictionLogPath, "compact")
+	// opencode pops up a command menu above the input box when the /compact
+	// text is sent; Enter runs the top item, so only press it when /compact is
+	// on top.
+	endStatus := ""
+	endLine := ""
+	compacted := false
+	proceedToWait := true
+	if kind == "opencode" {
+		switch compactOpenCodeMenuSelection(agent, env) {
+		case openCodeMenuNothing:
+			// The menu has no /compact (an empty session): pressing Enter would
+			// run the top item (e.g. /review); clear the box and report nothing
+			// to compact, like claude and pi.
+			herdr.PaneSendKeys(pane, "ctrl+u", env)
+			endStatus = "nothing-to-compact"
+			proceedToWait = false
+		case openCodeMenuMissing:
+			// /compact is not on top, or the menu never appeared: clear the box
+			// and stop; nothing was compacted.
+			herdr.PaneSendKeys(pane, "ctrl+u", env)
+			core.DieFriction(fmt.Sprintf("compact: could not select /compact in the command menu of '%s'; nothing was compacted", agent), 4, frictionLogPath, "compact")
+		}
 	}
 	start := platform.Now()
-	deadline := start.Add(time.Duration(timeoutMS) * time.Millisecond)
-	compacted := false
-	endStatus := ""
-	for {
-		if !compacted && endStatus == "" {
-			screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
-			if compactProofNew(screen, proof, seen) || transcriptRisen() {
-				compacted = compactWaitIdle(agent, env, deadline)
-			} else {
-				// A claude ending counts only when it belongs to this attempt:
-				// below a /compact the screen gained since the pre-send read,
-				// or on a line not there before the send; it never waits for
-				// the worker back at idle.
-				for i := range endings {
-					if compactEndingNew(screen, before, endings[i].text, endSeen[i]) {
-						endStatus = endings[i].status
-						break
+	if proceedToWait {
+		if !herdr.PaneSendKeys(pane, "Enter", env) {
+			core.DieFriction(fmt.Sprintf("compact: could not send Enter to pane '%s'; release --close and spawn --fresh instead", pane), 4, frictionLogPath, "compact")
+		}
+		deadline := start.Add(time.Duration(timeoutMS) * time.Millisecond)
+		for {
+			if !compacted && endStatus == "" {
+				screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
+				if proofNew(screen) || transcriptRisen() {
+					compacted = compactWaitIdle(agent, env, deadline)
+				} else {
+					// An ending counts only when it belongs to this attempt: below a
+					// /compact the screen gained since the pre-send read, on a line
+					// not there before the send, or when its line count on screen
+					// grew (a CLI that does not echo the command); it never waits
+					// for the worker back at idle.
+					for i := range endings {
+						if line, ok := compactEndingNew(screen, before, endings[i].text, endSeen[i]); ok {
+							endStatus = endings[i].status
+							endLine = line
+							break
+						}
+					}
+					if endStatus == "" {
+						// No proof yet: a worker that died meanwhile stops the wait now (6, 4)
+						// instead of running out the deadline.
+						compactDieOnDeadWorker(agent, herdr.AgentState(agent, env, herdr.Timeout, nil))
 					}
 				}
-				if endStatus == "" {
-					// No proof yet: a worker that died meanwhile stops the wait now (6, 4)
-					// instead of running out the deadline.
-					compactDieOnDeadWorker(agent, herdr.AgentState(agent, env, herdr.Timeout, nil))
-				}
 			}
+			if compacted || endStatus != "" || !platform.Now().Before(deadline) {
+				break
+			}
+			time.Sleep(compactPollInterval)
 		}
-		if compacted || endStatus != "" || !platform.Now().Before(deadline) {
-			break
-		}
-		time.Sleep(compactPollInterval)
 	}
 	elapsed := platform.Now().Sub(start).Milliseconds()
 	thinkingRestored := false
@@ -261,7 +344,9 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	}
 	if endStatus != "" {
 		if endStatus == "failed" {
-			core.Warn(fmt.Sprintf("compact: '%s' reported %q; nothing was compacted", agent, "Error compacting conversation"), frictionLogPath, "compact")
+			// Cite the screen line that matched the failure (claude and pi),
+			// sanitized and redacted, so the warning shows what the CLI reported.
+			core.Warn(fmt.Sprintf("compact: '%s' reported %q; nothing was compacted", agent, text.SanitizeCause(text.RedactSecrets(endLine))), frictionLogPath, "compact")
 		}
 		if inDispatch && endStatus == "nothing-to-compact" {
 			// The dispatch keeps one JSON line on stdout: its own result.
@@ -411,21 +496,125 @@ func compactCommandCount(screen string) int {
 	return n
 }
 
-// compactEndingNew reports a claude ending that belongs to this /compact
-// attempt: one below a /compact the screen gained since the pre-send read
-// (its answer may repeat a line already on screen), or one on a line that
-// was not on screen before the send. An ending that sat below an older
-// /compact on the unchanged screen does not count.
-func compactEndingNew(screen, before, text string, seen map[string]bool) bool {
-	if compactCommandCount(screen) > compactCommandCount(before) && compactProofBelow(screen, text) {
+// compactLines returns the screen's lines with \r\n normalized to \n.
+func compactLines(screen string) []string {
+	return strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
+}
+
+// compactLineCount returns how many lines of the screen contain text.
+func compactLineCount(screen, text string) int {
+	n := 0
+	for _, line := range compactLines(screen) {
+		if strings.Contains(line, text) {
+			n++
+		}
+	}
+	return n
+}
+
+// compactFirstLineBelow returns the first screen line below the last sent
+// /compact that contains text, trimmed, or "" when there is no sent /compact
+// or no such line below it.
+func compactFirstLineBelow(screen, text string) string {
+	lines := compactLines(screen)
+	marker := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		if compactCommandLine(lines[i]) {
+			marker = i
+			break
+		}
+	}
+	if marker < 0 {
+		return ""
+	}
+	for i := marker + 1; i < len(lines); i++ {
+		if strings.Contains(lines[i], text) {
+			return strings.TrimSpace(lines[i])
+		}
+	}
+	return ""
+}
+
+// compactLastLineWith returns the last screen line that contains text,
+// trimmed, or "" when none does.
+func compactLastLineWith(screen, text string) string {
+	last := ""
+	for _, line := range compactLines(screen) {
+		if strings.Contains(line, text) {
+			last = strings.TrimSpace(line)
+		}
+	}
+	return last
+}
+
+// compactOpenCodeProofLines returns the trimmed screen lines that are the
+// opencode compaction-done line (the proof, with a duration).
+func compactOpenCodeProofLines(screen string) map[string]bool {
+	out := map[string]bool{}
+	for _, line := range compactLines(screen) {
+		trimmed := strings.TrimSpace(line)
+		if compactOpenCodeDoneRE.MatchString(trimmed) {
+			out[trimmed] = true
+		}
+	}
+	return out
+}
+
+// compactOpenCodeProofLineCount returns how many lines of the screen are the
+// opencode compaction-done line.
+func compactOpenCodeProofLineCount(screen string) int {
+	n := 0
+	for _, line := range compactLines(screen) {
+		if compactOpenCodeDoneRE.MatchString(strings.TrimSpace(line)) {
+			n++
+		}
+	}
+	return n
+}
+
+// compactOpenCodeProofNew reports an opencode proof that belongs to this
+// /compact: a proof line not on screen before the send, or a screen whose
+// count of proof lines grew past the pre-send read (opencode does not echo
+// the /compact it runs, so an identical later line still counts). The line
+// without the duration is not proof.
+func compactOpenCodeProofNew(screen, before string, seen map[string]bool) bool {
+	if compactOpenCodeProofLineCount(screen) > compactOpenCodeProofLineCount(before) {
 		return true
 	}
-	for line := range compactProofLines(screen, text) {
+	for line := range compactOpenCodeProofLines(screen) {
 		if !seen[line] {
 			return true
 		}
 	}
 	return false
+}
+
+// compactEndingNew reports an ending that belongs to this /compact attempt,
+// returning the screen line that matched (for the failure warning): one below
+// a /compact the screen gained since the pre-send read (its answer may repeat
+// a line already on screen), one whose line count on screen grew past the
+// pre-send read (a CLI that does not echo the command, so a second attempt
+// prints an identical line), or one on a line that was not on screen before
+// the send. An ending that sat below an older /compact on the unchanged
+// screen does not count.
+func compactEndingNew(screen, before, text string, seen map[string]bool) (string, bool) {
+	if compactCommandCount(screen) > compactCommandCount(before) {
+		if line := compactFirstLineBelow(screen, text); line != "" {
+			return line, true
+		}
+	}
+	if compactLineCount(screen, text) > compactLineCount(before, text) {
+		if line := compactLastLineWith(screen, text); line != "" {
+			return line, true
+		}
+	}
+	for _, line := range compactLines(screen) {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(line, text) && !seen[trimmed] {
+			return trimmed, true
+		}
+	}
+	return "", false
 }
 
 // compactThinkingWarning warns, for pi only, when the last footer line of the
@@ -483,4 +672,60 @@ func compactThinkingFooter(screen string) string {
 		return ""
 	}
 	return ""
+}
+
+// openCodeMenuResult reports what the opencode command-menu selection found.
+type openCodeMenuResult int
+
+const (
+	// openCodeMenuCompact is /compact on the first menu line: Enter runs it.
+	openCodeMenuCompact openCodeMenuResult = iota
+	// openCodeMenuNothing is a menu without /compact (an empty session):
+	// clear the box and report nothing to compact.
+	openCodeMenuNothing
+	// openCodeMenuMissing is /compact not on the first line, or a menu that
+	// never appeared: clear the box and stop.
+	openCodeMenuMissing
+)
+
+// compactOpenCodeMenu returns the command names of the screen's command-menu
+// lines, in order (the menu pops up above the input box when / is typed; the
+// input box itself pads with two spaces and does not match).
+func compactOpenCodeMenu(screen string) []string {
+	var out []string
+	for _, line := range compactLines(screen) {
+		if m := compactOpenCodeMenuLineRE.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
+			out = append(out, m[1])
+		}
+	}
+	return out
+}
+
+// compactOpenCodeMenuSelection reads the visible screen for up to
+// compactOpenCodeMenuWindow after the /compact text was sent and reports which
+// top menu item an Enter would run: /compact on top runs it, a menu without
+// /compact is an empty session (nothing to compact), and /compact not on top
+// (or a menu that never appears) cannot be selected. A recent read of a
+// working opencode fails with agent_not_idle and herdr.AgentRead already
+// falls back to the visible screen.
+func compactOpenCodeMenuSelection(agent string, env platform.Env) openCodeMenuResult {
+	deadline := platform.Now().Add(compactOpenCodeMenuWindow)
+	for {
+		menu := compactOpenCodeMenu(herdr.AgentRead(env, agent, "visible", nil))
+		if len(menu) > 0 {
+			if menu[0] == "compact" {
+				return openCodeMenuCompact
+			}
+			for _, cmd := range menu {
+				if cmd == "compact" {
+					return openCodeMenuMissing
+				}
+			}
+			return openCodeMenuNothing
+		}
+		if !platform.Now().Before(deadline) {
+			return openCodeMenuMissing
+		}
+		time.Sleep(compactOpenCodeMenuPoll)
+	}
 }

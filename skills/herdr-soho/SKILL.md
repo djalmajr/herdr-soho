@@ -741,8 +741,8 @@ $S session show | session clear [key]
 $S roles                                   # roles with the kind, model and effort in effect and where each comes from
 $S role reviewer                           # resolved file + frontmatter
 $S spawn implementer [--name impl] [--kind codex] [--direction right|down]
-$S dispatch impl <brief.md> [--timeout 900000] [--amend] [--compact]   # role prompt + brief → agent, waits; --amend amends the agent's current brief; --compact compacts an idle worker (claude, codex, pi) before the brief and keeps it unsent on a timeout (9) or a busy worker (10)
-$S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, pi): sends /compact once and waits for the CLI's proof plus its return to idle; a kind without a verified command exits 2, a timeout 9; a claude with nothing to compact exits 0 with `nothing-to-compact`, and `Error compacting conversation` exits 9 with `failed`; for pi the thinking goes to `off` during the compaction and comes back to the level it had, and a level that does not come back is warned; a pi timeout while "Compacting context" is still on screen adds `still_compacting: true` and a warning: wait and read the screen, do not send /compact again; for claude the proof can also come from the session transcript (a new `compact_boundary` line), because the Claude Code screen does not show the confirmation
+$S dispatch impl <brief.md> [--timeout 900000] [--amend] [--compact]   # role prompt + brief → agent, waits; --amend amends the agent's current brief; --compact compacts an idle worker (claude, codex, pi, opencode) before the brief and keeps it unsent on a timeout (9) or a busy worker (10)
+$S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, pi, opencode): sends /compact once and waits for the CLI's proof plus its return to idle; a kind without a verified command exits 2, a timeout 9; a claude, pi or opencode with nothing to compact exits 0 with `nothing-to-compact`, and a failed compaction exits 9 with `failed` and a warning that cites the failing screen line (claude's `Error compacting conversation`, pi's `Compaction failed: …`); for pi the thinking goes to `off` during the compaction and comes back to the level it had, and a level that does not come back is warned; a pi timeout while "Compacting context" is still on screen adds `still_compacting: true` and a warning: wait and read the screen, do not send /compact again; for claude the proof can also come from the session transcript (a new `compact_boundary` line), because the Claude Code screen does not show the confirmation; for opencode the proof is the `▣ Compaction · <model> · <duration>` line (the line without the duration is not proof), and the command menu is checked before the Enter: only /compact on the first menu item gets the Enter, a menu without /compact (an empty session) clears the box with ctrl+u and exits 0, and /compact not on top or a menu that never appears clears the box and exits 4
 $S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines, one `<sha256>  <path>` per file as `sha256sum` prints it (a trailing `# note` after the path is dropped when the path without it exists; exit 16 on changed/missing or when the report has none, 4 when the report cannot be read)
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
@@ -1014,12 +1014,13 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   - same slice or same subject (a fix round, the next step of the same
     area): reuse it as it is, and send fix rounds with `--amend`;
   - another subject in the same project: while it is idle, send its CLI's
-    compaction command (`/compact` in Claude Code, Codex and pi) with
+    compaction command (`/compact` in Claude Code, Codex, pi and OpenCode) with
     `herdr agent prompt <name> "/compact"` (a slash command is not a brief,
     so `dispatch` does not apply). Prefer `herdr-soho compact <name>`, or
     `dispatch <name> <brief.md> --compact`, which compacts before the brief:
     it sends the command once, waits for the CLI's confirmation and the
-    worker's return to idle, and exits 9 on a timeout. Then read the pane
+    worker's return to idle, and exits 9 on a timeout (a pi or opencode with
+    nothing to compact exits 0). Then read the pane
     once with `herdr agent read <name>` until the CLI confirms it (Codex
     prints `Context compacted`), and dispatch;
   - nothing of the old context helps (an unrelated subject): clear the
