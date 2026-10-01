@@ -84,7 +84,9 @@ func TestProjectIsFirstRunRequiresTeamChoiceOrRoster(t *testing.T) { // JS: "pro
 
 func TestDoctorFixRejectsInvalidPanesBeforeWriting(t *testing.T) { // JS: "doctorFix: the dies 2 (bad flag, no panes anywhere, bad file panes)"
 	root := t.TempDir()
-	env := platform.Env{"HOME": root, "HERDR_SOHO_SKILL_DIR": root}
+	// The skill must stay outside the project root: inside it, doctor --fix
+	// now refuses before the panes validation this test checks.
+	env := platform.Env{"HOME": root, "HERDR_SOHO_SKILL_DIR": filepath.Join(root, "skill")}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	oldOut, oldErr := platform.Stdout, platform.Stderr
 	var out, stderr strings.Builder
@@ -113,7 +115,9 @@ func TestDoctorFixUsesLastNonCommentPanesValue(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			env := platform.Env{"HOME": root, "USERPROFILE": root, "HERDR_SOHO_SKILL_DIR": root}
+			// The skill must stay outside the project root: inside it, doctor
+			// --fix now refuses before the panes parsing this test checks.
+			env := platform.Env{"HOME": root, "USERPROFILE": root, "HERDR_SOHO_SKILL_DIR": filepath.Join(root, "skill")}
 			ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 			conf := filepath.Join(root, ".agents", "herdr-soho.conf")
 			if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {

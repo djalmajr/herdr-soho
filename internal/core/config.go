@@ -711,6 +711,14 @@ func CmdConfigSet(argv []string, ctx *Config, env platform.Env, cwd string) {
 		platform.Die("config set: invalid value '"+value+"' for "+key, 2)
 	}
 	dest := ConfigFileFor(where, env, cwd)
+	// The project file lands under the project root; refuse it inside the
+	// skill before MkdirAll/rewrite. The user file stays valid from inside.
+	if where == "project" {
+		root := platform.ProjectRoot(env, cwd)
+		if skill := StatePathInSkill(env, root); skill != "" {
+			platform.Die(StateInSkillMessage("config set", root, skill), 2)
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o777); err != nil {
 		platform.Die(fmt.Sprintf("config set: could not rewrite %s (file left untouched)", dest), 4)
 	}

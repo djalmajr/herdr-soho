@@ -210,6 +210,18 @@ func CmdDoctor(args []string, ctx *core.Config, env platform.Env, cwd string) {
 }
 
 func doctorFix(where, panes string, ctx *core.Config, env platform.Env, cwd string) {
+	// Refuse a write inside the skill before any file or herdr call: the
+	// project target is the project root, the session target the state root.
+	if where == "session" {
+		if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
+			platform.DieFriction(core.StateInSkillMessage("doctor --fix", core.StateRootPath(ctx, env, cwd), skill), 2)
+		}
+	} else if where == "project" {
+		root := platform.ProjectRoot(env, cwd)
+		if skill := core.StatePathInSkill(env, root); skill != "" {
+			platform.DieFriction(core.StateInSkillMessage("doctor --fix", root, skill), 2)
+		}
+	}
 	dest := core.ConfigFileFor(where, env, cwd)
 	if where == "session" {
 		dest = core.SessionConfPath(ctx, env, cwd)

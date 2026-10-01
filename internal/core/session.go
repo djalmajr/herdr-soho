@@ -78,7 +78,17 @@ func parseSessionPair(argv []string, command string) (key, value string, sawValu
 	return key, value, sawValue
 }
 
+// refuseSessionStateInSkill makes session set/clear exit 2 with the skill
+// refusal before SessionConfPath (no herdr pane current), StateRoot (no
+// .gitignore append) or any MkdirAll/write, the same way StateDir does.
+func refuseSessionStateInSkill(ctx *Config, env platform.Env, cwd, command string) {
+	if skill := StateInSkill(ctx, env, cwd); skill != "" {
+		platform.Die(StateInSkillMessage(command, StateRootPath(ctx, env, cwd), skill), 2)
+	}
+}
+
 func CmdSessionSet(argv []string, ctx *Config, env platform.Env, cwd string) {
+	refuseSessionStateInSkill(ctx, env, cwd, "session set")
 	key, value, sawValue := parseSessionPair(argv, "session set")
 	key, value, sawValue = SplitPairArg(key, value, sawValue, "session set")
 	if key == "" || !sawValue {
@@ -109,6 +119,7 @@ func CmdSessionSet(argv []string, ctx *Config, env platform.Env, cwd string) {
 }
 
 func CmdSessionClear(argv []string, ctx *Config, env platform.Env, cwd string) {
+	refuseSessionStateInSkill(ctx, env, cwd, "session clear")
 	key := ""
 	if len(argv) > 0 {
 		key = argv[0]
