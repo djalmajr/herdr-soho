@@ -858,3 +858,23 @@ func equalJSON(got any, want json.RawMessage) (bool, error) {
 	}
 	return string(b) == string(want), nil
 }
+
+func TestRetryLineErrorTailNeedsCounterOrDeadline(t *testing.T) {
+	cases := []struct {
+		screen string
+		counts bool
+	}{
+		{"API Error (Request timed out) · Retrying in 5 seconds…\n", true},
+		{"API Error (Request timed out) - Retrying in 5 seconds\n", true},
+		{"stream disconnected - retrying sampling request (1/5 in 211ms)...\n", true},
+		{"Error - retrying the 1/2 migration\n", false},
+		{"I hit an error - retrying the 1/2 migration\n", false},
+		{"Error · Retrying the migration\n", false},
+	}
+	for _, c := range cases {
+		got := RetryLine("working", c.screen)
+		if (got != "") != c.counts {
+			t.Errorf("RetryLine(%q) = %q, want counts=%v", c.screen, got, c.counts)
+		}
+	}
+}

@@ -193,10 +193,10 @@ func retryLineReports(line string) bool {
 	if strings.HasPrefix(lower, "reconnecting") {
 		return true
 	}
-	if leading {
-		return retryCounterRE.MatchString(lower) || retryDeadlineRE.MatchString(lower)
-	}
-	return strings.ContainsAny(lower, "0123456789")
+	// Every other form needs what a provider prints: an (n/m counter or a
+	// deadline ("in 4s"). Any digit was not enough: "I hit an error -
+	// retrying the 1/2 migration" is the model talking.
+	return retryCounterRE.MatchString(lower) || retryDeadlineRE.MatchString(lower)
 }
 
 // harnessModuleCause reports whether line is the first line of the stop of a
