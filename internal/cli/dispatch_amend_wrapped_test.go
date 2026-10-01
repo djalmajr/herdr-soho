@@ -29,7 +29,9 @@ func TestDispatchAmendNoWaitWrappedPiHistory(t *testing.T) {
 	// The screen is a fake-herdr rule, so $ROOT is substituted with the
 	// fixture root: the wrapped path is the dispatch's own composed path.
 	screen := func(name string) string {
-		p := "$ROOT/state/ws/briefs/worker-" + name + ".md"
+		// The separators must match the composed path: pi prints the
+		// dispatch's own path, backslashed on Windows.
+		p := "$ROOT" + string(filepath.Separator) + "state" + string(filepath.Separator) + "ws" + string(filepath.Separator) + "briefs" + string(filepath.Separator) + "worker-" + name + ".md"
 		c := len(p) / 2 // the wrap splits the path mid-line, like the real screen
 		return "is a simple task. Let's just execute it as is.\n" +
 			" $ sleep 45 (timeout 60s)\n" +
