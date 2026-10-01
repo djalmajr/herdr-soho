@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/testutil"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
@@ -157,6 +158,19 @@ var compactScreens = struct {
 	noProof           string
 	codexLaterMention string
 	piFooterCutoff    string
+	// The pi and opencode screens from the review, minimized. pi does not
+	// echo the /compact it runs; opencode proves the compaction only with the
+	// done line that carries the duration (▣ = U+25A3, · = U+00B7).
+	piNothing      string
+	piNothingTwice string
+	piFailed       string
+	piCompacting   string
+	ocMenuTop      string
+	ocMenuEmpty    string
+	ocMenuNotFirst string
+	ocBefore       string
+	ocWorking      string
+	ocDone         string
 }{
 	piStale:          "old output line\n[compaction] Compacted from 99999 tokens\n> /compact\n",
 	piFresh:          "old output line\n[compaction] Compacted from 99999 tokens\n> /compact\n[compaction] Compacted from 12345 tokens\n",
@@ -173,6 +187,24 @@ var compactScreens = struct {
 	// become the anchor, and `cutoff` must not read as thinking `off`.
 	codexLaterMention: "> /compact\nContext compacted\nthe history mentions /compact again\n",
 	piFooterCutoff:    "old output line\n> /compact\n[compaction] Compacted from 12345 tokens\n• cutoff\n",
+	// pi shows the answer with no echo of the /compact it runs.
+	piNothing: "Thinking level: off\nError: Compaction failed: Nothing to compact (session too small)\n",
+	// A second attempt prints the identical line again; pi still does not
+	// echo the /compact.
+	piNothingTwice: "Thinking level: off\nError: Compaction failed: Nothing to compact (session too small)\nError: Compaction failed: Nothing to compact (session too small)\n",
+	piFailed:       "Thinking level: off\nError: Compaction failed: Summarization failed: generation hit the token cap for this model\n",
+	piCompacting:   "Thinking level: off\nCompacting context...\n",
+	// opencode's command menu above the input box (the box itself pads with
+	// two spaces and never matches a menu line).
+	ocMenuTop:      "  ┃ /compact      Compact session                    ┃\n  ┃ /review       review changes [commit|branch|pr]  ┃\n             ┃\n             ┃  /compact\n             ┃  Build · Model X Provider Y\n",
+	ocMenuEmpty:    "             ┃ /review     review changes [commit|branch|pr]  ┃\n             ┃\n             ┃  /compact\n             ┃  Build · Model X Provider Y\n",
+	ocMenuNotFirst: "             ┃ /review     review changes [commit|branch|pr]  ┃\n             ┃ /compact    Compact session                ┃\n             ┃\n             ┃  /compact\n             ┃  Build · Model X Provider Y\n",
+	// opencode screens: the before read (no done line yet), the compaction
+	// still running (the line without a duration is not proof), and the done
+	// screen with the summary and the final line with the duration.
+	ocBefore:  "     ▣  Build · Model X · 3.3s\n",
+	ocWorking: "     ▣  Build · Model X · 3.3s\n  ──────────────────────────── Compaction ────────────────────────────\n     ⠏ Thinking\n     ▣  Compaction · Model X\n",
+	ocDone:    "     Next Move\n     1. (none)\n     ▣  Compaction · Model X · 3.1s\n  ┃  Build · Model X Provider Y\n   /private/tmp/oc-probe        851 (0%)  ctrl+p commands\n",
 }
 
 func compactReadArgv(agent string) []string {
@@ -749,6 +781,499 @@ func TestCompactPiTimeoutWhileStillCompacting(t *testing.T) {
 	}
 }
 
+// TestCompactPiNothingToCompact verifies the real pi screen: `Nothing to
+// compact (session too small)` ends the wait at once as a success without
+// compaction (exit 0, well before the deadline, no liveness probes).
+func TestCompactPiNothingToCompact(t *testing.T) {
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piNothing},
+	})
+	start := time.Now()
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	elapsed := time.Since(start)
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["agent"] != "worker" || value["kind"] != "pi" || value["status"] != "nothing-to-compact" {
+		t.Fatalf("json=%v", value)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("exited after %v; nothing-to-compact must not wait out the deadline", elapsed)
+	}
+	calls := f.calls(t)
+	// The ending is found on the first poll, before any liveness probe: the
+	// only state read is the pre-send check.
+	if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 1 {
+		t.Fatalf("agent get calls=%d want 1: %#v", n, calls)
+	}
+	if n := countArgv(calls, compactReadArgv("worker")); n != 2 {
+		t.Fatalf("recent reads=%d want 2 (before, first poll): %#v", n, calls)
+	}
+}
+
+// TestCompactPiNothingToCompactRepeat covers the second attempt: pi does not
+// echo the /compact, so the retry prints a line identical to the one already
+// on screen before the send; the ending counts when the line count grows.
+func TestCompactPiNothingToCompactRepeat(t *testing.T) {
+	before := "Thinking level: off\nError: Compaction failed: Nothing to compact (session too small)\n"
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: before},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.piNothingTwice},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["kind"] != "pi" || value["status"] != "nothing-to-compact" {
+		t.Fatalf("json=%v", value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 1 {
+		t.Fatalf("agent get calls=%d want 1 (the ending must not wait for a liveness probe): %#v", n, calls)
+	}
+}
+
+// TestCompactPiFailedCompaction verifies the real pi failure screen: exit 9
+// with the failed status, and the warning cites the failing screen line
+// (sanitized and redacted) instead of a fixed phrase. A `Compaction failed:`
+// line that is the nothing-to-compact answer must not read as a failure.
+func TestCompactPiFailedCompaction(t *testing.T) {
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.piFailed},
+	})
+	start := time.Now()
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	elapsed := time.Since(start)
+	if code != 9 {
+		t.Fatalf("code=%d want 9 out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["kind"] != "pi" || value["status"] != "failed" {
+		t.Fatalf("json=%v", value)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("exited after %v; the reported failure must end the wait long before the 30 s deadline", elapsed)
+	}
+	want := `compact: 'worker' reported "Error: Compaction failed: Summarization failed: generation hit the token cap for this model"; nothing was compacted`
+	if !strings.Contains(errText, want) {
+		t.Fatalf("stderr=%q want %q", errText, want)
+	}
+	if strings.Contains(errText, "Error compacting conversation") {
+		t.Fatalf("the pi failure warning must cite the screen line, not the claude phrase: %q", errText)
+	}
+}
+
+// TestCompactPiStillCompactingKeepsWaiting verifies that `Compacting context`
+// on screen, with no ending, keeps waiting until the deadline and reports
+// still_compacting.
+func TestCompactPiStillCompactingKeepsWaiting(t *testing.T) {
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.piCompacting},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+	if code != 9 {
+		t.Fatalf("code=%d want 9 out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["status"] != "timeout" || value["still_compacting"] != true {
+		t.Fatalf("json=%v", value)
+	}
+	if !strings.Contains(errText, "is still compacting") {
+		t.Fatalf("stderr=%q", errText)
+	}
+	if elapsed, ok := value["elapsed_ms"].(float64); !ok || elapsed < 500 {
+		t.Fatalf("elapsed_ms=%v want >= 500 (the wait ran out the deadline)", value["elapsed_ms"])
+	}
+}
+
+// TestCompactOpenCodeMenuCompacted verifies opencode's verified compact path
+// with a conversation: the command menu with /compact on top gets the Enter,
+// and the done line with the duration ends the wait as compacted.
+func TestCompactOpenCodeMenuCompacted(t *testing.T) {
+	f := newCompactFixture(t, "opencode", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.ocBefore},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: compactScreens.ocMenuTop},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.ocDone},
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["agent"] != "worker" || value["kind"] != "opencode" || value["status"] != "compacted" {
+		t.Fatalf("json=%v", value)
+	}
+	if _, present := value["still_compacting"]; present {
+		t.Fatalf("still_compacting is a pi field: %v", value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 1 {
+		t.Fatalf("Enter calls=%d want 1: %#v", n, calls)
+	}
+	if n := countArgvPrefix(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 0 {
+		t.Fatalf("ctrl+u calls on the success path: %#v", calls)
+	}
+	if n := countArgv(calls, []string{"agent", "read", "worker", "--source", "visible"}); n != 1 {
+		t.Fatalf("visible reads=%d want 1 (the menu read): %#v", n, calls)
+	}
+}
+
+// TestCompactOpenCodeUndatedLineIsNotProof verifies that the compaction line
+// without the duration (still running) is not the proof: the wait runs out
+// the deadline and times out.
+func TestCompactOpenCodeUndatedLineIsNotProof(t *testing.T) {
+	f := newCompactFixture(t, "opencode", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.ocBefore},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: compactScreens.ocMenuTop},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.ocWorking},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+	if code != 9 {
+		t.Fatalf("code=%d want 9 out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["status"] != "timeout" {
+		t.Fatalf("json=%v", value)
+	}
+	if _, present := value["still_compacting"]; present {
+		t.Fatalf("still_compacting is a pi field: %v", value)
+	}
+	if _, present := value["transcript"]; present {
+		t.Fatalf("the opencode timeout has no transcript field: %v", value)
+	}
+	if elapsed, ok := value["elapsed_ms"].(float64); !ok || elapsed < 500 {
+		t.Fatalf("elapsed_ms=%v want >= 500", value["elapsed_ms"])
+	}
+}
+
+// TestCompactClaudeProofAfterDeadlineStillCompacted (edger): the proof shows
+// up only in the read after the deadline; the one last read runs the same
+// proofs, the compact ends as compacted (exit 0), and /compact is never sent
+// again.
+func TestCompactClaudeProofAfterDeadlineStillCompacted(t *testing.T) {
+	f := newCompactFixture(t, "claude", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		// The pre-send read and the polls inside the deadline show no proof.
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.claudeStale},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.claudeStale},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: compactScreens.claudeStale},
+		// Only the read after the deadline shows the proof below /compact.
+		{Argv: compactReadArgv("worker"), Call: 4, Stdout: compactScreens.claudeFresh},
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["kind"] != "claude" || value["status"] != "compacted" {
+		t.Fatalf("json=%v", value)
+	}
+	if elapsed, ok := value["elapsed_ms"].(float64); !ok || elapsed < 500 {
+		t.Fatalf("elapsed_ms=%v want >= 500 (the proof came after the deadline): %v", value["elapsed_ms"], value)
+	}
+	calls := f.calls(t)
+	// The last read never sends /compact again.
+	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
+		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
+	}
+	// Pre-send read, two polls inside the deadline, and the last read.
+	if n := countArgv(calls, compactReadArgv("worker")); n != 4 {
+		t.Fatalf("recent reads=%d want 4: %#v", n, calls)
+	}
+}
+
+// TestCompactPiEndingOnLastRead verifies that an ending that shows up only in
+// the read after the deadline still yields the ending's result.
+func TestCompactPiEndingOnLastRead(t *testing.T) {
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: "old output line\n"},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: "old output line\n"},
+		// Only the read after the deadline shows the ending.
+		{Argv: compactReadArgv("worker"), Call: 4, Stdout: compactScreens.piNothing},
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["kind"] != "pi" || value["status"] != "nothing-to-compact" {
+		t.Fatalf("json=%v", value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
+		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
+	}
+	if n := countArgv(calls, compactReadArgv("worker")); n != 4 {
+		t.Fatalf("recent reads=%d want 4: %#v", n, calls)
+	}
+}
+
+// TestCompactLastReadNothingTimesOut verifies that a last read without proof
+// or ending falls back to the plain timeout, with a single /compact sent.
+func TestCompactLastReadNothingTimesOut(t *testing.T) {
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: "old output line\n"},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+	if code != 9 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["status"] != "timeout" {
+		t.Fatalf("json=%v", value)
+	}
+	if _, present := value["transcript"]; present {
+		t.Fatalf("the pi timeout has no transcript field: %v", value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
+		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
+	}
+	// Pre-send read, two polls inside the deadline, the last read, and the pi
+	// still-compacting check that reads the screen once more.
+	if n := countArgv(calls, compactReadArgv("worker")); n != 5 {
+		t.Fatalf("recent reads=%d want 5: %#v", n, calls)
+	}
+}
+
+// TestCompactClaudeTimeoutTranscriptField verifies the timeout's transcript
+// field for claude: counted when the session transcript was found and
+// counted, missing without an id session (or when the file does not exist),
+// and unreadable when the transcript path is not a readable file. No path,
+// session id or content reaches the JSON.
+func TestCompactClaudeTimeoutTranscriptField(t *testing.T) {
+	sessionGet := `{"result":{"agent":{"agent_status":"idle","state_change_seq":1,"agent_session":{"kind":"id","value":"sess-1"},"cwd":"/tmp/px"}}}`
+	timeoutRules := func(get string) []fakecli.Rule {
+		return []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: get},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: "old output line\n> /compact\n"},
+		}
+	}
+	runTimeout := func(t *testing.T, get string, claudeDir string) map[string]any {
+		f := newCompactFixture(t, "claude", timeoutRules(get))
+		if claudeDir != "" {
+			f.env["CLAUDE_CONFIG_DIR"] = claudeDir
+		}
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+		if code != 9 || errText != "" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+		value := compactJSON(t, out)
+		if value["status"] != "timeout" {
+			t.Fatalf("json=%v", value)
+		}
+		return value
+	}
+	t.Run("counted when the transcript was found and counted", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		projDir := filepath.Join(claudeDir, "projects", herdr.ClaudeProjectDir("/tmp/px"))
+		if err := os.MkdirAll(projDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		transcript := filepath.Join(projDir, "sess-1.jsonl")
+		if err := os.WriteFile(transcript, []byte(`{"type":"summary","subtype":"compact_boundary"}\n`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		value := runTimeout(t, sessionGet, claudeDir)
+		if value["transcript"] != "counted" {
+			t.Fatalf("transcript=%v want counted: %v", value["transcript"], value)
+		}
+	})
+	t.Run("missing without a session in agent get", func(t *testing.T) {
+		value := runTimeout(t, compactStateJSON("idle", 1), t.TempDir())
+		if value["transcript"] != "missing" {
+			t.Fatalf("transcript=%v want missing: %v", value["transcript"], value)
+		}
+	})
+	t.Run("missing when the session kind is not id", func(t *testing.T) {
+		get := `{"result":{"agent":{"agent_status":"idle","state_change_seq":1,"agent_session":{"kind":"session","value":"sess-1"},"cwd":"/tmp/px"}}}`
+		value := runTimeout(t, get, t.TempDir())
+		if value["transcript"] != "missing" {
+			t.Fatalf("transcript=%v want missing: %v", value["transcript"], value)
+		}
+	})
+	t.Run("missing when the file does not exist", func(t *testing.T) {
+		value := runTimeout(t, sessionGet, t.TempDir())
+		if value["transcript"] != "missing" {
+			t.Fatalf("transcript=%v want missing: %v", value["transcript"], value)
+		}
+	})
+	t.Run("unreadable when the transcript path is a directory", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		// A directory where the transcript file would sit: found, not readable.
+		if err := os.MkdirAll(filepath.Join(claudeDir, "projects", herdr.ClaudeProjectDir("/tmp/px"), "sess-1.jsonl"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		value := runTimeout(t, sessionGet, claudeDir)
+		if value["transcript"] != "unreadable" {
+			t.Fatalf("transcript=%v want unreadable: %v", value["transcript"], value)
+		}
+	})
+}
+
+// TestCompactOpenCodeEmptySessionClearsBox verifies the empty-session menu:
+// without a /compact item the Enter is never sent (it would run /review), the
+// box is cleared with ctrl+u, and the result is nothing-to-compact (0), like
+// claude and pi.
+func TestCompactOpenCodeEmptySessionClearsBox(t *testing.T) {
+	f := newCompactFixture(t, "opencode", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.ocBefore},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: compactScreens.ocMenuEmpty},
+		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}}`},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["kind"] != "opencode" || value["status"] != "nothing-to-compact" {
+		t.Fatalf("json=%v", value)
+	}
+	calls := f.calls(t)
+	if n := countArgvPrefix(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 0 {
+		t.Fatalf("Enter was sent on an empty-session menu: %#v", calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 1 {
+		t.Fatalf("ctrl+u calls=%d want 1 (clear the box): %#v", n, calls)
+	}
+	if n := countArgv(calls, compactReadArgv("worker")); n != 1 {
+		t.Fatalf("recent reads=%d want 1 (only the pre-send read): %#v", n, calls)
+	}
+}
+
+// TestCompactOpenCodeCompactNotFirstExits4 verifies that a /compact item that
+// is not the first menu line is not run: the box is cleared with ctrl+u, no
+// Enter is sent, and the compact exits 4.
+func TestCompactOpenCodeCompactNotFirstExits4(t *testing.T) {
+	f := newCompactFixture(t, "opencode", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.ocBefore},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: compactScreens.ocMenuNotFirst},
+		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}}`},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 4 || out != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	want := "compact: could not select /compact in the command menu of 'worker'; nothing was compacted"
+	if !strings.Contains(errText, want) {
+		t.Fatalf("stderr=%q want %q", errText, want)
+	}
+	calls := f.calls(t)
+	if n := countArgvPrefix(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 0 {
+		t.Fatalf("Enter was sent although /compact is not on top: %#v", calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 1 {
+		t.Fatalf("ctrl+u calls=%d want 1: %#v", n, calls)
+	}
+}
+
+// TestCompactOpenCodeMenuNeverAppearsExits4 verifies that when the command
+// menu never shows up in the visible screen (the ~2 s window), the box is
+// cleared and the compact exits 4.
+func TestCompactOpenCodeMenuNeverAppearsExits4(t *testing.T) {
+	f := newCompactFixture(t, "opencode", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.ocBefore},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true},
+		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}`},
+	})
+	start := time.Now()
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	elapsed := time.Since(start)
+	if code != 4 || out != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	if !strings.Contains(errText, "could not select /compact in the command menu") {
+		t.Fatalf("stderr=%q", errText)
+	}
+	if elapsed < 2*time.Second || elapsed > 10*time.Second {
+		t.Fatalf("the menu window is ~2 s: elapsed=%v", elapsed)
+	}
+	calls := f.calls(t)
+	if n := countArgvPrefix(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 0 {
+		t.Fatalf("Enter was sent without a visible menu: %#v", calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 1 {
+		t.Fatalf("ctrl+u calls=%d want 1: %#v", n, calls)
+	}
+}
+
+// TestCompactOpenCodeWorkingReadFallsBackToVisible verifies that the wait
+// loop reads opencode through herdr.AgentRead: a `recent` read of the working
+// worker fails with agent_not_idle and the visible screen stands in for the
+// proof.
+func TestCompactOpenCodeWorkingReadFallsBackToVisible(t *testing.T) {
+	f := newCompactFixture(t, "opencode", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.ocBefore},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, Stdout: compactScreens.ocMenuTop},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}`},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Code: 1, Stderr: `{"error":{"code":"agent_not_idle","message":"cannot read 40 lines while worker is working"}}`},
+		{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: compactScreens.ocDone},
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	if value := compactJSON(t, out); value["status"] != "compacted" {
+		t.Fatalf("json=%v", value)
+	}
+	calls := f.calls(t)
+	// The menu read and the visible read the fallback takes after the failed
+	// recent read.
+	if n := countArgv(calls, []string{"agent", "read", "worker", "--source", "visible"}); n != 2 {
+		t.Fatalf("visible reads=%d want 2 (menu plus the agent_not_idle fallback): %#v", n, calls)
+	}
+	if n := countArgvPrefix(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 1 {
+		t.Fatalf("Enter calls=%d want 1: %#v", n, calls)
+	}
+}
+
 // TestCompactClaudeNoMessagesToCompact verifies Claude Code 2.1.285's second
 // nothing-to-compact string: below the echoed /compact it ends the wait as a
 // success without compaction, and the same line already on screen before the
@@ -1246,5 +1771,75 @@ func TestCompactPreSendReadFailureSendsNothing(t *testing.T) {
 	}
 	if n := countArgv(f.calls(t), []string{"pane", "send-text", "p1", "/compact"}); n != 0 {
 		t.Fatalf("/compact was sent after a failed pre-send read (%d)", n)
+	}
+}
+
+// TestDispatchCompactOpenCodeCompacts verifies that dispatch --compact for an
+// opencode worker compacts it (the menu is checked and the Enter is sent only
+// with /compact on top) and then sends the brief: opencode is a verified
+// compact kind, so there is no skip warning.
+func TestDispatchCompactOpenCodeCompacts(t *testing.T) {
+	extra := []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("idle", 1)},
+		// The pre-send read has no done line; the poll reads the done screen.
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.ocBefore},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.ocDone},
+		{Argv: []string{"pane", "send-text", "w0test:p0a", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, Stdout: compactScreens.ocMenuTop},
+		{Argv: []string{"pane", "send-keys", "w0test:p0a", "Enter"}, Stdout: `{"result":{}}`},
+		// The dispatch's arrival probes: the worker goes back to working with a
+		// new state_change_seq.
+		{Argv: []string{"agent", "get", "worker"}, ArgvPrefix: true, Stdout: compactStateJSON("working", 2)},
+		{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Stdout: `{"result":{"submitted":true}}`},
+	}
+	f := newDispatchArrivalFixture(t, "working", 1, 2, "$CURRENT_PATHS", "0", extra...)
+	roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\tmode\targs\teffort\nworker\tw0test:p0a\topencode\timplementer\t\t0\t\tnow\toc-model\ttask\timplementer\t\t\t\thigh\n"
+	if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errText := f.run(t, "worker", f.brief, "--no-wait", "--compact")
+	if code != 0 {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	if status := dispatchLastLineStatus(t, out); status != "submitted" {
+		t.Fatalf("wait_status=%s out=%s", status, out)
+	}
+	if strings.Contains(errText, "has no verified compact command") {
+		t.Fatalf("opencode has a verified compact command: %s", errText)
+	}
+	// One JSON line on stdout (the dispatch's); the compaction is a stderr note.
+	if strings.Contains(out, `"status":"compacted"`) || strings.Count(strings.TrimSpace(out), "\n") != 0 {
+		t.Fatalf("stdout must hold only the dispatch line: %s", out)
+	}
+	if !strings.Contains(errText, "dispatch: compacted 'worker' in ") {
+		t.Fatalf("missing the compacted note on stderr: %s", errText)
+	}
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.bin, "herdr.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countArgvPrefix(calls, []string{"agent", "prompt", "worker"}); n != 1 {
+		t.Fatalf("prompt calls=%d want 1: %#v", n, calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-text", "w0test:p0a", "/compact"}); n != 1 {
+		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-keys", "w0test:p0a", "Enter"}); n != 1 {
+		t.Fatalf("Enter calls=%d want 1 (only the menu's /compact gets the Enter): %#v", n, calls)
+	}
+	// The menu read is the first visible read, before the Enter.
+	var firstVisible, enterIdx = -1, -1
+	for i, c := range calls {
+		if enterIdx < 0 && reflect.DeepEqual(c.Argv, []string{"pane", "send-keys", "w0test:p0a", "Enter"}) {
+			enterIdx = i
+		}
+		if firstVisible < 0 && reflect.DeepEqual(c.Argv, []string{"agent", "read", "worker", "--source", "visible"}) {
+			firstVisible = i
+		}
+	}
+	if firstVisible < 0 || enterIdx < 0 || firstVisible > enterIdx {
+		t.Fatalf("the menu read must precede the Enter: firstVisible=%d enter=%d", firstVisible, enterIdx)
 	}
 }
