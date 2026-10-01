@@ -835,3 +835,70 @@ func containsArgPair(args []string, key, value string) bool {
 	}
 	return false
 }
+
+func TestSpawnNameDiffersFromBase(t *testing.T) {
+	const line = "herdr-soho: spawn: the new worker is 'build-2' ('build' is already live); dispatch to 'build-2'"
+
+	newBuildFixture := func(t *testing.T, liveBuild bool) spawnFixture {
+		t.Helper()
+		rules := freshSpawnRules()
+		if liveBuild {
+			rules[0].Stdout = `{"result":{"agents":[{"name":"build"}]}}`
+		}
+		f := newSpawnFixture(t, rules)
+		configureSpawnFixture(t, &f)
+		if err := os.WriteFile(filepath.Join(f.root, "roles", "build.md"), []byte("---\nkind: grok\n---\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+
+	t.Run("spawn: no --name with the base live announces the final name on stderr", func(t *testing.T) {
+		// Mutation captured: dropping the stderr line leaves the orchestrator dispatching to the live base name.
+		f := newBuildFixture(t, true)
+		code, stdout, stderr, _ := runCmdSpawn(t, f, []string{"build"})
+		if code != 0 {
+			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+		if !strings.Contains(stderr, line) {
+			t.Fatalf("stderr=%q", stderr)
+		}
+		if strings.Contains(stdout, line) {
+			t.Fatalf("the line leaked to stdout: %q", stdout)
+		}
+		if !strings.Contains(stdout, `"name": "build-2"`) {
+			t.Fatalf("spawn JSON=%q", stdout)
+		}
+	})
+
+	t.Run("spawn: no --name with the base free stays silent", func(t *testing.T) {
+		f := newBuildFixture(t, false)
+		code, stdout, stderr, _ := runCmdSpawn(t, f, []string{"build"})
+		if code != 0 {
+			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+		if strings.Contains(stderr, "the new worker is") {
+			t.Fatalf("stderr=%q", stderr)
+		}
+		if !strings.Contains(stdout, `"name": "build"`) {
+			t.Fatalf("spawn JSON=%q", stdout)
+		}
+	})
+
+	t.Run("spawn: a taken --name keeps only the existing warning", func(t *testing.T) {
+		f := newBuildFixture(t, true)
+		code, stdout, stderr, _ := runCmdSpawn(t, f, []string{"build", "--name", "build"})
+		if code != 0 {
+			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+		if !strings.Contains(stderr, "agent name 'build' is taken by another pane or workspace; using 'build-2'") {
+			t.Fatalf("stderr=%q", stderr)
+		}
+		if strings.Contains(stderr, "the new worker is") {
+			t.Fatalf("the base warning leaked on the --name path: stderr=%q", stderr)
+		}
+		if !strings.Contains(stdout, `"name": "build-2"`) {
+			t.Fatalf("spawn JSON=%q", stdout)
+		}
+	})
+}

@@ -53,7 +53,7 @@ func shaDropComment(p string) (string, []byte, bool) {
 	return p, nil, false
 }
 
-var dimensions = []string{"role", "kind", "model", "agent", "effort"}
+var dimensions = []string{"role", "kind", "model", "kind-model", "agent", "effort"}
 var reviewRoles = strings.Fields(core.ReviewRolesAll)
 
 type CommandContext struct {
@@ -299,6 +299,14 @@ func dim(p prompt, d string) string {
 		v = p.snapshot.model
 	case "effort":
 		v = p.snapshot.effort
+	case "kind-model":
+		if p.snapshot.kind == "" {
+			return "(unknown)"
+		}
+		if p.snapshot.model == "" {
+			return p.snapshot.kind + "/-"
+		}
+		return p.snapshot.kind + "/" + p.snapshot.model
 	}
 	if v == "" {
 		return "(unknown)"
@@ -420,7 +428,7 @@ func CmdStats(args []string, command CommandContext) int {
 			}
 		}
 		if !ok {
-			die("stats: --by expects one of role, kind, model, agent, effort (got '"+by+"')", 2, "stats", logFile)
+			die("stats: --by expects one of role, kind, model, kind-model, agent, effort (got '"+by+"')", 2, "stats", logFile)
 		}
 	}
 	var since time.Time

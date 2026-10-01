@@ -738,7 +738,7 @@ $S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, p
 $S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines, one `<sha256>  <path>` per file as `sha256sum` prints it (a trailing `# note` after the path is dropped when the path without it exists; exit 16 on changed/missing or when the report has none, 4 when the report cannot be read)
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
-$S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
+$S stats [--since <date>] [--by role|kind|model|kind-model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
 $S friction [--since <date>] [--level warning|note|error] [--command <cmd>] [--agent <name>] [--summary]  # errors/warnings of this workspace (review at end); the options AND together over the log lines (<date> as in stats --since; --level error matches error(exit N); --agent matches '<name>' in the message); --summary prints a count/level/command table instead of the lines
 $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before sending; no dispatch, no state
 $S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
@@ -818,7 +818,9 @@ SessionStart hook checks these locations in order: project
 
 **Naming.** With lanes on, the agent is named after the lane (`build`,
 `build-2`, `review`, `docs`). A name already live anywhere in Herdr gets the
-next free suffix (with a warning when it was a `--name`). `lanes=off` names it after the role
+next free suffix (with a warning when it was a `--name`); without `--name`, a final
+name different from the lane's (or the role's, with lanes off) is announced on
+stderr with the name to dispatch to. `lanes=off` names it after the role
 (`implementer`, then `implementer-2`). Pass `--name` for a custom name
 (`[a-z][a-z0-9_-]{0,31}`). Use that name in `dispatch`, `collect`, and
 `release`; never pane IDs.

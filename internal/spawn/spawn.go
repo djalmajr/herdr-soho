@@ -664,6 +664,9 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		if AgentNameTaken(o.name, env) {
 			core.DieFriction(fmt.Sprintf("agent name '%s' is already live", o.name), 3, "", "")
 		}
+		if o.name != base {
+			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: spawn: the new worker is '%s' ('%s' is already live); dispatch to '%s'\n", o.name, base, o.name)
+		}
 	}
 	args := buildArgs(kind, o.approvals, o.model, o.effort, ctx, env)
 	native := ConfigNativeArgs(kind, lane, o.role, ctx, env, cwd, func(key, own string) {
