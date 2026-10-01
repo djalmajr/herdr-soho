@@ -800,7 +800,7 @@ $S status [a b …]                          # non-blocking completion check; no
 $S config                                  # effective configuration and sources (incl. the session layer)
 $S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>
 $S roster                                  # live agents with role/kind/pane/state/report and the current task (TASK, from the pane title; '-' when none, cut to 40 characters)
-$S release impl [--close] [--force]        # forget the agent; --close closes a pane we created, or the recorded orphan's pane (idle only)
+$S release impl [--close] [--force]        # forget the agent; --close closes a pane we created, or the recorded orphan's pane (idle or done)
 $S reopen impl [--force]                    # release --close + spawn --fresh with the roster's role, kind, model, effort, cwd and native args; output is the spawn JSON
 $S clean [--older-than 7]                  # drop gone agents, delete old briefs/reports
 $S kinds                                   # kind → executable, family, effort ceiling
@@ -1003,7 +1003,7 @@ logging `dialog` without typing into the dialog.
 The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.
 Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).
 Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000` (it never automatically re-prompts).
-Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof). For a pi target whose screen carries its two input-box borders (lines of `─`, or the working border `── ⠴ Working ──…` while it works), the closing line and the id count only inside its input box (the region between those lines), so a message already in its chat history is delivered, a message in its `Steering:` queue is queued, and the Enter goes only when the id is in that box. For a codex target whose screen holds a composer line (the last line that, without its left spaces, begins with `›` and sits within the last 8 non-empty lines), the closing line and the id count only inside its composer region (from that line to the bottom of the screen), so a message already in its history above the composer is delivered; a `↳` line holding the id above the composer is its follow-up queue — the result is `queued`, with no Enter sent. A Claude Code queue is recognized the same way: when the visible screen holds the message's id and the line `Press up to edit queued messages`, the result is `queued`, with no Enter sent.
+Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof). For a pi target whose screen carries its two input-box borders (lines of `─`, or the working border `── ⠴ Working ──…` while it works), the closing line and the id count only inside its input box (the region between those lines), so a message already in its chat history is delivered, a message in its `Steering:` queue is queued, and the Enter goes only when the id is in that box. For a codex target whose screen holds a composer line (the last line that, without its left spaces, is `›` alone or begins with `› `, and sits within the last 8 non-empty lines), the closing line and the id count only inside its composer region (from that line to the bottom of the screen), so a message already in its history above the composer is delivered; a `↳` line holding the id above the composer is its follow-up queue — the result is `queued`, with no Enter sent. A Claude Code queue is recognized the same way: when the visible screen holds the message's id and the line `Press up to edit queued messages`, the result is `queued`, with no Enter sent.
 When `agent prompt` reports `agent_prompt_stalled` — the prompt may be typed with its Enter missing — `send` reads the target's visible screen and, when `#<id>` sits in its input box (for pi between the box borders, for codex the composer region, for every other kind the last 15 non-empty lines) and no dialog is on screen, presses one Enter and runs the arrival window; a dialog on screen would take the Enter as its answer, so nothing is pressed and it exits 17 (`send: <ref> is showing a dialog after the message was typed; press nothing and read its pane`). Still unproven after the Enter, it exits 15 (`send: <ref> did not take the message: it sits in its input box after one Enter; read its pane before sending again`). Without the id in the box it keeps the plain stalled exit 15. One Enter at most, no resend.
 If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
 If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or screen)`).
@@ -1110,14 +1110,15 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   the same way, so a nested orchestrator must not be a sandboxed codex.
 - **`release` without `--close` leaves the agent running.** `--close` ends
   it by closing the pane. Panes passed with `--pane` are never closed.
-  `run` does not release. A release that leaves the pane open records it in
-  `<state>/released-panes.tsv` (one row per name and pane, refreshed by a
-  repeated release) and says on stderr how to close it later: `herdr-soho:
+  `run` does not release. A release that leaves open a pane this skill
+  created records it in `<state>/released-panes.tsv` (one row per name and
+  pane, refreshed by a repeated release) and says on stderr how to close it
+  later (a pane passed with `--pane` is never recorded): `herdr-soho:
   release: the pane <pane> stays open; close it later with: herdr-soho
   release <name> --close`. `release <name> --close` on a name no longer in
   the roster closes the recorded orphan's pane (a live agent whose name and
   pane match a row, outside the roster and the orchestrator's pane) when the
-  agent is idle; `working`, `blocked` or unqueryable exits 10 without
+  agent is `idle` or `done`; `working`, `blocked` or unqueryable exits 10 without
   `--force` (`agent '<name>' is not in the roster and is <state>; pass
   --force to close its pane`), and a failed pane close exits 4, keeping the
   row (`release: could not close the pane <pane> of '<name>'; close it by
@@ -1125,7 +1126,7 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   '<name>' (<pane>, <state>) is not in the roster; close it with:
   herdr-soho release <name> --close` per orphan, and `spawn` (lanes on) warns
   one `herdr-soho: spawn: '<name>' is idle outside the roster (<pane>); close
-  it with: herdr-soho release <name> --close` per idle orphan before opening
+  it with: herdr-soho release <name> --close` per `idle` or `done` orphan before opening
   a new pane (it only warns; the spawn proceeds). A `spawn --pane` that
   re-rosters a recorded pane retires its row, and a row whose pane is gone
   from Herdr (`pane_not_found`) leaves on the next registry write (a pane
