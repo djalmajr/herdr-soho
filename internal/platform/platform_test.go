@@ -969,7 +969,12 @@ func TestAtomicWrite(t *testing.T) {
 		}
 		got, _ := os.ReadFile(target)
 		stat, _ := os.Stat(target)
-		if string(got) != "through\n" || stat.Mode().Perm() != 0o640 {
+		if string(got) != "through\n" {
+			t.Fatalf("content=%q", got)
+		}
+		// Windows does not expose POSIX file modes: the write-through and link
+		// assertions above stand, the target's mode is unobservable there.
+		if runtime.GOOS != "windows" && stat.Mode().Perm() != 0o640 {
 			t.Fatalf("content=%q mode=%o", got, stat.Mode().Perm())
 		}
 	})

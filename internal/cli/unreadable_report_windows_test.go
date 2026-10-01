@@ -26,4 +26,10 @@ func makeUnreadableReport(t *testing.T, path string) {
 			t.Errorf("close unreadable report handle: %v", err)
 		}
 	})
+	// A same-process share handle does not always block the collector's read
+	// (the round-48 Windows run read the report through it); probe the very
+	// read the command performs and skip where the fixture is ineffective.
+	if _, err := os.ReadFile(path); err == nil {
+		t.Skip("host can read the unreadable report; unreadable-report fixture is ineffective")
+	}
 }

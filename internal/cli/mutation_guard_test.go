@@ -471,7 +471,8 @@ func TestMutationGuard(t *testing.T) {
 			}
 		}
 		code, out, stderr := runMutationGuardFixture(t, s, []string{s.copy, "--source", s.source}, nil)
-		if code != 1 || stderr != "" || !strings.Contains(out, "symlink B/target -> ") || strings.Contains(out, "symlink a/target") {
+		// The guard prints the relative symlink path with the platform separator.
+		if code != 1 || stderr != "" || !strings.Contains(out, "symlink "+filepath.Join("B", "target")+" -> ") || strings.Contains(out, "symlink "+filepath.Join("a", "target")) {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})
@@ -625,7 +626,7 @@ func TestMutationGuard(t *testing.T) {
 			t.Skip("symlink creation unavailable")
 		}
 		code, out, stderr := runMutationGuardFixture(t, s, []string{s.copy, "--source", s.source}, nil)
-		if code != 1 || !strings.Contains(out, "fail no-symlink-into-source: symlink nested/deeper/source-link -> ") || stderr != "" {
+		if code != 1 || !strings.Contains(out, "fail no-symlink-into-source: symlink "+filepath.Join("nested", "deeper", "source-link")+" -> ") || stderr != "" {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, out, stderr)
 		}
 	})

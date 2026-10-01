@@ -50,7 +50,11 @@ func a13GitOnlyPath(t *testing.T) string {
 		t.Skip("git is required for the linked worktree doctor fixture")
 	}
 	bin := t.TempDir()
-	if err := os.Symlink(gitPath, filepath.Join(bin, "git")); err != nil {
+	// The product locates git the way JS does on win32: name plus a PATHEXT
+	// extension, so the link must carry the real binary's extension
+	// (git.exe); an extensionless name is only ever found on POSIX.
+	link := filepath.Join(bin, "git"+filepath.Ext(gitPath))
+	if err := os.Symlink(gitPath, link); err != nil {
 		// Windows without the symlink privilege: git's own directory (the
 		// doctor lines under test do not depend on what else is there).
 		return filepath.Dir(gitPath)
