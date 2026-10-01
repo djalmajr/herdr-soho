@@ -326,7 +326,7 @@ test('parity: doctor warns only about the kinds the effective config uses (test-
   });
   const ok = r.steps[0];
   assert.equal(ok.rc, 0, ok.err);
-  assert.ok(ok.out.includes('kinds installed: grok'), ok.out);
+  assert.ok(ok.out.includes('kinds in use and installed: grok'), ok.out);
   assert.ok(!ok.out.includes('kinds in use but not in PATH'), ok.out);
   const missing = r.steps[1];
   assert.equal(missing.rc, 0, missing.err);
@@ -349,7 +349,7 @@ test('parity: doctor with lanes off counts no planner kind (test-doctor-fix.sh, 
   });
   const s = r.steps[0];
   assert.equal(s.rc, 0, s.err);
-  assert.ok(s.out.includes('kinds installed: grok'), s.out);
+  assert.ok(s.out.includes('kinds in use and installed: grok'), s.out);
   assert.ok(!s.out.includes('kinds in use but not in PATH'), s.out);
 });
 
