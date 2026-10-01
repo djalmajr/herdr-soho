@@ -13,6 +13,12 @@ type Detection struct {
 	Auth   bool   `json:"auth"`
 }
 
+// HarnessModuleCause is the cause of a CLI that cannot load one of its own
+// files (the "Error: Cannot find module ... imported from" report, often right
+// after the CLI was updated while it ran). The cause is always this fixed
+// text, never the file path.
+const HarnessModuleCause = "Error: Cannot find module"
+
 var (
 	retryingRE       = regexp.MustCompile(`retrying|retry in|will retry|reconnecting`)
 	econnRE          = regexp.MustCompile(`\bECONN(REFUSED|RESET)\b`)
@@ -93,6 +99,9 @@ func ProviderDetectTexts(state, screen, capacityTexts, errorTexts string) *Detec
 				return &Detection{Status: "provider-error", Cause: cause}
 			}
 		}
+		if harnessModuleCause(line, nonEmpty, i) {
+			return &Detection{Status: "provider-error", Cause: HarnessModuleCause}
+		}
 		stripped := configuredTextLine(line)
 		if equalsText(stripped, capacity) {
 			return &Detection{Status: "capacity", Cause: text.SanitizeCause(text.RedactSecrets(line))}
@@ -138,6 +147,24 @@ func stripBoxPrefix(line string) string {
 		return strings.TrimLeft(value[len("┃"):], " \t")
 	}
 	return value
+}
+
+// harnessModuleCause reports whether line is the first line of the stop of a
+// CLI that cannot load one of its own files: without its box prefix and spaces
+// it starts with the fixed cause, and the line plus the two following lines,
+// with the spaces collapsed, carry the "imported from" half of the report.
+// Without that half the line is not this stop: a test run or a Require stack
+// can print the same first line, and nothing changes then.
+func harnessModuleCause(line string, lines []string, i int) bool {
+	value := stripBoxPrefix(line)
+	if !strings.HasPrefix(value, "Error: Cannot find module") {
+		return false
+	}
+	words := strings.Fields(value)
+	for j := i + 1; j < len(lines) && j <= i+2; j++ {
+		words = append(words, strings.Fields(stripBoxPrefix(lines[j]))...)
+	}
+	return strings.Contains(strings.Join(words, " "), "imported from")
 }
 
 func splitTexts(value string) []string {
