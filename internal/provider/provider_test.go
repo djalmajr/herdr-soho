@@ -830,6 +830,8 @@ func TestRetryLineModelPhrasesWithoutParenCounter(t *testing.T) {
 			"retrying the 1/2 migration\n",
 			"Now retrying the 1/2 migration\n",
 			"I'll try again: retrying the 1/2 migration\n",
+			"I hit an error - retrying the 1/2 migration\n",
+			"Error - retrying the 1/2 migration\n",
 			"Finished retrying the 2026/10 cutover\n",
 		} {
 			if got := RetryLine("working", screen); got != "" {
