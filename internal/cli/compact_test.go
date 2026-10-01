@@ -989,7 +989,7 @@ func TestCompactClaudeProofAfterDeadlineStillCompacted(t *testing.T) {
 		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
 	})
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
-	if code != 0 || errText != "" {
+	if code != 0 || withoutShortTimeoutWarning(errText) != "" {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 	}
 	value := compactJSON(t, out)
@@ -1025,7 +1025,7 @@ func TestCompactPiEndingOnLastRead(t *testing.T) {
 		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
 	})
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
-	if code != 0 || errText != "" {
+	if code != 0 || withoutShortTimeoutWarning(errText) != "" {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 	}
 	value := compactJSON(t, out)
@@ -1051,7 +1051,7 @@ func TestCompactLastReadNothingTimesOut(t *testing.T) {
 		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: "old output line\n"},
 	})
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
-	if code != 9 || errText != "" {
+	if code != 9 || withoutShortTimeoutWarning(errText) != "" {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 	}
 	value := compactJSON(t, out)
@@ -1093,7 +1093,7 @@ func TestCompactClaudeTimeoutTranscriptField(t *testing.T) {
 			f.env["CLAUDE_CONFIG_DIR"] = claudeDir
 		}
 		code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
-		if code != 9 || errText != "" {
+		if code != 9 || withoutShortTimeoutWarning(errText) != "" {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 		}
 		value := compactJSON(t, out)
@@ -1842,4 +1842,18 @@ func TestDispatchCompactOpenCodeCompacts(t *testing.T) {
 	if firstVisible < 0 || enterIdx < 0 || firstVisible > enterIdx {
 		t.Fatalf("the menu read must precede the Enter: firstVisible=%d enter=%d", firstVisible, enterIdx)
 	}
+}
+
+// withoutShortTimeoutWarning drops the warning a --timeout under a second
+// prints, so a test that uses a short timeout for speed still checks that
+// nothing else reached stderr.
+func withoutShortTimeoutWarning(stderr string) string {
+	kept := []string{}
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.Contains(line, "--timeout is in milliseconds;") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
