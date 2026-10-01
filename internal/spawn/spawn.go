@@ -887,6 +887,9 @@ func startAgent(o spawnOptions, kind string, env platform.Env, created bool, arg
 			if closed {
 				core.DieFriction(fmt.Sprintf("agent start failed for %s (%s) in pane %s; closed the pane this spawn opened (last screen lines: %s)", o.name, kind, o.pane, tail), 4, "", "")
 			}
+			if herdr.PaneGetGone(o.pane, env) {
+				core.DieFriction(fmt.Sprintf("agent start failed for %s (%s) in pane %s; the pane close failed but the pane is already gone (last screen lines: %s)", o.name, kind, o.pane, tail), 4, "", "")
+			}
 			core.DieFriction(fmt.Sprintf("agent start failed for %s (%s) in pane %s; pane close failed and the pane is still open, check it for a running agent (last screen lines: %s)", o.name, kind, o.pane, tail), 4, "", "")
 		}
 		core.DieFriction(fmt.Sprintf("agent start failed for %s (%s) in pane %s; the pane was given (--pane) and stays open: check it for a running agent", o.name, kind, o.pane), 4, "", "")

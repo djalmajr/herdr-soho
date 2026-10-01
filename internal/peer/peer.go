@@ -475,6 +475,10 @@ func appendPeerLog(stateDir, from, to, result string, chars int, id string, env 
 	if core.Nowrite(env) {
 		return
 	}
+	// Defense: peer logs are state and never land inside the skill.
+	if core.StatePathInSkill(env, stateDir) != "" {
+		return
+	}
 	clean := func(v string) string { return peerLogSeparators.ReplaceAllString(v, " ") }
 	line := fmt.Sprintf("%s\t%s\t%s\t%s\t%d\t%s\n", platform.Now().Format("2006-01-02T15:04:05"), clean(from), clean(to), clean(result), chars, clean(id))
 	if os.MkdirAll(stateDir, 0o755) == nil {
@@ -552,6 +556,19 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		platform.Die("send: empty message (pass the message words or --file <path>)", 2)
 	}
 	id := RandomPeerID()
+	// Decide with StateInSkill/StateRootPath before any StateDirPath/StateRoot/
+	// WorkspaceID, so the refusal leaves no side effect (no .gitignore append,
+	// no pane current). The path named is the state root.
+	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
+		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was sent)", core.StateRootPath(ctx, env, cwd), skill), 2)
+	}
+	senderRef, senderName, senderKind, senderRole := SenderInfo(ctx, env, cwd)
+	// A rostered worker reports through its report file, not by message: refuse
+	// before any send. The orchestrator (role -) and sub-orchestrators keep
+	// sending; no HERDR_PANE_ID or a failing sender lookup leaves the send alone.
+	if senderName != "-" && senderRole != "-" && senderRole != "sub-orchestrator" {
+		platform.Die(fmt.Sprintf("send: '%s' is a worker of this team (role %s): a worker reports through its report file, not by message (nothing was sent)", senderName, senderRole), 2)
+	}
 	stateDir := core.StateDirPath(ctx, env, cwd)
 	log := func(from, to, result string) { appendPeerLog(stateDir, from, to, result, utf16Length(body), id, env) }
 	t := resolveTarget(target, env)
@@ -604,7 +621,6 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			platform.Die(fmt.Sprintf("send: %s unavailable: %s", t.RefShown, w.Cause), 4)
 		}
 	}
-	senderRef, senderName, senderKind, senderRole := SenderInfo(ctx, env, cwd)
 	vScreen, cause := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 	if cause != "" {
 		log(senderRef, t.RefShown, "unreadable")

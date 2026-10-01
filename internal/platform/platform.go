@@ -361,6 +361,17 @@ func SkillDir(env Env) string {
 // (tried in that order; <home> is HOME, USERPROFILE on Windows). It dies with the
 // same message as before when no source holds a skill.
 func SkillDirSource(env Env) (string, string) {
+	dir, source := SkillDirSourceOrEmpty(env)
+	if dir == "" {
+		Die("cannot find skill directory; set HERDR_SOHO_SKILL_DIR", 2)
+	}
+	return dir, source
+}
+
+// SkillDirSourceOrEmpty is SkillDirSource without the Die: it returns ("", "")
+// when no source holds a skill, for callers that must not die on a project
+// without an installed skill.
+func SkillDirSourceOrEmpty(env Env) (string, string) {
 	if configured := env.Get("HERDR_SOHO_SKILL_DIR"); configured != "" {
 		return configured, "HERDR_SOHO_SKILL_DIR"
 	}
@@ -384,7 +395,6 @@ func SkillDirSource(env Env) (string, string) {
 			}
 		}
 	}
-	Die("cannot find skill directory; set HERDR_SOHO_SKILL_DIR", 2)
 	return "", ""
 }
 
