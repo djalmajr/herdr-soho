@@ -74,6 +74,28 @@ func TestSendPiInputBox(t *testing.T) {
 			t.Fatalf("no Enter may go to a delivered pi message: %d enters", enters)
 		}
 	})
+	t.Run("pi: a message in the Steering queue above the input box is queued, not sent (R-RC8C)", func(t *testing.T) {
+		prompt := newPromptFixture(t)
+		history := "old turn output\nSteering: [herdr-soho:peer] #01020304 Message from another agent\n↳ Option+Up to edit all queued messages"
+		rules := []fakecli.Rule{
+			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 1, Stdout: agentJSONKind("pi", "working", "1")},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 1, Stdout: piSendScreen("old turn output", "")},
+			{Argv: []string{"agent", "prompt", "w0test:p0a"}, ArgvPrefix: true},
+			{Argv: []string{"agent", "get", "w0test:p0a"}, ArgvPrefix: true, Stdout: agentJSONKind("pi", "working", "1")},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stdout: history + "\n"},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: piSendScreen(history, "")},
+		}
+		_ = prompt
+		f := newFixture(t, rules)
+		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
+		if code != 0 || !strings.HasPrefix(out, "queued for local/w0test:p0a") {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		}
+		if enters := countEnters(t, f); enters != 0 {
+			t.Fatalf("no Enter may go to a busy pi: %d enters", enters)
+		}
+	})
 	t.Run("pi: a message still in the input box gets Enter and today's proof", func(t *testing.T) {
 		prompt := newPromptFixture(t)
 		history := "old turn output"

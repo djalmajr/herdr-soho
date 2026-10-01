@@ -685,7 +685,9 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 				if strings.Contains(recent, "#"+id) {
 					visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 					if visibleErr == "" && visible != preScreen && !isDialogScreen(visible, t.Kind, statusOr(curGet, currentStatus)) {
-						if !messageStillInScreen(t.Kind, visible, endLine, id) {
+						// A message in pi's Steering queue sits above the input box but is
+						// not read yet: it is queued (reported after the window), not delivered.
+						if !messageStillInScreen(t.Kind, visible, endLine, id) && !steeringQueued(visible, id) {
 							return proofResult{Proven: true, RecentReadSucceeded: true, LastCause: result.LastCause}
 						}
 					} else if visibleErr != "" {
