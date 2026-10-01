@@ -229,6 +229,21 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			return code
 		}
 	}
+	// Context check before any task state is written: at long context opencode
+	// can end its turn empty. The footer read is opencode-only for now.
+	if kind == "opencode" {
+		warnPercent := 60
+		if raw := core.Cfg(ctx, "context_warn_percent", "60", env); raw != "60" {
+			if v, e := strconv.Atoi(raw); e == nil {
+				warnPercent = v
+			}
+		}
+		if warnPercent > 0 {
+			if pct := dispatchContextPercent(herdr.AgentRead(env, agent, "visible", nil)); pct >= warnPercent {
+				core.Warn(fmt.Sprintf("dispatch: '%s' is at %d%% of its context; a long context can end its turn empty (opencode): release --close it and spawn a fresh worker for a new task", agent, pct), frictionLogPath, "dispatch")
+			}
+		}
+	}
 	sidecar := dispatch.DispatchSidecar(composed)
 	if err := writeDispatchSidecar(sidecar, kind, model, effort, "attempted", "", session); err != nil {
 		taskReport := filepath.Join(sd, "reports", strings.TrimSuffix(filepath.Base(report), ".md")+".current.md")
@@ -786,6 +801,32 @@ func warnOwnedOverlap(brief, role, agent, sd string, ctx *core.Config, env platf
 		}
 		core.Warn(message, frictionLogPath, "dispatch")
 	}
+}
+
+var dispatchContextFooterRE = regexp.MustCompile(`\d+(?:\.\d+)?K \((\d+)%\)\s+ctrl\+p commands$`)
+
+// dispatchContextPercent scans the visible screen bottom-up over the last
+// non-empty lines and returns the context percent the opencode footer shows
+// (<number>K (NN%) on the line ending in ctrl+p commands); -1 when there is
+// no such line or the pattern does not match.
+func dispatchContextPercent(screen string) int {
+	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if !strings.HasSuffix(line, "ctrl+p commands") {
+			continue
+		}
+		if m := dispatchContextFooterRE.FindStringSubmatch(line); m != nil {
+			if pct, e := strconv.Atoi(m[1]); e == nil {
+				return pct
+			}
+		}
+		return -1
+	}
+	return -1
 }
 
 var ownershipStopwords = map[string]bool{"nenhum": true, "none": true}

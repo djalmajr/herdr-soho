@@ -215,6 +215,9 @@ prompt_settle_seconds=20
 # the wait logs a "may be stuck in one tool call" warning, once. 0 = off.
 stuck_warn_minutes=20
 
+# Percent of context use at which `dispatch` warns for an opencode worker (a long context can end the turn empty). 0 = off.
+context_warn_percent=60
+
 # State root: briefs, reports, roster. Relative paths are under the repo root.
 # Must be writable by every worker sandbox (Codex denies .agents/ and .codex/).
 state_dir=.herdr-soho
