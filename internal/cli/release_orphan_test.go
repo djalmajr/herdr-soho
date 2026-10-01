@@ -322,6 +322,41 @@ func TestReleaseWithoutCloseRecordsTheReleasedPane(t *testing.T) {
 	}
 }
 
+func TestReleaseWithoutCloseNeverRecordsAGivenPane(t *testing.T) {
+	// A pane the skill did not create (spawn --pane, roster created=0) is
+	// never registered, so a later release --close cannot close it as an
+	// orphan: the skill never closes a pane it did not create.
+	// The released agent stays live in its own pane of this workspace, the
+	// case where a registry row would make it an orphan.
+	f := newOrphanReleaseFixture(t, `[{"name":"worker","pane_id":"p-worker","agent_status":"idle"}]`, `[{"pane_id":"p-worker"}]`, "", nil, []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
+		{Argv: []string{"tab", "rename", "t1", "herd"}},
+		{Argv: []string{"pane", "close", "p-worker"}},
+	})
+	if err := os.WriteFile(filepath.Join(f.state, "agents.tsv"), []byte("# header\n"+releaseRow("worker", "p-worker", "0", "implementer", false, "/tmp/work")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	addReleaseReport(t, f.state, "worker", false)
+	r := f.run(t, "worker")
+	if r.code != 0 || strings.Contains(r.stderr, "stays open") {
+		t.Fatalf("release status=%d stdout=%q stderr=%q", r.code, r.stdout, r.stderr)
+	}
+	if rows := releasedPanesRows(t, f.state, "worker"); len(rows) != 0 {
+		t.Fatalf("a given pane was registered: %#v", rows)
+	}
+	again := f.run(t, "worker", "--close")
+	if again.code != 3 {
+		t.Fatalf("release --close of a given pane: status=%d stdout=%q stderr=%q", again.code, again.stdout, again.stderr)
+	}
+	for _, call := range again.calls {
+		if len(call.Argv) >= 2 && call.Argv[0] == "pane" && call.Argv[1] == "close" {
+			t.Fatalf("a given pane was closed: %#v", again.calls)
+		}
+	}
+}
+
 func TestReleaseWithoutClosePrunesGoneRows(t *testing.T) {
 	// The registry write prunes rows whose pane is gone from Herdr.
 	f := newOrphanReleaseFixture(t, orphanAgents, orphanPanes, "", []string{releasedRow("old", "ws:pGone")}, []fakecli.Rule{
