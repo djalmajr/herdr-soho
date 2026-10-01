@@ -741,6 +741,10 @@ func emitDispatchResult(agent, role, kind, composed, report, taskReport, status 
 		return 11
 	case "provider-error":
 		cause, _ := out.Get("cause")
+		if fmt.Sprint(cause) == provider.HarnessModuleCause {
+			core.Warn(fmt.Sprintf("agent '%s' stopped on a harness error: its CLI could not load one of its own files (Error: Cannot find module), often after the CLI was updated while it ran. It is idle without a report; restart it (release --close, then spawn --fresh) and resend the brief.", agent), frictionLogPath, "dispatch")
+			return 14
+		}
 		core.Warn(fmt.Sprintf("agent '%s' stopped on a provider error: %v. It is idle without a report; ask the user whether to resend the brief, switch the assistant, or wait.", agent, cause), frictionLogPath, "dispatch")
 		return 14
 	case "capacity":
