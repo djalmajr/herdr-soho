@@ -104,6 +104,15 @@ dispatching: any place where you would have to choose is a gap.
   can trigger a CLI's folder-trust prompt; tell the user or use a folder
   already trusted. A CLI that crashes at start shows it in its pane — read
   the pane before blaming the transport.
+- **One obligation per line.** `Expected result` lists each obligation
+  on its own line (the role, the gate, the claim, the limit); a single
+  running paragraph makes the worker decode which numbers are facts to
+  prove and which are context.
+- **Work still in flight is named with its state.** A slice that reads or
+  reports on work not yet finished (an active amendment, another worker's
+  slice) names it on its own line with its state, such as "amendment
+  T100525 active: do not call it finished", instead of leaving the worker
+  to infer the state from missing reports.
 - **Facts verified when the brief is written.** Flags, versions and
   endpoints come from `--help` or the source at that moment; CLIs update
   themselves between sessions.
