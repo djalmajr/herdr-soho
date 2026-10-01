@@ -824,6 +824,33 @@ func TestRetryLineCodexMidLineCounter(t *testing.T) {
 	})
 }
 
+func TestRetryLineModelPhrasesWithoutParenCounter(t *testing.T) {
+	t.Run("retryLine: model wording with an n/m figure but no (n/m) counter does not count", func(t *testing.T) {
+		for _, screen := range []string{
+			"retrying the 1/2 migration\n",
+			"Now retrying the 1/2 migration\n",
+			"I'll try again: retrying the 1/2 migration\n",
+			"Finished retrying the 2026/10 cutover\n",
+		} {
+			if got := RetryLine("working", screen); got != "" {
+				t.Errorf("RetryLine(working, %q) = %q, want empty (model wording)", screen, got)
+			}
+		}
+	})
+	t.Run("retryLine: a line-start form needs the (n/m) counter or an in-N deadline, not any digit", func(t *testing.T) {
+		for _, screen := range []string{
+			"Retrying 2 files\n",
+			// A digit without the (n/m) counter or the in-N deadline: the
+			// line-start form the brief no longer counts on any digit alone.
+			"Will retry, 3 files left\n",
+		} {
+			if got := RetryLine("working", screen); got != "" {
+				t.Errorf("RetryLine(working, %q) = %q, want empty", screen, got)
+			}
+		}
+	})
+}
+
 func equalJSON(got any, want json.RawMessage) (bool, error) {
 	b, err := json.Marshal(got)
 	if err != nil {

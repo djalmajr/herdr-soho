@@ -23,7 +23,8 @@ const HarnessModuleCause = "Error: Cannot find module"
 var (
 	retryingRE       = regexp.MustCompile(`retrying|retry in|will retry|reconnecting`)
 	errorTailRetryRE = regexp.MustCompile(`error.*(·|-)[ \t]*retrying`)
-	retryCounterRE   = regexp.MustCompile(`retrying.*\d+/\d+`)
+	retryCounterRE   = regexp.MustCompile(`retrying.*\(\d+/\d+`)
+	retryDeadlineRE  = regexp.MustCompile(`\bin \d`)
 	econnRE          = regexp.MustCompile(`\bECONN(REFUSED|RESET)\b`)
 	providerStatusRE = regexp.MustCompile(`\b(500|502|503|504)\b` + jsWhitespace + `*[:{(]`)
 	capacity529RE    = regexp.MustCompile(`\b529\b`)
@@ -174,10 +175,13 @@ func stripStatusGlyph(value string) string {
 // not the model talking about its own retry. It counts only when the line,
 // after the box prefix, the spaces and a single status glyph, starts with
 // Retrying, Reconnecting or Will retry, or carries a `· Retrying`/`- Retrying`
-// tail after an Error, or carries a `retrying` followed later by a `n/m`
-// counter (codex's mid-line "retrying sampling request (1/5 ...)") (a), AND it
-// carries a digit or starts with Reconnecting (b). "Retrying with the correct
-// text." and "Now retrying the build, attempt 2" (no `n/m` counter) fail.
+// tail after an Error, or carries a `retrying` followed later by an `n/m`
+// counter right after a `(` (codex's mid-line "retrying sampling request
+// (1/5 ...)") (a), AND it carries a digit or starts with Reconnecting (b).
+// The line-start Retrying/Will retry forms tighten (b): they need that
+// `n/m` counter right after a `(` or a deadline such as `in 4s` or
+// `in 30 seconds`, so "retrying the 1/2 migration" and "Retrying 2 files"
+// fail. A Reconnecting start counts without a number.
 func retryLineReports(line string) bool {
 	lower := text.ASCIILower(stripStatusGlyph(line))
 	leading := strings.HasPrefix(lower, "retrying") ||
@@ -186,8 +190,13 @@ func retryLineReports(line string) bool {
 	if !leading && !errorTailRetryRE.MatchString(lower) && !retryCounterRE.MatchString(lower) {
 		return false
 	}
-	return strings.ContainsAny(lower, "0123456789") ||
-		strings.HasPrefix(lower, "reconnecting")
+	if strings.HasPrefix(lower, "reconnecting") {
+		return true
+	}
+	if leading {
+		return retryCounterRE.MatchString(lower) || retryDeadlineRE.MatchString(lower)
+	}
+	return strings.ContainsAny(lower, "0123456789")
 }
 
 // harnessModuleCause reports whether line is the first line of the stop of a
