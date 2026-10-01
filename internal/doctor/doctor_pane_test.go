@@ -19,7 +19,8 @@ func paneContextFixture(t *testing.T, rules []fakecli.Rule) (platform.Env, strin
 	home := filepath.Join(root, "home")
 	bin := filepath.Join(root, "bin")
 	state := filepath.Join(root, "state")
-	for _, dir := range []string{home, bin, state} {
+	skill := filepath.Join(root, "skill")
+	for _, dir := range []string{home, bin, state, skill} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -33,7 +34,10 @@ func paneContextFixture(t *testing.T, rules []fakecli.Rule) (platform.Env, strin
 		"HERDR_SOCKET_PATH":         filepath.Join(root, "missing.sock"),
 		"HERDR_SOHO_DIR":            state,
 		"HERDR_SOHO_FAKECLI_CONFIG": bin,
-		"HERDR_SOHO_SKILL_DIR":      root,
+		// The state must stay outside the skill dir: StateDir refuses a
+		// state dir inside the skill (exit 2), so the fixture's skill is a
+		// sibling, not the root that holds the state.
+		"HERDR_SOHO_SKILL_DIR": skill,
 	}
 	return env, root
 }

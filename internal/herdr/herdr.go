@@ -486,6 +486,23 @@ func NotificationShow(title, body string, env platform.Env) {
 func PaneClose(pane string, env platform.Env) bool {
 	return ok(run([]string{"pane", "close", pane}, env))
 }
+
+// PaneGetGone re-queries the pane with `herdr pane get` after a failed close:
+// true only when the query fails with the pane_not_found code (the pane is
+// already gone). A present pane, or a failure with any other cause, reports
+// false so the caller keeps its "still open" report.
+func PaneGetGone(pane string, env platform.Env) bool {
+	r := run([]string{"pane", "get", pane}, env)
+	if ok(r) {
+		return false
+	}
+	raw := r.Stderr
+	if raw == "" {
+		raw = r.Stdout
+	}
+	code, _ := errorInfo(raw)
+	return code == "pane_not_found"
+}
 func PaneSendText(pane, text string, env platform.Env) bool {
 	return ok(run([]string{"pane", "send-text", pane, text}, env))
 }

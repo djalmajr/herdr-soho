@@ -475,6 +475,10 @@ func appendPeerLog(stateDir, from, to, result string, chars int, id string, env 
 	if core.Nowrite(env) {
 		return
 	}
+	// Defense: peer logs are state and never land inside the skill.
+	if core.StatePathInSkill(env, stateDir) != "" {
+		return
+	}
 	clean := func(v string) string { return peerLogSeparators.ReplaceAllString(v, " ") }
 	line := fmt.Sprintf("%s\t%s\t%s\t%s\t%d\t%s\n", platform.Now().Format("2006-01-02T15:04:05"), clean(from), clean(to), clean(result), chars, clean(id))
 	if os.MkdirAll(stateDir, 0o755) == nil {
@@ -553,6 +557,9 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	}
 	id := RandomPeerID()
 	stateDir := core.StateDirPath(ctx, env, cwd)
+	if skill := core.StatePathInSkill(env, stateDir); skill != "" {
+		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was sent)", stateDir, skill), 2)
+	}
 	log := func(from, to, result string) { appendPeerLog(stateDir, from, to, result, utf16Length(body), id, env) }
 	t := resolveTarget(target, env)
 	if !t.OK {

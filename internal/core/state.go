@@ -160,6 +160,11 @@ func StateDirPath(ctx *Config, env platform.Env, cwd string) string {
 }
 
 func StateDir(ctx *Config, env platform.Env, cwd string) string {
+	if !Nowrite(env) {
+		if skill := StateInSkill(ctx, env, cwd); skill != "" {
+			platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was written)", StateDirPath(ctx, env, cwd), skill), 2)
+		}
+	}
 	dir := StateDirPath(ctx, env, cwd)
 	if Nowrite(env) {
 		return dir
