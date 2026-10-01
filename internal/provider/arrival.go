@@ -52,17 +52,40 @@ const boxPrefix = "\u2503"
 // only a prefix such as `…/briefs/<agent>-`, which every brief of that agent
 // shares), or whole once the history lines pi wraps a consumed prompt into are
 // reassembled. The fragment and queue rules of QueuedPromptEvidence apply only
-// to lines outside the `┃` box.
+// to lines outside the `┃` box. When the screen carries pi's two input-box
+// borders (PiInputRegion), every rule here — the whole-line check, the `┃` box
+// join, and the queue rules — skips the lines between the borders: there a
+// prompt sits typed and not sent yet, so the composed path whole on one box
+// line is not arrival. Without the two borders the whole screen is inspected,
+// as before.
 func PromptEvidence(screen, composed string) bool {
 	if composed == "" {
 		return false
 	}
-	if strings.Contains(screen, composed) {
+	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
+	boxStart, boxEnd, inBox := 0, 0, false
+	if s, e, ok := PiInputRegion(screen); ok {
+		boxStart, boxEnd, inBox = s, e, true
+	}
+	outsideRegion := func(i int) bool {
+		return !inBox || i < boxStart || i >= boxEnd
+	}
+	if inBox {
+		// A line inside pi's input box holds the prompt typed and not sent
+		// yet: only the lines outside the region can carry the whole path.
+		for i, line := range lines {
+			if outsideRegion(i) && strings.Contains(line, composed) {
+				return true
+			}
+		}
+	} else if strings.Contains(screen, composed) {
 		return true
 	}
-	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
 	var joined, outside strings.Builder
-	for _, line := range lines {
+	for i, line := range lines {
+		if !outsideRegion(i) {
+			continue
+		}
 		head := strings.TrimLeft(line, " \t")
 		if strings.HasPrefix(head, boxPrefix) {
 			joined.WriteString(strings.TrimPrefix(head, boxPrefix))
