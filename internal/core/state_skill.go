@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -38,6 +39,17 @@ func StatePathInSkill(env platform.Env, statePath string) string {
 		return skill
 	}
 	return ""
+}
+
+// StateInSkillMessage is the refusal sentence for a write whose path would
+// land inside the installed skill: the same sentence StateDir uses, with
+// command prefixed like the command's other errors when it is not "".
+func StateInSkillMessage(command, path, skill string) string {
+	phrase := fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was written)", path, skill)
+	if command == "" {
+		return phrase
+	}
+	return command + ": " + phrase
 }
 
 // skillComparablePath resolves p for the skill comparison: EvalSymlinks when

@@ -210,6 +210,18 @@ func CmdDoctor(args []string, ctx *core.Config, env platform.Env, cwd string) {
 }
 
 func doctorFix(where, panes string, ctx *core.Config, env platform.Env, cwd string) {
+	// Refuse a write inside the skill before any file or herdr call: the
+	// project target is the project root, the session target the state root.
+	if where == "session" {
+		if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
+			platform.DieFriction(core.StateInSkillMessage("doctor --fix", core.StateRootPath(ctx, env, cwd), skill), 2)
+		}
+	} else if where == "project" {
+		root := platform.ProjectRoot(env, cwd)
+		if skill := core.StatePathInSkill(env, root); skill != "" {
+			platform.DieFriction(core.StateInSkillMessage("doctor --fix", root, skill), 2)
+		}
+	}
 	dest := core.ConfigFileFor(where, env, cwd)
 	if where == "session" {
 		dest = core.SessionConfPath(ctx, env, cwd)
@@ -387,6 +399,7 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 	} else {
 		s.Ok("config: lanes=off (per-role reuse unchanged)")
 	}
+	doctorOrphans(ctx, env, cwd, s)
 	doctorDiscardedModels(ctx, env, cwd, s)
 	doctorModelPairs(ctx, env, cwd, s)
 	doctorLaneArgs(ctx, env, s)
@@ -803,6 +816,34 @@ func doctorLaneWarnings(ctx *core.Config, env platform.Env, cwd string, s *Say) 
 		if source == "user" || source == "project" || source == "env" || source == "session" {
 			s.Warning(fmt.Sprintf("config: %s is set (%s) but the planner is the orchestrator and opens no pane. Remove it (doctor --fix).", key, source))
 		}
+	}
+}
+
+// doctorOrphans reports one warn per live lane-worker pane that has already
+// left the roster, with the command to close it. Outside a Herdr pane
+// (HERDR_ENV != 1) there is no live-agent context to check; a failing herdr
+// call is swallowed and the doctor keeps going, like its other herdr probes.
+func doctorOrphans(ctx *core.Config, env platform.Env, cwd string, s *Say) {
+	if env.Get("HERDR_ENV") != "1" {
+		return
+	}
+	var orphans []core.Orphan
+	func() {
+		defer func() {
+			if value := recover(); value != nil {
+				if _, ok := value.(*platform.ExitError); !ok {
+					panic(value)
+				}
+			}
+		}()
+		orphans = core.Orphans(ctx, env, cwd)
+	}()
+	for _, orphan := range orphans {
+		state := orphan.State
+		if state == "" {
+			state = "null"
+		}
+		s.Warning(fmt.Sprintf("orphan pane: '%s' (%s, %s) is not in the roster; close it with: herdr-soho release %s --close", orphan.Name, orphan.Pane, state, orphan.Name))
 	}
 }
 

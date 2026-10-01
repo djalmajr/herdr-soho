@@ -333,7 +333,13 @@ func StateRoot(ctx *Config, env platform.Env, cwd string) string {
 	root := platform.StateProjectRoot(env, cwd)
 	dir := StateRootPath(ctx, env, cwd)
 	rel := StateGitignoreRel(root, dir)
-	if rel != "" && !Nowrite(env) {
+	// The append below writes root/.gitignore: when the state root lives
+	// inside the installed skill (a skill that is a git checkout), that would
+	// create or change the .gitignore inside the skill. Read-only callers
+	// (layout-plan resolves the state path through StateRoot/StateDirPath)
+	// must stay side-effect free there, so the append is skipped for a state
+	// path inside the skill; StateRoot still returns the path.
+	if rel != "" && !Nowrite(env) && StatePathInSkill(env, dir) == "" {
 		result := platform.RunCli("git", []string{"-C", root, "rev-parse", "--is-inside-work-tree"}, platform.RunOptions{Env: env, Cwd: root})
 		if result.Status != nil && *result.Status == 0 && GitignoreNeeds(root, rel, env) {
 			file := filepath.Join(root, ".gitignore")
@@ -711,6 +717,14 @@ func CmdConfigSet(argv []string, ctx *Config, env platform.Env, cwd string) {
 		platform.Die("config set: invalid value '"+value+"' for "+key, 2)
 	}
 	dest := ConfigFileFor(where, env, cwd)
+	// The project file lands under the project root; refuse it inside the
+	// skill before MkdirAll/rewrite. The user file stays valid from inside.
+	if where == "project" {
+		root := platform.ProjectRoot(env, cwd)
+		if skill := StatePathInSkill(env, root); skill != "" {
+			platform.Die(StateInSkillMessage("config set", root, skill), 2)
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o777); err != nil {
 		platform.Die(fmt.Sprintf("config set: could not rewrite %s (file left untouched)", dest), 4)
 	}

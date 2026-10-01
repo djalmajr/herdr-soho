@@ -52,17 +52,40 @@ const boxPrefix = "\u2503"
 // only a prefix such as `…/briefs/<agent>-`, which every brief of that agent
 // shares), or whole once the history lines pi wraps a consumed prompt into are
 // reassembled. The fragment and queue rules of QueuedPromptEvidence apply only
-// to lines outside the `┃` box.
+// to lines outside the `┃` box. When the screen carries pi's two input-box
+// borders (PiInputRegion), every rule here — the whole-line check, the `┃` box
+// join, and the queue rules — skips the lines between the borders: there a
+// prompt sits typed and not sent yet, so the composed path whole on one box
+// line is not arrival. Without the two borders the whole screen is inspected,
+// as before.
 func PromptEvidence(screen, composed string) bool {
 	if composed == "" {
 		return false
 	}
-	if strings.Contains(screen, composed) {
+	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
+	boxStart, boxEnd, inBox := 0, 0, false
+	if s, e, ok := PiInputRegion(screen); ok {
+		boxStart, boxEnd, inBox = s, e, true
+	}
+	outsideRegion := func(i int) bool {
+		return !inBox || i < boxStart || i >= boxEnd
+	}
+	if inBox {
+		// A line inside pi's input box holds the prompt typed and not sent
+		// yet: only the lines outside the region can carry the whole path.
+		for i, line := range lines {
+			if outsideRegion(i) && strings.Contains(line, composed) {
+				return true
+			}
+		}
+	} else if strings.Contains(screen, composed) {
 		return true
 	}
-	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
 	var joined, outside strings.Builder
-	for _, line := range lines {
+	for i, line := range lines {
+		if !outsideRegion(i) {
+			continue
+		}
 		head := strings.TrimLeft(line, " \t")
 		if strings.HasPrefix(head, boxPrefix) {
 			joined.WriteString(strings.TrimPrefix(head, boxPrefix))
@@ -152,27 +175,46 @@ func blockMatchesPath(block, pattern string) bool {
 	return ti >= len(text) || unicode.IsSpace(text[ti])
 }
 
+// isPiBorderLine reports whether the line is one of pi's input-box borders,
+// ignoring whitespace: a line composed only of '─' (U+2500), or a line that,
+// without its end spaces, starts with at least two '─', ends with at least
+// two '─', and carries '─' in at least half of its runes — a working pi marks
+// the top border with its activity indicator, like `── ⠴ Working ──…`. A
+// plain text line with a '─' in the middle is not a border.
+func isPiBorderLine(line string) bool {
+	content := strings.TrimFunc(line, isJSWhitespace)
+	if content == "" {
+		return false
+	}
+	runes := []rune(content)
+	border, plain := 0, true
+	for _, r := range runes {
+		if r == '─' {
+			border++
+		} else {
+			plain = false
+		}
+	}
+	if plain {
+		return true
+	}
+	if border*2 < len(runes) {
+		return false
+	}
+	return strings.HasPrefix(string(runes[:2]), "──") && strings.HasSuffix(string(runes), "──")
+}
+
 // PiInputRegion reports the line index range [start, end) of pi's input box in
-// the screen's lines: the lines between the last two lines composed only of
-// '─' (U+2500), ignoring whitespace (pi's borders, chat history above, footer
-// below). ok is false when the screen has fewer than two such lines; the
-// caller then keeps the whole-screen behavior.
+// the screen's lines: the lines between the last two border lines (isPiBorderLine:
+// lines of '─', or the working pi's `── ⠴ Working ──…` top border), ignoring
+// whitespace (pi's borders, chat history above, footer below). ok is false when
+// the screen has fewer than two such lines; the caller then keeps the
+// whole-screen behavior.
 func PiInputRegion(screen string) (start, end int, ok bool) {
 	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
 	borders := make([]int, 0, 2)
 	for i, line := range lines {
-		content := strings.TrimFunc(line, isJSWhitespace)
-		if content == "" {
-			continue
-		}
-		border := true
-		for _, r := range content {
-			if r != '─' {
-				border = false
-				break
-			}
-		}
-		if border {
+		if isPiBorderLine(line) {
 			borders = append(borders, i)
 		}
 	}

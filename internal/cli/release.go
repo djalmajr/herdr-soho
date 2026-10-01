@@ -33,6 +33,9 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 	sd := core.StateDir(ctx, env, cwd)
 	line := core.RosterLine(sd, agent)
 	if line == "" {
+		if closePane && releaseOrphan(agent, force, ctx, env, cwd) {
+			return 0
+		}
 		core.DieFriction(fmt.Sprintf("agent '%s' is not in the roster (state dir: %s)", agent, sd), 3, frictionLogPath, "release")
 	}
 	fields := strings.Split(line, "\t")
@@ -96,6 +99,14 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 			layout.HerdTabsRelabel(ctx, env, cwd)
 		}()
 	}
+	if !closes && pane != "" && created == "1" {
+		// The pane stays alive outside the roster: register it, like the
+		// other state files, so the orphan commands know this project
+		// released it. A pane the skill did not create (spawn --pane) is
+		// never registered: release --close must never close it later.
+		core.ReleasedPanesRecord(ctx, env, cwd, agent, pane, field(2))
+		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: release: the pane %s stays open; close it later with: herdr-soho release %s --close\n", pane, agent)
+	}
 
 	worktrees := exec.Command("git", "-C", wdir, "worktree", "list")
 	worktrees.Env = env.List()
@@ -115,6 +126,34 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 	}
 	_, _ = fmt.Fprintf(platform.Stdout, "released %s\n", agent)
 	return 0
+}
+
+// releaseOrphan closes the pane of an agent this project released without
+// --close (its pane and name both match a row of the released-panes
+// registry): a live agent outside the roster and outside the orchestrator's
+// own pane. Only a confirmed-idle orphan is closed; a working, blocked or
+// unqueryable one is refused with 10 unless --force is passed. A failed pane
+// close exits 4 and keeps the registry row: the pane is still open, and the
+// release must not claim otherwise.
+func releaseOrphan(name string, force bool, ctx *core.Config, env platform.Env, cwd string) bool {
+	orphan, ok := core.FindOrphan(name, ctx, env, cwd)
+	if !ok {
+		return false
+	}
+	state := ""
+	if !force {
+		state = herdr.AgentState(name, env, herdr.Timeout, nil).State
+	}
+	if !force && state != "idle" && state != "done" {
+		core.DieFriction(fmt.Sprintf("agent '%s' is not in the roster and is %s; pass --force to close its pane", name, state), 10, frictionLogPath, "release")
+	}
+	if herdr.PaneClose(orphan.Pane, env) {
+		core.ReleasedPanesForget(ctx, env, cwd, orphan.Pane)
+		_, _ = fmt.Fprintf(platform.Stdout, "released %s (pane %s closed; it was no longer in the roster)\n", name, orphan.Pane)
+	} else {
+		core.DieFriction(fmt.Sprintf("release: could not close the pane %s of '%s'; close it by hand with: herdr pane close %s", orphan.Pane, name, orphan.Pane), 4, frictionLogPath, "release")
+	}
+	return true
 }
 
 func releaseAutoRegrid(ctx *core.Config, env platform.Env, cwd string) {

@@ -178,6 +178,11 @@ func CmdSetup(args []string, ctx *core.Config, env platform.Env, cwd string) {
 		return
 	}
 	root := platform.ProjectRoot(env, cwd)
+	// The block, hooks, excludes and preset all land under the project root;
+	// refuse them inside the skill before anything is written.
+	if skill := core.StatePathInSkill(env, root); skill != "" {
+		platform.DieFriction(core.StateInSkillMessage("setup", root, skill), 2)
+	}
 	modeLocal := resolveSetupMode(local, target, ctx, env, "setup")
 	localFile := ""
 	if modeLocal {

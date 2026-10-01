@@ -359,6 +359,36 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			priorAuth[cause] = true
 		}
 	}
+	// A Claude Code target writes every prompt it takes into its local
+	// session transcript as a "type":"user" line, and a working claude can
+	// show none of the prompt on screen (the alternate screen scrolls, and
+	// the long composed path is split over lines): when the transcript
+	// resolves, a rise in the count of those lines holding this prompt's
+	// path, read before the send, is arrival proof within the check window.
+	// ClaudeTranscriptPath resolves with a local `agent get` plus a local
+	// file, so a remote target or one without a local agent_session resolves
+	// nothing and keeps the screen-based path, with no new warning. The
+	// count is the only thing read from the transcript: no line content is
+	// retained, logged, or returned.
+	claudeTranscriptPath := ""
+	claudeTranscriptPre := 0
+	claudeTranscriptArmed := false
+	if checkOn && kind == "claude" {
+		if path := herdr.ClaudeTranscriptPath(agent, env); path != "" {
+			if pre, ok := herdr.CountClaudeUserMarkerLines(path, claudeTranscriptPathMarker(composed)); ok {
+				claudeTranscriptPath = path
+				claudeTranscriptPre = pre
+				claudeTranscriptArmed = true
+			}
+		}
+	}
+	transcriptArrival := func() bool {
+		if !claudeTranscriptArmed {
+			return false
+		}
+		count, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, claudeTranscriptPathMarker(composed))
+		return ok && count > claudeTranscriptPre
+	}
 	p := herdr.AgentPrompt(agent, text, env)
 	if !p.Ok {
 		if err := writeDispatchSidecar(sidecar, kind, model, effort, "failed", "", session); err != nil {
@@ -385,7 +415,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			screen := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
 			return provider.PromptEvidence(screen, composed)
 		}
-		if !wasWorking && !waitDispatchArrival(window, env, arrived) {
+		if !wasWorking && !waitDispatchArrivalExtra(window, env, arrived, transcriptArrival) {
 			screen := herdr.AgentRead(env, agent, "visible", nil)
 			screenMoved := strconv.FormatUint(uint64(waitpkg.CksumField(screen)), 10) != H0
 			if screenMoved && composedPathSeenOutsideInput(agent, composed, env) {
@@ -418,7 +448,9 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			}
 		}
 		if wasWorking {
-			ok := waitDispatchArrivalExtra(window, env, arrived, promptEvidence)
+			ok := waitDispatchArrivalExtra(window, env, arrived, func() bool {
+				return promptEvidence() || transcriptArrival()
+			})
 			if !ok && settleSecs > 0 {
 				// Some CLIs (Cursor) hold a prompt sent during a turn in a queue they do
 				// not show: wait up to prompt_settle_seconds for that turn to end, then
@@ -583,7 +615,24 @@ func waitWorkingTurnEnd(agent, preSeq string, window time.Duration, env platform
 }
 func intPtr(v int) *int { return &v }
 func composedPathSeenOutsideInput(agent, composed string, env platform.Env) bool {
-	lines := strings.Split(strings.ReplaceAll(herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40)), "\r\n", "\n"), "\n")
+	screen := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
+	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
+	boxStart, boxEnd, inBox := 0, 0, false
+	if s, e, ok := provider.PiInputRegion(screen); ok {
+		boxStart, boxEnd, inBox = s, e, true
+	}
+	if inBox {
+		// With pi's two input-box borders, "outside the input box" is the lines
+		// outside the region between them: the footer below the box counts as
+		// outside, and a line between the borders holds the prompt typed and
+		// not sent yet.
+		for i, line := range lines {
+			if (i < boxStart || i >= boxEnd) && strings.Contains(line, composed) {
+				return true
+			}
+		}
+		return false
+	}
 	kept := []string{}
 	for _, line := range lines {
 		if strings.TrimSpace(line) != "" {
@@ -600,6 +649,27 @@ func composedPathSeenOutsideInput(agent, composed string, env platform.Env) bool
 	}
 	return false
 }
+
+// claudeTranscriptPathMarker returns a path the way a Claude Code session
+// transcript writes it inside a JSON string: a backslash (the Windows path
+// separator) is written as two and a quote escaped, as JSON writes them. A
+// path without those characters comes back unchanged, so the Unix composed
+// path matches the transcript line verbatim.
+func claudeTranscriptPathMarker(path string) string {
+	var out strings.Builder
+	for _, r := range path {
+		switch r {
+		case '\\':
+			out.WriteString(`\\`)
+		case '"':
+			out.WriteString(`\"`)
+		default:
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
 func sanitizeDispatchCause(raw string) string { return core.FrictionSafe(strings.TrimSpace(raw)) }
 func dispatchCauseOrUnknown(err error) string {
 	if cause := sanitizeDispatchCause(err.Error()); cause != "" {

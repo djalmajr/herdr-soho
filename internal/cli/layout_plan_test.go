@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
 func TestLayoutPlanFixture(t *testing.T) {
@@ -205,5 +208,92 @@ func TestParityLayoutPlanSixFixturesByteForByte(t *testing.T) {
 				t.Fatalf("code=%d stdout=%q stderr=%q; want code=%d stdout=%q", code, out.String(), stderr.String(), want.RC, want.Out)
 			}
 		})
+	}
+}
+
+func TestLayoutPlanFromInsideTheSkillGitCheckout(t *testing.T) {
+	// Mutation captured: StateRoot used to append the state dir to the
+	// .gitignore of the git checkout the cwd resolved to; run from inside a
+	// skill that is a git checkout, layout-plan would create or change the
+	// skill's own .gitignore (StateDirPath resolves the state path through
+	// StateRoot even though layout-plan writes nothing else).
+	// The fake herdr is the project's cross-platform fakecli binary: the old
+	// #!/bin/sh script does not run on Windows, where the rc.11 round first
+	// ran this test (gowin51: code 4 "pane layout failed").
+	root := t.TempDir()
+	skill := filepath.Join(root, "skill")
+	if err := os.MkdirAll(filepath.Join(skill, "roles"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("# herdr-soho\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := filepath.EvalSymlinks(skill); err == nil {
+		skill = resolved // git reports the resolved spelling (macOS /tmp)
+	}
+	if out, gitErr := exec.Command("git", "init", "-q", skill).CombinedOutput(); gitErr != nil {
+		t.Fatalf("git init: %s %v", out, gitErr)
+	}
+	const seeded = "# pre-existing\n"
+	if err := os.WriteFile(filepath.Join(skill, ".gitignore"), []byte(seeded), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(root, "bin")
+	const layoutJSON = `{"result":{"layout":{"area":{"width":100,"height":100},"panes":[{"pane_id":"C","rect":{"x":0,"y":0,"width":50,"height":100}},{"pane_id":"A","rect":{"x":50,"y":0,"width":50,"height":100}}]}}}`
+	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{
+		{Argv: []string{"pane", "layout", "--current"}, Stdout: layoutJSON},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(skill); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldCwd); err != nil {
+			t.Errorf("restore cwd: %v", err)
+		}
+	})
+	entries := fakecli.Env(testutil.CleanEnv(t), bin, fakecli.EnvOptions{IncludeBasePath: true})
+	env := platform.Env{}
+	for _, entry := range entries {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	home := t.TempDir()
+	env["HERDR_ENV"], env["HERDR_PANE_ID"], env["HERDR_WORKSPACE_ID"] = "1", "C", "ws"
+	env["HERDR_SOHO_SKILL_DIR"] = skill
+	env["HOME"], env["USERPROFILE"] = home, home
+	oldOut, oldErr := platform.Stdout, platform.Stderr
+	var out, errOut bytes.Buffer
+	platform.Stdout, platform.Stderr = &out, &errOut
+	t.Cleanup(func() { platform.Stdout, platform.Stderr = oldOut, oldErr })
+	if code := Run([]string{"layout-plan"}, env); code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), `"placement":"split","anchor":"C"`) {
+		t.Fatalf("layout-plan did not proceed: %q", out.String())
+	}
+	calls, err := fakecli.ReadCalls(filepath.Join(bin, "herdr.calls.jsonl"))
+	if err != nil {
+		t.Fatalf("read the herdr call log: %v", err)
+	}
+	requested := false
+	for _, call := range calls {
+		if len(call.Argv) >= 2 && call.Argv[0] == "pane" && call.Argv[1] == "layout" {
+			requested = true
+		}
+	}
+	if !requested {
+		t.Fatalf("pane layout was not requested: %#v", calls)
+	}
+	got, err := os.ReadFile(filepath.Join(skill, ".gitignore"))
+	if err != nil || string(got) != seeded {
+		t.Fatalf("layout-plan changed the skill .gitignore: %q err=%v", got, err)
 	}
 }
