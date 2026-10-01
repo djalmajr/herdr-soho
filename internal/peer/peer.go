@@ -685,8 +685,9 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 				if strings.Contains(recent, "#"+id) {
 					visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 					if visibleErr == "" && visible != preScreen && !isDialogScreen(visible, t.Kind, statusOr(curGet, currentStatus)) {
-						normVisible := NormalizeScreen(visible)
-						if !strings.Contains(normVisible, NormalizeScreen(endLine)) && !strings.Contains(normVisible, NormalizeScreen("#"+id)) {
+						// A message in pi's Steering queue sits above the input box but is
+						// not read yet: it is queued (reported after the window), not delivered.
+						if !messageStillInScreen(t.Kind, visible, endLine, id) && !steeringQueued(visible, id) {
 							return proofResult{Proven: true, RecentReadSucceeded: true, LastCause: result.LastCause}
 						}
 					} else if visibleErr != "" {
@@ -742,15 +743,10 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		log(senderRef, t.RefShown, "dialog")
 		platform.Die(fmt.Sprintf("send: %s is showing a dialog after the message was typed; press nothing and read its pane", t.RefShown), 17)
 	}
-	idInBox := false
-	for _, line := range TailLines(preEnterVis, 15) {
-		if strings.Contains(NormalizeScreen(line), NormalizeScreen("#"+id)) {
-			idInBox = true
-		}
-	}
+	idInBox := idInInputBox(t.Kind, preEnterVis, id)
 	if !idInBox {
 		log(senderRef, t.RefShown, "lost")
-		platform.Die(fmt.Sprintf("send: %s did not take the message (no sign of it in its state or transcript); read its pane before sending again", t.RefShown), 15)
+		platform.Die(fmt.Sprintf("send: %s did not take the message (no sign of it in its state or screen); read its pane before sending again", t.RefShown), 15)
 	}
 	_ = sendKey(t.Machine, t.TargetArg, "enter", env)
 	res = pollWindow()
@@ -768,8 +764,72 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		platform.Die(fmt.Sprintf("send: could not confirm that %s took the message (%s); read its pane before sending again", t.RefShown, cause), 15)
 	}
 	log(senderRef, t.RefShown, "lost")
-	platform.Die(fmt.Sprintf("send: %s did not take the message (no sign of it in its state or transcript); read its pane before sending again", t.RefShown), 15)
+	platform.Die(fmt.Sprintf("send: %s did not take the message (no sign of it in its state or screen); read its pane before sending again", t.RefShown), 15)
 	return 15
+}
+
+// piInputRegion returns the visible screen's lines between the last two lines
+// composed only of '─' (U+2500), ignoring whitespace: pi's input box, whose
+// borders are those two separator lines (chat history above, footer below).
+// ok is false when the screen has fewer than two such lines; the caller then
+// keeps the whole-screen behavior.
+func piInputRegion(screen string) ([]string, bool) {
+	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
+	borders := make([]int, 0, 2)
+	for i, line := range lines {
+		content := strings.TrimFunc(line, isJSWhitespace)
+		if content == "" {
+			continue
+		}
+		border := true
+		for _, r := range content {
+			if r != '─' {
+				border = false
+				break
+			}
+		}
+		if border {
+			borders = append(borders, i)
+		}
+	}
+	if len(borders) < 2 {
+		return nil, false
+	}
+	return lines[borders[len(borders)-2]+1 : borders[len(borders)-1]], true
+}
+
+// messageStillInScreen reports whether the visible screen still holds the
+// message's marker, meaning the prompt is typed but not taken yet. For a pi
+// target the marker only counts inside the input box: a taken message stays
+// in the chat history, which is part of the visible screen. Without two box
+// borders, and for every other kind, the whole visible screen still counts.
+func messageStillInScreen(kind, visible, endLine, id string) bool {
+	if kind == "pi" {
+		if lines, ok := piInputRegion(visible); ok {
+			region := NormalizeScreen(strings.Join(lines, "\n"))
+			return strings.Contains(region, NormalizeScreen("#"+id)) || strings.Contains(region, NormalizeScreen(endLine))
+		}
+	}
+	visibleNorm := NormalizeScreen(visible)
+	return strings.Contains(visibleNorm, NormalizeScreen(endLine)) || strings.Contains(visibleNorm, NormalizeScreen("#"+id))
+}
+
+// idInInputBox reports the message's id in the screen's input area. For a pi
+// target the id must sit between the box borders before an Enter goes to a
+// busy agent; without borders, and for every other kind, the last 15 lines
+// still count as before.
+func idInInputBox(kind, visible, id string) bool {
+	if kind == "pi" {
+		if lines, ok := piInputRegion(visible); ok {
+			return strings.Contains(NormalizeScreen(strings.Join(lines, "\n")), NormalizeScreen("#"+id))
+		}
+	}
+	for _, line := range TailLines(visible, 15) {
+		if strings.Contains(NormalizeScreen(line), NormalizeScreen("#"+id)) {
+			return true
+		}
+	}
+	return false
 }
 
 // steeringQueued reports a visible pi queue line (`Steering: …`) that holds
