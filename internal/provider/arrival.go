@@ -82,20 +82,26 @@ func PromptEvidence(screen, composed string) bool {
 
 // wrappedBlockEvidence reports the composed path reassembled from the lines pi
 // wraps a consumed prompt into: the line that holds "Read the file" opens a
-// block of up to 8 following lines, cut at the first empty line, and the block
-// joined without any whitespace must begin with "Read the file" plus the
-// composed path, so lines that spell the path without the marker above do not
-// prove it. A block that opens inside pi's input box never counts: there a
-// prompt sits typed and not sent yet. Without the two box borders the block
-// rule runs over the whole screen, as the `┃` box rule does today.
+// block of up to 8 following lines, cut at the first empty line, and the
+// block's original text must begin with "Read the file" plus the composed
+// path, matching rune by rune while skipping only the whitespace (spaces and
+// line breaks) between the pattern's runes, so pi's own wrapping does not
+// defeat the match. The path must end at a word boundary: right after its
+// last rune the block ends or the next original rune is whitespace, so a
+// longer path on screen (`.md-later`, a radical still followed by its
+// continuation) never proves the shorter composed one. A block that opens
+// inside pi's input box never counts: there a prompt sits typed and not sent
+// yet. Without the two box borders the block rule runs over the whole screen,
+// as the `┃` box rule does today.
 func wrappedBlockEvidence(screen string, lines []string, composed string) bool {
 	boxStart, boxEnd, inBox := 0, 0, false
 	if s, e, ok := PiInputRegion(screen); ok {
 		boxStart, boxEnd, inBox = s, e, true
 	}
-	prefix := stripSpace(PromptMarker + composed)
+	pattern := PromptMarker + composed
 	// pi can wrap exactly after the marker's space, leaving the line as
-	// "Read the file" alone; the joined prefix below still gates the proof.
+	// "Read the file" alone; the whitespace-insensitive match below still
+	// gates the proof.
 	marker := strings.TrimRight(PromptMarker, " ")
 	for i, line := range lines {
 		if strings.HasPrefix(strings.TrimLeft(line, " \t"), boxPrefix) {
@@ -111,11 +117,39 @@ func wrappedBlockEvidence(screen string, lines []string, composed string) bool {
 		for n := 1; n <= 8 && i+n < len(lines) && !isJSEmpty(lines[i+n]); n++ {
 			block += "\n" + lines[i+n]
 		}
-		if strings.HasPrefix(stripSpace(block), prefix) {
+		if blockMatchesPath(block, pattern) {
 			return true
 		}
 	}
 	return false
+}
+
+// blockMatchesPath reports whether the block's original text starts with the
+// pattern: each non-whitespace rune of the pattern must meet the same rune in
+// the text, and only whitespace (unicode.IsSpace, line breaks included) may
+// sit between the pattern's runes. After the pattern's last rune the text
+// must end, or the next original rune must be whitespace: a path that
+// continues on the screen (`.md-later`, a radical still followed by `-…`)
+// does not prove the shorter composed one.
+func blockMatchesPath(block, pattern string) bool {
+	text := []rune(block)
+	pat := []rune(pattern)
+	ti, pi := 0, 0
+	for pi < len(pat) {
+		for ti < len(text) && unicode.IsSpace(text[ti]) {
+			ti++
+		}
+		p := pat[pi]
+		pi++
+		if unicode.IsSpace(p) {
+			continue
+		}
+		if ti >= len(text) || text[ti] != p {
+			return false
+		}
+		ti++
+	}
+	return ti >= len(text) || unicode.IsSpace(text[ti])
 }
 
 // PiInputRegion reports the line index range [start, end) of pi's input box in

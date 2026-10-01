@@ -152,3 +152,68 @@ func TestPromptEvidenceOpencodeBoxUnchanged(t *testing.T) {
 		}
 	})
 }
+
+// Round 2 (R-RC10F, P2): the composed path must end at a word boundary in
+// the block's original text — matching skips only the whitespace between the
+// pattern's runes, and the rune right after the path's last one must be
+// whitespace or the end of the block, so a longer path on screen never proves
+// the shorter composed one.
+func TestBlockMatchesPathBoundary(t *testing.T) {
+	pattern := "Read the file /tmp/herdr-soho/reports/build-2-20261001T999999.brief.md"
+	cases := []struct {
+		name, block string
+		want        bool
+	}{
+		{"a space after the path is proof", "Read the file /tmp/herdr-soho/reports/build-2-20261001T999999.brief.md and follow it", true},
+		{"the path at the end of the block is proof", "Read the file /tmp/herdr-soho/reports/build-2-20261001T999999.brief.md", true},
+		{`.md-later is not proof`, "Read the file /tmp/herdr-soho/reports/build-2-20261001T999999.brief.md-later and follow it", false},
+		{"a radical still followed by its continuation is not proof", "Read the file /tmp/herdr-soho/reports/build-2-20261001T999999-amend-probe-with-a-long-name.brief.md and follow it", false},
+		{"a wrap between the pattern's runes is skipped", "Read the file\n /tmp/herdr-soho/reports/build-2-20261001T999999.brief.md and follow it", true},
+		{"text before the marker is not proof", "The user is asking: Read the file /tmp/herdr-soho/reports/build-2-20261001T999999.brief.md", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := blockMatchesPath(tc.block, pattern); got != tc.want {
+				t.Fatalf("blockMatchesPath=%v want %v for %q", got, tc.want, tc.block)
+			}
+		})
+	}
+}
+
+func TestPromptEvidenceWrappedPathBoundary(t *testing.T) {
+	composed := "/tmp/herdr-soho/reports/build-2-20261001T999999.brief.md"
+	t.Run("a path continuing past the composed one is not proof", func(t *testing.T) {
+		// The path is wrapped, so the whole-screen rule cannot see the composed
+		// path; the block rule must reject the -later continuation.
+		screen := "Read the file\n /tmp/herdr-soho/reports/build-2-20261001T\n 999999.brief.md-later and follow it\n"
+		if PromptEvidence(screen, composed) {
+			t.Fatalf("a longer wrapped path must not prove the composed one:\n%s", screen)
+		}
+	})
+	t.Run("the radical of the real consumed path is not proof", func(t *testing.T) {
+		radical := "/var/folders/f2/r857c16x45z6p82wsq_0d_v00000gp/T/herdr-soho/w14/reports/build-2-20261001T999999-amend-probe"
+		if PromptEvidence(consumedPiScreen, radical) {
+			t.Fatalf("the radical still followed by its continuation must not prove the path")
+		}
+	})
+	t.Run("the path ending at the end of a line with the next line and follow it is proof", func(t *testing.T) {
+		// Wrapped, so the whole-screen rule cannot see the path: the line break
+		// right after the path's last rune is the boundary the block rule accepts.
+		screen := "Read the file\n /tmp/herdr-soho/reports/build-2-20261001T\n 999999.brief.md\nand follow it\n"
+		if !PromptEvidence(screen, composed) {
+			t.Fatalf("the path ending at a line break must prove the prompt:\n%s", screen)
+		}
+	})
+	t.Run("the path ending at the end of the block is proof", func(t *testing.T) {
+		// Wrapped and cut off: the block ends right after the path's last rune.
+		screen := "Read the file\n /tmp/herdr-soho/reports/build-2-20261001T\n 999999.brief.md\n"
+		if !PromptEvidence(screen, composed) {
+			t.Fatalf("the path ending the block must prove the prompt:\n%s", screen)
+		}
+	})
+	t.Run("the real consumed screen still proves the prompt", func(t *testing.T) {
+		if !PromptEvidence(consumedPiScreen, wrappedComposed) {
+			t.Fatalf("the real consumed screen must keep proving the prompt")
+		}
+	})
+}
