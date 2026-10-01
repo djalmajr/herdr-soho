@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -107,8 +108,20 @@ func (f *claudeDispatchFixture) seedTranscript(t *testing.T, lines ...string) {
 	}
 }
 
+// claudeTranscriptLine writes a transcript line the way a Claude Code session
+// transcript does: the whole line is JSON, so the text inside its string is
+// escaped the way JSON writes it (a Windows path separator doubled, a quote
+// escaped). The product counts the path in that escaped form
+// (claudeTranscriptPathMarker, internal/cli/dispatch.go); a line written with
+// the raw text never carries the marker on Windows, which is how the rc.11
+// gowin51 round failed.
 func claudeTranscriptLine(role, text string) string {
-	return `{"type":"` + role + `","message":{"role":"` + role + `","content":[{"type":"text","text":"` + text + `"}]}}`
+	body, err := json.Marshal(text)
+	if err != nil {
+		// The text is the plain dispatch sentence; Marshal cannot fail.
+		panic(err)
+	}
+	return `{"type":"` + role + `","message":{"role":"` + role + `","content":[{"type":"text","text":` + string(body) + `}]}}`
 }
 
 // claudeDispatchText is the prompt text dispatch sends (internal/cli/
@@ -280,6 +293,31 @@ func TestDispatchClaudeTranscriptArrival(t *testing.T) {
 		}
 		requireNoEnter(t, f.bin)
 	})
+}
+
+// TestClaudeTranscriptLineCarriesTheWindowsMarker: the rc.11 Windows round
+// (gowin51) failed TestDispatchClaudeTranscriptArrival because the fixture
+// line wrote the composed path as raw text while the product counts the path
+// the way JSON writes it (claudeTranscriptPathMarker): a Windows separator
+// doubled, a quote escaped. The line the fixture appends must carry the
+// marker the product counts, for a Windows-shaped composed path as well as a
+// Unix one.
+func TestClaudeTranscriptLineCarriesTheWindowsMarker(t *testing.T) {
+	windowsComposed := `C:\Users\dj4lm\AppData\Local\Temp\hs\001\state\ws\briefs\worker-20260929T000000.md`
+	unixComposed := "/tmp/hs/001/state/ws/briefs/worker-20260929T000000.md"
+	report := "/tmp/hs/001/state/ws/reports/worker-20260929T000000.md"
+	cases := []struct{ name, line, marker string }{
+		{"amend text to a windows composed path", claudeTranscriptLine("user", claudeDispatchText(windowsComposed, report, true)), claudeTranscriptPathMarker(windowsComposed)},
+		{"normal text to a windows composed path", claudeTranscriptLine("user", claudeDispatchText(windowsComposed, report, false)), claudeTranscriptPathMarker(windowsComposed)},
+		{"amend text to a unix composed path", claudeTranscriptLine("user", claudeDispatchText(unixComposed, report, true)), claudeTranscriptPathMarker(unixComposed)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(tc.line, tc.marker) {
+				t.Fatalf("the fixture line does not carry the marker the product counts:\nline:   %s\nmarker: %s", tc.line, tc.marker)
+			}
+		})
+	}
 }
 
 // TestClaudeTranscriptPathMarker: the composed path lands in the transcript
