@@ -146,7 +146,8 @@ Run `$S init` first, after any required first `setup --local` in a fork. It
 runs `doctor` (advisory: inside Herdr,
 Herdr client vs server version, the **official `herdr` skill present and
 identical to `herdr --skill`**, kinds in `PATH`, state dir writable,
-config sane), then renames the caller's own agent to `orchestrator`
+config sane, an orphan pane left by a `release` without `--close`), then
+renames the caller's own agent to `orchestrator`
 (config `orchestrator_name`; `orchestrator-2` when taken) so the Herdr
 sidebar and `roster` show who leads, and prints the context (pane, tab,
 workspace, layout, state dir). Act on `warn` lines before spawning; a
@@ -452,8 +453,17 @@ and, when the visible screen already moved away from the hash the last
 wait probe recorded, `activity_changed: true` with `activity_age_s:
 null` — the screen changed since that probe and the change has no age. A
 `timeout` line of a still `working` agent whose screen carries a provider
-retry line gains `retrying: "<line>"` (the most recent retry line,
-sanitized like a cause); the state and the exit 9 are unchanged. A
+retry line gains `retrying: "<line>"` (the most recent retry line of the
+bottom ten non-empty lines, without their box prefix, sanitized like a
+cause); the state and the exit 9 are unchanged. A provider retry line is
+one that, after its box prefix, its spaces and a single status glyph,
+starts with `Retrying`, `Reconnecting` or `Will retry`, or carries a
+`· Retrying`/`- Retrying` tail after an `Error`, or a `retrying` with an
+`n/m` counter right after a `(` (codex's mid-line `retrying sampling
+request (1/5 …)`): a `Reconnecting` start counts on its own, and every
+other form needs that `n/m` counter or a deadline such as `in 4s` or
+`in 30 seconds`, so the model's own wording about its work (`retrying the
+1/2 migration`, `Retrying 2 files`) is not a provider retry. A
 worker still `working` whose screen really changed within the stuck
 window (`stuck_warn_minutes`, 20 min when 0 or not a number) is a
 **neutral checkpoint**: `checkpoint: true`, no friction line, only
@@ -575,7 +585,12 @@ in place), never from the Unix epoch.
 `dispatch` also checks that the prompt arrived. If the target is already
 `working`, dispatch skips the settle wait and sends no key after the prompt.
 Within `prompt_check_seconds` (15, 0 off), a moved `state_change_seq` while
-working or a non-empty report confirms receipt. The generic `Read the file `
+working or a non-empty report confirms receipt. For a local claude target, a
+rise in the count of its session transcript's `"type":"user"` lines that
+hold the composed path (escaped the way JSON writes it), read before the
+send, also confirms receipt within the window: a working claude can show
+none of the prompt on screen; only the count is read, and a remote target or
+a missing transcript keeps the screen checks. The generic `Read the file `
 marker from an earlier prompt does not count. Only this dispatch's unique
 composed prompt path in the recent screen confirms that the
 prompt is queued; with `--no-wait`, dispatch returns `queued`, and otherwise
@@ -590,10 +605,18 @@ arrival checks: it waits up to `prompt_settle_seconds` (20, 0 off) for
 consecutive identical visible screen reads 500 ms apart; passing the
 deadline warns and sends anyway. If the prompt text sits in the agent's input
 box, it sends one Enter (JSON `enter_sent`); if the screen never moved, or
-moved without the composed prompt path visible in recent screen outside the
-last 3 non-empty lines, it resends the prompt once (`resent`) followed by a
-fresh window with the strict rules; if nothing works, it returns
-`not-received` (exit 15) — read the pane before sending anything else. A
+moved without the composed prompt path visible in the recent screen outside
+the input, it resends the prompt once (`resent`) followed by a fresh window
+with the strict rules; if nothing works, it returns `not-received` (exit 15)
+— read the pane before sending anything else. For a pi screen, the input is
+the region between its last two border lines — a line of `─`, or the working
+border `── ⠴ Working ──…` while pi works — and with both borders on screen
+the arrival rules (the whole path on a line, the `┃` box join, the queue
+rules) and the outside-the-input check look only at the lines outside the
+region (the footer below the box counts as outside), so the composed path
+whole in the box (typed, not sent) is not arrival; without the two borders
+the whole screen counts, and outside the input is above the last 3
+non-empty lines. A
 `queued` dispatch records the moment, the agent's `state_change_seq`, and the
 composed prompt path in `<state>/wait/<agent>.queued`. A later `wait` keeps
 running its normal probes while the same working turn continues. Once the
@@ -637,9 +660,9 @@ recorded — the change has no age; `-` in any other state or with no
 observed change), and adds both as the last keys of its JSON lines
 (`null` when unknown; `activity_changed: true` right after `activity_s`
 when the screen changed since the last wait probe). A `working` agent
-whose screen carries a provider retry line gets the cause `retrying:
-<line>` in the TSV cause column — the state stays `working` and the exit
-code is unchanged. It writes no marker
+whose screen carries a provider retry line (the same line as the `wait`'s
+`retrying`) gets the cause `retrying: <line>` in the TSV cause column —
+the state stays `working` and the exit code is unchanged. It writes no marker
 and prints no screen text. `notify=on` in the config raises a Herdr toast
 per finished worker. `roster` shows a `REPORT` column (`none | pending |
 ready`) for a quick glance.
@@ -777,7 +800,7 @@ $S status [a b …]                          # non-blocking completion check; no
 $S config                                  # effective configuration and sources (incl. the session layer)
 $S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>
 $S roster                                  # live agents with role/kind/pane/state/report and the current task (TASK, from the pane title; '-' when none, cut to 40 characters)
-$S release impl [--close]                  # forget the agent; --close closes a pane we created
+$S release impl [--close] [--force]        # forget the agent; --close closes a pane we created, or the recorded orphan's pane (idle or done)
 $S reopen impl [--force]                    # release --close + spawn --fresh with the roster's role, kind, model, effort, cwd and native args; output is the spawn JSON
 $S clean [--older-than 7]                  # drop gone agents, delete old briefs/reports
 $S kinds                                   # kind → executable, family, effort ceiling
@@ -980,7 +1003,8 @@ logging `dialog` without typing into the dialog.
 The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.
 Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).
 Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000` (it never automatically re-prompts).
-Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof). For a pi target with two all-`─` lines at the bottom, the closing line and the id count only inside its input box (the region between those lines), so a message already in its chat history is delivered, a message in its `Steering:` queue is queued, and the Enter goes only when the id is in that box. A Claude Code queue is recognized the same way: when the visible screen holds the message's id and the line `Press up to edit queued messages`, the result is `queued`, with no Enter sent.
+Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof). For a pi target whose screen carries its two input-box borders (lines of `─`, or the working border `── ⠴ Working ──…` while it works), the closing line and the id count only inside its input box (the region between those lines), so a message already in its chat history is delivered, a message in its `Steering:` queue is queued, and the Enter goes only when the id is in that box. For a codex target whose screen holds a composer line (the last line that, without its left spaces, is `›` alone or begins with `› `, and sits within the last 8 non-empty lines), the closing line and the id count only inside its composer region (from that line to the bottom of the screen), so a message already in its history above the composer is delivered; a `↳` line holding the id above the composer is its follow-up queue — the result is `queued`, with no Enter sent. A Claude Code queue is recognized the same way: when the visible screen holds the message's id and the line `Press up to edit queued messages`, the result is `queued`, with no Enter sent.
+When `agent prompt` reports `agent_prompt_stalled` — the prompt may be typed with its Enter missing — `send` reads the target's visible screen and, when `#<id>` sits in its input box (for pi between the box borders, for codex the composer region, for every other kind the last 15 non-empty lines) and no dialog is on screen, presses one Enter and runs the arrival window; a dialog on screen would take the Enter as its answer, so nothing is pressed and it exits 17 (`send: <ref> is showing a dialog after the message was typed; press nothing and read its pane`). Still unproven after the Enter, it exits 15 (`send: <ref> did not take the message: it sits in its input box after one Enter; read its pane before sending again`). Without the id in the box it keeps the plain stalled exit 15. One Enter at most, no resend.
 If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
 If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or screen)`).
 The target project decides acceptance: the `inbound`
@@ -1086,7 +1110,27 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   the same way, so a nested orchestrator must not be a sandboxed codex.
 - **`release` without `--close` leaves the agent running.** `--close` ends
   it by closing the pane. Panes passed with `--pane` are never closed.
-  `run` does not release.
+  `run` does not release. A release that leaves open a pane this skill
+  created records it in `<state>/released-panes.tsv` (one row per name and
+  pane, refreshed by a repeated release) and says on stderr how to close it
+  later (a pane passed with `--pane` is never recorded): `herdr-soho:
+  release: the pane <pane> stays open; close it later with: herdr-soho
+  release <name> --close`. `release <name> --close` on a name no longer in
+  the roster closes the recorded orphan's pane (a live agent whose name and
+  pane match a row, outside the roster and the orchestrator's pane) when the
+  agent is `idle` or `done`; `working`, `blocked` or unqueryable exits 10 without
+  `--force` (`agent '<name>' is not in the roster and is <state>; pass
+  --force to close its pane`), and a failed pane close exits 4, keeping the
+  row (`release: could not close the pane <pane> of '<name>'; close it by
+  hand with: herdr pane close <pane>`). `doctor` warns one `orphan pane:
+  '<name>' (<pane>, <state>) is not in the roster; close it with:
+  herdr-soho release <name> --close` per orphan, and `spawn` (lanes on) warns
+  one `herdr-soho: spawn: '<name>' is idle outside the roster (<pane>); close
+  it with: herdr-soho release <name> --close` per `idle` or `done` orphan before opening
+  a new pane (it only warns; the spawn proceeds). A `spawn --pane` that
+  re-rosters a recorded pane retires its row, and a row whose pane is gone
+  from Herdr (`pane_not_found`) leaves on the next registry write (a pane
+  `get` that fails for any other reason keeps its row).
 - **Worktrees are yours to create.** `git worktree add .worktrees/<slug>`
   (or `herdr worktree create`) and pass the path with `--cwd`. The roster
   stays in the main repo; linked worktrees share the main checkout's state.
@@ -1135,7 +1179,19 @@ allows the repo root, `/tmp` and `$TMPDIR` but **denies its own config roots
 (`.agents/`, `.codex/`)**, which is why the state is not under `.agents/`.
 Override the root with `HERDR_SOHO_DIR` only if every worker can write
 there. Reports are files by contract, so collection does not depend on
-scraping an alternate-screen TUI.
+scraping an alternate-screen TUI. The skill never writes inside an installed
+copy of itself: a command that resolves the state dir exits 2 with `the
+state dir '<path>' would be inside the herdr-soho skill ('<skill>'); run
+herdr-soho from the project's directory (nothing was written)` before any
+side effect (no `.gitignore` append, no dir created) when it resolves to the
+skill or inside it; `init`, `config set --project`, `session set` and
+`session clear`, `setup` and `doctor --fix` carry the same refusal for the
+paths they write, and a plain `doctor` warns
+`state dir: '<path>' would be inside the herdr-soho skill ('<skill>'); run
+herdr-soho from the project's directory` instead. `StateRoot` likewise skips
+adding the state dir to the `.gitignore` of a git checkout of the skill, so
+even read-only callers (such as `layout-plan`) change nothing inside it.
+`config set --user` and a destination outside the skill still work.
 
 ## Fluxo paralelo
 
