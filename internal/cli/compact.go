@@ -172,8 +172,11 @@ func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 // before the Enter: only /compact on the first menu line runs it; a menu
 // without /compact (an empty session) clears the box and reports
 // nothing-to-compact (0), and /compact not on top or a missing menu clears
-// the box and exits 4. It never uses `agent prompt` and never
-// resends.
+// the box and exits 4. When the deadline runs out without proof or ending,
+// one last read runs the same proofs (/compact is never sent again) and a
+// claude timeout JSON carries a transcript field (counted, missing or
+// unreadable) saying what the session transcript gave. It never uses `agent
+// prompt` and never resends.
 func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ctx *core.Config, env platform.Env, cwd string, inDispatch bool) int {
 	state := herdr.AgentState(agent, env, herdr.Timeout, nil)
 	if state.State == "working" || state.State == "blocked" {
@@ -321,6 +324,26 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 			time.Sleep(compactPollInterval)
 		}
 	}
+	// The deadline ran out without proof or ending: the compaction can finish
+	// right after it. One last read runs the same proofs (the screen, the
+	// claude transcript, the opencode regex and the endings); /compact is
+	// never sent again.
+	if !compacted && endStatus == "" {
+		screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
+		if proofNew(screen) || transcriptRisen() {
+			// The idle wait that follows gets a short cap of its own: ten poll
+			// intervals from now.
+			compacted = compactWaitIdle(agent, env, platform.Now().Add(compactPollInterval*10))
+		} else {
+			for i := range endings {
+				if line, ok := compactEndingNew(screen, before, endings[i].text, endSeen[i]); ok {
+					endStatus = endings[i].status
+					endLine = line
+					break
+				}
+			}
+		}
+	}
 	elapsed := platform.Now().Sub(start).Milliseconds()
 	thinkingRestored := false
 	if thinkingChanged {
@@ -334,9 +357,12 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 			core.Warn(fmt.Sprintf("compact: could not restore '%s' thinking to '%s' (shows '%s'); set it by hand before the next brief", agent, thinkingBefore, shown), frictionLogPath, "compact")
 		}
 	}
-	// The result JSON gains thinking_restored only when the level was changed.
-	resultJSON := func(status string) string {
+	// The result JSON gains thinking_restored only when the level was changed;
+	// extra pairs (the claude timeout's transcript field) come after
+	// elapsed_ms.
+	resultJSON := func(status string, extra ...any) string {
 		pairs := []any{"agent", agent, "kind", kind, "status", status, "elapsed_ms", elapsed}
+		pairs = append(pairs, extra...)
 		if thinkingChanged {
 			pairs = append(pairs, "thinking_restored", thinkingRestored)
 		}
@@ -371,6 +397,15 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 			fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O(pairs...)))
 			return 9
 		}
+		if kind == "claude" {
+			// The timeout says what the claude session transcript gave, without
+			// a path, a session id or content: counted when the file was found
+			// and counted without a new compact_boundary, missing when there is
+			// no id session or the file does not exist, unreadable when the
+			// file was found but could not be read.
+			fmt.Fprintln(platform.Stdout, resultJSON("timeout", "transcript", compactClaudeTranscriptState(agent, env)))
+			return 9
+		}
 		fmt.Fprintln(platform.Stdout, resultJSON("timeout"))
 		return 9
 	}
@@ -398,6 +433,23 @@ func compactDieOnDeadWorker(agent string, state herdr.AgentStateResult) {
 	if state.State == "gone" {
 		core.DieFriction(fmt.Sprintf("compact: agent '%s' is no longer live", agent), 6, frictionLogPath, "compact")
 	}
+}
+
+// compactClaudeTranscriptState reports, for the claude timeout JSON only, what
+// the session transcript gave: "counted" when the file was found and counted
+// (a timeout then has no new compact_boundary), "missing" when agent get has
+// no id session or the file does not exist, and "unreadable" when the file
+// was found but could not be read. No path, session id or content ever
+// reaches the JSON.
+func compactClaudeTranscriptState(agent string, env platform.Env) string {
+	path := herdr.ClaudeTranscriptPath(agent, env)
+	if path == "" {
+		return "missing"
+	}
+	if _, ok := herdr.CountClaudeCompactBoundaries(path); !ok {
+		return "unreadable"
+	}
+	return "counted"
 }
 
 // compactWaitIdle polls the agent state until it is idle or done or the

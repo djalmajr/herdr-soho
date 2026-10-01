@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/testutil"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
@@ -961,9 +962,191 @@ func TestCompactOpenCodeUndatedLineIsNotProof(t *testing.T) {
 	if _, present := value["still_compacting"]; present {
 		t.Fatalf("still_compacting is a pi field: %v", value)
 	}
+	if _, present := value["transcript"]; present {
+		t.Fatalf("the opencode timeout has no transcript field: %v", value)
+	}
 	if elapsed, ok := value["elapsed_ms"].(float64); !ok || elapsed < 500 {
 		t.Fatalf("elapsed_ms=%v want >= 500", value["elapsed_ms"])
 	}
+}
+
+// TestCompactClaudeProofAfterDeadlineStillCompacted (edger): the proof shows
+// up only in the read after the deadline; the one last read runs the same
+// proofs, the compact ends as compacted (exit 0), and /compact is never sent
+// again.
+func TestCompactClaudeProofAfterDeadlineStillCompacted(t *testing.T) {
+	f := newCompactFixture(t, "claude", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		// The pre-send read and the polls inside the deadline show no proof.
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: compactScreens.claudeStale},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.claudeStale},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: compactScreens.claudeStale},
+		// Only the read after the deadline shows the proof below /compact.
+		{Argv: compactReadArgv("worker"), Call: 4, Stdout: compactScreens.claudeFresh},
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["kind"] != "claude" || value["status"] != "compacted" {
+		t.Fatalf("json=%v", value)
+	}
+	if elapsed, ok := value["elapsed_ms"].(float64); !ok || elapsed < 500 {
+		t.Fatalf("elapsed_ms=%v want >= 500 (the proof came after the deadline): %v", value["elapsed_ms"], value)
+	}
+	calls := f.calls(t)
+	// The last read never sends /compact again.
+	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
+		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
+	}
+	// Pre-send read, two polls inside the deadline, and the last read.
+	if n := countArgv(calls, compactReadArgv("worker")); n != 4 {
+		t.Fatalf("recent reads=%d want 4: %#v", n, calls)
+	}
+}
+
+// TestCompactPiEndingOnLastRead verifies that an ending that shows up only in
+// the read after the deadline still yields the ending's result.
+func TestCompactPiEndingOnLastRead(t *testing.T) {
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: "old output line\n"},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: "old output line\n"},
+		// Only the read after the deadline shows the ending.
+		{Argv: compactReadArgv("worker"), Call: 4, Stdout: compactScreens.piNothing},
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["kind"] != "pi" || value["status"] != "nothing-to-compact" {
+		t.Fatalf("json=%v", value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
+		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
+	}
+	if n := countArgv(calls, compactReadArgv("worker")); n != 4 {
+		t.Fatalf("recent reads=%d want 4: %#v", n, calls)
+	}
+}
+
+// TestCompactLastReadNothingTimesOut verifies that a last read without proof
+// or ending falls back to the plain timeout, with a single /compact sent.
+func TestCompactLastReadNothingTimesOut(t *testing.T) {
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: "old output line\n"},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+	if code != 9 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["status"] != "timeout" {
+		t.Fatalf("json=%v", value)
+	}
+	if _, present := value["transcript"]; present {
+		t.Fatalf("the pi timeout has no transcript field: %v", value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
+		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
+	}
+	// Pre-send read, two polls inside the deadline, the last read, and the pi
+	// still-compacting check that reads the screen once more.
+	if n := countArgv(calls, compactReadArgv("worker")); n != 5 {
+		t.Fatalf("recent reads=%d want 5: %#v", n, calls)
+	}
+}
+
+// TestCompactClaudeTimeoutTranscriptField verifies the timeout's transcript
+// field for claude: counted when the session transcript was found and
+// counted, missing without an id session (or when the file does not exist),
+// and unreadable when the transcript path is not a readable file. No path,
+// session id or content reaches the JSON.
+func TestCompactClaudeTimeoutTranscriptField(t *testing.T) {
+	sessionGet := `{"result":{"agent":{"agent_status":"idle","state_change_seq":1,"agent_session":{"kind":"id","value":"sess-1"},"cwd":"/tmp/px"}}}`
+	timeoutRules := func(get string) []fakecli.Rule {
+		return []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: get},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: "old output line\n> /compact\n"},
+		}
+	}
+	runTimeout := func(t *testing.T, get string, claudeDir string) map[string]any {
+		f := newCompactFixture(t, "claude", timeoutRules(get))
+		if claudeDir != "" {
+			f.env["CLAUDE_CONFIG_DIR"] = claudeDir
+		}
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+		if code != 9 || errText != "" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+		value := compactJSON(t, out)
+		if value["status"] != "timeout" {
+			t.Fatalf("json=%v", value)
+		}
+		return value
+	}
+	t.Run("counted when the transcript was found and counted", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		projDir := filepath.Join(claudeDir, "projects", herdr.ClaudeProjectDir("/tmp/px"))
+		if err := os.MkdirAll(projDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		transcript := filepath.Join(projDir, "sess-1.jsonl")
+		if err := os.WriteFile(transcript, []byte(`{"type":"summary","subtype":"compact_boundary"}\n`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		value := runTimeout(t, sessionGet, claudeDir)
+		if value["transcript"] != "counted" {
+			t.Fatalf("transcript=%v want counted: %v", value["transcript"], value)
+		}
+	})
+	t.Run("missing without a session in agent get", func(t *testing.T) {
+		value := runTimeout(t, compactStateJSON("idle", 1), t.TempDir())
+		if value["transcript"] != "missing" {
+			t.Fatalf("transcript=%v want missing: %v", value["transcript"], value)
+		}
+	})
+	t.Run("missing when the session kind is not id", func(t *testing.T) {
+		get := `{"result":{"agent":{"agent_status":"idle","state_change_seq":1,"agent_session":{"kind":"session","value":"sess-1"},"cwd":"/tmp/px"}}}`
+		value := runTimeout(t, get, t.TempDir())
+		if value["transcript"] != "missing" {
+			t.Fatalf("transcript=%v want missing: %v", value["transcript"], value)
+		}
+	})
+	t.Run("missing when the file does not exist", func(t *testing.T) {
+		value := runTimeout(t, sessionGet, t.TempDir())
+		if value["transcript"] != "missing" {
+			t.Fatalf("transcript=%v want missing: %v", value["transcript"], value)
+		}
+	})
+	t.Run("unreadable when the transcript path is a directory", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		// A directory where the transcript file would sit: found, not readable.
+		if err := os.MkdirAll(filepath.Join(claudeDir, "projects", herdr.ClaudeProjectDir("/tmp/px"), "sess-1.jsonl"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		value := runTimeout(t, sessionGet, claudeDir)
+		if value["transcript"] != "unreadable" {
+			t.Fatalf("transcript=%v want unreadable: %v", value["transcript"], value)
+		}
+	})
 }
 
 // TestCompactOpenCodeEmptySessionClearsBox verifies the empty-session menu:
