@@ -108,3 +108,39 @@ func TestStatsJSONPreservesRoleInsertionOrder(t *testing.T) {
 		t.Fatalf("--by stats JSON group order = %s; want sorted implementer before reviewer", got)
 	}
 }
+
+func TestDimKindModel(t *testing.T) {
+	// Mutation captured: grouping by kind alone merges harnesses that run the same model.
+	for _, d := range []string{"role", "kind", "model", "kind-model", "agent", "effort"} {
+		found := false
+		for _, x := range dimensions {
+			if x == d {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("dimensions missing %q: %v", d, dimensions)
+		}
+	}
+	cases := []struct {
+		snapshotNil bool
+		kind        string
+		model       string
+		want        string
+	}{
+		{false, "pi", "lbvllm/qwen3.8-27b", "pi/lbvllm/qwen3.8-27b"},
+		{false, "opencode", "qwen3.8-27b", "opencode/qwen3.8-27b"},
+		{false, "pi", "", "pi/-"},
+		{false, "", "m", "(unknown)"},
+		{true, "", "", "(unknown)"},
+	}
+	for _, c := range cases {
+		var p prompt
+		if !c.snapshotNil {
+			p.snapshot = &sidecar{kind: c.kind, model: c.model}
+		}
+		if got := dim(p, "kind-model"); got != c.want {
+			t.Fatalf("dim(kind=%q model=%q snapshotNil=%v)=%q want %q", c.kind, c.model, c.snapshotNil, got, c.want)
+		}
+	}
+}

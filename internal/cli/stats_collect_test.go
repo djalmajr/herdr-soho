@@ -1057,3 +1057,45 @@ func TestStatsAndCollectWithHerdrInPathDoNotPanic(t *testing.T) {
 		t.Fatalf("collect code=%d stdout=%q stderr=%q", collectCode, collectOut, collectErr)
 	}
 }
+
+func TestStatsKindModelDimension(t *testing.T) {
+	t.Run("kind-model groups two kinds of the same model separately, text and JSON", func(t *testing.T) {
+		// Mutation captured: grouping by model alone mixes harnesses that run the same model.
+		f := newCommandFixture(t)
+		f.pair("a", "20260928T120000", "tasker", "done\n", 0, f.accepted("pi", "qwen3.8-27b", "high"))
+		f.pair("b", "20260928T120001", "tasker", "done\n", 0, f.accepted("opencode", "qwen3.8-27b", "high"))
+		out, _, code := f.invoke("stats", "--by", "kind-model", "--json")
+		if code != 0 || !strings.Contains(out, `"by":"kind-model"`) || !strings.Contains(out, `"pi/qwen3.8-27b":{"tasks":1`) || !strings.Contains(out, `"opencode/qwen3.8-27b":{"tasks":1`) {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+		out, _, code = f.invoke("stats", "--by", "kind-model")
+		if code != 0 || !strings.Contains(out, "tasks by kind-model:") || !strings.Contains(out, "pi/qwen3.8-27b") || !strings.Contains(out, "opencode/qwen3.8-27b") {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+		out, _, code = f.invoke("stats", "--by", "model", "--json")
+		if code != 0 || !strings.Contains(out, `"qwen3.8-27b":{"tasks":2`) {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+
+	t.Run("kind-model without a model groups as <kind>/-", func(t *testing.T) {
+		f := newCommandFixture(t)
+		f.pair("a", "20260928T120000", "tasker", "done\n", 0, f.accepted("pi", "", "high"))
+		out, _, code := f.invoke("stats", "--by", "kind-model", "--json")
+		if code != 0 || !strings.Contains(out, `"pi/-":{"tasks":1`) {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+		out, _, code = f.invoke("stats", "--by", "kind-model")
+		if code != 0 || !strings.Contains(out, "pi/-") {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+
+	t.Run("invalid by dimension lists kind-model", func(t *testing.T) {
+		f := newCommandFixture(t)
+		_, stderr, code := f.invoke("stats", "--by", "banana")
+		if code != 2 || !strings.Contains(stderr, "stats: --by expects one of role, kind, model, kind-model, agent, effort (got 'banana')") {
+			t.Fatalf("code=%d stderr=%q", code, stderr)
+		}
+	})
+}
