@@ -390,6 +390,7 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 	doctorDiscardedModels(ctx, env, cwd, s)
 	doctorModelPairs(ctx, env, cwd, s)
 	doctorLaneArgs(ctx, env, s)
+	doctorContextWindow(ctx, env, s)
 	doctorCodexNetwork(ctx, env, cwd, s)
 	codexenv.DoctorCodexPolicyWarnings(env, platform.Current(), s.Warning)
 	doctorFeedback(ctx, env, s)
@@ -973,6 +974,26 @@ func doctorLaneArgs(ctx *core.Config, env platform.Env, s *Say) {
 			suffix = " (" + strings.Join(roles, ", ") + ")"
 		}
 		s.Warning(fmt.Sprintf("config: lane.%s.args is ignored (lanes=off); set role.<role>.args for its roles instead%s", lane, suffix))
+	}
+}
+
+func doctorContextWindow(ctx *core.Config, env platform.Env, s *Say) {
+	entries := core.ContextWindowEntries(ctx, env)
+	kinds := make([]string, 0, len(entries))
+	for kind := range entries {
+		kinds = append(kinds, kind)
+	}
+	textutil.SortUTF16(kinds)
+	for _, kind := range kinds {
+		entry := entries[kind]
+		display := "context_window." + kind
+		if kind != "grok" {
+			s.Warning(fmt.Sprintf("config: %s=%s has no effect (only grok uses context_window.<kind>)", display, entry.Value))
+			continue
+		}
+		if !core.ContextWindowValueOk(entry.Value) {
+			s.Warning(fmt.Sprintf("config: %s='%s' is not a token count like 500k or 256000 (ignored)", display, entry.Value))
+		}
 	}
 }
 
