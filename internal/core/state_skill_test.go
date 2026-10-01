@@ -266,3 +266,84 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		}
 	})
 }
+
+// TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched is the guard for
+// the read-only side of the skill refusal: StateRoot/StateDirPath do not
+// refuse (they only resolve the path), but they must not append the state dir
+// to the .gitignore of a skill that is a git checkout.
+func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
+	ctx := &Config{Entries: map[string]ConfigEntry{}}
+
+	gitSkill := func(t *testing.T) (root, skill, home string) {
+		t.Helper()
+		root, skill, home = skillFixture(t)
+		if resolved, err := filepath.EvalSymlinks(skill); err == nil {
+			skill = resolved // git reports the resolved spelling (macOS /tmp)
+		}
+		if out, gitErr := exec.Command("git", "init", "-q", skill).CombinedOutput(); gitErr != nil {
+			t.Fatalf("git init: %s %v", out, gitErr)
+		}
+		return root, skill, home
+	}
+
+	t.Run("StateRoot from a cwd inside a skill that is a git checkout: no .gitignore is created", func(t *testing.T) {
+		_, skill, home := gitSkill(t)
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": os.Getenv("PATH")}
+		dir := StateRoot(ctx, env, skill)
+		if dir != filepath.Join(skill, ".herdr-soho") {
+			t.Fatalf("dir=%q want %q", dir, filepath.Join(skill, ".herdr-soho"))
+		}
+		if _, err := os.Stat(filepath.Join(skill, ".gitignore")); !os.IsNotExist(err) {
+			t.Fatalf("StateRoot created the skill .gitignore: %v", err)
+		}
+	})
+	t.Run("StateRoot with a pre-existing skill .gitignore: the bytes are untouched", func(t *testing.T) {
+		_, skill, home := gitSkill(t)
+		if err := os.WriteFile(filepath.Join(skill, ".gitignore"), []byte("# pre-existing\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": os.Getenv("PATH")}
+		StateRoot(ctx, env, skill)
+		got, err := os.ReadFile(filepath.Join(skill, ".gitignore"))
+		if err != nil || string(got) != "# pre-existing\n" {
+			t.Fatalf(".gitignore changed by StateRoot: %q err=%v", got, err)
+		}
+	})
+	t.Run("StateDirPath from a cwd inside the skill: no .gitignore either", func(t *testing.T) {
+		_, skill, home := gitSkill(t)
+		if err := os.WriteFile(filepath.Join(skill, ".gitignore"), []byte("# pre-existing\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": os.Getenv("PATH")}
+		dir := StateDirPath(ctx, env, skill)
+		if dir != filepath.Join(skill, ".herdr-soho", "ws") {
+			t.Fatalf("dir=%q want %q", dir, filepath.Join(skill, ".herdr-soho", "ws"))
+		}
+		got, err := os.ReadFile(filepath.Join(skill, ".gitignore"))
+		if err != nil || string(got) != "# pre-existing\n" {
+			t.Fatalf(".gitignore changed by StateDirPath: %q err=%v", got, err)
+		}
+	})
+	t.Run("a cwd outside the skill in a git repo: the .gitignore entry is still appended", func(t *testing.T) {
+		root, skill, home := skillFixture(t)
+		proj := filepath.Join(root, "project")
+		if err := os.MkdirAll(proj, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if resolved, err := filepath.EvalSymlinks(proj); err == nil {
+			proj = resolved
+		}
+		if out, gitErr := exec.Command("git", "init", "-q", proj).CombinedOutput(); gitErr != nil {
+			t.Fatalf("git init: %s %v", out, gitErr)
+		}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": os.Getenv("PATH")}
+		dir := StateRoot(ctx, env, proj)
+		if dir != filepath.Join(proj, ".herdr-soho") {
+			t.Fatalf("dir=%q want %q", dir, filepath.Join(proj, ".herdr-soho"))
+		}
+		got, err := os.ReadFile(filepath.Join(proj, ".gitignore"))
+		if err != nil || string(got) != ".herdr-soho/\n" {
+			t.Fatalf(".gitignore not appended as today: %q err=%v", got, err)
+		}
+	})
+}
