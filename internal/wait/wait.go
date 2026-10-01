@@ -750,7 +750,8 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 				if tag == "" {
 					tag = "working"
 				}
-				age, changed := ActivityAgeSeconds(sd, agent, herdr.AgentRead(env, agent, "visible", nil), now)
+				screen := herdr.AgentRead(env, agent, "visible", nil)
+				age, changed := ActivityAgeSeconds(sd, agent, screen, now)
 				active := tag == "working" && age != nil && float64(*age) < win*60
 				// A screen that changed since the last probe proves movement within
 				// that interval: it is a checkpoint when the interval is inside the
@@ -767,6 +768,13 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 				line := jsonjs.O("agent", agent, "status", "timeout", "elapsed_ms", platform.Now().Sub(started).Milliseconds(), "state", tag, "checkpoint", active, "activity_age_s", ageValue)
 				if changed {
 					line.Set("activity_changed", true)
+				}
+				if tag == "working" {
+					// A retry is not a stop: the state stays working and the
+					// exit code 9 is unchanged; only the line names the retry.
+					if retryLine := provider.RetryLine(tag, screen); retryLine != "" {
+						line.Set("retrying", retryLine)
+					}
 				}
 				jsonLine(line)
 				if active {

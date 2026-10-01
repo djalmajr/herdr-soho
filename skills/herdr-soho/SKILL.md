@@ -439,6 +439,9 @@ change it. A `timeout` line carries `elapsed_ms` (this wait's own),
 and, when the visible screen already moved away from the hash the last
 wait probe recorded, `activity_changed: true` with `activity_age_s:
 null` — the screen changed since that probe and the change has no age. A
+`timeout` line of a still `working` agent whose screen carries a provider
+retry line gains `retrying: "<line>"` (the most recent retry line,
+sanitized like a cause); the state and the exit 9 are unchanged. A
 worker still `working` whose screen really changed within the stuck
 window (`stuck_warn_minutes`, 20 min when 0 or not a number) is a
 **neutral checkpoint**: `checkpoint: true`, no friction line, only
@@ -621,7 +624,10 @@ visible screen already moved away from the hash the last wait probe
 recorded — the change has no age; `-` in any other state or with no
 observed change), and adds both as the last keys of its JSON lines
 (`null` when unknown; `activity_changed: true` right after `activity_s`
-when the screen changed since the last wait probe). It writes no marker
+when the screen changed since the last wait probe). A `working` agent
+whose screen carries a provider retry line gets the cause `retrying:
+<line>` in the TSV cause column — the state stays `working` and the exit
+code is unchanged. It writes no marker
 and prints no screen text. `notify=on` in the config raises a Herdr toast
 per finished worker. `roster` shows a `REPORT` column (`none | pending |
 ready`) for a quick glance.
