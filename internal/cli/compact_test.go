@@ -1056,6 +1056,10 @@ func TestDispatchCompactTimeoutKeepsBriefUnsent(t *testing.T) {
 	if code != 9 {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 	}
+	// cinzel: the timeout says which phase stopped and that the brief was not sent.
+	if !strings.Contains(errText, "the compact step of 'worker' did not finish (exit 9); the brief was not sent") {
+		t.Fatalf("stderr without the phase and brief_sent note: %q", errText)
+	}
 	if !strings.Contains(out, `"status":"timeout"`) {
 		t.Fatalf("missing the timeout JSON: %s", out)
 	}

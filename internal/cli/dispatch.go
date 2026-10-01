@@ -226,6 +226,9 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		if compactProof(kind) == "" {
 			core.Warn(fmt.Sprintf("dispatch: --compact skipped: kind '%s' has no verified compact command", kind), frictionLogPath, "dispatch")
 		} else if code := compactRun(agent, at(1), kind, role, lane, model, compactDefaultTimeoutMS, ctx, env, cwd, true); code != 0 {
+			// The compaction phase did not finish: say so, and that this brief was
+			// not sent, so the orchestrator does not look for it on the screen.
+			fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: the compact step of '%s' did not finish (exit %d); the brief was not sent\n", agent, code)
 			return code
 		}
 	}
