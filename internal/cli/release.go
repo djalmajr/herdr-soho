@@ -99,10 +99,11 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 			layout.HerdTabsRelabel(ctx, env, cwd)
 		}()
 	}
-	if !closes && pane != "" {
+	if !closes && pane != "" && created == "1" {
 		// The pane stays alive outside the roster: register it, like the
 		// other state files, so the orphan commands know this project
-		// released it.
+		// released it. A pane the skill did not create (spawn --pane) is
+		// never registered: release --close must never close it later.
 		core.ReleasedPanesRecord(ctx, env, cwd, agent, pane, field(2))
 		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: release: the pane %s stays open; close it later with: herdr-soho release %s --close\n", pane, agent)
 	}
