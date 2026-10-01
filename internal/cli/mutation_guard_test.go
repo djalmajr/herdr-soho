@@ -103,11 +103,29 @@ func TestMutationGuard(t *testing.T) {
 			t.Skip("cargo is not available on PATH")
 		}
 		s := newGuardFixture(t)
-		hostHome, _ := os.UserHomeDir()
-		s.env["RUSTUP_HOME"] = filepath.Join(hostHome, ".rustup")
+		// The fixture isolates HOME, so the toolchain rustup installed has
+		// to be named explicitly: an inherited RUSTUP_HOME wins, else the
+		// host user's ~/.rustup.
+		rustupHome := os.Getenv("RUSTUP_HOME")
+		if rustupHome == "" {
+			hostHome, _ := os.UserHomeDir()
+			rustupHome = filepath.Join(hostHome, ".rustup")
+		}
+		s.env["RUSTUP_HOME"] = rustupHome
 		s.env["CARGO_HOME"] = filepath.Join(s.root, "cargo-home")
 		if err := os.MkdirAll(s.env.Get("CARGO_HOME"), 0o700); err != nil {
 			t.Fatal(err)
+		}
+		// A cargo that cannot run in the fixture's environment (a rustup
+		// proxy whose toolchain is not under RUSTUP_HOME, as under a test
+		// run with an isolated HOME) cannot answer cargo metadata: that is
+		// the host, not the guard, so the case is skipped like a missing
+		// cargo.
+		probe := exec.Command("cargo", "--version")
+		probe.Env = s.env.List()
+		probe.Dir = s.root
+		if out, err := probe.CombinedOutput(); err != nil {
+			t.Skipf("cargo cannot run in the fixture environment (RUSTUP_HOME=%s): %v: %s", rustupHome, err, strings.TrimSpace(string(out)))
 		}
 		manifest := "[package]\nname = \"mutation-guard-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
 		if err := os.WriteFile(filepath.Join(s.copy, "Cargo.toml"), []byte(manifest), 0o600); err != nil {
