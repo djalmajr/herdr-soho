@@ -685,11 +685,16 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// proof. The id is new, so the pre-send count is zero. Without a
 	// transcript (no agent_session, a session kind that is not id, or a file
 	// that is missing or unreadable) the send keeps the screen-based path,
-	// with no new warning.
+	// with no new warning. The transcript is local to the machine that runs
+	// the Claude Code session, and ClaudeTranscriptPath resolves it with a
+	// local `agent get` plus a local file: it only applies to a local target.
+	// A remote target with a pane of the same id locally would otherwise be
+	// proved by another claude's transcript, so for it the proof is not armed
+	// at all (no machineless get, no file read).
 	claudeTranscriptPath := ""
 	claudeTranscriptPre := 0
 	claudeTranscriptArmed := false
-	if t.Kind == "claude" {
+	if t.Kind == "claude" && (t.Machine == sessionref.LocalMachine || t.Machine == "") {
 		claudeTranscriptPath = herdr.ClaudeTranscriptPath(t.TargetArg, env)
 		if claudeTranscriptPath != "" {
 			if pre, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); ok {
@@ -720,8 +725,13 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			curGet := agentGet(t.Machine, t.TargetArg, env)
 			if curGet.OK {
 				preIdle := preStatus == "idle" || preStatus == "done"
-				working := curGet.Status == "working" || curGet.Status == "blocked"
-				if preSeq != "" && curGet.Seq != "" && curGet.Seq != preSeq && preIdle && working {
+				// An idle/done agent's state sequence moves only when its
+				// state changes: a new seq since preGet means it just ran a
+				// turn (or took the prompt into a queue). A short turn can be
+				// over before the first state read, so the status no longer
+				// has to be working; the visible screen read below must still
+				// succeed and show no dialog.
+				if preSeq != "" && curGet.Seq != "" && curGet.Seq != preSeq && preIdle {
 					visible, readErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 					if readErr == "" && !isDialogScreen(visible, t.Kind, curGet.Status) {
 						return proofResult{Proven: true, RecentReadSucceeded: result.RecentReadSucceeded, LastCause: result.LastCause}

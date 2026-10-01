@@ -60,13 +60,20 @@ func appendAfterPrompt(t *testing.T, callsLog, transcriptPath, id, line string) 
 		for time.Now().Before(deadline) {
 			if calls, err := fakecli.ReadCalls(callsLog); err == nil {
 				for _, c := range calls {
-					if len(c.Argv) > 3 && c.Argv[1] == "prompt" && strings.Contains(c.Argv[3], "#"+id) {
-						f, werr := os.OpenFile(transcriptPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-						if werr == nil {
-							_, werr = f.WriteString(line + "\n")
-							_ = f.Close()
-							ok = werr == nil
+					// Find `agent prompt <pane> <msg>` with or without the
+					// leading --machine prefix.
+					for i := 0; i+3 < len(c.Argv); i++ {
+						if c.Argv[i] == "agent" && c.Argv[i+1] == "prompt" && strings.Contains(c.Argv[i+3], "#"+id) {
+							f, werr := os.OpenFile(transcriptPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+							if werr == nil {
+								_, werr = f.WriteString(line + "\n")
+								_ = f.Close()
+								ok = werr == nil
+							}
+							break
 						}
+					}
+					if ok {
 						break
 					}
 				}
