@@ -703,20 +703,6 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			}
 		}
 	}
-	p := deliverPrompt(t.Machine, t.TargetArg, message, env)
-	if p.Code != "ok" {
-		if p.Code == "agent_prompt_stalled" || p.Code == "agent_blocked" || p.Code == "timeout" {
-			result := map[string]string{"agent_prompt_stalled": "stalled", "agent_blocked": "blocked", "timeout": "timeout"}[p.Code]
-			log(senderRef, t.RefShown, result)
-			cause := p.Cause
-			if p.Code == "timeout" {
-				cause = "timeout"
-			}
-			platform.Die(fmt.Sprintf("send: %s did not take the message (%s); read its pane before sending again", t.RefShown, cause), 15)
-		}
-		log(senderRef, t.RefShown, "error")
-		platform.Die(fmt.Sprintf("send: %s unavailable: %s", t.RefShown, p.Cause), 4)
-	}
 	windowMS, pollMS := arrivalWindowMS(env), arrivalPollMS(env)
 	pollWindow := func() proofResult {
 		deadline := time.Now().Add(time.Duration(windowMS) * time.Millisecond)
@@ -784,6 +770,45 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			sleepMS(min(pollMS, int(time.Until(deadline).Milliseconds())))
 		}
 		return result
+	}
+	p := deliverPrompt(t.Machine, t.TargetArg, message, env)
+	if p.Code != "ok" {
+		if p.Code == "agent_prompt_stalled" {
+			// agent_prompt_stalled can mean the prompt was typed but its
+			// Enter never landed: the message then sits in the input box
+			// while the state stays idle. Read the target's visible screen
+			// (with the target's machine, as the rest of the send does)
+			// and, only when this message's marker is in the box, press one
+			// Enter and run the proof window. One Enter at most, no resend;
+			// agent_blocked and timeout keep today's exit below.
+			if vis, readErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env); readErr == "" && idInInputBox(t.Kind, vis, id) {
+				// A dialog on screen takes the Enter as its answer: press
+				// nothing, as the Enter of the ok path does.
+				if isDialogScreen(vis, t.Kind, "idle") {
+					log(senderRef, t.RefShown, "dialog")
+					platform.Die(fmt.Sprintf("send: %s is showing a dialog after the message was typed; press nothing and read its pane", t.RefShown), 17)
+				}
+				_ = sendKey(t.Machine, t.TargetArg, "enter", env)
+				if res := pollWindow(); res.Proven {
+					log(senderRef, t.RefShown, "sent")
+					_, _ = fmt.Fprintf(platform.Stdout, "sent to %s\n", t.RefShown)
+					return 0
+				}
+				log(senderRef, t.RefShown, "stalled")
+				platform.Die(fmt.Sprintf("send: %s did not take the message: it sits in its input box after one Enter; read its pane before sending again", t.RefShown), 15)
+			}
+		}
+		if p.Code == "agent_prompt_stalled" || p.Code == "agent_blocked" || p.Code == "timeout" {
+			result := map[string]string{"agent_prompt_stalled": "stalled", "agent_blocked": "blocked", "timeout": "timeout"}[p.Code]
+			log(senderRef, t.RefShown, result)
+			cause := p.Cause
+			if p.Code == "timeout" {
+				cause = "timeout"
+			}
+			platform.Die(fmt.Sprintf("send: %s did not take the message (%s); read its pane before sending again", t.RefShown, cause), 15)
+		}
+		log(senderRef, t.RefShown, "error")
+		platform.Die(fmt.Sprintf("send: %s unavailable: %s", t.RefShown, p.Cause), 4)
 	}
 	res := pollWindow()
 	if res.Proven {
