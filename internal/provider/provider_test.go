@@ -746,6 +746,84 @@ func TestRetryLineCases(t *testing.T) {
 		}
 	})
 }
+
+func TestRetryLineModelPhraseNotProviderRetry(t *testing.T) {
+	t.Run("retryLine: the four provider retry shapes count", func(t *testing.T) {
+		cases := []struct{ screen, want string }{
+			{"Retrying (5/8) in 4s…\n", "Retrying (5/8) in 4s"},
+			{"API Error (Request timed out) · Retrying in 5 seconds…\n", "API Error (Request timed out) Retrying in 5 seconds"},
+			{"Reconnecting…\n", "Reconnecting"},
+			{"Will retry in 30 seconds\n", "Will retry in 30 seconds"},
+		}
+		for _, row := range cases {
+			if got := RetryLine("working", row.screen); got != row.want {
+				t.Errorf("RetryLine(working, %q) = %q, want %q", row.screen, got, row.want)
+			}
+		}
+	})
+	t.Run("retryLine: the model's own retry wording is not a provider retry", func(t *testing.T) {
+		for _, screen := range []string{
+			"Retrying with the correct text.\n",
+			"I'll try again: retrying the edit\n",
+			// Has a digit but does not start with a retry word and carries no
+			// `· Retrying`/`- Retrying` tail: isolates the line-start rule.
+			"Now retrying the build, attempt 2\n",
+		} {
+			if got := RetryLine("working", screen); got != "" {
+				t.Errorf("RetryLine(working, %q) = %q, want empty (model wording)", screen, got)
+			}
+		}
+	})
+	t.Run("retryLine: a boxed retry line with a counter still counts", func(t *testing.T) {
+		if got := RetryLine("working", "┃ Retrying (2/5) in 3s\n"); got != "Retrying (2/5) in 3s" {
+			t.Errorf("RetryLine() = %q, want the boxed retry line", got)
+		}
+	})
+	t.Run("providerDetect: the model's retry phrase is skipped as today", func(t *testing.T) {
+		if got := ProviderDetect("idle", "Retrying with the correct text.\n"); got != nil {
+			t.Errorf("ProviderDetect() = %+v, want nil (same as today)", got)
+		}
+	})
+}
+
+func TestRetryLineCodexMidLineCounter(t *testing.T) {
+	t.Run("retryLine: codex's mid-line retrying with an n/m counter counts, with or without a glyph", func(t *testing.T) {
+		line := "stream disconnected - retrying sampling request (1/5 in 211ms)..."
+		want := "stream disconnected - retrying sampling request (1/5 in 211ms)..."
+		for _, screen := range []string{
+			line + "\n",
+			"■ " + line + "\n",
+			"⚠ " + line + "\n",
+		} {
+			if got := RetryLine("working", screen); got != want {
+				t.Errorf("RetryLine(working, %q) = %q, want %q", screen, got, want)
+			}
+		}
+	})
+	t.Run("retryLine: Reconnecting lines count", func(t *testing.T) {
+		cases := []struct{ screen, want string }{
+			{"Reconnecting... 2/5\n", "Reconnecting... 2/5"},
+			{"Reconnecting... waiting for network\n", "Reconnecting... waiting for network"},
+		}
+		for _, row := range cases {
+			if got := RetryLine("working", row.screen); got != row.want {
+				t.Errorf("RetryLine(working, %q) = %q, want %q", row.screen, got, row.want)
+			}
+		}
+	})
+	t.Run("retryLine: the negatives still do not count", func(t *testing.T) {
+		for _, screen := range []string{
+			"Retrying with the correct text.\n",
+			"I'll try again: retrying the edit\n",
+			"Now retrying the build, attempt 2\n",
+		} {
+			if got := RetryLine("working", screen); got != "" {
+				t.Errorf("RetryLine(working, %q) = %q, want empty", screen, got)
+			}
+		}
+	})
+}
+
 func equalJSON(got any, want json.RawMessage) (bool, error) {
 	b, err := json.Marshal(got)
 	if err != nil {
