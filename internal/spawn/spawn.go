@@ -60,7 +60,14 @@ func approvalsRank(mode string) int {
 func liveAgents(env platform.Env) []any { return herdr.LiveAgents(env, herdr.Timeout) }
 
 func AgentNameTaken(name string, env platform.Env) bool {
-	for _, a := range liveAgents(env) {
+	return AgentNameTakenIn(name, liveAgents(env))
+}
+
+// AgentNameTakenIn is AgentNameTaken over an already-read live list, so the
+// read can be shared with the lane-orphan warning that runs after the name
+// check without making a second agent list call.
+func AgentNameTakenIn(name string, agents []any) bool {
+	for _, a := range agents {
 		if fieldString(a, "name") == name {
 			return true
 		}
@@ -652,6 +659,7 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		}
 	}
 	core.EnforceWorkerCap(ctx, env, cwd)
+	var orphanLive []any
 	if o.name != "" {
 		if AgentNameTaken(o.name, env) {
 			taken := o.name
@@ -670,7 +678,8 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		if !agentNameRE.MatchString(o.name) {
 			core.DieFriction(fmt.Sprintf("invalid agent name '%s' (must match [a-z][a-z0-9_-]{0,31})", o.name), 2, "", "")
 		}
-		if AgentNameTaken(o.name, env) {
+		orphanLive = liveAgents(env)
+		if AgentNameTakenIn(o.name, orphanLive) {
 			core.DieFriction(fmt.Sprintf("agent name '%s' is already live", o.name), 3, "", "")
 		}
 		if o.name != base {
@@ -698,6 +707,14 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		Warn("--tab-label ignored: --pane places the worker in a given pane", ctx, env, "spawn")
 	}
 	if o.pane == "" {
+		if lane != "" {
+			// An idle pane released by this project without --close is not
+			// re-adopted: the spawn only names it (from the released-panes
+			// registry) before opening another pane. It reuses the live read
+			// the name check just made, and spends a workspace read only when
+			// a live agent matches a registry row.
+			warnLaneOrphans(ctx, env, cwd, orphanLive)
+		}
 		anchor, autoDir := "overflow", "layout"
 		if layoutMode != "tab" && o.tabLabel == "" {
 			picked := layout.PickSplitAnchor(ctx, env, cwd)
@@ -759,6 +776,11 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		Warn(fmt.Sprintf("replaced the stale roster line of '%s' (pane %s)", stale[0], stale[1]), ctx, env, "spawn")
 	}
 	core.RosterAppend(sd, []string{o.name, o.pane, kind, o.role, family, boolInt(created), o.cwd, core.NowStamp(platform.Now()), o.model, defaultValue(o.approvals, "ask"), o.role, lane, boolText(burst), native, o.effort})
+	// A spawn that re-rosters a released pane (spawn --pane on it) retires
+	// the pane's released-panes row.
+	if placement == "given" {
+		core.ReleasedPanesForget(ctx, env, cwd, o.pane)
+	}
 	sameTreeEditors(o.name, o.role, o.cwd, sd, env, cwd, ctx)
 	if placement == "herd" {
 		func() {
@@ -811,6 +833,42 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 
 func clampSpawnEffort(effort, kind, maxEffort string) string {
 	return kinds.ClampTo(kinds.ClampTo(effort, kinds.KindEffortCeiling(kind)), maxEffort)
+}
+
+// warnLaneOrphans notices the idle orphans — the panes this project released
+// without --close, recorded in the released-panes registry — before the
+// spawn opens a new pane; it only warns, the spawn proceeds and the orphan is
+// left alone. With an empty registry it makes no extra herdr reads at all.
+func warnLaneOrphans(ctx *core.Config, env platform.Env, cwd string, live []any) {
+	if live == nil {
+		live = liveAgents(env)
+	}
+	released := core.ReleasedPanes(ctx, env, cwd)
+	if len(released) == 0 {
+		return
+	}
+	// A workspace read is spent only when a live agent matches a registry
+	// row by pane and name.
+	candidate := false
+	for _, row := range released {
+		for _, agent := range live {
+			if fieldString(agent, "name") == row.Name && fieldString(agent, "pane_id") == row.Pane {
+				candidate = true
+				break
+			}
+		}
+		if candidate {
+			break
+		}
+	}
+	if !candidate {
+		return
+	}
+	for _, orphan := range core.OrphansOf(ctx, env, cwd, live) {
+		if orphan.State == "idle" || orphan.State == "done" {
+			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: spawn: '%s' is idle outside the roster (%s); close it with: herdr-soho release %s --close\n", orphan.Name, orphan.Pane, orphan.Name)
+		}
+	}
 }
 
 func has(values []string, want string) bool {

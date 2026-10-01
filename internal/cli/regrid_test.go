@@ -179,7 +179,11 @@ func TestReleaseAutomaticRegridLifecycle(t *testing.T) {
 		code := Run([]string{"release", "worker"}, env)
 		platform.Stdout, platform.Stderr = oldOut, oldErr
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
-		if err != nil || code != 0 || out.String() != "released worker\n" || stderr.Len() != 0 || hasCallPrefix(calls, "pane", "move") || len(callsTo(calls, "pane", "report-metadata", "pa", "--source", "herdr-soho", "--clear-title")) != 1 {
+		// The release without --close now names the pane that stays open (the
+		// orphan follow-up of the release slice); the relabel branch must still
+		// not move panes.
+		wantErr := "herdr-soho: release: the pane pa stays open; close it later with: herdr-soho release worker --close\n"
+		if err != nil || code != 0 || out.String() != "released worker\n" || stderr.String() != wantErr || hasCallPrefix(calls, "pane", "move") || len(callsTo(calls, "pane", "report-metadata", "pa", "--source", "herdr-soho", "--clear-title")) != 1 {
 			t.Fatalf("code=%d out=%q stderr=%q calls=%#v err=%v", code, out.String(), stderr.String(), calls, err)
 		}
 	})
