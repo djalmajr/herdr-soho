@@ -470,6 +470,9 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	}
 	if o.timeout == "" {
 		o.timeout = core.Cfg(ctx, "spawn_timeout", "60000", env)
+	} else if n, ok := text.ParseJSNumber(o.timeout); ok && !math.IsNaN(n) && !math.IsInf(n, 0) && math.Trunc(n) == n {
+		// The value goes to `herdr agent start --timeout`, also in milliseconds.
+		core.WarnShortTimeout("spawn", filepath.Join(core.StateDirPath(ctx, env, cwd), "friction.log"), int64(n))
 	}
 	if o.effort != "" {
 		if !text.HasWord(strings.Join(core.EffortLadder, " "), o.effort) {

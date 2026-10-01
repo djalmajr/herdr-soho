@@ -693,7 +693,7 @@ func TestSend(t *testing.T) {
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"] = "1"
 		f.env["HERDR_SOHO_SEND_POLL_MS"] = "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "300", "hello"})
-		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
+		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "herdr-soho: warning: send: --timeout is in milliseconds; 300 is under a second (for 300 seconds pass 300000)\n" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})
@@ -1504,7 +1504,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		}))
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "50", "hi"})
-		if code != 0 || stderr != "" {
+		if code != 0 || stderr != "herdr-soho: warning: send: --timeout is in milliseconds; 50 is under a second (for 50 seconds pass 50000)\n" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 	})
@@ -1561,7 +1561,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		})
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "50", "hi"})
-		if code != 0 || stderr != "" {
+		if code != 0 || stderr != "herdr-soho: warning: send: --timeout is in milliseconds; 50 is under a second (for 50 seconds pass 50000)\n" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 	})

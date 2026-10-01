@@ -805,7 +805,7 @@ func TestCompactLaterMentionDoesNotAnchor(t *testing.T) {
 		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.codexLaterMention},
 	})
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
-	if code != 0 || errText != "" {
+	if code != 0 || errText != "herdr-soho: warning: compact: --timeout is in milliseconds; 500 is under a second (for 500 seconds pass 500000)\n" {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 	}
 	value := compactJSON(t, out)
