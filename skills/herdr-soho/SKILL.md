@@ -344,6 +344,18 @@ the chosen model's advertised reasoning levels, not from the kind.
   unchanged` instead of failing the spawn. Verify the effective context
   window in the Cursor TUI; a model's
   native harness may expose a different window than Cursor does.
+- **`context_window`** is grok's context window, in tokens
+  (`context_window.grok=500k` or `256000`): grok has no CLI flag for it, so a
+  fresh grok spawn types `/context-window <value>` into the pane right after
+  the agent is ready (a pause, then the Enter on the menu) and reads the
+  visible screen for the `Context window set to <value>` line before it
+  reports; the spawn JSON then carries `"context_window"`. Only grok uses
+  the key (another kind is a `doctor` warning with no effect), a value that
+  is not `<n>k`/`<n>` is ignored with a `doctor` warning, and a spawn that
+  cannot confirm the line still succeeds with the warning `spawn: could not
+  confirm grok's context window …` (set it by hand with `/context-window`).
+  The command never goes to a reused or working grok, and no value leaves
+  grok's own default window in place.
 - **`approvals`** decides how much a worker may do without a human:
   `ask` (default, the CLI's normal prompts), `edits` (auto-accept file
   edits), `full` (no prompts for tools or MCP servers, still inside the
@@ -670,7 +682,7 @@ does not exist.
 
 `$S config` prints every effective value with its source: the scalar keys
 in order, then the dotted keys (`args.*`, `role.*`, `model.*`, `effort.*`,
-`lane.*`, sorted) — the file's own spelling when a layer holds the key,
+`context_window.*`, `lane.*`, sorted) — the file's own spelling when a layer holds the key,
 the rebuilt dotted name for a key that only exists in the environment.
 Keys:
 `orchestrator_name`, `layout` (`split`: panes in the caller's tab until it is
