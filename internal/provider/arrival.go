@@ -175,27 +175,46 @@ func blockMatchesPath(block, pattern string) bool {
 	return ti >= len(text) || unicode.IsSpace(text[ti])
 }
 
+// isPiBorderLine reports whether the line is one of pi's input-box borders,
+// ignoring whitespace: a line composed only of '─' (U+2500), or a line that,
+// without its end spaces, starts with at least two '─', ends with at least
+// two '─', and carries '─' in at least half of its runes — a working pi marks
+// the top border with its activity indicator, like `── ⠴ Working ──…`. A
+// plain text line with a '─' in the middle is not a border.
+func isPiBorderLine(line string) bool {
+	content := strings.TrimFunc(line, isJSWhitespace)
+	if content == "" {
+		return false
+	}
+	runes := []rune(content)
+	border, plain := 0, true
+	for _, r := range runes {
+		if r == '─' {
+			border++
+		} else {
+			plain = false
+		}
+	}
+	if plain {
+		return true
+	}
+	if border*2 < len(runes) {
+		return false
+	}
+	return strings.HasPrefix(string(runes[:2]), "──") && strings.HasSuffix(string(runes), "──")
+}
+
 // PiInputRegion reports the line index range [start, end) of pi's input box in
-// the screen's lines: the lines between the last two lines composed only of
-// '─' (U+2500), ignoring whitespace (pi's borders, chat history above, footer
-// below). ok is false when the screen has fewer than two such lines; the
-// caller then keeps the whole-screen behavior.
+// the screen's lines: the lines between the last two border lines (isPiBorderLine:
+// lines of '─', or the working pi's `── ⠴ Working ──…` top border), ignoring
+// whitespace (pi's borders, chat history above, footer below). ok is false when
+// the screen has fewer than two such lines; the caller then keeps the
+// whole-screen behavior.
 func PiInputRegion(screen string) (start, end int, ok bool) {
 	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
 	borders := make([]int, 0, 2)
 	for i, line := range lines {
-		content := strings.TrimFunc(line, isJSWhitespace)
-		if content == "" {
-			continue
-		}
-		border := true
-		for _, r := range content {
-			if r != '─' {
-				border = false
-				break
-			}
-		}
-		if border {
+		if isPiBorderLine(line) {
 			borders = append(borders, i)
 		}
 	}
