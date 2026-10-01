@@ -737,7 +737,7 @@ export function doctorCheck(ctx, env = process.env, cwd = process.cwd(), opts = 
     if (!findExecutable(kindExe(k), env)) missing.push(k);
   }
   if (used.length === 0) s.ok('kinds: none configured (spawn passes --kind)');
-  else if (missing.length === 0) s.ok(`kinds installed: ${used.join(' ')}`);
+  else if (missing.length === 0) s.ok(`kinds in use and installed: ${used.join(' ')}`);
   else s.warn(`kinds in use but not in PATH: ${missing.join(' ')} (roles or lanes using them will fail to start)`);
   // Own-provider traps (references/kinds.md "Reasoning
   // models on your own server"): each warning as its own warn line (into
