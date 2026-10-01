@@ -3,6 +3,7 @@ package provider
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/djalmajr/herdr-soho/internal/text"
 )
@@ -21,6 +22,7 @@ const HarnessModuleCause = "Error: Cannot find module"
 
 var (
 	retryingRE       = regexp.MustCompile(`retrying|retry in|will retry|reconnecting`)
+	errorTailRetryRE = regexp.MustCompile(`error.*(·|-)[ \t]*retrying`)
 	econnRE          = regexp.MustCompile(`\bECONN(REFUSED|RESET)\b`)
 	providerStatusRE = regexp.MustCompile(`\b(500|502|503|504)\b` + jsWhitespace + `*[:{(]`)
 	capacity529RE    = regexp.MustCompile(`\b529\b`)
@@ -113,11 +115,13 @@ func ProviderDetectTexts(state, screen, capacityTexts, errorTexts string) *Detec
 	return nil
 }
 
-// RetryLine returns the most recent retry line of a working agent: the
-// bottom ten non-empty screen lines, read upward without the leading box
-// prefix, the first one that matches the retrying patterns, sanitized like
-// a cause. A retry is not a terminal stop (ProviderDetect skips the line);
-// this surfaces it. Empty when the state is not working or no line matches.
+// RetryLine returns the most recent provider-retry line of a working agent:
+// the bottom ten non-empty screen lines, read upward without the leading box
+// prefix, the first that is a provider retry (retryLineReports), sanitized
+// like a cause. A retry is not a terminal stop (ProviderDetect skips the
+// line); this surfaces it. The model's own wording about retrying (no retry
+// counter and not the Reconnecting start) is not a provider retry. Empty when
+// the state is not working or no line matches.
 func RetryLine(state, screen string) string {
 	if state != "working" {
 		return ""
@@ -134,7 +138,7 @@ func RetryLine(state, screen string) string {
 		nonEmpty = nonEmpty[len(nonEmpty)-10:]
 	}
 	for i := len(nonEmpty) - 1; i >= 0; i-- {
-		if retryingRE.MatchString(text.ASCIILower(nonEmpty[i])) {
+		if retryLineReports(nonEmpty[i]) {
 			return text.SanitizeCause(text.RedactSecrets(nonEmpty[i]))
 		}
 	}
@@ -147,6 +151,40 @@ func stripBoxPrefix(line string) string {
 		return strings.TrimLeft(value[len("┃"):], " \t")
 	}
 	return value
+}
+
+// stripStatusGlyph removes one leading status glyph (the activity and error
+// bullets the TUI prints before a line) and the spaces after it, the way
+// stripBoxPrefix removes the box prefix and the spaces. A line without a
+// leading glyph is returned unchanged.
+func stripStatusGlyph(value string) string {
+	if value == "" {
+		return value
+	}
+	r, size := utf8.DecodeRuneInString(value)
+	switch r {
+	case '•', '●', '⏺', '✓', '✔', '■':
+		return strings.TrimLeft(value[size:], " \t")
+	}
+	return value
+}
+
+// retryLineReports says whether the box-stripped line is a provider retry,
+// not the model talking about its own retry. It counts only when the line,
+// after the box prefix, the spaces and a single status glyph, starts with
+// Retrying, Reconnecting or Will retry, or carries a `· Retrying`/`- Retrying`
+// tail after an Error (a), AND it carries a digit or starts with Reconnecting
+// (b). "Retrying with the correct text." passes (a) but not (b).
+func retryLineReports(line string) bool {
+	lower := text.ASCIILower(stripStatusGlyph(line))
+	leading := strings.HasPrefix(lower, "retrying") ||
+		strings.HasPrefix(lower, "reconnecting") ||
+		strings.HasPrefix(lower, "will retry")
+	if !leading && !errorTailRetryRE.MatchString(lower) {
+		return false
+	}
+	return strings.ContainsAny(lower, "0123456789") ||
+		strings.HasPrefix(lower, "reconnecting")
 }
 
 // harnessModuleCause reports whether line is the first line of the stop of a
