@@ -16,6 +16,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/provider"
 	"github.com/djalmajr/herdr-soho/internal/sessionref"
 	textutil "github.com/djalmajr/herdr-soho/internal/text"
 )
@@ -799,30 +800,15 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 // composed only of '─' (U+2500), ignoring whitespace: pi's input box, whose
 // borders are those two separator lines (chat history above, footer below).
 // ok is false when the screen has fewer than two such lines; the caller then
-// keeps the whole-screen behavior.
+// keeps the whole-screen behavior. The region rule lives in provider, where the
+// dispatch arrival check reuses it; this adapter hands it the lines back.
 func piInputRegion(screen string) ([]string, bool) {
 	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
-	borders := make([]int, 0, 2)
-	for i, line := range lines {
-		content := strings.TrimFunc(line, isJSWhitespace)
-		if content == "" {
-			continue
-		}
-		border := true
-		for _, r := range content {
-			if r != '─' {
-				border = false
-				break
-			}
-		}
-		if border {
-			borders = append(borders, i)
-		}
-	}
-	if len(borders) < 2 {
+	start, end, ok := provider.PiInputRegion(screen)
+	if !ok {
 		return nil, false
 	}
-	return lines[borders[len(borders)-2]+1 : borders[len(borders)-1]], true
+	return lines[start:end], true
 }
 
 // messageStillInScreen reports whether the visible screen still holds the
