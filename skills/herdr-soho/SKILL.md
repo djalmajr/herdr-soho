@@ -44,8 +44,10 @@ to a file.
    can edit.** `dispatch` lints it (`brief_lint=warn|strict`; a read-only
    role needs no `Owned files` section) and tells every worker that nobody
    watches its terminal (no interactive questions) and never to invent
-   names, endpoints, flags, credentials, URLs or requirements. Credentials,
-   URLs and seeds named in a brief must be verified first (`git grep`, the
+   names, endpoints, flags, credentials, URLs or requirements. A brief may
+   carry a `Type: mechanical|backend|ui|docs|review|security` line, recorded
+   in the settled report's metrics line when `metrics=on` — the lint does not
+   require it. Credentials, URLs and seeds named in a brief must be verified first (`git grep`, the
    seed script), not guessed.
 4. **Reviewer from another model family** than the implementers, before push.
    **A review item marked `partial` is not a pass.** The reviewer could not
@@ -437,6 +439,9 @@ change it. A `timeout` line carries `elapsed_ms` (this wait's own),
 and, when the visible screen already moved away from the hash the last
 wait probe recorded, `activity_changed: true` with `activity_age_s:
 null` — the screen changed since that probe and the change has no age. A
+`timeout` line of a still `working` agent whose screen carries a provider
+retry line gains `retrying: "<line>"` (the most recent retry line,
+sanitized like a cause); the state and the exit 9 are unchanged. A
 worker still `working` whose screen really changed within the stuck
 window (`stuck_warn_minutes`, 20 min when 0 or not a number) is a
 **neutral checkpoint**: `checkpoint: true`, no friction line, only
@@ -619,7 +624,10 @@ visible screen already moved away from the hash the last wait probe
 recorded — the change has no age; `-` in any other state or with no
 observed change), and adds both as the last keys of its JSON lines
 (`null` when unknown; `activity_changed: true` right after `activity_s`
-when the screen changed since the last wait probe). It writes no marker
+when the screen changed since the last wait probe). A `working` agent
+whose screen carries a provider retry line gets the cause `retrying:
+<line>` in the TSV cause column — the state stays `working` and the exit
+code is unchanged. It writes no marker
 and prints no screen text. `notify=on` in the config raises a Herdr toast
 per finished worker. `roster` shows a `REPORT` column (`none | pending |
 ready`) for a quick glance.
@@ -738,7 +746,7 @@ $S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, p
 $S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines, one `<sha256>  <path>` per file as `sha256sum` prints it (a trailing `# note` after the path is dropped when the path without it exists; exit 16 on changed/missing or when the report has none, 4 when the report cannot be read)
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
-$S stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
+$S stats [--since <date>] [--by role|kind|model|kind-model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
 $S friction [--since <date>] [--level warning|note|error] [--command <cmd>] [--agent <name>] [--summary]  # errors/warnings of this workspace (review at end); the options AND together over the log lines (<date> as in stats --since; --level error matches error(exit N); --agent matches '<name>' in the message); --summary prints a count/level/command table instead of the lines
 $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before sending; no dispatch, no state
 $S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
@@ -818,7 +826,9 @@ SessionStart hook checks these locations in order: project
 
 **Naming.** With lanes on, the agent is named after the lane (`build`,
 `build-2`, `review`, `docs`). A name already live anywhere in Herdr gets the
-next free suffix (with a warning when it was a `--name`). `lanes=off` names it after the role
+next free suffix (with a warning when it was a `--name`); without `--name`, a final
+name different from the lane's (or the role's, with lanes off) is announced on
+stderr with the name to dispatch to. `lanes=off` names it after the role
 (`implementer`, then `implementer-2`). Pass `--name` for a custom name
 (`[a-z][a-z0-9_-]{0,31}`). Use that name in `dispatch`, `collect`, and
 `release`; never pane IDs.
@@ -958,9 +968,9 @@ logging `dialog` without typing into the dialog.
 The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.
 Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).
 Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000` (it never automatically re-prompts).
-Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof).
+Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof). For a pi target with two all-`─` lines at the bottom, the closing line and the id count only inside its input box (the region between those lines), so a message already in its chat history is delivered, a message in its `Steering:` queue is queued, and the Enter goes only when the id is in that box.
 If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
-If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or transcript)`).
+If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or screen)`).
 The target project decides acceptance: the `inbound`
 key (`auto` | `off`, default `auto`) is consulted for a **local** target in
 the target's directory, with the target's session layer (its

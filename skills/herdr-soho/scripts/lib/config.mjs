@@ -29,7 +29,7 @@ export const CONFIG_SCALAR_KEYS = [
   'provider_retry_delay', 'provider_capacity_texts', 'provider_error_texts',
   'prompt_check_seconds', 'prompt_settle_seconds', 'stuck_warn_minutes', 'context_warn_percent', 'state_dir',
   'report_language', 'notify', 'feedback', 'feedback_repo', 'feedback_dir', 'feedback_to',
-  'setup_target', 'inbound',
+  'setup_target', 'inbound', 'metrics',
 ];
 export const KNOWN_KINDS = ['claude', 'codex', 'grok', 'agy', 'gemini', 'cursor', 'pi', 'opencode'];
 export const EFFORT_LADDER = ['low', 'medium', 'high', 'xhigh', 'max'];

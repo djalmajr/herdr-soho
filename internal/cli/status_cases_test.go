@@ -1006,3 +1006,61 @@ func TestWaitStatusRemainingCommandCases(t *testing.T) {
 		}
 	})
 }
+
+func TestStatusAndWaitRetryingCases(t *testing.T) {
+	row := "worker\tp0a\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\t\t\n"
+	retryScreen := "Retrying (5/8) in 4s…\n"
+	t.Run("status: a working agent on a retry line reports the retrying cause, still working, rc 0", func(t *testing.T) {
+		f := newWaitStatusFixture(t, row, []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`},
+			{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: retryScreen},
+		})
+		code, out, stderr := f.run(t, "worker")
+		if code != 0 || stderr != "" || out != "worker\tworking\t\tretrying: Retrying (5/8) in 4s\t-\t-\n" {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		}
+	})
+	t.Run("status: a working agent without the retry line keeps today's five-column output", func(t *testing.T) {
+		f := newWaitStatusFixture(t, row, []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`},
+			{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: "Compiling workspace\n"},
+		})
+		code, out, stderr := f.run(t, "worker")
+		if code != 0 || stderr != "" || out != "worker\tworking\t\t-\t-\n" {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		}
+	})
+	t.Run("status: the retry line on the screen does not move the state or the rc of other agents", func(t *testing.T) {
+		rows := "retrying\tp0a\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\t\t\nplain\tp0b\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\t\t\n"
+		f := newWaitStatusFixture(t, rows, []fakecli.Rule{
+			{Argv: []string{"agent", "get", "retrying"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`},
+			{Argv: []string{"agent", "read", "retrying", "--source", "visible"}, Stdout: retryScreen},
+			{Argv: []string{"agent", "get", "plain"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`},
+			{Argv: []string{"agent", "read", "plain", "--source", "visible"}, Stdout: "Compiling workspace\n"},
+		})
+		code, out, stderr := f.run(t, "retrying", "plain")
+		if code != 0 || stderr != "" || out != "retrying\tworking\t\tretrying: Retrying (5/8) in 4s\t-\t-\nplain\tworking\t\t-\t-\n" {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		}
+	})
+	t.Run("wait: a timeout line of a working agent on a retry line carries the retrying field", func(t *testing.T) {
+		f := newWaitStatusFixture(t, row, []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`},
+			{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: retryScreen},
+		})
+		code, out, stderr := f.runWait(t, "worker", "--timeout", "10")
+		if code != 9 || !strings.Contains(out, `"status":"timeout"`) || !strings.Contains(out, `"state":"working"`) || !strings.Contains(out, `"retrying":"Retrying (5/8) in 4s"`) || !strings.Contains(stderr, "timeout waiting for 'worker'") {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		}
+	})
+	t.Run("wait: a timeout line without the retry line has no retrying field and keeps its output", func(t *testing.T) {
+		f := newWaitStatusFixture(t, row, []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`},
+			{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: "Compiling workspace\n"},
+		})
+		code, out, stderr := f.runWait(t, "worker", "--timeout", "10")
+		if code != 9 || !strings.Contains(out, `"status":"timeout"`) || strings.Contains(out, "retrying") || !strings.Contains(stderr, "timeout waiting for 'worker'") {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		}
+	})
+}

@@ -303,7 +303,7 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 	if len(used) == 0 {
 		s.Ok("kinds: none configured (spawn passes --kind)")
 	} else if len(missing) == 0 {
-		s.Ok("kinds installed: " + strings.Join(used, " "))
+		s.Ok("kinds in use and installed: " + strings.Join(used, " "))
 	} else {
 		s.Warning("kinds in use but not in PATH: " + strings.Join(missing, " ") + " (roles or lanes using them will fail to start)")
 	}

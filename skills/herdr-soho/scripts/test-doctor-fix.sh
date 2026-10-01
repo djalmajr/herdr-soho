@@ -175,7 +175,7 @@ KINDS_PATH="$TEST_ROOT/bin:/usr/bin:/bin"
 legacy   # every laned role on grok; the grok fake on PATH → only grok is in use
 run_cmd "$KINDS_PATH" doctor
 [ "$RUN_RC" = 0 ] || fail "doctor kinds rc $RUN_RC err $RUN_ERR"
-printf '%s\n' "$RUN_OUT" | grep -q 'kinds installed: grok' || fail "doctor kinds ok line: $RUN_OUT"
+printf '%s\n' "$RUN_OUT" | grep -q 'kinds in use and installed: grok' || fail "doctor kinds ok line: $RUN_OUT"
 printf '%s\n' "$RUN_OUT" | grep -q 'kinds in use but not in PATH' && fail "doctor warned about unused kinds: $RUN_OUT"
 
 # Every laned role on codex (absent from the controlled PATH): the warning
@@ -203,7 +203,7 @@ done
 } > "$CONF"
 run_cmd "$KINDS_PATH" doctor
 [ "$RUN_RC" = 0 ] || fail "doctor lanes-off rc $RUN_RC err $RUN_ERR"
-printf '%s\n' "$RUN_OUT" | grep -q 'kinds installed: grok' || fail "doctor lanes-off ok line: $RUN_OUT"
+printf '%s\n' "$RUN_OUT" | grep -q 'kinds in use and installed: grok' || fail "doctor lanes-off ok line: $RUN_OUT"
 printf '%s\n' "$RUN_OUT" | grep -q 'kinds in use but not in PATH' && fail "doctor counted the planner's kind: $RUN_OUT"
 
 rm -f "$CONF"

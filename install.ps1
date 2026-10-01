@@ -59,7 +59,10 @@ try {
     }
 
     if ([System.IO.File]::Exists($destination)) {
-        [System.IO.File]::Replace($binaryTemp, $destination, $null)
+        # Windows PowerShell turns $null into '' for a .NET string parameter, and
+        # File.Replace rejects '' as a backup path ("The path is not of a legal
+        # form"); [NullString]::Value passes a real null (no backup file).
+        [System.IO.File]::Replace($binaryTemp, $destination, [NullString]::Value)
     } else {
         [System.IO.File]::Move($binaryTemp, $destination)
     }
