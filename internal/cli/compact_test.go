@@ -151,22 +151,24 @@ var compactScreens = struct {
 	claudeStale       string
 	claudeFresh       string
 	claudeNothing     string
+	claudeNoMessages  string
 	claudeFailed      string
 	codexProof        string
 	noProof           string
 	codexLaterMention string
 	piFooterCutoff    string
 }{
-	piStale:        "old output line\n[compaction] Compacted from 99999 tokens\n> /compact\n",
-	piFresh:        "old output line\n[compaction] Compacted from 99999 tokens\n> /compact\n[compaction] Compacted from 12345 tokens\n",
-	piFooterHigh:   "old output line\n> /compact\n[compaction] Compacted from 12345 tokens\n• thinking: high\n",
-	piFooterMedium: "old output line\n> /compact\n[compaction] Compacted from 12345 tokens\n• thinking: medium\n",
-	claudeStale:    "old output line\nCompacted\n> /compact\n",
-	claudeFresh:    "old output line\nCompacted\n> /compact\nCompacted the conversation to 42 tokens\n",
-	claudeNothing:  "old output line\n> /compact\nNot enough messages to compact.\n",
-	claudeFailed:   "old output line\n> /compact\nError compacting conversation\n",
-	codexProof:     "> /compact\nContext compacted\n",
-	noProof:        "> /compact\n",
+	piStale:          "old output line\n[compaction] Compacted from 99999 tokens\n> /compact\n",
+	piFresh:          "old output line\n[compaction] Compacted from 99999 tokens\n> /compact\n[compaction] Compacted from 12345 tokens\n",
+	piFooterHigh:     "old output line\n> /compact\n[compaction] Compacted from 12345 tokens\n• thinking: high\n",
+	piFooterMedium:   "old output line\n> /compact\n[compaction] Compacted from 12345 tokens\n• thinking: medium\n",
+	claudeStale:      "old output line\nCompacted\n> /compact\n",
+	claudeFresh:      "old output line\nCompacted\n> /compact\nCompacted the conversation to 42 tokens\n",
+	claudeNothing:    "old output line\n> /compact\nNot enough messages to compact.\n",
+	claudeNoMessages: "old output line\n> /compact\nNo messages to compact\n",
+	claudeFailed:     "old output line\n> /compact\nError compacting conversation\n",
+	codexProof:       "> /compact\nContext compacted\n",
+	noProof:          "> /compact\n",
 	// The review's screens: a later line that only mentions /compact must not
 	// become the anchor, and `cutoff` must not read as thinking `off`.
 	codexLaterMention: "> /compact\nContext compacted\nthe history mentions /compact again\n",
@@ -488,6 +490,306 @@ func TestCompactPiThinkingWarning(t *testing.T) {
 	if !strings.Contains(errText, want) {
 		t.Fatalf("stderr=%q want %q", errText, want)
 	}
+}
+
+// TestCompactPiThinkingOffAndRestored verifies the pi thinking handling: a
+// footer at a level is turned off with shift+tab before the /compact and the
+// level is given back after the compaction; the result JSON carries
+// thinking_restored and no warning is emitted.
+func TestCompactPiThinkingOffAndRestored(t *testing.T) {
+	before := "old output line\n• thinking: high\n"
+	off := "old output line\n• thinking: off\n"
+	proof := "old output line\n[compaction] Compacted from 12345 tokens\n• thinking: off\n"
+	restored := "old output line\n[compaction] Compacted from 12345 tokens\n• thinking: high\n"
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 2)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: before},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: off},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: proof},
+		{Argv: compactReadArgv("worker"), Call: 4, Stdout: restored},
+		{Argv: compactReadArgv("worker"), Call: 5, Stdout: restored},
+		{Argv: []string{"pane", "send-keys", "p1", "shift+tab"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["agent"] != "worker" || value["kind"] != "pi" || value["status"] != "compacted" {
+		t.Fatalf("json=%v", value)
+	}
+	if restored, ok := value["thinking_restored"].(bool); !ok || !restored {
+		t.Fatalf("thinking_restored=%v want true: %v", value["thinking_restored"], value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "shift+tab"}); n != 2 {
+		t.Fatalf("shift+tab calls=%d want 2 (one off, one restore): %#v", n, calls)
+	}
+	if n := countArgv(calls, compactReadArgv("worker")); n != 5 {
+		t.Fatalf("recent reads=%d want 5 (before, off, proof, restore, footer check): %#v", n, calls)
+	}
+}
+
+// TestCompactPiAlreadyOffNoChange verifies that a pi footer already at off is
+// left as is: no shift+tab is sent and the result JSON has no thinking_restored.
+func TestCompactPiAlreadyOffNoChange(t *testing.T) {
+	off := "old output line\n• thinking: off\n"
+	proof := "old output line\n[compaction] Compacted from 12345 tokens\n• thinking: off\n"
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 2)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: off},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: proof},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: proof},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+	})
+	code, out, _ := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 0 {
+		t.Fatalf("code=%d out=%s", code, out)
+	}
+	value := compactJSON(t, out)
+	if value["status"] != "compacted" {
+		t.Fatalf("json=%v", value)
+	}
+	if _, present := value["thinking_restored"]; present {
+		t.Fatalf("thinking_restored must be absent when the level was not changed: %v", value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "shift+tab"}); n != 0 {
+		t.Fatalf("shift+tab calls=%d want 0 (footer already off): %#v", n, calls)
+	}
+}
+
+// TestCompactPiNeverReachesOff verifies that when the footer never reaches off
+// after the eight taps, the compact warns and still compacts; the level is
+// given back and the result carries thinking_restored.
+func TestCompactPiNeverReachesOff(t *testing.T) {
+	stuck := "old output line\n• thinking: high\n"
+	proof := "old output line\n[compaction] Compacted from 12345 tokens\n• thinking: high\n"
+	rules := []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 2)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: stuck},
+		// eight taps in the off phase, all re-reading the stuck footer
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: stuck},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: stuck},
+		{Argv: compactReadArgv("worker"), Call: 4, Stdout: stuck},
+		{Argv: compactReadArgv("worker"), Call: 5, Stdout: stuck},
+		{Argv: compactReadArgv("worker"), Call: 6, Stdout: stuck},
+		{Argv: compactReadArgv("worker"), Call: 7, Stdout: stuck},
+		{Argv: compactReadArgv("worker"), Call: 8, Stdout: stuck},
+		{Argv: compactReadArgv("worker"), Call: 9, Stdout: stuck},
+		{Argv: compactReadArgv("worker"), Call: 10, Stdout: proof},
+		{Argv: compactReadArgv("worker"), Call: 11, Stdout: stuck},
+		{Argv: compactReadArgv("worker"), Call: 12, Stdout: stuck},
+		{Argv: []string{"pane", "send-keys", "p1", "shift+tab"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+	}
+	f := newCompactFixture(t, "pi", rules)
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 0 {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["status"] != "compacted" {
+		t.Fatalf("json=%v", value)
+	}
+	if restored, ok := value["thinking_restored"].(bool); !ok || !restored {
+		t.Fatalf("thinking_restored=%v want true (the footer never left its level): %v", value["thinking_restored"], value)
+	}
+	want := "compact: could not turn 'worker' thinking off before compacting (still 'high'); compacting anyway"
+	if !strings.Contains(errText, want) {
+		t.Fatalf("stderr=%q want %q", errText, want)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "shift+tab"}); n != 9 {
+		t.Fatalf("shift+tab calls=%d want 9 (eight off, one restore): %#v", n, calls)
+	}
+}
+
+// TestCompactPiNotRestored verifies that when the level does not come back
+// after the eight restore taps, the result carries thinking_restored false and
+// the stderr warning names the level the footer still shows.
+func TestCompactPiNotRestored(t *testing.T) {
+	before := "old output line\n• thinking: high\n"
+	off := "old output line\n• thinking: off\n"
+	// After the compact the footer stays at off: it never comes back to high.
+	stuckOff := "old output line\n[compaction] Compacted from 12345 tokens\n• thinking: off\n"
+	rules := []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 2)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: before},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: off},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: stuckOff},
+		// eight restore taps, all re-reading the stuck-off footer
+		{Argv: compactReadArgv("worker"), Call: 4, Stdout: stuckOff},
+		{Argv: compactReadArgv("worker"), Call: 5, Stdout: stuckOff},
+		{Argv: compactReadArgv("worker"), Call: 6, Stdout: stuckOff},
+		{Argv: compactReadArgv("worker"), Call: 7, Stdout: stuckOff},
+		{Argv: compactReadArgv("worker"), Call: 8, Stdout: stuckOff},
+		{Argv: compactReadArgv("worker"), Call: 9, Stdout: stuckOff},
+		{Argv: compactReadArgv("worker"), Call: 10, Stdout: stuckOff},
+		{Argv: compactReadArgv("worker"), Call: 11, Stdout: stuckOff},
+		{Argv: compactReadArgv("worker"), Call: 12, Stdout: stuckOff},
+		{Argv: []string{"pane", "send-keys", "p1", "shift+tab"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+	}
+	f := newCompactFixture(t, "pi", rules)
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 0 {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	value := compactJSON(t, out)
+	if value["status"] != "compacted" {
+		t.Fatalf("json=%v", value)
+	}
+	if restored, ok := value["thinking_restored"].(bool); !ok || restored {
+		t.Fatalf("thinking_restored=%v want false: %v", value["thinking_restored"], value)
+	}
+	want := "compact: could not restore 'worker' thinking to 'high' (shows 'off'); set it by hand before the next brief"
+	if !strings.Contains(errText, want) {
+		t.Fatalf("stderr=%q want %q", errText, want)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "shift+tab"}); n != 9 {
+		t.Fatalf("shift+tab calls=%d want 9 (one off, eight restore): %#v", n, calls)
+	}
+}
+
+// TestCompactPiTimeoutStillRestores verifies that a timeout with the thinking
+// still off tries to restore the level before exiting; the timeout JSON carries
+// thinking_restored.
+func TestCompactPiTimeoutStillRestores(t *testing.T) {
+	before := "old output line\n• thinking: high\n"
+	off := "old output line\n• thinking: off\n"
+	// After the send the footer shows high (no proof): the compact times out,
+	// but the restore read finds the level back at high.
+	noProof := "old output line\n• thinking: high\n"
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: before},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: off},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: noProof},
+		{Argv: []string{"pane", "send-keys", "p1", "shift+tab"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+	})
+	code, out, _ := f.run(t, "compact", "worker", "--timeout", "500")
+	if code != 9 {
+		t.Fatalf("code=%d want 9 out=%s", code, out)
+	}
+	value := compactJSON(t, out)
+	if value["status"] != "timeout" {
+		t.Fatalf("json=%v", value)
+	}
+	if restored, ok := value["thinking_restored"].(bool); !ok || !restored {
+		t.Fatalf("thinking_restored=%v want true (restored before the timeout exit): %v", value["thinking_restored"], value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "shift+tab"}); n != 2 {
+		t.Fatalf("shift+tab calls=%d want 2 (one off, one restore): %#v", n, calls)
+	}
+}
+
+// TestCompactPiFailureAfterOffRestores (R-RC7B): a send that fails after the
+// thinking went off exits 4 through DieFriction, and the level goes back first.
+func TestCompactPiFailureAfterOffRestores(t *testing.T) {
+	before := "old output line\n• thinking: high\n"
+	off := "old output line\n• thinking: off\n"
+	f := newCompactFixture(t, "pi", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: before},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: off},
+		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: before},
+		{Argv: []string{"pane", "send-keys", "p1", "shift+tab"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Code: 1, Stderr: `{"error":{"code":"herdr_failed","message":"boom"}}`},
+	})
+	code, _, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 4 || !strings.Contains(errText, "could not send /compact") {
+		t.Fatalf("code=%d stderr=%q", code, errText)
+	}
+	if strings.Contains(errText, "could not restore") {
+		t.Fatalf("the level came back, yet a restore warning: %q", errText)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "shift+tab"}); n != 2 {
+		t.Fatalf("shift+tab calls=%d want 2 (one off, one restore before the exit): %#v", n, calls)
+	}
+}
+
+// TestCompactPiTimeoutWhileStillCompacting (cinzel): a short timeout while pi
+// shows "Compacting context..." exits 9 with still_compacting and a warning not
+// to send /compact again; a timeout without that line has no such field.
+func TestCompactPiTimeoutWhileStillCompacting(t *testing.T) {
+	run := func(t *testing.T, screen string) (int, map[string]any, string) {
+		f := newCompactFixture(t, "pi", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: screen},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
+		return code, compactJSON(t, out), errText
+	}
+	code, value, errText := run(t, "old output line\nCompacting context...\n")
+	if code != 9 || value["status"] != "timeout" || value["still_compacting"] != true || !strings.Contains(errText, "is still compacting") {
+		t.Fatalf("code=%d json=%v stderr=%q", code, value, errText)
+	}
+	code, value, errText = run(t, "old output line\n")
+	if _, has := value["still_compacting"]; code != 9 || has || strings.Contains(errText, "still compacting") {
+		t.Fatalf("code=%d json=%v stderr=%q", code, value, errText)
+	}
+}
+
+// TestCompactClaudeNoMessagesToCompact verifies Claude Code 2.1.285's second
+// nothing-to-compact string: below the echoed /compact it ends the wait as a
+// success without compaction, and the same line already on screen before the
+// send does not count.
+func TestCompactClaudeNoMessagesToCompact(t *testing.T) {
+	t.Run("the answer below the echoed /compact counts", func(t *testing.T) {
+		f := newCompactFixture(t, "claude", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: "old output line\n"},
+			{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.claudeNoMessages},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+		if code != 0 || errText != "" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+		value := compactJSON(t, out)
+		if value["agent"] != "worker" || value["kind"] != "claude" || value["status"] != "nothing-to-compact" {
+			t.Fatalf("json=%v", value)
+		}
+		calls := f.calls(t)
+		if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 1 {
+			t.Fatalf("agent get calls=%d want 1: %#v", n, calls)
+		}
+		if n := countArgv(calls, compactReadArgv("worker")); n != 2 {
+			t.Fatalf("recent reads=%d want 2: %#v", n, calls)
+		}
+	})
+	t.Run("the same line already on screen before the send does not count", func(t *testing.T) {
+		stable := "old output line\n> /compact\nNo messages to compact\n"
+		f := newCompactFixture(t, "claude", []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: stable},
+		})
+		code, out, errText := f.run(t, "compact", "worker", "--timeout", "800")
+		if code != 9 || compactJSON(t, out)["status"] != "timeout" {
+			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+		}
+	})
 }
 
 // TestCompactLaterMentionDoesNotAnchor verifies the review's later-mention

@@ -20,10 +20,17 @@ const compactPollInterval = 2 * time.Second
 
 const compactScreenLines = 40
 
+// compactThinkingTaps caps the shift+tab presses in one direction while the
+// compact turns pi's thinking off before the /compact or restores it after.
+const compactThinkingTaps = 8
+
 // compactProofByKind holds the compaction proof each supported kind prints
 // after `/compact`; a kind without an entry has no verified compact command.
 // The proof only counts below the line where `/compact` was sent: an earlier
 // compaction on the screen is not proof of this one.
+// compactPiRunning is what pi shows while its compaction is still running.
+const compactPiRunning = "Compacting context"
+
 var compactProofByKind = map[string]string{
 	"claude": "Compacted",
 	"codex":  "Context compacted",
@@ -51,6 +58,7 @@ var compactEndingsByKind = map[string][]compactEnding{
 	"claude": {
 		{status: "failed", text: "Error compacting conversation"},
 		{status: "nothing-to-compact", text: "Not enough messages to compact."},
+		{status: "nothing-to-compact", text: "No messages to compact"},
 	},
 }
 
@@ -106,7 +114,11 @@ func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 // waits for the kind's compaction proof below the sent command, then for the
 // worker back at idle or done. It is the shared step behind the `compact`
 // command and `dispatch --compact`. The caller must have checked the roster
-// and the kind. A busy or unreachable worker dies (10, 4, 6); on success it
+// and the kind. A pi worker whose footer shows a thinking level gets it
+// turned off with shift+tab before the send and the level back after the
+// compaction (a timeout or a failure included); its result JSON then carries
+// thinking_restored. A busy or unreachable worker dies (10, 4, 6); on
+// success it
 // prints the result JSON (a stderr line inside a dispatch) and returns 0,
 // on timeout it prints the timeout JSON and returns 9; a claude with
 // nothing to compact returns 0 with the nothing-to-compact result (a stderr
@@ -134,6 +146,32 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	endSeen := make([]map[string]bool, len(endings))
 	for i := range endings {
 		endSeen[i] = compactProofLines(before, endings[i].text)
+	}
+	thinkingBefore := ""
+	thinkingChanged := false
+	restoreDone := false
+	// A failure after the thinking went off (a send that fails, a worker that
+	// becomes unavailable or dies) exits through DieFriction; the level still
+	// goes back first, so the next brief does not run with thinking off.
+	defer func() {
+		if thinkingChanged && !restoreDone {
+			restoreDone = true
+			if shown := compactThinkingLevel(agent, pane, env, thinkingBefore); shown != thinkingBefore {
+				core.Warn(fmt.Sprintf("compact: could not restore '%s' thinking to '%s' (shows '%s'); set it by hand before the next brief", agent, thinkingBefore, shown), frictionLogPath, "compact")
+			}
+		}
+	}()
+	if kind == "pi" {
+		// pi cuts its summary at a high thinking level: turn it off before the
+		// /compact and give the level back after; a footer without a level or
+		// one already off is left as is.
+		thinkingBefore = compactThinkingFooter(before)
+		if thinkingBefore != "" && thinkingBefore != "off" {
+			thinkingChanged = true
+			if level := compactThinkingLevel(agent, pane, env, "off"); level != "off" {
+				core.Warn(fmt.Sprintf("compact: could not turn '%s' thinking off before compacting (still '%s'); compacting anyway", agent, level), frictionLogPath, "compact")
+			}
+		}
 	}
 	if !herdr.PaneSendText(pane, "/compact", env) {
 		core.DieFriction(fmt.Sprintf("compact: could not send /compact to pane '%s'; release --close and spawn --fresh instead", pane), 4, frictionLogPath, "compact")
@@ -174,6 +212,26 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 		time.Sleep(compactPollInterval)
 	}
 	elapsed := platform.Now().Sub(start).Milliseconds()
+	thinkingRestored := false
+	if thinkingChanged {
+		restoreDone = true
+		// The /compact ran with the thinking off: give the level back before
+		// any exit, a timeout or a failure included; the result reports
+		// whether it came back.
+		if shown := compactThinkingLevel(agent, pane, env, thinkingBefore); shown == thinkingBefore {
+			thinkingRestored = true
+		} else {
+			core.Warn(fmt.Sprintf("compact: could not restore '%s' thinking to '%s' (shows '%s'); set it by hand before the next brief", agent, thinkingBefore, shown), frictionLogPath, "compact")
+		}
+	}
+	// The result JSON gains thinking_restored only when the level was changed.
+	resultJSON := func(status string) string {
+		pairs := []any{"agent", agent, "kind", kind, "status", status, "elapsed_ms", elapsed}
+		if thinkingChanged {
+			pairs = append(pairs, "thinking_restored", thinkingRestored)
+		}
+		return jsonjs.Stringify(jsonjs.O(pairs...))
+	}
 	if endStatus != "" {
 		if endStatus == "failed" {
 			core.Warn(fmt.Sprintf("compact: '%s' reported %q; nothing was compacted", agent, "Error compacting conversation"), frictionLogPath, "compact")
@@ -183,14 +241,25 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 			fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: '%s' had nothing to compact\n", agent)
 			return 0
 		}
-		fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O("agent", agent, "kind", kind, "status", endStatus, "elapsed_ms", elapsed)))
+		fmt.Fprintln(platform.Stdout, resultJSON(endStatus))
 		if endStatus == "failed" {
 			return 9
 		}
 		return 0
 	}
 	if !compacted {
-		fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O("agent", agent, "kind", kind, "status", "timeout", "elapsed_ms", elapsed)))
+		// pi shows "Compacting context..." while its compaction runs: a timeout
+		// then is the observer giving up, not the compaction failing.
+		if kind == "pi" && strings.Contains(herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines)), compactPiRunning) {
+			core.Warn(fmt.Sprintf("compact: '%s' is still compacting (%q on screen); do not send /compact again: wait and read its screen before the next brief", agent, compactPiRunning), frictionLogPath, "compact")
+			pairs := []any{"agent", agent, "kind", kind, "status", "timeout", "elapsed_ms", elapsed, "still_compacting", true}
+			if thinkingChanged {
+				pairs = append(pairs, "thinking_restored", thinkingRestored)
+			}
+			fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O(pairs...)))
+			return 9
+		}
+		fmt.Fprintln(platform.Stdout, resultJSON("timeout"))
 		return 9
 	}
 	compactThinkingWarning(agent, kind, role, lane, model, ctx, env, cwd)
@@ -199,7 +268,7 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 		fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: compacted '%s' in %d ms\n", agent, elapsed)
 		return 0
 	}
-	fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O("agent", agent, "kind", kind, "status", "compacted", "elapsed_ms", elapsed)))
+	fmt.Fprintln(platform.Stdout, resultJSON("compacted"))
 	return 0
 }
 
@@ -349,6 +418,26 @@ func compactThinkingWarning(agent, kind, role, lane, model string, ctx *core.Con
 		return
 	}
 	core.Warn(fmt.Sprintf("compact: '%s' shows thinking '%s' after compaction; its effort is '%s'", agent, thinking, effort), frictionLogPath, "compact")
+}
+
+// compactThinkingLevel presses shift+tab on the pane toward the wanted footer
+// level: one press, the poll pause, and a footer re-read after each press, up
+// to compactThinkingTaps presses; it reports the level the footer still shows,
+// the wanted one when it was reached. A failed key press stops the presses;
+// a failed read shows no level.
+func compactThinkingLevel(agent, pane string, env platform.Env, wanted string) string {
+	shown := ""
+	for i := 0; i < compactThinkingTaps; i++ {
+		if !herdr.PaneSendKeys(pane, "shift+tab", env) {
+			break
+		}
+		time.Sleep(compactPollInterval)
+		shown = compactThinkingFooter(herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines)))
+		if shown == wanted {
+			return shown
+		}
+	}
+	return shown
 }
 
 // compactThinkingFooter returns the thinking value the last footer line of

@@ -1401,6 +1401,20 @@ test('doctor: own provider with a literal apiKey warns; the env reference does n
   out = doctorOut();
   assert.ok(!out.includes('literal apiKey'), out);
   rmOwnFiles();
+  // Counter-example (opencode): "{file:path}" is a reference too (appliance, skedly).
+  fs.writeFileSync(OC_PROJECT_FILE, JSON.stringify({
+    provider: { 'my-provider': { options: { apiKey: '{file:~/.config/keys/my-provider}' }, models: { 'my-model': { options: { thinking_token_budget: 16000 } } } } },
+  }));
+  out = doctorOut();
+  assert.ok(!out.includes('literal apiKey'), out);
+  rmOwnFiles();
+  // Counter-example (pi): "!command" runs a command for the key: a reference.
+  fs.writeFileSync(PI_MODELS_FILE, JSON.stringify({
+    providers: { 'my-provider': { apiKey: '!my-key-helper', models: [{ id: 'my-model', maxTokens: 32768 }] } },
+  }));
+  out = doctorOut();
+  assert.ok(!out.includes('literal apiKey'), out);
+  rmOwnFiles();
   cleanLayers();
 });
 

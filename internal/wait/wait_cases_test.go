@@ -41,7 +41,7 @@ func TestWaitJavaScriptPureCases(t *testing.T) {
 			t.Fatalf("CksumField(hello) = %d", got)
 		}
 	})
-	t.Run("activityAgeSeconds: 0 on a changed screen, the age on an equal one, null without valid markers", func(t *testing.T) { // JS: "activityAgeSeconds: 0 on a changed screen, the age on an equal one, null without valid markers"
+	t.Run("activityAgeSeconds: a changed screen has no age, the equal one its age, and no marker has neither", func(t *testing.T) {
 		sd := t.TempDir()
 		waitDir := filepath.Join(sd, "wait")
 		if err := os.MkdirAll(waitDir, 0o700); err != nil {
@@ -56,16 +56,23 @@ func TestWaitJavaScriptPureCases(t *testing.T) {
 		screen := "Loading file 17%\n"
 		write("stuck-hash", "1\n")
 		write("probe-at", "100\n")
-		if got := ActivityAgeSeconds(sd, "agent", screen, 100); got == nil || *got != 0 {
-			t.Fatalf("changed screen age = %v, want 0", got)
+		if age, changed := ActivityAgeSeconds(sd, "agent", screen, 100); age != nil || !changed {
+			t.Fatalf("changed screen = (%v, %v), want no age and changed", age, changed)
+		}
+		write("stuck-hash", "not-a-number\n")
+		if age, changed := ActivityAgeSeconds(sd, "agent", screen, 100); age != nil || !changed {
+			t.Fatalf("changed screen with an invalid probe date = (%v, %v), want no age and changed", age, changed)
 		}
 		write("stuck-hash", ""+stringInt(CksumField(NormalizeScreen(screen)))+"\n")
 		write("activity-at", "45\n")
-		if got := ActivityAgeSeconds(sd, "agent", screen, 100); got == nil || *got != 55 {
-			t.Fatalf("unchanged screen age = %v, want 55", got)
+		if age, changed := ActivityAgeSeconds(sd, "agent", screen, 100); changed || age == nil || *age != 55 {
+			t.Fatalf("unchanged screen = (%v, %v), want age 55 and no change", age, changed)
 		}
-		if got := ActivityAgeSeconds(sd, "missing", screen, 100); got != nil {
-			t.Fatalf("missing activity markers = %v, want nil", got)
+		if age, changed := ActivityAgeSeconds(sd, "agent", "", 100); age != nil || changed {
+			t.Fatalf("an empty (failed) read = (%v, %v), want nothing", age, changed)
+		}
+		if age, changed := ActivityAgeSeconds(sd, "missing", screen, 100); age != nil || changed {
+			t.Fatalf("missing activity markers = (%v, %v), want nothing", age, changed)
 		}
 	})
 }
@@ -481,7 +488,7 @@ func TestWaitTM4ApprovalDialogHistoryCases(t *testing.T) {
 }
 
 func TestWaitTM4CheckpointRemainingCases(t *testing.T) {
-	t.Run("wait: a move seen across a long gap between waits is dated at the old probe (not active)", func(t *testing.T) { // JS: "wait: a move seen across a long gap between waits is dated at the old probe (not active)"
+	t.Run("wait: a move seen across a long gap between waits has no age (changed since the last probe, not active)", func(t *testing.T) {
 		fixed := time.Unix(2_000_001_000, 0)
 		oldNow := platform.Now
 		platform.Now = func() time.Time { return fixed }
@@ -494,16 +501,18 @@ func TestWaitTM4CheckpointRemainingCases(t *testing.T) {
 		if err := os.WriteFile(f.marker("probe-at"), []byte("2000000000\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		// The recorded hash is the old screen's: the read-only age is
+		// unknown (no age) and the screen is changed since that probe.
+		age, changed := ActivityAgeSeconds(f.sd, "worker", "Loading 20%\n", fixed.Unix())
+		if age != nil || !changed {
+			t.Fatalf("activity = (%v, %v), want no age and a changed screen", age, changed)
+		}
 		if got := f.probe(""); got != "working" {
 			t.Fatalf("changed screen state = %q", got)
 		}
 		activity, err := os.ReadFile(f.marker("activity-at"))
 		if err != nil || string(activity) != "2000000000\n" {
 			t.Fatalf("activity-at = %q, %v; want the prior probe time", activity, err)
-		}
-		age := ActivityAgeSeconds(f.sd, "worker", "Loading 20%\n", fixed.Unix())
-		if age == nil || *age != 1000 {
-			t.Fatalf("activity age = %v, want 1000 seconds", age)
 		}
 	})
 	t.Run("wait: with stuck_warn_minutes=0 the hash still follows the screen (no endless fresh change)", func(t *testing.T) { // JS: "wait: with stuck_warn_minutes=0 the hash still follows the screen (no endless fresh change)"

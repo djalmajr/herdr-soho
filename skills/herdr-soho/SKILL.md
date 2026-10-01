@@ -254,7 +254,7 @@ command line, which can hold credentials; a sandboxed codex blocks `ps`); and th
 verified (`ui_verification`). The `reviewer` never edits the repository,
 mutates only in a throwaway copy, and runs the project's own gates before
 its verdict; its `verdict:` header stays pass/fail (fail with any open
-P0–P2) whatever scale the brief uses.
+P0–P2) whatever scale the brief uses. A brief that hands the reviewer a frozen package (a snapshot of the owned files) also lists the companion files the checks need to stay coherent (a test that counts a catalog, the interface a store implements): owned files frozen over a tree that moved on make checks fail for reasons outside the change.
 
 ## Effort, model, approvals
 
@@ -304,7 +304,11 @@ maps to `--thinking` (ceiling `max`) on pi; the opencode TUI maps no effort
 flag (`--variant` is only in `opencode run`) and spawn warns instead of
 failing. Approvals: opencode `full` → `--auto` (`edits` is not mapped;
 warning), and pi has no approval prompts at all (`edits` is a no-op with a
-warning). Family is **by model**: the same-family reviewer check is skipped
+warning). Context: at context use at or above `context_warn_percent`
+(default 60; 0 turns it off), `dispatch` warns before sending, because a
+long context can end opencode's turn empty — release the worker `--close`
+and spawn a fresh one for a new task; the dispatch goes on anyway. Family is
+**by model**: the same-family reviewer check is skipped
 unless the model id is recognizable, so pick the reviewer's family by hand.
 Config and provider examples:
 [references/kinds.md](references/kinds.md#generic-kinds-pi-opencode).
@@ -428,12 +432,19 @@ exist (7 blocked/`question`, 6 settled/`gone`, 4 `unavailable`, 9 timeout,
 several agents finish in one `wait`, the exit is the most severe of those:
 4, then 11, then 14, then 15, then 7, then 6. Argument order does not
 change it. A `timeout` line carries `elapsed_ms` (this wait's own),
-`state` (the last probe tag, `working` or `pending`), `checkpoint` and
-`activity_age_s`. A worker still `working` whose screen really changed
-within the stuck window (`stuck_warn_minutes`, 20 min when 0 or not a
-number) is a **neutral checkpoint**: `checkpoint: true`, no friction line,
-only `herdr-soho: checkpoint: '<agent>' is still working (screen changed
-<N>s ago); wait again: herdr-soho wait <agent> --timeout <t>` on stderr.
+`state` (the last probe tag, `working` or `pending`), `checkpoint`,
+`activity_age_s` (seconds since the last screen change a wait observed)
+and, when the visible screen already moved away from the hash the last
+wait probe recorded, `activity_changed: true` with `activity_age_s:
+null` — the screen changed since that probe and the change has no age. A
+worker still `working` whose screen really changed within the stuck
+window (`stuck_warn_minutes`, 20 min when 0 or not a number) is a
+**neutral checkpoint**: `checkpoint: true`, no friction line, only
+`herdr-soho: checkpoint: '<agent>' is still working (screen changed <N>s
+ago); wait again: herdr-soho wait <agent> --timeout <t>` on stderr, where
+`<N>` is the published age; a screen that changed since the last probe
+(`activity_changed`, no age) says `screen changed within the last <N>s`
+instead, `<N>` being the time since that probe.
 Reading a screen is not activity: a change counts only when the
 normalized screen (counters and progress glyphs do not count) moves away
 from the hash an earlier probe recorded, a failed (empty) read counts for
@@ -603,10 +614,13 @@ once its size stops changing between two polls.
 `status` ends every TSV line with `task_s` (seconds from the dispatch —
 the mtime of `last-report-<agent>` — to the report, or to now while it is
 missing; `-` with no dispatch) and `activity_s` (for a `working` agent,
-seconds since the last screen change a wait observed, dated as above; `-`
-in any other state or with no observed change), and adds both as the last
-keys of its JSON lines (`null` when unknown). It writes no marker and
-prints no screen text. `notify=on` in the config raises a Herdr toast
+seconds since the last screen change a wait observed; `changed` when the
+visible screen already moved away from the hash the last wait probe
+recorded — the change has no age; `-` in any other state or with no
+observed change), and adds both as the last keys of its JSON lines
+(`null` when unknown; `activity_changed: true` right after `activity_s`
+when the screen changed since the last wait probe). It writes no marker
+and prints no screen text. `notify=on` in the config raises a Herdr toast
 per finished worker. `roster` shows a `REPORT` column (`none | pending |
 ready`) for a quick glance.
 
@@ -720,7 +734,7 @@ $S roles                                   # roles with the kind, model and effo
 $S role reviewer                           # resolved file + frontmatter
 $S spawn implementer [--name impl] [--kind codex] [--direction right|down]
 $S dispatch impl <brief.md> [--timeout 900000] [--amend] [--compact]   # role prompt + brief → agent, waits; --amend amends the agent's current brief; --compact compacts an idle worker (claude, codex, pi) before the brief and keeps it unsent on a timeout (9) or a busy worker (10)
-$S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, pi): sends /compact once and waits for the CLI's proof plus its return to idle; a kind without a verified command exits 2, a timeout 9; a claude with nothing to compact exits 0 with `nothing-to-compact`, and `Error compacting conversation` exits 9 with `failed`
+$S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, pi): sends /compact once and waits for the CLI's proof plus its return to idle; a kind without a verified command exits 2, a timeout 9; a claude with nothing to compact exits 0 with `nothing-to-compact`, and `Error compacting conversation` exits 9 with `failed`; for pi the thinking goes to `off` during the compaction and comes back to the level it had, and a level that does not come back is warned; a pi timeout while "Compacting context" is still on screen adds `still_compacting: true` and a warning: wait and read the screen, do not send /compact again
 $S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines, one `<sha256>  <path>` per file as `sha256sum` prints it (a trailing `# note` after the path is dropped when the path without it exists; exit 16 on changed/missing or when the report has none, 4 when the report cannot be read)
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
