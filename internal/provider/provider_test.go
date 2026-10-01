@@ -691,6 +691,61 @@ func itemBytes(t *testing.T, item map[string]json.RawMessage) []byte {
 	}
 	return data
 }
+
+func TestRetryLineCases(t *testing.T) {
+	t.Run("retryLine: the most recent retry line of a working agent, sanitized", func(t *testing.T) {
+		cases := []struct{ screen, want string }{
+			{"Retrying (5/8) in 4s…\n", "Retrying (5/8) in 4s"},
+			{"┃ Retrying (5/8) in 4s…\n", "Retrying (5/8) in 4s"},
+			{"busy\n┃ Reconnecting…\n", "Reconnecting"},
+		}
+		for _, row := range cases {
+			if got := RetryLine("working", row.screen); got != row.want {
+				t.Errorf("RetryLine(working, %q) = %q, want %q", row.screen, got, row.want)
+			}
+		}
+	})
+	t.Run("retryLine: the bottom-up scan returns the most recent retry line", func(t *testing.T) {
+		if got := RetryLine("working", "Reconnecting…\nRetrying (5/8) in 4s…\n"); got != "Retrying (5/8) in 4s" {
+			t.Errorf("RetryLine() = %q, want the bottom line", got)
+		}
+	})
+	t.Run("retryLine: a box decoration line does not consume a window slot", func(t *testing.T) {
+		// Eleven raw non-empty lines; the `┃` decoration counts for nothing
+		// without its prefix, so the retry line stays inside the ten.
+		screen := "Retrying (5/8) in 4s…\n" +
+			"b1\nb2\nb3\nb4\nb5\nb6\nb7\nb8\n┃\nb9\n"
+		if got := RetryLine("working", screen); got != "Retrying (5/8) in 4s" {
+			t.Errorf("RetryLine() = %q, want the retry line despite the decoration line", got)
+		}
+	})
+	t.Run("retryLine: a retry line above the bottom ten non-empty lines is not the line", func(t *testing.T) {
+		screen := "Retrying (5/8) in 4s…\n" +
+			"a1\na2\na3\na4\na5\na6\na7\na8\na9\na10\n"
+		if got := RetryLine("working", screen); got != "" {
+			t.Errorf("RetryLine() = %q, want empty (eleventh line from the bottom)", got)
+		}
+	})
+	t.Run("retryLine: no retry line, empty screen, or a non-working state returns empty", func(t *testing.T) {
+		cases := []struct{ state, screen string }{
+			{"working", "Reading the file\nRunning tests\n"},
+			{"working", ""},
+			{"working", "\n  \n\t\n"},
+			{"idle", "Retrying (5/8) in 4s…\n"},
+			{"blocked", "Retrying (5/8) in 4s…\n"},
+		}
+		for _, row := range cases {
+			if got := RetryLine(row.state, row.screen); got != "" {
+				t.Errorf("RetryLine(%q, %q) = %q, want empty", row.state, row.screen, got)
+			}
+		}
+	})
+	t.Run("retryLine: a secret on the line is redacted before it is returned", func(t *testing.T) {
+		if got := RetryLine("working", "Retrying (5/8) with sk_live_abcdefgh1234\n"); got != "Retrying (5/8) with [redacted]" {
+			t.Errorf("RetryLine() = %q, want the redacted line", got)
+		}
+	})
+}
 func equalJSON(got any, want json.RawMessage) (bool, error) {
 	b, err := json.Marshal(got)
 	if err != nil {

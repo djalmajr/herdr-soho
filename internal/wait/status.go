@@ -152,11 +152,17 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 		}
 		activityChanged := false
 		if state == "working" {
-			age, changed := ActivityAgeSeconds(sd, agent, herdr.AgentRead(env, agent, "visible", nil), platform.Now().Unix())
+			screen := herdr.AgentRead(env, agent, "visible", nil)
+			age, changed := ActivityAgeSeconds(sd, agent, screen, platform.Now().Unix())
 			if age != nil {
 				activityS = *age
 			}
 			activityChanged = changed
+			// A retry is not a stop: the state stays working and the exit
+			// code is unchanged; only the cause column names the retry.
+			if retryLine := provider.RetryLine(state, screen); retryLine != "" {
+				cause = "retrying: " + retryLine
+			}
 		}
 		ageFields := []any{"task_s", taskS, "activity_s", activityS}
 		if activityChanged {

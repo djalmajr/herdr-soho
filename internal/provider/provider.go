@@ -104,6 +104,34 @@ func ProviderDetectTexts(state, screen, capacityTexts, errorTexts string) *Detec
 	return nil
 }
 
+// RetryLine returns the most recent retry line of a working agent: the
+// bottom ten non-empty screen lines, read upward without the leading box
+// prefix, the first one that matches the retrying patterns, sanitized like
+// a cause. A retry is not a terminal stop (ProviderDetect skips the line);
+// this surfaces it. Empty when the state is not working or no line matches.
+func RetryLine(state, screen string) string {
+	if state != "working" {
+		return ""
+	}
+	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
+	nonEmpty := make([]string, 0, len(lines))
+	for _, line := range lines {
+		value := stripBoxPrefix(line)
+		if !isJSEmpty(value) {
+			nonEmpty = append(nonEmpty, value)
+		}
+	}
+	if len(nonEmpty) > 10 {
+		nonEmpty = nonEmpty[len(nonEmpty)-10:]
+	}
+	for i := len(nonEmpty) - 1; i >= 0; i-- {
+		if retryingRE.MatchString(text.ASCIILower(nonEmpty[i])) {
+			return text.SanitizeCause(text.RedactSecrets(nonEmpty[i]))
+		}
+	}
+	return ""
+}
+
 func stripBoxPrefix(line string) string {
 	value := strings.TrimLeft(line, " \t")
 	if strings.HasPrefix(value, "┃") {
