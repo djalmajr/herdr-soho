@@ -437,7 +437,10 @@ worker still `working` whose screen really changed within the stuck
 window (`stuck_warn_minutes`, 20 min when 0 or not a number) is a
 **neutral checkpoint**: `checkpoint: true`, no friction line, only
 `herdr-soho: checkpoint: '<agent>' is still working (screen changed <N>s
-ago); wait again: herdr-soho wait <agent> --timeout <t>` on stderr.
+ago); wait again: herdr-soho wait <agent> --timeout <t>` on stderr, where
+`<N>` is the published age; a screen that changed since the last probe
+(`activity_changed`, no age) says `screen changed within the last <N>s`
+instead, `<N>` being the time since that probe.
 Reading a screen is not activity: a change counts only when the
 normalized screen (counters and progress glyphs do not count) moves away
 from the hash an earlier probe recorded, a failed (empty) read counts for
