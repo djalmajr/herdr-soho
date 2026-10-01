@@ -44,8 +44,10 @@ to a file.
    can edit.** `dispatch` lints it (`brief_lint=warn|strict`; a read-only
    role needs no `Owned files` section) and tells every worker that nobody
    watches its terminal (no interactive questions) and never to invent
-   names, endpoints, flags, credentials, URLs or requirements. Credentials,
-   URLs and seeds named in a brief must be verified first (`git grep`, the
+   names, endpoints, flags, credentials, URLs or requirements. A brief may
+   carry a `Type: mechanical|backend|ui|docs|review|security` line, recorded
+   in the settled report's metrics line when `metrics=on` — the lint does not
+   require it. Credentials, URLs and seeds named in a brief must be verified first (`git grep`, the
    seed script), not guessed.
 4. **Reviewer from another model family** than the implementers, before push.
    **A review item marked `partial` is not a pass.** The reviewer could not

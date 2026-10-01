@@ -637,6 +637,7 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 						writeWaitFile(sd, agent, "partial-warned", report+"\n")
 					}
 				}
+				recordMetrics(sd, agent, report, text, header, partial, ctx, env)
 				if header != nil && header.Verdict == "pass" {
 					open := header.Severity["P0"] + header.Severity["P1"] + header.Severity["P2"]
 					if open > 0 {
