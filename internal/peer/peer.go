@@ -782,6 +782,12 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			// Enter and run the proof window. One Enter at most, no resend;
 			// agent_blocked and timeout keep today's exit below.
 			if vis, readErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env); readErr == "" && idInInputBox(t.Kind, vis, id) {
+				// A dialog on screen takes the Enter as its answer: press
+				// nothing, as the Enter of the ok path does.
+				if isDialogScreen(vis, t.Kind, "idle") {
+					log(senderRef, t.RefShown, "dialog")
+					platform.Die(fmt.Sprintf("send: %s is showing a dialog after the message was typed; press nothing and read its pane", t.RefShown), 17)
+				}
 				_ = sendKey(t.Machine, t.TargetArg, "enter", env)
 				if res := pollWindow(); res.Proven {
 					log(senderRef, t.RefShown, "sent")

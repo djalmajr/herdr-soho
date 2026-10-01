@@ -136,6 +136,36 @@ func TestSendStalledEnter(t *testing.T) {
 			t.Fatalf("the stalled path never resends the text: %d prompts", prompts)
 		}
 	})
+	t.Run("stalled: a dialog on screen gets no Enter and exits 17", func(t *testing.T) {
+		_, prompt := stalledID(t)
+		history := "old turn output"
+		// The message sits in the box and a trust dialog shares the tail:
+		// the Enter would answer the dialog, so the send presses nothing.
+		box := piSendScreen(history, prompt+"\nDo you trust this workspace? [y/N]")
+		rules := []fakecli.Rule{
+			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 1, Stdout: agentJSONKind("pi", "idle", "1")},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 1, Stdout: piSendScreen(history, "")},
+			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 2, Stdout: agentJSONKind("pi", "idle", "1")},
+			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 3, Stdout: agentJSONKind("pi", "idle", "1")},
+			{Argv: []string{"agent", "prompt", "w0test:p0a", prompt, "--wait", "--until", "working", "--until", "blocked", "--until", "idle", "--until", "done", "--timeout", "15000"}, Stderr: stalledPromptErr, Code: 1},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: box},
+			{Argv: []string{"agent", "get", "w0test:p0a"}, Stdout: agentJSONKind("pi", "idle", "1")},
+			{Argv: []string{"agent", "send-keys", "w0test:p0a", "enter"}, Code: 0},
+		}
+		f := newFixture(t, rules)
+		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
+		want := "herdr-soho: send: local/w0test:p0a is showing a dialog after the message was typed; press nothing and read its pane\n"
+		if code != 17 || stderr != want {
+			t.Fatalf("code=%d stderr=%q", code, stderr)
+		}
+		if enters := countSendKeyEnters(t, f); enters != 0 {
+			t.Fatalf("a dialog on screen must not get the stalled Enter: %d", enters)
+		}
+		if prompts := countPromptCalls(t, f); prompts != 1 {
+			t.Fatalf("the stalled path never resends the text: %d prompts", prompts)
+		}
+	})
 	t.Run("stalled: without the id in the box it keeps today's 15 and presses nothing", func(t *testing.T) {
 		_, prompt := stalledID(t)
 		_ = prompt
