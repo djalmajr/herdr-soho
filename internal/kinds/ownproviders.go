@@ -104,7 +104,9 @@ func PiOwnModelsWithConfig(ctx *core.Config, env platform.Env) []OwnModel {
 		}
 		apiKey, keyPresent := provider.Get("apiKey")
 		literal := keyPresent && apiKey != nil
-		if s, ok := apiKey.(string); ok && strings.HasPrefix(s, "$") {
+		// pi resolves "$NAME" from the environment and runs "!command" for the key:
+		// both are references, not a key written in the file.
+		if s, ok := apiKey.(string); ok && (strings.HasPrefix(s, "$") || (strings.HasPrefix(s, "!") && strings.TrimSpace(s[1:]) != "")) {
 			literal = false
 		}
 		for _, entry := range list {
@@ -164,7 +166,9 @@ func PiOwnModelsWithConfig(ctx *core.Config, env platform.Env) []OwnModel {
 	return out
 }
 
-var opencodeEnvKeyRE = regexp.MustCompile(`^\{env:[A-Za-z_][A-Za-z0-9_]*\}$`)
+// opencodeEnvKeyRE is an opencode key reference: "{env:NAME}" or
+// "{file:path}" (opencode reads the key from that file).
+var opencodeEnvKeyRE = regexp.MustCompile(`^(\{env:[A-Za-z_][A-Za-z0-9_]*\}|\{file:[^{}\s][^{}]*\})$`)
 
 // OpencodeOwnModels scans project, explicit, XDG, then home config, preserving first declarations.
 func OpencodeOwnModels(env platform.Env, cwd string) []OwnModel {
