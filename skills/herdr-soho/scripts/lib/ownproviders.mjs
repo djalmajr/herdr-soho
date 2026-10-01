@@ -57,7 +57,7 @@ const PI_HEADROOM = 8192;
 // including a non-string value or the empty string — is a literal key.
 function piApiKeyShape(v) {
   if (v === null || v === undefined) return 'absent';
-  return typeof v === 'string' && v.startsWith('$') ? 'ref' : 'literal';
+  return typeof v === 'string' && (v.startsWith('$') || (v.startsWith('!') && v.slice(1).trim() !== '')) ? 'ref' : 'literal';
 }
 
 // Rule 1 (opencode): absent is fine; exactly `{env:NAME}` (a valid
@@ -68,6 +68,7 @@ function opencodeApiKeyShape(v) {
   if (typeof v === 'string' && v.startsWith('{env:') && v.endsWith('}')) {
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(v.slice(6, -1))) return 'ref';
   }
+  if (typeof v === 'string' && /^\{file:[^{}\s][^{}]*\}$/.test(v)) return 'ref';
   return 'literal';
 }
 
