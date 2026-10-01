@@ -1,6 +1,7 @@
 package spawn
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,8 +11,8 @@ import (
 )
 
 // laneOrphanRules is freshSpawnRules with a live-agent list that holds an
-// idle orphan on the lane's base name (build-2), a working one (build-3),
-// and a workspace pane list that holds both of their panes.
+// idle released worker (build-2) and a working one (build-3), plus a
+// workspace pane list that holds both of their panes.
 func laneOrphanRules() []fakecli.Rule {
 	rules := append([]fakecli.Rule{}, freshSpawnRules()...)
 	for i := range rules {
@@ -25,7 +26,28 @@ func laneOrphanRules() []fakecli.Rule {
 	return rules
 }
 
-func TestSpawnWarnsAboutIdleLaneOrphansBeforeOpeningThePane(t *testing.T) {
+func writeReleasedPanesFixture(t *testing.T, f *spawnFixture, rows ...string) {
+	t.Helper()
+	released := "# name\tpane\tkind\treleased\n"
+	if len(rows) > 0 {
+		released += strings.Join(rows, "\n") + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(f.state, "ws", "released-panes.tsv"), []byte(released), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func callsTo(calls []fakecli.Call, args ...string) int {
+	n := 0
+	for _, call := range calls {
+		if strings.Join(call.Argv, "\x00") == strings.Join(args, "\x00") {
+			n++
+		}
+	}
+	return n
+}
+
+func TestSpawnWarnsAboutIdleReleasedOrphanBeforeOpeningThePane(t *testing.T) {
 	// Mutation captured: re-adopting the orphan (or silently skipping the
 	// warning) loses the operator's released idle worker again.
 	f := newSpawnFixture(t, laneOrphanRules())
@@ -36,6 +58,7 @@ func TestSpawnWarnsAboutIdleLaneOrphansBeforeOpeningThePane(t *testing.T) {
 	f.ctx.Entries["lane_build_kind"] = core.ConfigEntry{Value: "grok", Source: "project"}
 	f.ctx.Order = []string{"lane_build_roles", "lane_build_kind"}
 	f.roster(t)
+	writeReleasedPanesFixture(t, &f, "build-2\tws:p2\tgrok\t20261001T000000", "build-3\tws:p3\tgrok\t20261001T000000")
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
 	if code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -45,7 +68,7 @@ func TestSpawnWarnsAboutIdleLaneOrphansBeforeOpeningThePane(t *testing.T) {
 	}
 	want := "herdr-soho: spawn: 'build-2' is idle outside the roster (ws:p2); close it with: herdr-soho release build-2 --close\n"
 	if !strings.Contains(stderr, want) {
-		t.Fatalf("missing the idle orphan warning:\n%s", stderr)
+		t.Fatalf("missing the released orphan warning:\n%s", stderr)
 	}
 	// The working orphan is not idle: no warning names it.
 	if strings.Contains(stderr, "build-3") {
@@ -74,11 +97,12 @@ func TestSpawnWarnsAboutIdleLaneOrphansBeforeOpeningThePane(t *testing.T) {
 	}
 }
 
-func TestSpawnHasNoOrphanWarningWithoutIdleLaneOrphans(t *testing.T) {
-	// Control: with no idle orphan on the lane's base name the spawn stderr
-	// carries no orphan warning (the freshSpawnRules live list is empty).
-	f := newSpawnFixture(t, freshSpawnRules())
+func TestSpawnHasNoOrphanWarningWithoutReleasedRows(t *testing.T) {
+	// The round-1 false positive: a live lane-named idle agent that this
+	// project never released is not an orphan, and the spawn warns nothing.
+	f := newSpawnFixture(t, laneOrphanRules())
 	configureSpawnFixture(t, &f)
+	f.env["HERDR_PANE_ID"] = "p1"
 	f.env["HERDR_SOHO_LANES"] = "on"
 	f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
 	f.ctx.Entries["lane_build_kind"] = core.ConfigEntry{Value: "grok", Source: "project"}
@@ -89,13 +113,13 @@ func TestSpawnHasNoOrphanWarningWithoutIdleLaneOrphans(t *testing.T) {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	if strings.Contains(stderr, "is idle outside the roster") {
-		t.Fatalf("an orphan warning without an orphan:\n%s", stderr)
+		t.Fatalf("an orphan warning without a released row:\n%s", stderr)
 	}
 }
 
 func TestSpawnLanesOffDoesNotWarnAboutRoleNamedOrphans(t *testing.T) {
 	// The warning is for lane workers only: with lanes=off a role-named idle
-	// orphan outside the roster does not stop or name the spawn.
+	// agent outside the roster does not stop or name the spawn.
 	rules := laneOrphanRules()
 	for i := range rules {
 		if len(rules[i].Argv) >= 2 && rules[i].Argv[0] == "agent" && rules[i].Argv[1] == "list" && !rules[i].ArgvPrefix {
@@ -111,5 +135,34 @@ func TestSpawnLanesOffDoesNotWarnAboutRoleNamedOrphans(t *testing.T) {
 	}
 	if strings.Contains(stderr, "is idle outside the roster") {
 		t.Fatalf("lanes=off spawn warned about a role-named orphan:\n%s", stderr)
+	}
+}
+
+func TestSpawnGivenPaneReRostersRetiresTheReleasedRow(t *testing.T) {
+	// A spawn that re-rosters a released pane (spawn --pane on it) retires
+	// the pane's released-panes row: the pane is a roster pane again.
+	rules := append([]fakecli.Rule{}, freshSpawnRules()...)
+	rules = append(rules, fakecli.Rule{Argv: []string{"pane", "get", "ws:px"}, Stdout: `{"result":{"pane":{"pane_id":"ws:px"}}}`})
+	f := newSpawnFixture(t, rules)
+	configureSpawnFixture(t, &f)
+	f.roster(t)
+	writeReleasedPanesFixture(t, &f, "worker\tws:px\tgrok\t20261001T000000")
+	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker", "--pane", "ws:px"})
+	if code != 0 || !strings.Contains(stdout, `"pane_id": "ws:px"`) {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if n := callsTo(calls, "pane", "get", "ws:px"); n != 1 {
+		t.Fatalf("the pruning probe did not run: %#v", calls)
+	}
+	raw, err := os.ReadFile(filepath.Join(f.state, "ws", "released-panes.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "ws:px") {
+		t.Fatalf("the released row survived the re-roster: %q", raw)
+	}
+	row := core.RosterRows(filepath.Join(f.state, "ws"))
+	if len(row) != 1 || !strings.HasPrefix(row[0], "worker\tws:px\t") {
+		t.Fatalf("the worker was not rostered in the pane: %#v", row)
 	}
 }

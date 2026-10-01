@@ -1,7 +1,7 @@
 package core
 
 import (
-	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -11,94 +11,123 @@ import (
 )
 
 // Orphan is a live Herdr agent of the current workspace that this project no
-// longer owns: it is not a roster pane, it is not the orchestrator's own
-// pane, and it carries this project's worker name. A release without --close
-// leaves such an agent alive and idle outside the roster.
+// longer owns: its pane and name both match a row of this project's
+// released-panes registry (a release without --close leaves the pane alive
+// and idle outside the roster), and it is not a roster pane nor the
+// orchestrator's own pane.
 type Orphan struct {
 	Name  string
 	Pane  string
 	State string
 }
 
-// WorkerNameMatches reports whether name is base alone or base followed by
-// "-<n>", the shape spawn.UniqueName gives a lane worker's name (review,
-// review-2, review-3...).
-func WorkerNameMatches(name, base string) bool {
-	if base == "" || name == "" {
-		return false
-	}
-	if name == base {
-		return true
-	}
-	if !strings.HasPrefix(name, base) {
-		return false
-	}
-	suffix := name[len(base):]
-	if !strings.HasPrefix(suffix, "-") {
-		return false
-	}
-	suffix = suffix[1:]
-	if suffix == "" {
-		return false
-	}
-	for i := 0; i < len(suffix); i++ {
-		if suffix[i] < '0' || suffix[i] > '9' {
-			return false
-		}
-	}
-	return true
+// ReleasedPane is one row of the project's released-panes registry
+// (<state>/released-panes.tsv): a pane this project released without --close,
+// kept until its pane is closed, re-rostered by a spawn, or gone from Herdr.
+type ReleasedPane struct {
+	Name     string
+	Pane     string
+	Kind     string
+	Released string
 }
 
-// WorkerNameBases lists the base names that identify this project's lane
-// workers: the configured lanes with lanes=on, the known role names (the
-// role files) with lanes=off.
-func WorkerNameBases(ctx *Config, env platform.Env, cwd string) []string {
-	if LanesEnabled(ctx, env) {
-		return LaneNames(ctx, env)
+const releasedPanesFile = "released-panes.tsv"
+
+const releasedPanesHeader = "# name\tpane\tkind\treleased\n"
+
+// ReleasedPanes reads the registry; a missing or unreadable file reads as no
+// released panes. Rows keep file order.
+func ReleasedPanes(ctx *Config, env platform.Env, cwd string) []ReleasedPane {
+	return readReleasedPanes(StateDirPath(ctx, env, cwd))
+}
+
+func readReleasedPanes(dir string) []ReleasedPane {
+	raw, err := platform.ReadTextFile(filepath.Join(dir, releasedPanesFile))
+	if err != nil {
+		return []ReleasedPane{}
 	}
-	names := map[string]bool{}
-	for _, dir := range RoleDirs(env, cwd) {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
+	rows := []ReleasedPane{}
+	for _, line := range strings.Split(raw, "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-				continue
+		f := strings.Split(line, "\t")
+		if len(f) < 4 || f[0] == "" || f[1] == "" {
+			continue
+		}
+		rows = append(rows, ReleasedPane{Name: f[0], Pane: f[1], Kind: f[2], Released: f[3]})
+	}
+	return rows
+}
+
+// releasedPanesWrite applies one registry change the way the other state
+// files are written: StateDir refuses a state dir inside the skill before any
+// write, the roster lock serializes the read/rewrite, rows whose pane is
+// gone from Herdr (herdr pane get reports pane_not_found) are pruned, and
+// the file is rewritten atomically. A pane that fails the get for any other
+// cause is kept, so a herdr outage never wipes the registry.
+func releasedPanesWrite(ctx *Config, env platform.Env, cwd string, mutate func(rows []ReleasedPane) []ReleasedPane) {
+	sd := StateDir(ctx, env, cwd)
+	WithRosterLock(sd, func() {
+		current := readReleasedPanes(sd)
+		pruned := make([]ReleasedPane, 0, len(current))
+		for _, row := range current {
+			if !herdr.PaneGetGone(row.Pane, env) {
+				pruned = append(pruned, row)
 			}
-			names[strings.TrimSuffix(entry.Name(), ".md")] = true
 		}
-	}
-	out := make([]string, 0, len(names))
-	for name := range names {
-		out = append(out, name)
-	}
-	textutil.SortUTF16(out)
-	return out
+		writeReleasedPanes(sd, mutate(pruned))
+	})
 }
 
-// WorkerNameOfProject reports whether name is one of this project's worker
-// names: a configured lane (lanes=on) or a known role (lanes=off), alone or
-// followed by "-<n>".
-func WorkerNameOfProject(name string, ctx *Config, env platform.Env, cwd string) bool {
-	return workerNameOfBases(name, WorkerNameBases(ctx, env, cwd))
+// ReleasedPanesRecord registers a release without --close: one row per
+// (name, pane), a repeated release refreshes the row.
+func ReleasedPanesRecord(ctx *Config, env platform.Env, cwd string, name, pane, kind string) {
+	releasedPanesWrite(ctx, env, cwd, func(rows []ReleasedPane) []ReleasedPane {
+		for i, row := range rows {
+			if row.Name == name && row.Pane == pane {
+				rows = append(rows[:i], rows[i+1:]...)
+				break
+			}
+		}
+		return append(rows, ReleasedPane{Name: name, Pane: pane, Kind: kind, Released: NowStamp(platform.Now())})
+	})
 }
 
-func workerNameOfBases(name string, bases []string) bool {
-	for _, base := range bases {
-		if WorkerNameMatches(name, base) {
-			return true
+// ReleasedPanesForget removes the registry rows of a pane: the pane is
+// closed, or a spawn re-rostered it.
+func ReleasedPanesForget(ctx *Config, env platform.Env, cwd string, pane string) {
+	releasedPanesWrite(ctx, env, cwd, func(rows []ReleasedPane) []ReleasedPane {
+		out := make([]ReleasedPane, 0, len(rows))
+		for _, row := range rows {
+			if row.Pane != pane {
+				out = append(out, row)
+			}
 		}
+		return out
+	})
+}
+
+func writeReleasedPanes(dir string, rows []ReleasedPane) {
+	lines := make([]string, 0, len(rows)+1)
+	lines = append(lines, releasedPanesHeader)
+	for _, row := range rows {
+		lines = append(lines, row.Name+"\t"+row.Pane+"\t"+row.Kind+"\t"+row.Released)
 	}
-	return false
+	content := ""
+	if len(lines) != 0 {
+		content = strings.Join(lines, "\n") + "\n"
+	}
+	if err := platform.AtomicWrite(filepath.Join(dir, releasedPanesFile), content); err != nil {
+		panic(err)
+	}
 }
 
 // OrphansOf classifies a herdr agent list into the orphans of the current
-// workspace, using the live list the way the roster reads it for the "other
-// live agents" section: not a roster pane, not the orchestrator's own pane
-// (HERDR_PANE_ID), a pane of this workspace (herdr pane list --workspace),
-// and named like one of this project's workers. A failed pane list reads as
-// no workspace pane, so nothing is classified (no false orphan).
+// workspace: a live agent whose pane and name both match a row of this
+// project's released-panes registry, that is not a roster pane and is not
+// the orchestrator's own pane (HERDR_PANE_ID). A failed pane list reads as no
+// workspace pane, so nothing is classified (no false orphan).
 func OrphansOf(ctx *Config, env platform.Env, cwd string, live []any) []Orphan {
 	rosterPanes := map[string]bool{}
 	for _, line := range RosterRows(StateDirPath(ctx, env, cwd)) {
@@ -113,8 +142,11 @@ func OrphansOf(ctx *Config, env platform.Env, cwd string, live []any) []Orphan {
 			workspacePanes[id] = true
 		}
 	}
+	released := map[string]bool{}
+	for _, row := range ReleasedPanes(ctx, env, cwd) {
+		released[row.Name+"\x00"+row.Pane] = true
+	}
 	orchestrator := env.Get("HERDR_PANE_ID")
-	bases := WorkerNameBases(ctx, env, cwd)
 	out := []Orphan{}
 	for _, agent := range live {
 		name := agentField(agent, "name")
@@ -125,7 +157,7 @@ func OrphansOf(ctx *Config, env platform.Env, cwd string, live []any) []Orphan {
 		if rosterPanes[pane] || pane == orchestrator || !workspacePanes[pane] {
 			continue
 		}
-		if !workerNameOfBases(name, bases) {
+		if !released[name+"\x00"+pane] {
 			continue
 		}
 		out = append(out, Orphan{Name: name, Pane: pane, State: agentField(agent, "agent_status")})

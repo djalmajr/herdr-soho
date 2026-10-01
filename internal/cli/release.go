@@ -100,6 +100,10 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 		}()
 	}
 	if !closes && pane != "" {
+		// The pane stays alive outside the roster: register it, like the
+		// other state files, so the orphan commands know this project
+		// released it.
+		core.ReleasedPanesRecord(ctx, env, cwd, agent, pane, field(2))
 		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: release: the pane %s stays open; close it later with: herdr-soho release %s --close\n", pane, agent)
 	}
 
@@ -123,12 +127,13 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 	return 0
 }
 
-// releaseOrphan closes the pane of an agent that has already left the roster
-// (a release without --close leaves it alive and idle). Only a lane-worker
-// name live in the current workspace counts as an orphan; the orchestrator's
-// own pane and other names fall through to the plain not-in-roster error.
-// Only a confirmed-idle orphan is closed; a working, blocked or unqueryable
-// one is refused with 10 unless --force is passed.
+// releaseOrphan closes the pane of an agent this project released without
+// --close (its pane and name both match a row of the released-panes
+// registry): a live agent outside the roster and outside the orchestrator's
+// own pane. Only a confirmed-idle orphan is closed; a working, blocked or
+// unqueryable one is refused with 10 unless --force is passed. A failed pane
+// close exits 4 and keeps the registry row: the pane is still open, and the
+// release must not claim otherwise.
 func releaseOrphan(name string, force bool, ctx *core.Config, env platform.Env, cwd string) bool {
 	orphan, ok := core.FindOrphan(name, ctx, env, cwd)
 	if !ok {
@@ -142,11 +147,10 @@ func releaseOrphan(name string, force bool, ctx *core.Config, env platform.Env, 
 		core.DieFriction(fmt.Sprintf("agent '%s' is not in the roster and is %s; pass --force to close its pane", name, state), 10, frictionLogPath, "release")
 	}
 	if herdr.PaneClose(orphan.Pane, env) {
+		core.ReleasedPanesForget(ctx, env, cwd, orphan.Pane)
 		_, _ = fmt.Fprintf(platform.Stdout, "released %s (pane %s closed; it was no longer in the roster)\n", name, orphan.Pane)
 	} else {
-		// A failed close keeps the roster release's contract: the release
-		// stands, the pane stays open, and no "closed" claim is printed.
-		_, _ = fmt.Fprintf(platform.Stdout, "released %s\n", name)
+		core.DieFriction(fmt.Sprintf("release: could not close the pane %s of '%s'; close it by hand with: herdr pane close %s", orphan.Pane, name, orphan.Pane), 4, frictionLogPath, "release")
 	}
 	return true
 }
