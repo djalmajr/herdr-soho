@@ -311,6 +311,12 @@ func deliverPrompt(machine, pane, body string, env platform.Env) callResult {
 	return callResult{Code: code, Cause: cause}
 }
 
+// readScreen runs `herdr agent read`. A full-screen TUI holds its history
+// on the alternate screen, which Herdr captures only while the agent is
+// idle: a `recent` read of a working one fails with agent_not_idle. The
+// visible screen is what such an agent shows, so that read (without
+// --lines) takes its place, as herdr's agentRead does; any other error, and
+// a failed visible read, is not repeated.
 func readScreen(machine, pane, source string, lines int, env platform.Env) (string, string) {
 	args := append(sessionref.HerdrMachineArgs(machine), "agent", "read", pane, "--source", source)
 	if lines > 0 {
@@ -328,7 +334,10 @@ func readScreen(machine, pane, source string, lines int, env platform.Env) (stri
 		if r.Status != nil {
 			status = *r.Status
 		}
-		_, cause := structuredError(r.Stdout, r.Stderr, "agent read", fmt.Sprintf("failed (exit %d)", status))
+		code, cause := structuredError(r.Stdout, r.Stderr, "agent read", fmt.Sprintf("failed (exit %d)", status))
+		if code == "agent_not_idle" && strings.HasPrefix(source, "recent") {
+			return readScreen(machine, pane, "visible", 0, env)
+		}
 		return "", cause
 	}
 	return r.Stdout, ""
@@ -685,9 +694,10 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 				if strings.Contains(recent, "#"+id) {
 					visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 					if visibleErr == "" && visible != preScreen && !isDialogScreen(visible, t.Kind, statusOr(curGet, currentStatus)) {
-						// A message in pi's Steering queue sits above the input box but is
-						// not read yet: it is queued (reported after the window), not delivered.
-						if !messageStillInScreen(t.Kind, visible, endLine, id) && !steeringQueued(visible, id) {
+						// A message in pi's Steering queue or in Claude Code's queued
+						// messages sits above the input box but is not read yet: it is
+						// queued (reported after the window), not delivered.
+						if !messageStillInScreen(t.Kind, visible, endLine, id) && !steeringQueued(visible, id) && !claudeQueued(visible, id) {
 							return proofResult{Proven: true, RecentReadSucceeded: true, LastCause: result.LastCause}
 						}
 					} else if visibleErr != "" {
@@ -719,9 +729,10 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		platform.Die(fmt.Sprintf("send: could not confirm that %s took the message (%s); read its pane before sending again", t.RefShown, cause), 15)
 	}
 	preEnterVis, readErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
-	if readErr == "" && steeringQueued(preEnterVis, id) {
-		// pi keeps a message sent during a turn in its Steering queue: it is
-		// queued, not lost, and not yet read; no Enter goes to a busy agent.
+	if readErr == "" && (steeringQueued(preEnterVis, id) || claudeQueued(preEnterVis, id)) {
+		// pi keeps a message sent during a turn in its Steering queue and
+		// Claude Code keeps it in its queued messages: it is queued, not lost,
+		// and not yet read; no Enter (and no ctrl+enter) goes to a busy agent.
 		log(senderRef, t.RefShown, "queued")
 		_, _ = fmt.Fprintf(platform.Stdout, "queued for %s: it takes the message when its current turn ends\n", t.RefShown)
 		return 0
@@ -838,6 +849,21 @@ func steeringQueued(visible, id string) bool {
 	for _, line := range strings.Split(visible, "\n") {
 		head := strings.TrimLeft(NormalizeScreen(line), " \t")
 		if strings.HasPrefix(head, "Steering:") && strings.Contains(head, NormalizeScreen("#"+id)) {
+			return true
+		}
+	}
+	return false
+}
+
+// claudeQueued reports a visible Claude Code queue: the screen holds this
+// message's id and the line Claude Code shows while a working turn holds
+// sent messages until it ends.
+func claudeQueued(visible, id string) bool {
+	if !strings.Contains(NormalizeScreen(visible), NormalizeScreen("#"+id)) {
+		return false
+	}
+	for _, line := range strings.Split(visible, "\n") {
+		if strings.Contains(NormalizeScreen(line), NormalizeScreen("Press up to edit queued messages")) {
 			return true
 		}
 	}

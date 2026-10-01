@@ -111,8 +111,10 @@ func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 }
 
 // compactRun sends /compact once to a rostered worker through its pane and
-// waits for the kind's compaction proof below the sent command, then for the
-// worker back at idle or done. It is the shared step behind the `compact`
+// waits for the kind's compaction proof below the sent command (a claude
+// also counts when its session transcript gains a compact_boundary line,
+// because the screen shows no confirmation), then for the worker back at
+// idle or done. It is the shared step behind the `compact`
 // command and `dispatch --compact`. The caller must have checked the roster
 // and the kind. A pi worker whose footer shows a thinking level gets it
 // turned off with shift+tab before the send and the level back after the
@@ -146,6 +148,31 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	endSeen := make([]map[string]bool, len(endings))
 	for i := range endings {
 		endSeen[i] = compactProofLines(before, endings[i].text)
+	}
+	// claude: the /compact confirmation never reaches the screen (the real
+	// screen keeps showing the older conversation), but the session
+	// transcript gains a compact_boundary line when the compaction finishes;
+	// the count of those lines before the send is the baseline. A transcript
+	// that is missing or unreadable leaves the screen proofs as the only
+	// evidence, with no new warning.
+	var transcriptPath string
+	transcriptBefore := 0
+	transcriptOK := false
+	if kind == "claude" {
+		transcriptPath = herdr.ClaudeTranscriptPath(agent, env)
+		if transcriptPath != "" {
+			transcriptBefore, transcriptOK = herdr.CountClaudeCompactBoundaries(transcriptPath)
+		}
+	}
+	// transcriptRisen reports the transcript proof: a compact_boundary line
+	// past the baseline counts the compaction done even though the screen
+	// shows nothing.
+	transcriptRisen := func() bool {
+		if !transcriptOK {
+			return false
+		}
+		n, ok := herdr.CountClaudeCompactBoundaries(transcriptPath)
+		return ok && n > transcriptBefore
 	}
 	thinkingBefore := ""
 	thinkingChanged := false
@@ -186,7 +213,7 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	for {
 		if !compacted && endStatus == "" {
 			screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
-			if compactProofNew(screen, proof, seen) {
+			if compactProofNew(screen, proof, seen) || transcriptRisen() {
 				compacted = compactWaitIdle(agent, env, deadline)
 			} else {
 				// A claude ending counts only when it belongs to this attempt:

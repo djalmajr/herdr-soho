@@ -274,10 +274,10 @@ func TestCompactClaudeNothingToCompact(t *testing.T) {
 			t.Fatalf("elapsed_ms=%v", value["elapsed_ms"])
 		}
 		calls := f.calls(t)
-		// The pre-send check is the only state read: the ending does not wait
-		// for the worker back at idle.
-		if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 1 {
-			t.Fatalf("agent get calls=%d want 1: %#v", n, calls)
+		// The pre-send state check and the transcript lookup are the only
+		// state reads: the ending does not wait for the worker back at idle.
+		if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 2 {
+			t.Fatalf("agent get calls=%d want 2: %#v", n, calls)
 		}
 		if n := countArgv(calls, compactReadArgv("worker")); n != 2 {
 			t.Fatalf("recent reads=%d want 2: %#v", n, calls)
@@ -373,9 +373,10 @@ func TestCompactClaudeFailedCompaction(t *testing.T) {
 		t.Fatalf("stderr=%q want %q", errText, want)
 	}
 	calls := f.calls(t)
-	// The failure is found on the first poll, before any liveness or idle wait.
-	if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 1 {
-		t.Fatalf("agent get calls=%d want 1: %#v", n, calls)
+	// The failure is found on the first poll, before any liveness or idle
+	// wait: only the pre-send state check and the transcript lookup.
+	if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 2 {
+		t.Fatalf("agent get calls=%d want 2: %#v", n, calls)
 	}
 }
 
@@ -770,8 +771,8 @@ func TestCompactClaudeNoMessagesToCompact(t *testing.T) {
 			t.Fatalf("json=%v", value)
 		}
 		calls := f.calls(t)
-		if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 1 {
-			t.Fatalf("agent get calls=%d want 1: %#v", n, calls)
+		if n := countArgv(calls, []string{"agent", "get", "worker"}); n != 2 {
+			t.Fatalf("agent get calls=%d want 2: %#v", n, calls)
 		}
 		if n := countArgv(calls, compactReadArgv("worker")); n != 2 {
 			t.Fatalf("recent reads=%d want 2: %#v", n, calls)
@@ -1147,13 +1148,15 @@ func TestDispatchCompactSkipsUnsupportedKind(t *testing.T) {
 // stderr line, the dispatch's own JSON line stays alone on stdout, and the
 // brief is sent.
 func TestDispatchCompactClaudeNothingToCompact(t *testing.T) {
-	// Call 1 is the compact pre-send check; the ending is found on the first
-	// poll, so calls 2 and 3 are the dispatch's pre-send state and first
-	// arrival probe.
+	// Call 1 is the compact pre-send check and call 2 its transcript lookup
+	// (no agent_session in the fixture: the screen path); the ending is
+	// found on the first poll, so call 3 is the dispatch's state probe before
+	// the send and call 4 its first arrival probe.
 	extra := []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
-		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("working", 2)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 4, Stdout: compactStateJSON("working", 2)},
 		{Argv: []string{"pane", "send-text", "w0test:p0a", "/compact"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "w0test:p0a", "Enter"}, Stdout: `{"result":{}}`},
 		// The pre-send read has no ending; the poll reads the answer below the
