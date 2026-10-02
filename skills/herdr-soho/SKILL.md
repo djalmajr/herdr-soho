@@ -850,11 +850,13 @@ each group. An amendment belongs to the brief it amends: it is never lost or
 pending on its own, and it does not decide which brief is the agent's
 last. A brief without a report is pending while its agent is in the
 roster and it is the agent's last non-amendment brief, and lost
-otherwise — unless a later report of the same task covers it: the task's
-report history (`<state>/task-report-<agent>.json`, the report paths in
-dispatch order) closes every earlier member of the task once a later one
-exists — the worker reports on the last amendment's path, covering the
-amended brief — and a closed brief is never pending or lost. Each group
+otherwise — unless a later report of the agent's current task covers it:
+that task's report history (`<state>/task-report-<agent>.json`, the report
+paths in dispatch order) closes every earlier member of the task once a
+later one exists — the worker reports on the last amendment's path,
+covering the amended brief. The history is the current task's only: once
+the agent gets a new (non-amendment) brief, a brief of an older task that
+was closed this way can count as lost again. Each group
 also has `no_report`, `minutes`,
 `partials` and `not_received`. The last field records a dispatch's
 arrival-check result even if a later wait recovers. JSON
@@ -953,7 +955,9 @@ listed.
 `scripts/herdr-soho` is a POSIX `sh` launcher: it prefers the installed
 `herdr-soho` Go binary (or the path in `HERDR_SOHO_BIN`), then falls back to
 `scripts/herdr-soho.mjs` with `node` (20+) or `bun`. Set `HERDR_SOHO_JS=1` to
-force the JavaScript fallback. Install the binary with `install.sh` (POSIX)
+force the JavaScript fallback. The fallback is frozen: behavior added since
+the Go port (the rc.8 metrics and later changes described here) exists only
+in the Go binary. Install the binary with `install.sh` (POSIX)
 or `install.ps1` (Windows) from the GitHub releases. If no binary or JS
 runtime is available it exits 2 with an installation message.
 `scripts/herdr-soho.cmd` follows the same order for Windows. The `setup`
@@ -1743,11 +1747,13 @@ kinds that answer a real prompt).
 non-interactive prompt per kind/model (claude `-p`, codex `exec`, grok
 `-p`, agy/gemini `-p`, cursor-agent `-p`, pi `-p --no-session`, opencode
 `run`; `--timeout` or `HERDR_SOHO_PROBE_TIMEOUT` whole seconds ≥ 1,
-default 20, codex 60) and classifies: `ready`, `no-auth` (login message),
+default 20, codex 60 in the Go binary — the JavaScript fallback keeps 20
+for every kind) and classifies: `ready`, `no-auth` (login message),
 `quota` (the same provider messages the wait detects), or `error` (a
 timeout is an error). The `cause` never copies CLI text — it is a fixed
 category: `not installed`, `timeout after <N>s (a timeout does not prove
-the assistant is unavailable; retry with --timeout 90)`, `not
+the assistant is unavailable; retry with --timeout 90)` (the JavaScript
+fallback says only `timeout after <N>s`), `not
 authenticated`, `quota exhausted` (with `; renews <date/time>` only when
 the renewal line carries one), or `exit <code>`. It opens no pane, needs no Herdr, and
 never prints the CLI output — only the classification and cause. Without
