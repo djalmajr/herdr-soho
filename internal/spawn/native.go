@@ -2,6 +2,7 @@ package spawn
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
@@ -42,7 +43,10 @@ func RosterCaller(ctx *core.Config, env platform.Env, cwd, pane string) (name, r
 	if pane == "" {
 		return "", "", false
 	}
-	for _, line := range core.RosterRows(core.StateDirPath(ctx, env, cwd)) {
+	// StateRootPath, not StateDirPath: a lookup must not append the state
+	// root to .gitignore (StateRoot does).
+	dir := filepath.Join(core.StateRootPath(ctx, env, cwd), core.WorkspaceID(ctx, env, cwd))
+	for _, line := range core.RosterRows(dir) {
 		f := strings.Split(line, "\t")
 		if len(f) > 3 && f[0] != "" && f[1] == pane {
 			name, role = f[0], f[3]
@@ -67,15 +71,22 @@ func EnsureOrchestratorName(ctx *core.Config, env platform.Env, cwd, command str
 		return ""
 	}
 	cur := herdr.CallerAgentName(env)
-	if cur == want || strings.HasPrefix(cur, want+"-") {
-		return cur
-	}
+	// The roster comes first: a worker named like an orchestrator is still a
+	// worker, and it gets the same stderr line.
 	if name, role, inRoster := RosterCaller(ctx, env, cwd, pane); inRoster {
 		who := "a " + role + " opened by another orchestrator"
 		if role == "" {
 			who = "opened by another orchestrator"
 		}
 		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s: this pane is '%s' in the roster (%s); keeping its name\n", command, name, who)
+		if cur == "" {
+			// A transient failure of the name read must not report an
+			// empty name: the roster row names the same agent.
+			return name
+		}
+		return cur
+	}
+	if cur == want || strings.HasPrefix(cur, want+"-") {
 		return cur
 	}
 	name := UniqueName(want, env)
