@@ -39,7 +39,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	agent, brief := argv[0], argv[1]
 	role, timeoutRaw := "", ""
-	noWait, allow, amend, compact := false, false, false, false
+	noWait, allow, amend, compact, resend := false, false, false, false, false
 	var forValue *string
 	for i := 2; i < len(argv); i++ {
 		a := argv[i]
@@ -68,6 +68,8 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			amend = true
 		case "--compact":
 			compact = true
+		case "--resend":
+			resend = true
 		case "--cwd":
 			// dispatch never opens a worker: its cwd is fixed when spawn opens it.
 			core.DieFriction("dispatch: unknown option --cwd (the worker's directory is set when it is opened: spawn <role> --cwd <dir>, then dispatch to it)", 2, frictionLogPath, "dispatch")
@@ -258,15 +260,35 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			}
 		}
 	}
-	sidecar := dispatch.DispatchSidecar(composed)
-	if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, "attempted", "", session); err != nil {
-		taskReport := filepath.Join(sd, "reports", strings.TrimSuffix(filepath.Base(report), ".md")+".current.md")
-		return writeDispatchError(agent, role, kind, composed, report, taskReport, "couldn't write the attempt sidecar: "+sanitizeDispatchCause(err.Error()), 4,
-			fmt.Sprintf("could not write the attempt sidecar %s: %s", sidecar, sanitizeDispatchCause(err.Error())))
-	}
+	// The one-send-once guard (s72): the same brief for the agent's open task
+	// is never sent twice. The sidecar's brief_sha256 is the digest of the
+	// brief's raw input bytes, read before the decision, so nothing is
+	// written when a member already carries the brief; the normalized text
+	// still serves the prompt composition.
 	briefRaw, err := platform.ReadTextFile(brief)
 	if err != nil {
 		panic(err)
+	}
+	rawBrief, err := os.ReadFile(brief)
+	if err != nil {
+		panic(err)
+	}
+	briefSHA := sha256Hex(rawBrief)
+	if !resend {
+		if dup := findDispatchDuplicate(sd, agent, briefSHA, amend); dup != nil {
+			return dispatchDuplicateResult(agent, role, kind, dup, noWait, timeoutRaw, sd, ctx, env, cwd)
+		}
+	}
+	sidecar := dispatch.DispatchSidecar(composed)
+	// priorPointer and taskReport are read before the first sidecar write: the
+	// sidecar's task_report is the pointer's value after this dispatch
+	// updates it (the new task's stable report, or the current one for an
+	// amendment).
+	priorPointer := taskreport.ReadTaskReportPointer(sd, agent)
+	taskReport := taskReportAfterDispatch(sd, report, amend, priorPointer)
+	if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, taskReport, briefSHA, "attempted", "", session); err != nil {
+		return writeDispatchError(agent, role, kind, composed, report, taskReport, "couldn't write the attempt sidecar: "+sanitizeDispatchCause(err.Error()), 4,
+			fmt.Sprintf("could not write the attempt sidecar %s: %s", sidecar, sanitizeDispatchCause(err.Error())))
 	}
 	shared := false
 	if live := safeLiveAgents(env); len(live) > 0 {
@@ -279,15 +301,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	if err := os.WriteFile(composed, []byte(prompt), 0o666); err != nil {
 		panic(err)
 	}
-	priorPointer := taskreport.ReadTaskReportPointer(sd, agent)
-	taskReport := filepath.Join(sd, "reports", strings.TrimSuffix(filepath.Base(report), ".md")+".current.md")
-	if amend && priorPointer != nil {
-		if v, ok := priorPointer.Get("task_report"); ok {
-			if x, ok := v.(string); ok {
-				taskReport = x
-			}
-		}
-	}
+	// priorPointer and taskReport stand from before the first sidecar write.
 	history := []any{}
 	if amend {
 		if priorPointer != nil {
@@ -414,14 +428,25 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	p := herdr.AgentPrompt(agent, text, env)
 	if !p.Ok {
-		if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, "failed", "", session); err != nil {
+		_ = restoreTaskDispatch(sd, agent, lastPath, lastData, priorPointer)
+		// The failed sidecar records the pointer's task_report after the
+		// restoration — the task the pointer actually keeps; without a
+		// restored pointer the field is absent.
+		restoredReport := ""
+		if restored := taskreport.ReadTaskReportPointer(sd, agent); restored != nil {
+			if v, ok := restored.Get("task_report"); ok {
+				if s, isStr := v.(string); isStr {
+					restoredReport = s
+				}
+			}
+		}
+		if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, restoredReport, briefSHA, "failed", "", session); err != nil {
 			core.Warn(fmt.Sprintf("could not record the failed submission in the attempt sidecar %s: %s", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 		}
-		_ = restoreTaskDispatch(sd, agent, lastPath, lastData, priorPointer)
 		return writeDispatchError(agent, role, kind, composed, report, taskReport, p.Raw, 4,
 			"prompt submission failed; inspect with: herdr agent get "+agent+" && herdr agent read "+agent+". Do not resend blindly.")
 	}
-	if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, "accepted", "", session); err != nil {
+	if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, taskReport, briefSHA, "accepted", "", session); err != nil {
 		core.Warn(fmt.Sprintf("could not record the accepted submission in the attempt sidecar %s: %s; the prompt went out", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 	}
 	status, resent, enterSent := "submitted", false, false
@@ -448,10 +473,10 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 				enterSent = true
 				core.Warn(fmt.Sprintf("prompt to '%s' sat in the input box; sent Enter", agent), frictionLogPath, "dispatch")
 				if !waitDispatchArrival(window, env, arrived) {
-					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, forEntries, env, wasWorking, "an Enter on the text left in its input box")
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "an Enter on the text left in its input box")
 				}
 			} else if staleAuthBlock(agent, env, H0, preSeq, enterSent, resent) {
-				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, forEntries, env, wasWorking, "its block on a provider auth error")
+				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "its block on a provider auth error")
 			} else {
 				core.Warn(fmt.Sprintf("prompt to '%s' did not arrive; sending it once more", agent), frictionLogPath, "dispatch")
 				H0 = strconv.FormatUint(uint64(waitpkg.CksumField(herdr.AgentRead(env, agent, "visible", nil))), 10)
@@ -463,10 +488,10 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 						return (strconv.FormatUint(uint64(waitpkg.CksumField(cur)), 10) != H0 && composedPathSeenOutsideInput(agent, composed, env)) || arrived()
 					}
 					if !waitDispatchArrival(window, env, proof) {
-						return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, forEntries, env, wasWorking, "one resend")
+						return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "one resend")
 					}
 				} else {
-					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, forEntries, env, wasWorking, "one resend")
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "one resend")
 				}
 			}
 		}
@@ -484,12 +509,12 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 					waitDispatchArrival(window, env, arrived)
 			}
 			if !ok {
-				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, forEntries, env, true, "the working target showed no prompt evidence")
+				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, true, "the working target showed no prompt evidence")
 			}
 			st := herdr.AgentState(agent, env, herdr.Timeout, nil)
 			if !(nonEmpty(report) || ((st.State == "working" || st.State == "blocked") && preSeq != "" && seqString(st.Seq) != "" && preSeq != seqString(st.Seq))) {
 				status = "queued"
-				if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, "accepted", "queued", session); err != nil {
+				if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, taskReport, briefSHA, "accepted", "queued", session); err != nil {
 					core.Warn(fmt.Sprintf("could not record the queued arrival in the attempt sidecar %s: %s; the dispatch result stands", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 				}
 				seq := seqString(st.Seq)
@@ -568,22 +593,25 @@ func containsWord(list, word string) bool {
 
 // writeDispatchSidecar writes the attempt sidecar and, when the dispatch
 // resolved --for authors, adds their anonymized "for" array so the metrics
-// line can carry it (issue #39, part 2). The sidecar is rewritten in place
-// on every submission update, so the array goes on at every write.
-func writeDispatchSidecarFor(entries []any, path, kind, model, effort, submission, arrival, session string) error {
+// line can carry it (issue #39, part 2). It also sets the durable task_report
+// and brief_sha256 fields (s72). The sidecar is rewritten in place on every
+// submission update, so those go on at every write.
+func writeDispatchSidecarFor(entries []any, path, kind, model, effort, taskReport, briefSHA, submission, arrival, session string) error {
 	if err := writeDispatchSidecar(path, kind, model, effort, submission, arrival, session); err != nil {
 		return err
 	}
-	if len(entries) == 0 {
-		return nil
-	}
-	return addForToSidecar(path, entries)
+	return addForToSidecar(path, entries, taskReport, briefSHA)
 }
 
 // addForToSidecar re-writes the sidecar dispatch.WriteSidecar just wrote with
 // the "for" array set: the wait's metrics line copies it to the review line
-// and the author names stay out of both.
-func addForToSidecar(path string, entries []any) error {
+// and the author names stay out of both. It also sets the durable
+// task_report and brief_sha256 fields when present, so every sidecar rewrite
+// carries them; an old sidecar without them stays valid.
+func addForToSidecar(path string, entries []any, taskReport, briefSHA string) error {
+	if len(entries) == 0 && taskReport == "" && briefSHA == "" {
+		return nil
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -596,7 +624,15 @@ func addForToSidecar(path string, entries []any) error {
 	if !ok {
 		return fmt.Errorf("the sidecar %s is not a JSON object", path)
 	}
-	obj.Set("for", entries)
+	if taskReport != "" {
+		obj.Set("task_report", taskReport)
+	}
+	if briefSHA != "" {
+		obj.Set("brief_sha256", briefSHA)
+	}
+	if len(entries) > 0 {
+		obj.Set("for", entries)
+	}
 	return platform.AtomicWrite(path, jsonjs.Stringify(obj)+"\n")
 }
 
@@ -793,9 +829,9 @@ func writeDispatchError(agent, role, kind, composed, report, taskReport, raw str
 	core.Warn(warning, frictionLogPath, "dispatch")
 	return code
 }
-func dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session string, forEntries []any, env platform.Env, wasWorking bool, why string) int {
+func dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA string, forEntries []any, env platform.Env, wasWorking bool, why string) int {
 	_ = lane
-	if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, "accepted", "not-received", session); err != nil {
+	if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, taskReport, briefSHA, "accepted", "not-received", session); err != nil {
 		core.Warn(fmt.Sprintf("could not record the not-received arrival in the attempt sidecar %s: %s; the dispatch result stands", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 	}
 	seq := seqString(herdr.AgentState(agent, env, herdr.Timeout, nil).Seq)
