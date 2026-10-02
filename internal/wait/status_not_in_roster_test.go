@@ -90,50 +90,82 @@ func wantLog(t *testing.T, got []string, want ...string) {
 	}
 }
 
-// D11: an agent outside the roster that Herdr knows (a local `agent get`
-// succeeds) is `not-in-roster` with the stderr hint, not `unknown-agent`.
-// The reference form ([machine/]<pane>) takes the same single agent get.
+// D11: an agent outside the roster that Herdr knows is `not-in-roster` with
+// the stderr hint, not `unknown-agent`. The hint cites the command form
+// that worked: a bare name and a local reference take the local query, a
+// remote reference goes to its machine with --machine, and a value that
+// does not parse as a reference keeps today's local name behavior.
 func TestStatusNotInRosterWhenHerdrKnowsTheAgent(t *testing.T) {
 	f := newNotInRosterFixture(t, "worker\tp1\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\t\t\n", []fakecli.Rule{
 		{Argv: []string{"agent", "get", "outsider"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`},
+		{Argv: []string{"--machine", "box1", "agent", "get", "w2:p42"}, Stdout: `{"result":{"agent":{"agent_status":"done"}}}`},
+		{Argv: []string{"agent", "get", "w3:p7"}, Stdout: `{"result":{"agent":{"agent_status":"idle"}}}`},
+		{Argv: []string{"agent", "get", "w4:p9"}, Stdout: `{"result":{"agent":{"agent_status":"blocked"}}}`},
 		{Argv: []string{"agent", "get", "[box1/p42]"}, Stdout: `{"result":{"agent":{"agent_status":"idle"}}}`},
 	})
-	code, out, err := f.run(t, []string{"outsider", "[box1/p42]"})
+	code, out, err := f.run(t, []string{"outsider", "box1/w2:p42", "local/w3:p7", "w4:p9", "[box1/p42]"})
 	if code != 0 {
 		t.Fatalf("code=%d out=%q stderr=%q, want rc 0 (today's unknown-agent rc)", code, out, err)
 	}
-	if out != "outsider\tnot-in-roster\t\t-\t-\n[box1/p42]\tnot-in-roster\t\t-\t-\n" {
-		t.Fatalf("out=%q, want one not-in-roster line per agent", out)
+	want := "outsider\tnot-in-roster\t\t-\t-\n" +
+		"box1/w2:p42\tnot-in-roster\t\t-\t-\n" +
+		"local/w3:p7\tnot-in-roster\t\t-\t-\n" +
+		"w4:p9\tnot-in-roster\t\t-\t-\n" +
+		"[box1/p42]\tnot-in-roster\t\t-\t-\n"
+	if out != want {
+		t.Fatalf("out=%q, want one not-in-roster line per agent\nwant %q", out, want)
 	}
-	want := "herdr-soho: status: 'outsider' is not a worker of this workspace's team; herdr agent get outsider shows its state\n" +
+	wantErr := "herdr-soho: status: 'outsider' is not a worker of this workspace's team; herdr agent get outsider shows its state\n" +
+		"herdr-soho: status: 'box1/w2:p42' is not a worker of this workspace's team; herdr --machine box1 agent get w2:p42 shows its state\n" +
+		"herdr-soho: status: 'local/w3:p7' is not a worker of this workspace's team; herdr agent get w3:p7 shows its state\n" +
+		"herdr-soho: status: 'w4:p9' is not a worker of this workspace's team; herdr agent get w4:p9 shows its state\n" +
 		"herdr-soho: status: '[box1/p42]' is not a worker of this workspace's team; herdr agent get [box1/p42] shows its state\n"
-	if err != want {
-		t.Fatalf("stderr=%q, want the not-in-roster hints\nwant %q", err, want)
+	if err != wantErr {
+		t.Fatalf("stderr=%q, want the not-in-roster hints quoting the command form that worked\nwant %q", err, wantErr)
 	}
-	// Only the single agent get per agent: no agent list, no screen reads.
+	// Only the single agent get per agent — the remote reference's query
+	// carries the machine, the local reference and the bare pane id query
+	// the pane id locally, and the unparseable value keeps the name path —
+	// and nothing else: no agent list, no screen reads.
 	wantLog(t, f.callLog(t),
 		"agent\x00get\x00outsider",
+		"--machine\x00box1\x00agent\x00get\x00w2:p42",
+		"agent\x00get\x00w3:p7",
+		"agent\x00get\x00w4:p9",
 		"agent\x00get\x00[box1/p42]",
 	)
 }
 
-// D11: what Herdr does not know either — agent_not_found, or a failed agent
-// get — stays `unknown-agent`, with no hint and today's rc 0.
+// D11: what Herdr does not know either stays `unknown-agent` with no hint
+// and today's rc 0 — a local agent_not_found, a remote one, a remote
+// transport failure, a successful query with no agent, and the unparseable
+// value that falls back to today's local name behavior.
 func TestStatusUnknownAgentWhenHerdrDoesNotKnow(t *testing.T) {
 	f := newNotInRosterFixture(t, "worker\tp1\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\t\t\n", []fakecli.Rule{
 		{Argv: []string{"agent", "get", "ghost"}, Code: 1, Stderr: `{"error":{"code":"agent_not_found","message":"agent target ghost not found"},"id":"cli:agent:get"}`},
-		{Argv: []string{"agent", "get", "stuck"}, Code: 1, Stderr: "Error: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" }"},
+		{Argv: []string{"--machine", "box1", "agent", "get", "w9:p1"}, Code: 1, Stderr: `{"error":{"code":"agent_not_found","message":"agent target w9:p1 not found"},"id":"cli:agent:get"}`},
+		{Argv: []string{"--machine", "box1", "agent", "get", "w9:p2"}, Code: 1, Stderr: "Error: Os { code: 13, kind: PermissionDenied, message: \"Permission denied\" }"},
+		{Argv: []string{"--machine", "box1", "agent", "get", "w9:p3"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"agent", "get", "[box1/p42]"}, Code: 1, Stderr: "Error: no rule"},
 	})
-	code, out, err := f.run(t, []string{"ghost", "stuck"})
-	if code != 0 || out != "ghost\tunknown-agent\t\t-\t-\nstuck\tunknown-agent\t\t-\t-\n" {
-		t.Fatalf("code=%d out=%q stderr=%q, want both unknown-agent with today's rc", code, out, err)
+	code, out, err := f.run(t, []string{"ghost", "box1/w9:p1", "box1/w9:p2", "box1/w9:p3", "[box1/p42]"})
+	want := "ghost\tunknown-agent\t\t-\t-\n" +
+		"box1/w9:p1\tunknown-agent\t\t-\t-\n" +
+		"box1/w9:p2\tunknown-agent\t\t-\t-\n" +
+		"box1/w9:p3\tunknown-agent\t\t-\t-\n" +
+		"[box1/p42]\tunknown-agent\t\t-\t-\n"
+	if code != 0 || out != want {
+		t.Fatalf("code=%d out=%q stderr=%q, want all unknown-agent with today's rc", code, out, err)
 	}
 	if err != "" {
 		t.Fatalf("stderr=%q, want no hint for what Herdr does not know", err)
 	}
 	wantLog(t, f.callLog(t),
 		"agent\x00get\x00ghost",
-		"agent\x00get\x00stuck",
+		"--machine\x00box1\x00agent\x00get\x00w9:p1",
+		"--machine\x00box1\x00agent\x00get\x00w9:p2",
+		"--machine\x00box1\x00agent\x00get\x00w9:p3",
+		"agent\x00get\x00[box1/p42]",
 	)
 }
 
