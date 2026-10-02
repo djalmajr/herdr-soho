@@ -67,6 +67,9 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			amend = true
 		case "--compact":
 			compact = true
+		case "--cwd":
+			// dispatch never opens a worker: its cwd is fixed when spawn opens it.
+			core.DieFriction("dispatch: unknown option --cwd (the worker's directory is set when it is opened: spawn <role> --cwd <dir>, then dispatch to it)", 2, frictionLogPath, "dispatch")
 		default:
 			core.DieFriction("dispatch: unknown option "+a, 2, frictionLogPath, "dispatch")
 		}
@@ -1198,7 +1201,9 @@ func pathsCross(a, b string) bool {
 		if i >= 0 {
 			prefix = strings.TrimRight(g[:i], "/")
 		}
-		return prefix == "" || inside(prefix, t)
+		// A glob that starts with a wildcard has no literal prefix to anchor
+		// a directory relation: it crosses a path only when it matches it.
+		return prefix != "" && inside(prefix, t)
 	}
 	if hasGlob(a) && !hasGlob(b) {
 		return crossPlain(a, b)
@@ -1214,7 +1219,36 @@ func pathsCross(a, b string) bool {
 		return s[:i]
 	}
 	x, y := prefix(a), prefix(b)
-	return x == "" || y == "" || strings.HasPrefix(x, y) || strings.HasPrefix(y, x)
+	if !strings.HasPrefix(x, y) && !strings.HasPrefix(y, x) {
+		return false
+	}
+	suffix := func(s string) string {
+		i := strings.LastIndexAny(s, "*?[")
+		if i < 0 {
+			return s
+		}
+		return s[i+1:]
+	}
+	u, v := suffix(a), suffix(b)
+	if !strings.HasSuffix(u, v) && !strings.HasSuffix(v, u) {
+		return false
+	}
+	// The literal anchors agree; the globs cross only when a file could
+	// match both. Each candidate that matches both is a real common file, so
+	// this never warns without a possible common edit.
+	longer := func(s, t string) string {
+		if len(s) >= len(t) {
+			return s
+		}
+		return t
+	}
+	p, s := longer(x, y), longer(u, v)
+	for _, fill := range []string{"", "x", "x/y", "x/", "x/y/z"} {
+		if c := p + fill + s; glob(a, c) && glob(b, c) {
+			return true
+		}
+	}
+	return false
 }
 func sharedTreeEditor(rows []string, live []any, self, selfCwd string, env platform.Env, cwd string) bool {
 	if selfCwd == "" {
