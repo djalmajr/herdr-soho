@@ -269,6 +269,13 @@ func TestSend(t *testing.T) {
 		}
 	})
 	t.Run("guard: send with real herdr, isolated socket and impossible target sends nothing and exits 4", func(t *testing.T) { // JS: "guard: send with real herdr, isolated socket and impossible target sends nothing and exits 4"
+		// D18: this guard needs the real Herdr CLI, so it only runs with an
+		// explicit opt-in; in a normal test environment it skips and no real
+		// herdr is ever called (the old PATH probe made it run on any host
+		// that happened to have herdr installed, with an isolated socket).
+		if os.Getenv("HERDR_SOHO_REAL_HERDR") != "1" {
+			t.Skip("the real-Herdr guard is opt-in: set HERDR_SOHO_REAL_HERDR=1 to run it")
+		}
 		if _, err := exec.LookPath("herdr"); err != nil {
 			t.Skip("Herdr CLI is not available on the host PATH")
 		}

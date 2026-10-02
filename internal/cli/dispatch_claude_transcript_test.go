@@ -24,11 +24,10 @@ import (
 // the screen-based path stands.
 
 const (
-	claudeTranscriptSession     = "a1b2c3d4-0000-1111-2222-334455667788"
-	claudeTranscriptRemoteRef   = "b7e6f5a4-8888-4444-9999-000011112222"
-	claudeTranscriptCwd         = "/tmp/work"
-	claudeTranscriptStamp       = "20260929T000000"
-	claudeTranscriptAppendDelay = 400 * time.Millisecond
+	claudeTranscriptSession   = "a1b2c3d4-0000-1111-2222-334455667788"
+	claudeTranscriptRemoteRef = "b7e6f5a4-8888-4444-9999-000011112222"
+	claudeTranscriptCwd       = "/tmp/work"
+	claudeTranscriptStamp     = "20260929T000000"
 )
 
 type claudeDispatchFixture struct {
@@ -133,20 +132,39 @@ func claudeDispatchText(composed, report string, amend bool) string {
 	return fmt.Sprintf("Read the file %s in full and execute it. It contains your role, your brief, and your report contract. When finished, write your report to %s and reply with exactly that path and nothing else.", composed, report)
 }
 
-// appendTranscriptLine appends a line to the transcript after the delay, so
-// it lands after the pre-send count and inside the 2 s check window.
-func appendTranscriptLine(t *testing.T, path, line string) {
+// appendTranscriptLine appends the line the way a Claude Code session
+// records the prompt it receives: the goroutine polls the fake herdr's call
+// log (the same idiom dispatch_r11_test.go uses for the report write) for
+// the `agent prompt` call and appends once it appears. The product logs that
+// call while submitting the prompt — after the pre-send count and before the
+// check window opens (internal/cli/dispatch.go) — so the line deterministically
+// lands inside the 2 s check window. The old one-shot 400 ms timer raced the
+// pre-send count: on a loaded host the dispatch setup (several fake herdr
+// calls) took longer than 400 ms, the line landed before the count, the
+// count never rose and the rise-proof path never ran. If the deadline passes
+// without the prompt call, the goroutine gives up silently: the subtest's
+// own code/status assertions fail on the missing rise.
+func appendTranscriptLine(t *testing.T, f *claudeDispatchFixture, line string) {
 	t.Helper()
 	go func() {
-		time.Sleep(claudeTranscriptAppendDelay)
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if err != nil {
-			t.Errorf("transcript append open: %v", err)
-			return
-		}
-		defer f.Close()
-		if _, err := f.WriteString(line + "\n"); err != nil {
-			t.Errorf("transcript append: %v", err)
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			calls, _ := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
+			for _, call := range calls {
+				if len(call.Argv) >= 2 && call.Argv[0] == "agent" && call.Argv[1] == "prompt" {
+					file, err := os.OpenFile(f.transcript, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+					if err != nil {
+						t.Errorf("transcript append open: %v", err)
+						return
+					}
+					defer file.Close()
+					if _, err := file.WriteString(line + "\n"); err != nil {
+						t.Errorf("transcript append: %v", err)
+					}
+					return
+				}
+			}
+			time.Sleep(time.Millisecond)
 		}
 	}()
 }
@@ -185,7 +203,7 @@ func TestDispatchClaudeTranscriptArrival(t *testing.T) {
 		f := newClaudeDispatchFixture(t, "working", 5, "id", claudeTranscriptSession, "0")
 		f.seedTranscript(t, claudeTranscriptLine("user", previousPrompt))
 		withEarlierReport(t, f)
-		appendTranscriptLine(t, f.transcript, claudeTranscriptLine("user", claudeDispatchText(f.composed, f.report, true)))
+		appendTranscriptLine(t, f, claudeTranscriptLine("user", claudeDispatchText(f.composed, f.report, true)))
 		code, out, errText := f.run(t, "worker", f.brief, "--amend", "--no-wait")
 		if code != 0 || dispatchOutputStatus(t, out) != "queued" || !strings.Contains(errText, "prompt queued") {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
@@ -231,7 +249,7 @@ func TestDispatchClaudeTranscriptArrival(t *testing.T) {
 		f := newClaudeDispatchFixture(t, "working", 5, "id", claudeTranscriptSession, "0")
 		f.seedTranscript(t, claudeTranscriptLine("user", previousPrompt))
 		withEarlierReport(t, f)
-		appendTranscriptLine(t, f.transcript, claudeTranscriptLine("assistant", claudeDispatchText(f.composed, f.report, true)))
+		appendTranscriptLine(t, f, claudeTranscriptLine("assistant", claudeDispatchText(f.composed, f.report, true)))
 		code, out, errText := f.run(t, "worker", f.brief, "--amend", "--no-wait")
 		if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
@@ -242,7 +260,7 @@ func TestDispatchClaudeTranscriptArrival(t *testing.T) {
 		pinDispatchClock(t)
 		f := newClaudeDispatchFixture(t, "idle", 1, "id", claudeTranscriptSession, "0")
 		f.seedTranscript(t, claudeTranscriptLine("user", previousPrompt))
-		appendTranscriptLine(t, f.transcript, claudeTranscriptLine("user", claudeDispatchText(f.composed, f.report, false)))
+		appendTranscriptLine(t, f, claudeTranscriptLine("user", claudeDispatchText(f.composed, f.report, false)))
 		code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || dispatchOutputStatus(t, out) != "submitted" {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
@@ -265,7 +283,7 @@ func TestDispatchClaudeTranscriptArrival(t *testing.T) {
 		f := newClaudeDispatchFixture(t, "working", 5, "ref", claudeTranscriptRemoteRef, "0")
 		f.seedTranscript(t, claudeTranscriptLine("user", previousPrompt))
 		withEarlierReport(t, f)
-		appendTranscriptLine(t, f.transcript, claudeTranscriptLine("user", claudeDispatchText(f.composed, f.report, true)))
+		appendTranscriptLine(t, f, claudeTranscriptLine("user", claudeDispatchText(f.composed, f.report, true)))
 		code, out, errText := f.run(t, "worker", f.brief, "--amend", "--no-wait")
 		if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
