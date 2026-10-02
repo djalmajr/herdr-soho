@@ -412,3 +412,83 @@ func TestCompactCodexUnchangedOldProofIsNotCompacted(t *testing.T) {
 		t.Fatalf("json=%v want the timeout (the old proof is not this compaction's)", value)
 	}
 }
+
+// TestCompactCodexScrolledProofIsCompacted covers the review P2: the reads
+// take 40 lines, so after a scroll the older compaction leaves the screen and
+// the new one shows the same `Context compacted` — the count stays at 1 and
+// the text is identical. The proof still counts: the visible screen changed
+// since the pre-send read, the proof sits below the delivered echo, and that
+// echo is not the composer line. The compact reads as done, not a timeout.
+func TestCompactCodexScrolledProofIsCompacted(t *testing.T) {
+	const before = "old conversation\n› /compact\nContext compacted\n› Ask Codex to do anything\n"
+	const after = "new conversation after scrolling\n› /compact\nContext compacted\n› Ask Codex to do anything\n"
+	f := newCompactFixture(t, "codex", []fakecli.Rule{
+		// All agent get calls idle (the pre-send check and the idle wait after
+		// the proof).
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+		// 1: pre-send, the screen before the scroll. The later reads: the
+		// screen after the scroll (the old compaction is gone, the new proof is
+		// below the delivered echo, the box is empty).
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: before},
+		{Argv: compactReadArgv("worker"), Stdout: after},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}}`},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "1000")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	if value := compactJSON(t, out); value["status"] != "compacted" {
+		t.Fatalf("json=%v want compacted (the new proof after the scroll)", value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 1 {
+		t.Fatalf("Enter calls=%d want 1: %#v", n, calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 0 {
+		t.Fatalf("ctrl+u calls=%d want 0: %#v", n, calls)
+	}
+}
+
+// TestCompactCodexNonIdleNoKeys covers the review's partial finding: when the
+// state leaves idle/done before the second Enter (here idle → working), the
+// message says "pressed nothing" and no key is sent — neither the Enter nor
+// the ctrl+u clear.
+func TestCompactCodexNonIdleNoKeys(t *testing.T) {
+	fakeFastClock(t, 6*time.Second)
+	f := newCompactFixture(t, "codex", []fakecli.Rule{
+		// 1: pre-send (idle). 2 and 3: the first confirm's liveness check and
+		// the re-read before the second Enter, both working.
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("working", 2)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("working", 2)},
+		// 1: pre-send. 2: the first proof poll, /compact still in the box. 3:
+		// the first confirm, still stuck. 4: the re-read before the second
+		// Enter, still stuck.
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: codexClearedComposer},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: codexStuckComposer},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: codexStuckComposer},
+		{Argv: compactReadArgv("worker"), Call: 4, Stdout: codexStuckComposer},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}}`},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 4 {
+		t.Fatalf("code=%d want 4 out=%s stderr=%s", code, out, errText)
+	}
+	if out != "" {
+		t.Fatalf("stdout must be empty on the non-idle exit: %s", out)
+	}
+	if !strings.Contains(errText, "pressed nothing") {
+		t.Fatalf("stderr=%q want 'pressed nothing'", errText)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 1 {
+		t.Fatalf("Enter calls=%d want 1 (the state left idle, no retry Enter): %#v", n, calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 0 {
+		t.Fatalf("ctrl+u calls=%d want 0 (no key at all on the pressed-nothing branch): %#v", n, calls)
+	}
+}
