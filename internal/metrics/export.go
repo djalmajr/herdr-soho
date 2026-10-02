@@ -19,9 +19,11 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/stats"
 )
 
-// exportCopyKeys are the input keys copied unchanged into the summary line,
-// in the output order. The closed list: any other input key (agent, report,
-// ts, a path, a URL, or an unknown key) stays out of the anonymized line.
+// exportCopyKeys are the input keys copied into the summary line, in the
+// output order. The closed list: any other input key (agent, report, ts, a
+// path, a URL, or an unknown key) stays out of the anonymized line. `items`
+// and `severity` keep their slot in the order but are projected to their own
+// closed keys (exportItemsKeys/exportSeverityKeys), like `for`.
 var exportCopyKeys = []string{
 	"role", "kind", "model", "effort", "family", "type",
 	"duration_s", "amendment", "session", "arrival",
@@ -31,6 +33,14 @@ var exportCopyKeys = []string{
 // exportForKeys are the only keys kept from each object of the input `for`
 // array (the authors a review role checked).
 var exportForKeys = []string{"kind", "model", "effort", "family"}
+
+// exportItemsKeys are the only keys kept from the input `items` object (the
+// done/partial/skipped counters part 1 writes).
+var exportItemsKeys = []string{"done", "partial", "skipped"}
+
+// exportSeverityKeys are the only keys kept from the input `severity` object
+// (the P0..P3 finding counters).
+var exportSeverityKeys = []string{"P0", "P1", "P2", "P3"}
 
 var exportLabelPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 
@@ -311,7 +321,23 @@ func exportSummaryLine(line exportLine, marks []exportMark, label string) string
 		out.Set("date", line.tsAt.UTC().Format("2006-01-02"))
 	}
 	for _, key := range exportCopyKeys {
-		if value, ok := line.obj.Get(key); ok {
+		value, ok := line.obj.Get(key)
+		if !ok {
+			continue
+		}
+		// items and severity are projected to their closed keys, like for:
+		// a stray key stays out, and a value that is not an object drops
+		// the whole field.
+		switch key {
+		case "items":
+			if projected, isObject := projectClosedObject(value, exportItemsKeys); isObject {
+				out.Set(key, projected)
+			}
+		case "severity":
+			if projected, isObject := projectClosedObject(value, exportSeverityKeys); isObject {
+				out.Set(key, projected)
+			}
+		default:
 			out.Set(key, value)
 		}
 	}
@@ -319,17 +345,9 @@ func exportSummaryLine(line exportLine, marks []exportMark, label string) string
 		if authors, isAuthors := value.([]any); isAuthors {
 			projected := make([]any, 0, len(authors))
 			for _, author := range authors {
-				obj, isObj := author.(*jsonjs.Object)
-				if !isObj {
-					continue
+				if authorObj, isObj := projectClosedObject(author, exportForKeys); isObj {
+					projected = append(projected, authorObj)
 				}
-				p := jsonjs.O()
-				for _, key := range exportForKeys {
-					if value, ok := obj.Get(key); ok {
-						p.Set(key, value)
-					}
-				}
-				projected = append(projected, p)
 			}
 			out.Set("for", projected)
 		}
@@ -339,7 +357,13 @@ func exportSummaryLine(line exportLine, marks []exportMark, label string) string
 		out.Set("findings_false", merge.falseCount)
 		if findings, ok := line.obj.Get("findings"); ok {
 			if total, isTotal := findings.(float64); isTotal {
-				out.Set("findings_unlabeled", int(total)-merge.real-merge.falseCount)
+				// More labels than findings are possible (marks on a report
+				// with fewer findings); the counter never goes below zero.
+				unlabeled := int(total) - merge.real - merge.falseCount
+				if unlabeled < 0 {
+					unlabeled = 0
+				}
+				out.Set("findings_unlabeled", unlabeled)
 			}
 		}
 		if len(merge.missed) > 0 {
@@ -354,6 +378,22 @@ func exportSummaryLine(line exportLine, marks []exportMark, label string) string
 		}
 	}
 	return jsonjs.Stringify(out)
+}
+
+// projectClosedObject keeps only the closed keys of an input object, in the
+// closed order; ok is false when the value is not an object.
+func projectClosedObject(value any, keys []string) (*jsonjs.Object, bool) {
+	src, isObj := value.(*jsonjs.Object)
+	if !isObj {
+		return nil, false
+	}
+	dst := jsonjs.O()
+	for _, key := range keys {
+		if item, ok := src.Get(key); ok {
+			dst.Set(key, item)
+		}
+	}
+	return dst, true
 }
 
 func sortedKeys(values map[string]float64) []string {

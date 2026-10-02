@@ -151,9 +151,9 @@ func sameTree(a, b []string) bool {
 // exportClosedSettled* are settled lines like wait writes them (plus the
 // report name and for array of the other slice), with the stray "secret" key
 // and a path inside `for` that must never reach the output.
-const exportClosedSettledImplementer = `{"ts":"2026-09-30T21:00:00Z","agent":"worker","report":"worker.md","role":"implementer","kind":"claude","model":"claude-opus","effort":"high","family":"anthropic","type":"backend","duration_s":120,"amendment":true,"session":"20260930T210000","arrival":"queued","items":{"done":3,"partial":1,"skipped":1},"secret":"x"}`
+const exportClosedSettledImplementer = `{"ts":"2026-09-30T21:00:00Z","agent":"worker","report":"worker.md","role":"implementer","kind":"claude","model":"claude-opus","effort":"high","family":"anthropic","type":"backend","duration_s":120,"amendment":true,"session":"20260930T210000","arrival":"queued","items":{"done":3,"partial":1,"skipped":1,"path":"/x"},"secret":"x"}`
 
-const exportClosedSettledReviewer = `{"ts":"2026-09-30T22:00:00Z","agent":"reviewer","report":"reviewer.md","role":"reviewer","kind":"codex","model":"gpt-5","effort":"max","family":"openai","type":"review","duration_s":80,"items":{"done":2,"partial":0,"skipped":0},"verdict":"pass","findings":3,"severity":{"P0":0,"P1":1,"P2":2,"P3":0},"verdict_effective":"fail","for":[{"kind":"claude","model":"claude-opus","effort":"high","family":"anthropic","cwd":"/Users/secret/proj"},{"kind":"codex"}],"secret":"x"}`
+const exportClosedSettledReviewer = `{"ts":"2026-09-30T22:00:00Z","agent":"reviewer","report":"reviewer.md","role":"reviewer","kind":"codex","model":"gpt-5","effort":"max","family":"openai","type":"review","duration_s":80,"items":{"done":2,"partial":0,"skipped":0},"verdict":"pass","findings":3,"severity":{"P0":0,"P1":1,"P2":2,"P3":0,"url":"https://x"},"verdict_effective":"fail","for":[{"kind":"claude","model":"claude-opus","effort":"high","family":"anthropic","cwd":"/Users/secret/proj"},{"kind":"codex"}],"secret":"x"}`
 
 const exportClosedSettledOther = `{"ts":"2026-09-30T20:00:00Z","agent":"other","report":"other.md","kind":"pi","model":"gpt","secret":"x"}`
 
@@ -215,6 +215,15 @@ func TestExportClosedKeyList(t *testing.T) {
 	if got := want("amendment", implementer); got != "true" {
 		t.Fatalf("amendment=%s want true", got)
 	}
+	var itemsRaw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(want("items", implementer)), &itemsRaw); err != nil || len(itemsRaw) != 3 {
+		t.Fatalf("items=%v want exactly the closed keys done/partial/skipped", itemsRaw)
+	}
+	for _, key := range []string{"done", "partial", "skipped"} {
+		if _, ok := itemsRaw[key]; !ok {
+			t.Fatalf("items misses the closed key %s: %v", key, itemsRaw)
+		}
+	}
 	var items map[string]int
 	if err := json.Unmarshal([]byte(want("items", implementer)), &items); err != nil || items["done"] != 3 || items["partial"] != 1 || items["skipped"] != 1 {
 		t.Fatalf("items=%v want {done:3 partial:1 skipped:1}", items)
@@ -246,6 +255,15 @@ func TestExportClosedKeyList(t *testing.T) {
 	}
 	if got := want("findings", reviewer); got != "3" {
 		t.Fatalf("findings=%s want 3", got)
+	}
+	var severityRaw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(want("severity", reviewer)), &severityRaw); err != nil || len(severityRaw) != 4 {
+		t.Fatalf("severity=%v want exactly the closed keys P0..P3", severityRaw)
+	}
+	for _, key := range []string{"P0", "P1", "P2", "P3"} {
+		if _, ok := severityRaw[key]; !ok {
+			t.Fatalf("severity misses the closed key %s: %v", key, severityRaw)
+		}
 	}
 	var severity map[string]int
 	if err := json.Unmarshal([]byte(want("severity", reviewer)), &severity); err != nil || severity["P2"] != 2 {
@@ -633,5 +651,71 @@ func TestExportSortedByTs(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], `"kind":"claude"`) || !strings.Contains(lines[1], `"kind":"codex"`) {
 		t.Fatalf("output not sorted by ts: %s", stdout)
+	}
+}
+
+func TestExportNestedClosedLists(t *testing.T) {
+	// R-M3 finding 1: items and severity are projected to their closed keys,
+	// like for; a value that is not an object drops the whole field.
+	// R-M3 finding 2: more labels than findings clamp findings_unlabeled at 0.
+	f := newExportFixture(t, map[string]string{
+		"ws1/metrics.jsonl": strings.Join([]string{
+			`{"ts":"2026-09-30T21:00:00Z","agent":"reviewer","report":"nested.md","role":"reviewer","kind":"codex","model":"gpt-5","family":"openai","items":{"done":1,"partial":0,"skipped":0,"path":"/x"},"findings":1,"severity":{"P0":0,"P1":0,"P2":0,"P3":0,"url":"https://x"},"verdict_effective":"fail"}`,
+			`{"ts":"2026-09-30T21:05:00Z","label":"mark","report":"nested.md","findings":{"1":"real","2":"real"},"missed":{"P2":1}}`,
+			`{"ts":"2026-09-30T21:10:00Z","agent":"w","report":"bad.md","role":"implementer","kind":"claude","model":"claude-opus","items":"oops","severity":"high"}`,
+		}, "\n") + "\n",
+	})
+	stdout, stderr, code, _ := f.run(t)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 output lines, got %d: %s", len(lines), stdout)
+	}
+	var nested, bad map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(lines[0]), &nested); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &bad); err != nil {
+		t.Fatal(err)
+	}
+	// The stray keys inside items and severity do not reach the output.
+	var itemsRaw map[string]json.RawMessage
+	if err := json.Unmarshal(nested["items"], &itemsRaw); err != nil || len(itemsRaw) != 3 {
+		t.Fatalf("items=%v want exactly done/partial/skipped (no path)", itemsRaw)
+	}
+	var severityRaw map[string]json.RawMessage
+	if err := json.Unmarshal(nested["severity"], &severityRaw); err != nil || len(severityRaw) != 4 {
+		t.Fatalf("severity=%v want exactly P0..P3 (no url)", severityRaw)
+	}
+	for _, key := range []string{"path", "url"} {
+		if _, ok := itemsRaw[key]; ok {
+			t.Fatalf("items keeps the stray key %s: %v", key, itemsRaw)
+		}
+		if _, ok := severityRaw[key]; ok {
+			t.Fatalf("severity keeps the stray key %s: %v", key, severityRaw)
+		}
+	}
+	// Two labels on a report with findings=1: real=2, unlabeled clamps at 0.
+	if string(nested["findings_real"]) != "2" || string(nested["findings_false"]) != "0" {
+		t.Fatalf("final counts = real:%v false:%v want 2/0: %s", nested["findings_real"], nested["findings_false"], lines[0])
+	}
+	if string(nested["findings_unlabeled"]) != "0" {
+		t.Fatalf("findings_unlabeled=%v want 0 (clamped, never negative): %s", nested["findings_unlabeled"], lines[0])
+	}
+	var missed map[string]int
+	if err := json.Unmarshal(nested["missed"], &missed); err != nil || missed["P2"] != 1 {
+		t.Fatalf("missed=%v want {P2:1}", missed)
+	}
+	// A value that is not an object drops the whole field.
+	if _, ok := bad["items"]; ok {
+		t.Fatalf("non-object items must drop the field: %s", lines[1])
+	}
+	if _, ok := bad["severity"]; ok {
+		t.Fatalf("non-object severity must drop the field: %s", lines[1])
+	}
+	if string(bad["kind"]) != `"claude"` || string(bad["model"]) != `"claude-opus"` {
+		t.Fatalf("the rest of the line must stay: %s", lines[1])
 	}
 }
