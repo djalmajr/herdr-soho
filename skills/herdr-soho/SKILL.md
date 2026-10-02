@@ -150,9 +150,13 @@ config sane, an orphan pane left by a `release` without `--close`), then
 renames the caller's own agent to `orchestrator`
 (config `orchestrator_name`; `orchestrator-2` when taken) so the Herdr
 sidebar and `roster` show who leads, and prints the context (pane, tab,
-workspace, layout, state dir). Act on `warn` lines before spawning; a
-stale official skill means the CLI syntax you read may be wrong. `spawn`
-does the rename lazily. When `first_run` is true, follow
+workspace, layout, state dir). A caller pane that is already in the roster
+is a worker another orchestrator opened: its name is kept and one line
+goes to stderr, `herdr-soho: init: this pane is '<name>' in the roster
+(a <role> opened by another orchestrator); keeping its name` (`spawn`,
+which does the rename lazily, prints the same line with `spawn`). Act on
+`warn` lines before spawning; a stale official skill means the CLI syntax
+you read may be wrong. When `first_run` is true, follow
 [First run](#first-run) before any spawn.
 
 With lanes on (the default), a worker is named after its lane (`build`,
@@ -166,7 +170,8 @@ something more telling. `lanes=off` keeps the old names: the role (`scouter`,
 list includes it.
 
 The orchestrator's pane is titled too: `init` sets
-`orchestrator: <project>` when the pane has no title, and
+`orchestrator: <project>` when the pane has no title (a pane that is in the
+roster is not titled by this `init`), and
 `$S title "<objective>"` sets `orchestrator: <objective>` (the objective
 is cut at 60 code points). Set it right after `init` and again whenever
 the objective changes, so the sidebar shows what this session leads.
@@ -347,16 +352,21 @@ the chosen model's advertised reasoning levels, not from the kind.
   native harness may expose a different window than Cursor does.
 - **`context_window`** is grok's context window, in tokens
   (`context_window.grok=500k` or `256000`): grok has no CLI flag for it, so a
-  fresh grok spawn types `/context-window <value>` into the pane right after
-  the agent is ready (a pause, then the Enter on the menu) and reads the
-  visible screen for the `Context window set to <value>` line before it
-  reports; the spawn JSON then carries `"context_window"`. Only grok uses
-  the key (another kind is a `doctor` warning with no effect), a value that
-  is not `<n>k`/`<n>` is ignored with a `doctor` warning, and a spawn that
-  cannot confirm the line still succeeds with the warning `spawn: could not
-  confirm grok's context window …` (set it by hand with `/context-window`).
-  The command never goes to a reused or working grok, and no value leaves
-  grok's own default window in place.
+  fresh grok spawn re-reads the visible screen right before it types
+  `/context-window <value>` into the pane (a pause, then the Enter on the
+  menu) and reads the visible screen for the `Context window set to <value>`
+  line before it reports; the spawn JSON then carries `"context_window"`.
+  The pre-typing re-read blocks the spawn when it sees a trust dialog that
+  landed after the start window (see "Startup dialogs") instead of typing.
+  Only grok uses the key (another kind is a `doctor` warning with no
+  effect), a value that is not `<n>k`/`<n>` is ignored with a `doctor`
+  warning, and a spawn that cannot confirm the line still succeeds with the
+  warning `spawn: could not confirm grok's context window …` (set it by hand
+  with `/context-window`) — or, when the grok is gone by then (state
+  `gone`), with `spawn: grok '<name>' exited after /context-window; it may
+  have been showing a dialog — read its pane`. The command never goes to a
+  reused or working grok, and no value leaves grok's own default window in
+  place.
 - **`approvals`** decides how much a worker may do without a human:
   `ask` (default, the CLI's normal prompts), `edits` (auto-accept file
   edits), `full` (no prompts for tools or MCP servers, still inside the
@@ -530,7 +540,16 @@ is still editing (its report still pending): `brief <path> owns files that
 role: `reviewing files that '<agent>' is still editing: <paths>`) —
 advisory, it never blocks. Paths are compared as files, directories
 and globs (`src/**/*.ts` crosses `src/a/b.ts`; `roles/reviewer*.md`
-crosses `roles/reviewer.md`). A codex worker's composed prompt (brief and
+crosses `roles/reviewer.md`). A glob crosses a plain path it matches, or
+one in a directory relation with its literal prefix — a glob that starts
+with a wildcard has no literal prefix, so `*.workers.test.ts` does not
+cross `src/a.ts` — and two globs cross only when one file could match
+both: a character class counts as a wildcard token (`src/[ab].ts` crosses
+`src/*.ts`), and a directory owned with its trailing slash in the brief
+crosses a glob that could match a file inside it (`**/*.ts` crosses
+`src/components/`); a directory owned as a glob is a tree, so it crosses a
+directory it matches, one inside a directory it matches, or one that
+contains its literal root (`src/*/` crosses `src/components/`). A codex worker's composed prompt (brief and
 amendment) carries the sandbox notes when its opening args do not grant
 the access (`danger-full-access` or
 `--dangerously-bypass-approvals-and-sandbox` drop both): `Your sandbox cannot write under .git: do not run git mv, git
@@ -831,7 +850,12 @@ each group. An amendment belongs to the brief it amends: it is never lost or
 pending on its own, and it does not decide which brief is the agent's
 last. A brief without a report is pending while its agent is in the
 roster and it is the agent's last non-amendment brief, and lost
-otherwise. Each group also has `no_report`, `minutes`,
+otherwise — unless a later report of the same task covers it: the task's
+report history (`<state>/task-report-<agent>.json`, the report paths in
+dispatch order) closes every earlier member of the task once a later one
+exists — the worker reports on the last amendment's path, covering the
+amended brief — and a closed brief is never pending or lost. Each group
+also has `no_report`, `minutes`,
 `partials` and `not_received`. The last field records a dispatch's
 arrival-check result even if a later wait recovers. JSON
 `lost_briefs` maps each group to the stored composed-prompt paths for
@@ -1041,7 +1065,10 @@ are `manual` and never overwritten (`tab-label --auto` returns a tab to the
 automatic label); `roster` shows the `TAB` of every worker.
 `dispatch` writes a composed prompt (role body + brief + report contract) to
 the state dir and sends a one-line pointer to it, so long briefs never
-depend on terminal paste limits. Exit codes: 2 usage/env, 3 unknown
+depend on terminal paste limits. `dispatch` has no `--cwd` (the worker's
+directory is set when `spawn` opens the pane): it dies 2 with `dispatch:
+unknown option --cwd (the worker's directory is set when it is opened:
+spawn <role> --cwd <dir>, then dispatch to it)`. Exit codes: 2 usage/env, 3 unknown
 role/agent, 4 Herdr failure (`unavailable`), 5 same-family reviewer, 6 settled without
 report, 7 agent blocked (startup or approval), 8 `max_workers` reached,
 9 wait timeout, 10 lane busy, 11 quota exhausted, 12 `spawn planner` (the
@@ -1066,13 +1093,23 @@ as a peer agent with an 8-hex random message ID — `[herdr-soho:peer] #<id> Mes
 <sender-ref> (<name>, <kind>, <role>), not from your user` —, says it carries
 no user intent or approval, tells how to reply with `send` itself, and announces
 that the message follows quoted with `> ` (`The message follows, each line quoted with "> ".`);
-outside a Herdr pane the sender degrades to `local/-` with dashes. Each line of the
+outside a Herdr pane the sender degrades to `local/-` with dashes. For a remote target the first
+line names the pane on this machine's hostname — `[herdr-soho:peer] #<id> Message from another
+agent — <pane> on <hostname> (<name>, <kind>, <role>), not from your user.` (without a hostname
+the pane reads `this machine`) — and the reply line asks for this machine's name in the receiver's
+machine list: `Reply, if useful, with: herdr-soho send <this machine's name in your herdr machine
+list>/<pane> "<your reply>" (this machine is <hostname>)` (without a hostname the parenthetical
+is dropped). Every header field is cleaned to stay on one line: control characters are dropped
+and every run of whitespace, line breaks and tabs included, becomes one space. Each line of the
 body is quoted with `> ` (empty lines become `>`), and the message ends with a closing line
 `[herdr-soho:peer] #<id> end of message`, so a fake header in the body can never be confused
 with the real one. A `working`/
 `blocked` target is waited on until `idle`/`done` (`agent wait --until idle
 --until done --timeout MS`, default 600000) unless `--now` is given (the target's own
-CLI decides queue vs mix); timing out exits 17 with nothing sent (`<ref> is still <status> after <s>s`).
+CLI decides queue vs mix); timing out exits 17 with nothing sent: `send: <ref> is still <status> after <s>s; nothing was sent (--now sends it without waiting; the target's CLI decides whether to queue it)`
+while the status is not `blocked`, and `send: <ref> is still blocked after <s>s; nothing was sent (it may be showing a dialog or waiting for an approval: read its pane before sending anything)`
+for a `blocked` target — it may be showing a dialog or waiting for an
+approval, so its message never suggests typing over it.
 Before sending, `send` checks the target's visible screen: if reading fails, it exits 4 (`<ref>'s screen unreadable; nothing was sent`).
 If the bottom 10 non-empty lines match folder/workspace trust patterns (`Trust this workspace`,
 `trust this folder`, `Do you trust`, `Enter to confirm`, `[y/N]`, `(y/n)`) under any status,
@@ -1083,8 +1120,8 @@ The dialog check pairs each visible-screen read with a fresh `agent get` status,
 Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).
 Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000` (it never automatically re-prompts).
 Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof). For a pi target whose screen carries its two input-box borders (lines of `─`, or the working border `── ⠴ Working ──…` while it works), the closing line and the id count only inside its input box (the region between those lines), so a message already in its chat history is delivered, a message in its `Steering:` queue is queued, and the Enter goes only when the id is in that box. For a codex target whose screen holds a composer line (the last line that, without its left spaces, is `›` alone or begins with `› `, and sits within the last 8 non-empty lines), the closing line and the id count only inside its composer region (from that line to the bottom of the screen), so a message already in its history above the composer is delivered; a `↳` line holding the id above the composer is its follow-up queue — the result is `queued`, with no Enter sent. A Claude Code queue is recognized the same way: when the visible screen holds the message's id and the line `Press up to edit queued messages`, the result is `queued`, with no Enter sent.
-When `agent prompt` reports `agent_prompt_stalled` — the prompt may be typed with its Enter missing — `send` reads the target's visible screen and, when `#<id>` sits in its input box (for pi between the box borders, for codex the composer region, for every other kind the last 15 non-empty lines) and no dialog is on screen, presses one Enter and runs the arrival window; a dialog on screen would take the Enter as its answer, so nothing is pressed and it exits 17 (`send: <ref> is showing a dialog after the message was typed; press nothing and read its pane`). Still unproven after the Enter, it exits 15 (`send: <ref> did not take the message: it sits in its input box after one Enter; read its pane before sending again`). Without the id in the box it keeps the plain stalled exit 15. One Enter at most, no resend.
-If not verified by the end of the window: if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
+When `agent prompt` reports `agent_prompt_stalled` — the prompt may be typed with its Enter missing — `send` reads the target's visible screen and, when `#<id>` sits in its input box (for pi between the box borders, for codex the composer region, for every other kind the last 15 non-empty lines) and no dialog is on screen, presses one Enter and runs the arrival window; a dialog on screen would take the Enter as its answer, so nothing is pressed and it exits 17 (`send: <ref> is showing a dialog after the message was typed; press nothing and read its pane`). Still unproven after the Enter, it exits 15 (`send: <ref> did not take the message: it sits in its input box after one Enter; read its pane before sending again`). Without the id in the box a single arrival check proves the taking once with the window's own rules (no key, no resend): proven taken is `sent`, not proven keeps the plain stalled exit 15. One Enter at most, no resend.
+If not verified by the end of the window: a local claude that is still `working` and whose session transcript was resolved keeps the transcript in evidence until the command's `--timeout` (the same value as the busy-target wait) — the transcript showing the message's `#<id>` line with no queue line on the visible screen is `sent`, and a visible queue line is `queued` (`queued for <ref>: it takes the message when its current turn ends`), due before the wait's laps and on every lap of it, independent of the count; no key is sent in the wait, and the warning `send: <ref> is busy; waiting for its transcript to show the message (up to <s>s)` goes once. Then, if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
 If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or screen)`).
 The target project decides acceptance: the `inbound`
 key (`auto` | `off`, default `auto`) is consulted for a **local** target in
@@ -1119,7 +1156,12 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
 - **Startup dialogs.** Update prompts, logins, and trust dialogs make
   `agent start` return `agent_not_ready`; `spawn` records the agent anyway,
   prints the screen, and exits 7. Ask the user, answer with
-  `herdr agent send-keys <name> …`, then `herdr agent wait <name>`.
+  `herdr agent send-keys <name> …`, then `herdr agent wait <name>`. A
+  fresh grok's first-use trust dialog is one of them: when its screen
+  shows `Do you trust the contents of this directory?` (or `Yes, proceed`
+  and `No, quit` on distinct lines), the spawn blocks before typing
+  anything — a typed answer would be taken as `No, quit` — with the spawn
+  JSON status `blocked_at_startup`, the screen printed, and exit 7.
 - **One agent, one growing session.** Several `dispatch` calls to the same
   name land in the same conversation; the worker remembers earlier briefs.
   `collect` prints only the latest report; older ones stay in `reports/`.
@@ -1223,7 +1265,9 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   cwd: `'<a>' and '<b>' both edit <cwd>: builds and test runs see each
   other's changes in progress; give each a git worktree (spawn --cwd
   <worktree>) to isolate them` — the fix is one worktree per worker (or
-  per branch). A `done` report the routing kept under
+  per branch) — and it goes once per pair and cwd: a marker
+  (`shared-tree-<hash>.warned`) in `<state>/wait/` records it, a new pair
+  or another cwd warns again. A `done` report the routing kept under
   `$TMPDIR/herdr-soho/<ws>/reports/` is mirrored back into the state dir,
   best effort: the report to `reports/` under the same name and the
   composed prompt next to it to `briefs/` minus the `.brief`; a copy
@@ -1699,12 +1743,13 @@ kinds that answer a real prompt).
 non-interactive prompt per kind/model (claude `-p`, codex `exec`, grok
 `-p`, agy/gemini `-p`, cursor-agent `-p`, pi `-p --no-session`, opencode
 `run`; `--timeout` or `HERDR_SOHO_PROBE_TIMEOUT` whole seconds ≥ 1,
-default 20) and classifies: `ready`, `no-auth` (login message), `quota`
-(the same provider messages the wait detects), or `error` (a timeout is
-an error). The `cause` never copies CLI text — it is a fixed category:
-`not installed`, `timeout after <N>s`, `not authenticated`, `quota
-exhausted` (with `; renews <date/time>` only when the renewal line
-carries one), or `exit <code>`. It opens no pane, needs no Herdr, and
+default 20, codex 60) and classifies: `ready`, `no-auth` (login message),
+`quota` (the same provider messages the wait detects), or `error` (a
+timeout is an error). The `cause` never copies CLI text — it is a fixed
+category: `not installed`, `timeout after <N>s (a timeout does not prove
+the assistant is unavailable; retry with --timeout 90)`, `not
+authenticated`, `quota exhausted` (with `; renews <date/time>` only when
+the renewal line carries one), or `exit <code>`. It opens no pane, needs no Herdr, and
 never prints the CLI output — only the classification and cause. Without
 `--kind` it probes every known kind with the model `spawn` would use
 (`model.<kind>.worker`, then `model.<kind>`, else the CLI default; the
@@ -1835,9 +1880,10 @@ issue on the skill's repo so the maintainer can improve it incrementally.
   `gh issue list --repo <feedback_repo> --search "<keywords>" --label herdr-soho`
   first to avoid duplicates. Every line of the log keeps the four columns
   (date, level, command, message; newlines are sanitized out of the
-  message), and `friction add "<text>" [--brief <path>]` records a friction
-  the tools do not log themselves (level `note`, command `friction`;
-  `--brief` appends ` (brief: <path>)`).
+  message): a new line's date is UTC with the `Z` suffix, and `--since`
+  reads the old zone-less lines as local time. `friction add "<text>"
+  [--brief <path>]` records a friction the tools do not log themselves
+  (level `note`, command `friction`; `--brief` appends ` (brief: <path>)`).
 - **Policy** is the `feedback` config key:
   - `ask` (default): tell the user what you would file, and file it only
     after they agree;
