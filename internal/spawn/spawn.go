@@ -792,6 +792,20 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 			layout.HerdTabsRelabel(ctx, env, cwd)
 		}()
 	}
+	// grok's first-run trust dialog must take no typed text: herdr reports the
+	// agent ready while the dialog is on its screen, and the "n" of the next
+	// typed line — "/context-window <value>" or a dispatch prompt — is "No,
+	// quit", so the agent exits. This is the new-grok path only (every reuse
+	// path returned before this point), before any text is typed, with or
+	// without a configured window. The check reuses the visible screen the
+	// start window just read of this new agent: the dialog is up from grok's
+	// first open of the folder, so that is the screen a typed line would
+	// land on, and no extra herdr read is spent. A dialog on it blocks the
+	// start like the other startup dialogs (screen printed, exit 7) — the
+	// user must answer it, spawn never does.
+	if !blocked && kind == "grok" && isGrokTrustDialog(lastScreen) {
+		blocked = true
+	}
 	contextWindow := ""
 	if !blocked && kind == "grok" {
 		// context_window.grok opens the fresh grok with the requested window
@@ -801,8 +815,16 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		// here; doctor names it.
 		value := core.Cfg(ctx, core.ContextWindowKey("grok"), "", env)
 		if value != "" && core.ContextWindowValueOk(value) {
-			if confirmGrokContextWindow(o, value, env) {
+			if confirmed, neverSawScreen := confirmGrokContextWindow(o, value, env); confirmed {
 				contextWindow = value
+			} else if neverSawScreen && herdr.AgentState(o.name, env, herdr.Timeout, nil).State == "gone" {
+				// Every read of the confirmation window failed and the agent is
+				// gone (agent_not_found): it quit during the window — the typed
+				// text answered a dialog. Say that, instead of the generic
+				// no-confirmation warning; the status stays ready, the dispatch
+				// will name the missing agent. A live grok that simply never
+				// showed the line keeps the old warning and no extra read.
+				Warn(fmt.Sprintf("spawn: grok '%s' exited after /context-window; it may have been showing a dialog — read its pane", o.name), ctx, env, "spawn")
 			} else {
 				Warn(fmt.Sprintf("spawn: could not confirm grok's context window %s for '%s' (no \"Context window set to\" line); set it by hand with /context-window", value, o.name), ctx, env, "spawn")
 			}
@@ -989,25 +1011,64 @@ func startWrapperTimeoutMs(raw string) float64 {
 	return n + 30_000
 }
 
+// grokTrustDialogQuestion is grok's first-run trust question line and
+// grokTrustDialogYes / grokTrustDialogNo its answer lines, quoted from the
+// dialog on a real machine: "Do you trust the contents of this directory?"
+// with "Yes, proceed" (y) and "No, quit" (n).
+const (
+	grokTrustDialogQuestion = "do you trust the contents of this directory"
+	grokTrustDialogYes      = "yes, proceed"
+	grokTrustDialogNo       = "no, quit"
+)
+
+// isGrokTrustDialog reports whether the visible screen of a fresh grok shows
+// its first-run trust dialog: the question line, or both answer lines
+// together. The match is case-insensitive and tolerant of the extra spaces
+// the TUI padding adds to the lines; one answer line alone is not a dialog.
+func isGrokTrustDialog(screen string) bool {
+	question, yes, no := false, false, false
+	for _, line := range strings.Split(screen, "\n") {
+		norm := strings.Join(strings.Fields(text.ASCIILower(line)), " ")
+		if strings.Contains(norm, grokTrustDialogQuestion) {
+			question = true
+		}
+		if strings.Contains(norm, grokTrustDialogYes) {
+			yes = true
+		}
+		if strings.Contains(norm, grokTrustDialogNo) {
+			no = true
+		}
+	}
+	return question || (yes && no)
+}
+
 // confirmGrokContextWindow opens the requested context window on the fresh
 // grok: it types /context-window <value> into the pane, pauses for the menu,
 // sends the Enter, and then reads the visible screen until grok's
-// "Context window set to <value>" line appears (up to the window). True only
-// when the line was seen — spawn records the window in its JSON; otherwise it
-// warns and the spawn still succeeds. Callers run it on the new-spawn path
+// "Context window set to <value>" line appears (up to the window). confirmed
+// is true only when the line was seen — spawn records the window in its
+// JSON; otherwise it warns and the spawn still succeeds. neverSawScreen is
+// true when every read of the window came back empty — the agent left
+// (usually the typed text answered a dialog) — so the caller can spend one
+// agent state read to name the exit. Callers run it on the new-spawn path
 // only, after the start window; a reused or working grok never gets it.
-func confirmGrokContextWindow(o spawnOptions, value string, env platform.Env) bool {
+func confirmGrokContextWindow(o spawnOptions, value string, env platform.Env) (confirmed, neverSawScreen bool) {
 	_ = herdr.PaneSendText(o.pane, "/context-window "+value, env)
 	time.Sleep(contextWindowSettle)
 	_ = herdr.PaneSendKeys(o.pane, "Enter", env)
 	needle := "Context window set to " + value
 	until := time.Now().Add(contextWindowWindow)
+	neverSawScreen = true
 	for {
-		if strings.Contains(herdr.AgentRead(env, o.name, "visible", intPtr(40)), needle) {
-			return true
+		screen := herdr.AgentRead(env, o.name, "visible", intPtr(40))
+		if screen != "" {
+			neverSawScreen = false
+		}
+		if strings.Contains(screen, needle) {
+			return true, false
 		}
 		if !time.Now().Before(until) {
-			return false
+			return false, neverSawScreen
 		}
 		time.Sleep(pollMillis(env))
 	}
