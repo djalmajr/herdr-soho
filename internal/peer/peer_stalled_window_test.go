@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/peer"
+	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
@@ -315,6 +317,106 @@ func TestSendStalledWindowSaveImpossible(t *testing.T) {
 	}
 	if enters := countSendKeyEnters(t, f); enters != 0 {
 		t.Fatalf("no Enter without the marker in the box: %d", enters)
+	}
+}
+
+// stalledWindowSetupRules is the stalled setup: a codex in done at sequence
+// 1, the pre-send screen still stale, and the prompt that stalls. Call 2 of
+// the visible read is the box detection (stale: no marker).
+func stalledWindowSetupRules(t *testing.T, tail []fakecli.Rule) []fakecli.Rule {
+	prompt := d15WindowPrompt(t)
+	rules := []fakecli.Rule{
+		d15WindowGet(1, "done", "1"),
+		d15WindowVisible(1, d15WindowStale),
+		d15WindowGet(2, "done", "1"),
+		d15WindowGet(3, "done", "1"),
+		{Argv: d15WindowPromptArgv(prompt), Stderr: stalledPromptErr, Code: 1},
+		d15WindowVisible(2, d15WindowStale),
+	}
+	return append(rules, tail...)
+}
+
+// stalledWindowCatchAll is the catch-all for every read after the pinned
+// ones: the given screen, the unmoved state, and a recent history without
+// the marker.
+func stalledWindowCatchAll(screen string) []fakecli.Rule {
+	return []fakecli.Rule{
+		{Argv: []string{"--machine", "windows", "agent", "read", "w0test:p0a", "--source", "visible"}, Stdout: screen},
+		{Argv: []string{"--machine", "windows", "agent", "get", "w0test:p0a"}, Stdout: agentJSONKind("codex", "done", "1")},
+		{Argv: []string{"--machine", "windows", "agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stdout: "old history\n"},
+	}
+}
+
+func TestReviewS74Deadline(t *testing.T) {
+	// A slow read near the end of the window must not push it far past its
+	// deadline: the second check's 16s visible read runs against the default
+	// 15s window, and the send must still finish within one window plus the
+	// one-second floor a read gets to finish (the probe's 16s bound).
+	slow := d15WindowVisible(4, d15WindowStale)
+	slow.Delay = 16000
+	tail := []fakecli.Rule{d15WindowVisible(3, d15WindowStale), slow}
+	tail = append(tail, stalledWindowCatchAll(d15WindowStale)...)
+	f := newFixture(t, stalledWindowSetupRules(t, tail))
+	start := time.Now()
+	code, _, _ := f.run([]string{"send", d15Pane, "hello"})
+	elapsed := time.Since(start)
+	t.Logf("default_window=15s elapsed=%s code=%d prompts=%d enters=%d", elapsed, code, remotePrompts(t, f), remoteEnters(t, f))
+	if code != 15 || elapsed > 16*time.Second {
+		t.Fatal("stalled proof calls exceeded the one-window time budget")
+	}
+}
+
+func TestReviewS74LastFallbackScreen(t *testing.T) {
+	// When the recent read gets agent_not_idle, readScreen falls back to a
+	// visible read: that fallback is a visible screen read too, so the saved
+	// screen must be the fallback's, not an earlier read.
+	latest := "LATEST_VISIBLE_SENTINEL\n›\n"
+	tail := []fakecli.Rule{
+		d15WindowVisible(3, d15WindowStale),
+		d15WindowGet(4, "done", "1"),
+		{Argv: []string{"--machine", "windows", "agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stderr: notIdleErr, Code: 1},
+		d15WindowVisible(4, latest),
+	}
+	f := newFixture(t, stalledWindowSetupRules(t, tail))
+	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+	code, _, stderr := f.run([]string{"send", d15Pane, "hello"})
+	p := filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen")
+	raw, err := os.ReadFile(p)
+	t.Logf("code=%d saved_latest=%t saved=%q stderr=%q", code, string(raw) == latest, string(raw), stderr)
+	if code != 15 || err != nil || string(raw) != latest {
+		t.Fatal("saved screen omitted the last successful visible fallback read")
+	}
+}
+
+func TestSaveStalledScreenNowrite(t *testing.T) {
+	// The CLI already refuses the send with HERDR_SOHO_NOWRITE=1 (exit 2)
+	// before the stalled 15, but the helper carries its own guard: under
+	// NOWRITE it must write nothing, so no screen can ever leak from the
+	// send flow. The control without the flag proves the helper writes.
+	screen := "NOWRITE_HELPER_SCREEN\n›\n"
+	dir := t.TempDir()
+	waitDir := filepath.Join(dir, "wait")
+	env := platform.Env{}
+	path := peer.SaveStalledScreen(dir, "01020304", screen, env)
+	raw, err := os.ReadFile(path)
+	if err != nil || string(raw) != screen {
+		t.Fatalf("helper without NOWRITE did not write the screen: %v %q", err, raw)
+	}
+	env["HERDR_SOHO_NOWRITE"] = "1"
+	if got := peer.SaveStalledScreen(dir, "01020304", screen, env); got != "" {
+		t.Fatalf("helper under NOWRITE reported a path: %s", got)
+	}
+	if entries, err := os.ReadDir(waitDir); err != nil || len(entries) != 1 {
+		var names []string
+		if err == nil {
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+		}
+		t.Fatalf("helper under NOWRITE left files in %s: %v %v", waitDir, names, err)
+	}
+	if got := peer.SaveStalledScreen(dir, "01020304", "", env); got != "" {
+		t.Fatalf("helper with an empty screen reported a path: %s", got)
 	}
 }
 
