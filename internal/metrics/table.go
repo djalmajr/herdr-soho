@@ -241,11 +241,21 @@ func renderTable(groups []*tableGroup) (content string, rows int) {
 	b.WriteString(metricsTableHeader)
 	for _, g := range groups {
 		_, _ = fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %d | %s | %s | %s | %s | %s |\n",
-			g.role, g.typ, g.kind, g.model, g.effort, g.n,
+			tableCell(g.role), tableCell(g.typ), tableCell(g.kind), tableCell(g.model), tableCell(g.effort), g.n,
 			medianMinutes(g.durations), partialPercent(g.itemsSeen, g.itemsPartial),
 			precisionCell(g), missedCell(g), confidenceBand(g.n))
 	}
 	return strings.TrimSuffix(b.String(), "\n"), len(groups)
+}
+
+// tableCell renders a group field for a printed markdown cell: \r and \n
+// become spaces (the row must stay one line), backslashes are doubled so a
+// \| is unambiguous, and | is escaped. Grouping and ordering keep using the
+// original value; only the printed cell changes.
+func tableCell(value string) string {
+	escaped := strings.ReplaceAll(value, "\\", "\\\\")
+	escaped = strings.ReplaceAll(escaped, "|", "\\|")
+	return strings.ReplaceAll(strings.ReplaceAll(escaped, "\r", " "), "\n", " ")
 }
 
 // medianMinutes is the median of duration_s in minutes, one decimal; "-"

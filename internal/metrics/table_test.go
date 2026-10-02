@@ -533,3 +533,73 @@ func TestTable_EndToEndExportAndTable(t *testing.T) {
 		t.Fatalf("table stdout =\n%s\nwant:\n%s\nexport was:\n%s", out, want, exportOut)
 	}
 }
+
+// TestTable_CellEscaping: | becomes \| (the row keeps exactly 11 cells),
+// a backslash is doubled so \| is unambiguous, \r/\n become spaces (one line
+// per row), and grouping/ordering keep the original values, so models that
+// differ only by a | stay in separate groups.
+func TestTable_CellEscaping(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{
+		tableJSON(t, map[string]any{"project": "p", "role": "r", "model": "alpha|beta"}),
+		tableJSON(t, map[string]any{"project": "p", "role": "r", "model": "alpha\nbeta"}),
+		tableJSON(t, map[string]any{"project": "p", "role": "r", "model": "a|b"}),
+		tableJSON(t, map[string]any{"project": "p", "role": "r", "model": "ab"}),
+		tableJSON(t, map[string]any{"project": "p", "role": "r", "model": "a\\b"}),
+	}
+	file := tableWriteFile(t, dir, "export.jsonl", strings.Join(lines, "\n")+"\n")
+
+	code, out, err := tableRun(t, []string{file})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, err)
+	}
+	if err != "" {
+		t.Fatalf("stderr = %q, want empty", err)
+	}
+	// Raw model values sort byte-wise (backslash 0x5C < b < l < |): a\b, ab,
+	// alpha\nbeta, alpha|beta, a|b. Only the printed cells change.
+	want := tableHeader +
+		"| r | - | - | a\\\\b | - | 1 | - | - | - | - | low |\n" +
+		"| r | - | - | ab | - | 1 | - | - | - | - | low |\n" +
+		"| r | - | - | alpha beta | - | 1 | - | - | - | - | low |\n" +
+		"| r | - | - | alpha\\|beta | - | 1 | - | - | - | - | low |\n" +
+		"| r | - | - | a\\|b | - | 1 | - | - | - | - | low |\n"
+	if out != want {
+		t.Fatalf("stdout =\n%s\nwant:\n%s", out, want)
+	}
+	// Exactly one line per row: header, separator and 5 data rows.
+	if got := strings.Count(out, "\n"); got != 7 {
+		t.Fatalf("stdout has %d lines, want 7 (a newline value must not split a row)", got)
+	}
+	// The alpha|beta row keeps exactly 11 cells: 12 unescaped pipes, the
+	// pipe inside the cell is escaped.
+	rows := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if got := tableUnescapedPipes(rows[5]); got != 12 {
+		t.Fatalf("row %q has %d unescaped pipes, want 12 (11 cells)", rows[5], got)
+	}
+	// Models that differ only by a | (ab vs a|b) stay in separate groups:
+	// both rows are present, unchanged in grouping.
+	for _, wantRow := range []string{
+		"| r | - | - | ab | - | 1 | - | - | - | - | low |",
+		"| r | - | - | a\\|b | - | 1 | - | - | - | - | low |",
+	} {
+		if !strings.Contains(out, wantRow+"\n") {
+			t.Fatalf("row %q missing (groups must not merge across |):\n%s", wantRow, out)
+		}
+	}
+}
+
+// tableUnescapedPipes counts the pipes that are not preceded by a backslash.
+func tableUnescapedPipes(row string) int {
+	count := 0
+	for i := 0; i < len(row); i++ {
+		if row[i] == '\\' {
+			i++ // skip the escaped character
+			continue
+		}
+		if row[i] == '|' {
+			count++
+		}
+	}
+	return count
+}
