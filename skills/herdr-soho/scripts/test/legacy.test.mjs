@@ -46,7 +46,12 @@ function setup() {
   const tmp = path.join(root, 'tmp');
   for (const d of [repo, home, conf, tmp]) fs.mkdirSync(d, { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: repo, stdio: 'ignore', timeout: 30000 });
-  const env = fixtureEnv({ HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: conf, TMPDIR: tmp });
+  // HERDR_SOHO_JS=1: these tests deliberately drive the worktree's
+  // JavaScript implementation through the launcher; without it, a host
+  // herdr-soho binary (PATH, ~/.local/bin or the install directory) would
+  // be exec'ed instead, and the shim's fallback warning would reach the
+  // stderr the assertions read.
+  const env = fixtureEnv({ HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: conf, TMPDIR: tmp, HERDR_SOHO_JS: '1' });
   const run = (args, over = {}, cwd = repo) => {
     const childEnv = { ...env, ...over };
     const invocation = process.platform === 'win32'

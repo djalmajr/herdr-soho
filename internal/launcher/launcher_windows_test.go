@@ -59,26 +59,64 @@ func TestWindowsBatchLauncherChoosesBinaryAndPassesArguments(t *testing.T) {
 	}
 	args := []string{"value with spaces", `say"hello`, "percent%"}
 	tests := []struct {
-		name   string
-		setup  string
-		env    map[string]string
-		want   string
-		status int
-		stderr string
+		name       string
+		setup      string
+		env        map[string]string
+		want       string
+		status     int
+		stderr     string
+		wantStderr string
+		notStderr  string
 	}{
-		{name: "forced JS", setup: "node-and-path-binary", env: map[string]string{"HERDR_SOHO_JS": "1", "HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23},
+		{name: "forced JS", setup: "node-and-path-binary", env: map[string]string{"HERDR_SOHO_JS": "1", "HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23, notStderr: "warning"},
 		{name: "override binary", setup: "node-and-go", env: map[string]string{"HERDR_SOHO_BIN": "go", "HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23},
 		{name: "invalid override", setup: "node", env: map[string]string{"HERDR_SOHO_BIN": "missing.exe", "HERDR_SOHO_HELPER": "js"}, status: 2, stderr: "HERDR_SOHO_BIN is missing or not executable"},
 		{name: "non-executable override", setup: "node-and-bad-override", env: map[string]string{"HERDR_SOHO_BIN": "bad", "HERDR_SOHO_HELPER": "js"}, status: 2, stderr: "HERDR_SOHO_BIN is missing or not executable"},
 		{name: "PATH binary", setup: "path-binary", env: map[string]string{"HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23},
 		{name: "launcher cmd is not a PATH binary", setup: "launcher-cmd-and-node", env: map[string]string{"HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23},
 		{name: "no binary or runtime", setup: "system-only", env: map[string]string{}, status: 2, stderr: "install the herdr-soho binary"},
+		// Install-dir lookup: a shell opened before the install keeps a PATH
+		// without the binary; the .cmd must find where install.ps1 (or
+		// HERDR_SOHO_INSTALL_DIR) put it. The fake LOCALAPPDATA /
+		// HERDR_SOHO_INSTALL_DIR live outside binDir so `where herdr-soho.exe`
+		// never sees them. Runs only on Windows (the orchestrator's round).
+		{name: "install dir binary (HERDR_SOHO_INSTALL_DIR)", setup: "node", env: map[string]string{"HERDR_SOHO_INSTALL_DIR": "installdir-binary", "HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23},
+		{name: "install dir binary (LOCALAPPDATA default)", setup: "node", env: map[string]string{"LOCALAPPDATA": "localappdata-binary", "HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23},
+		{name: "custom install dir beats the default", setup: "node", env: map[string]string{"HERDR_SOHO_INSTALL_DIR": "installdir-binary", "LOCALAPPDATA": "localappdata-junk", "HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23},
+		{name: "no binary: JS with the warning", setup: "node", env: map[string]string{"HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23, wantStderr: "the herdr-soho binary was not found (PATH or the install directory)"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			binDir := t.TempDir()
 			if err := populateWindowsFixture(binDir, test.setup, systemRoot); err != nil {
 				t.Fatal(err)
+			}
+			// The install-dir fixtures (see the cases above): built outside
+			// binDir so the PATH lookup stays empty.
+			var installDir, localDir string
+			if test.env["HERDR_SOHO_INSTALL_DIR"] == "installdir-binary" {
+				installDir = t.TempDir()
+				if err := writeWindowsExecutable(t, installDir, "herdr-soho.exe"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if value := test.env["LOCALAPPDATA"]; value == "localappdata-binary" || value == "localappdata-junk" {
+				localDir = t.TempDir()
+				program := filepath.Join(localDir, "Programs", "herdr-soho")
+				if err := os.MkdirAll(program, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if value == "localappdata-binary" {
+					if err := writeWindowsExecutable(t, program, "herdr-soho.exe"); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					// Not a valid PE image: if the .cmd tried the default before
+					// the custom dir, CreateProcess fails and the exit is not 23.
+					if err := os.WriteFile(filepath.Join(program, "herdr-soho.exe"), []byte("not a valid executable"), 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 			env := []string{"PATH=" + binDir + ";" + filepath.Join(systemRoot, "System32"), "SystemRoot=" + systemRoot, "HERDR_SOHO_HELPER_EXIT=23"}
 			for key, value := range test.env {
@@ -88,6 +126,10 @@ func TestWindowsBatchLauncherChoosesBinaryAndPassesArguments(t *testing.T) {
 					env = append(env, key+"="+filepath.Join(binDir, "herdr-soho.cmd"))
 				} else if key == "HERDR_SOHO_BIN" && value == "missing.exe" {
 					env = append(env, key+"="+filepath.Join(binDir, value))
+				} else if key == "HERDR_SOHO_INSTALL_DIR" && value == "installdir-binary" {
+					env = append(env, key+"="+installDir)
+				} else if key == "LOCALAPPDATA" && (value == "localappdata-binary" || value == "localappdata-junk") {
+					env = append(env, key+"="+localDir)
 				} else {
 					env = append(env, key+"="+value)
 				}
@@ -120,8 +162,31 @@ func TestWindowsBatchLauncherChoosesBinaryAndPassesArguments(t *testing.T) {
 			if string(output) != test.want {
 				t.Fatalf("output=%q want=%q", output, test.want)
 			}
+			if test.wantStderr != "" {
+				if !strings.Contains(stderrOf(runErr), test.wantStderr) {
+					t.Fatalf("stderr=%q want substring %q", stderrOf(runErr), test.wantStderr)
+				}
+			}
+			if test.notStderr != "" {
+				if strings.Contains(stderrOf(runErr), test.notStderr) {
+					t.Fatalf("stderr=%q must not contain %q", stderrOf(runErr), test.notStderr)
+				}
+			}
 		})
 	}
+}
+
+func writeWindowsExecutable(t *testing.T, dir, name string) error {
+	t.Helper()
+	current, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(current)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, name), data, 0o700)
 }
 
 func populateWindowsFixture(dir, setup, systemRoot string) error {

@@ -34,6 +34,16 @@ is_binary() {
   return 0
 }
 
+# A candidate outside the PATH (the install directories below): executable,
+# not a shebang script, not this launcher itself; sets candidate_path.
+usable_candidate() {
+  [ -n "$1" ] || return 1
+  is_binary "$1" || return 1
+  candidate_path=$(resolve_path "$1" 2>/dev/null || true)
+  [ -n "$candidate_path" ] || return 1
+  [ "$candidate_path" != "$own_path" ]
+}
+
 if [ "${HERDR_SOHO_JS:-}" = 1 ]; then
   js_only=1
 else
@@ -49,15 +59,47 @@ if [ "$js_only" -eq 0 ]; then
     exec "$HERDR_SOHO_BIN" "$@"
   fi
 
+  own_path=$(resolve_path "$script_path" 2>/dev/null || true)
+
   path_bin=$(command -v herdr-soho 2>/dev/null || true)
   if [ -n "$path_bin" ] && is_binary "$path_bin"; then
     candidate_path=$(resolve_path "$path_bin" 2>/dev/null || true)
-    own_path=$(resolve_path "$script_path" 2>/dev/null || true)
     if [ -n "$candidate_path" ] && [ "$candidate_path" != "$own_path" ]; then
       exec "$path_bin" "$@"
     fi
   fi
+
+  # A shell opened before the install keeps a PATH without the binary:
+  # try where install.sh (HERDR_SOHO_INSTALL_DIR or ~/.local/bin) or
+  # install.ps1 (Git Bash: %LOCALAPPDATA%) put it.
+  if [ -n "${HERDR_SOHO_INSTALL_DIR:-}" ]; then
+    candidate="$HERDR_SOHO_INSTALL_DIR/herdr-soho"
+    if usable_candidate "$candidate"; then
+      exec "$candidate" "$@"
+    fi
+  fi
+  if [ -n "${HOME:-}" ]; then
+    candidate="$HOME/.local/bin/herdr-soho"
+    if usable_candidate "$candidate"; then
+      exec "$candidate" "$@"
+    fi
+  fi
+  if [ -n "${LOCALAPPDATA:-}" ]; then
+    candidate="$LOCALAPPDATA/Programs/herdr-soho/herdr-soho.exe"
+    if usable_candidate "$candidate"; then
+      exec "$candidate" "$@"
+    fi
+  fi
 fi
+
+# One warning before the JavaScript fallback, only when it is a fallback:
+# HERDR_SOHO_JS=1 asked for the JavaScript on purpose.
+run_js_fallback() {
+  if [ "$js_only" -eq 0 ]; then
+    printf 'herdr-soho: warning: the herdr-soho binary was not found (PATH or the install directory); running the JavaScript fallback, which lags the binary; reopen the shell after installing, or set HERDR_SOHO_BIN\n' >&2
+  fi
+  exec "$@"
+}
 
 node_bin=$(command -v node 2>/dev/null || true)
 if [ -n "$node_bin" ]; then
@@ -66,7 +108,7 @@ if [ -n "$node_bin" ]; then
     ''|*[!0-9]*) : not a usable node version ;;
     *)
       if [ "$node_major" -ge 20 ]; then
-        exec "$node_bin" "$script_dir/herdr-soho.mjs" "$@"
+        run_js_fallback "$node_bin" "$script_dir/herdr-soho.mjs" "$@"
       fi
       ;;
   esac
@@ -74,7 +116,7 @@ fi
 
 bun_bin=$(command -v bun 2>/dev/null || true)
 if [ -n "$bun_bin" ]; then
-  exec "$bun_bin" "$script_dir/herdr-soho.mjs" "$@"
+  run_js_fallback "$bun_bin" "$script_dir/herdr-soho.mjs" "$@"
 fi
 
 printf 'herdr-soho: install the herdr-soho binary (install.sh / install.ps1 from the GitHub releases) or Node.js 20+ / Bun\n' >&2
