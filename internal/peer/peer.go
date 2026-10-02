@@ -390,20 +390,32 @@ func deliverPrompt(machine, pane, body string, env platform.Env) callResult {
 	return callResult{Code: code, Cause: cause}
 }
 
+// floorCallBudget floors a call's time budget (in ms) at one second so a
+// call can still finish when its deadline is moments away.
+func floorCallBudget(ms int) int {
+	if ms < 1000 {
+		return 1000
+	}
+	return ms
+}
+
 // readScreen runs `herdr agent read`, bounded by timeoutMS. A full-screen TUI
 // holds its history on the alternate screen, which Herdr captures only while
 // the agent is idle: a `recent` read of a working one fails with
 // agent_not_idle. The visible screen is what such an agent shows, so that
-// read (without --lines, with the same budget) takes its place, as herdr's
-// agentRead does; any other error, and a failed visible read, is not
-// repeated. A successful visible-screen read — direct or that fallback — is
-// reported through onVisibleScreen when it is non-nil, so the caller
-// (the send flow) records every visible screen it sees.
+// read (without --lines) takes its place, as herdr's agentRead does; any
+// other error, and a failed visible read, is not repeated. The fallback is
+// bounded by the time left of the same deadline the first read was given
+// (floored so it can finish), so the time the first read already consumed
+// is not paid twice. A successful visible-screen read — direct or that
+// fallback — is reported through onVisibleScreen when it is non-nil, so the
+// caller (the send flow) records every visible screen it sees.
 func readScreen(machine, pane, source string, lines int, env platform.Env, timeoutMS int, onVisibleScreen func(string)) (string, string) {
 	args := append(sessionref.HerdrMachineArgs(machine), "agent", "read", pane, "--source", source)
 	if lines > 0 {
 		args = append(args, "--lines", fmt.Sprint(lines))
 	}
+	deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
 	r := platform.RunCli("herdr", args, platform.RunOptions{Env: env, TimeoutMs: timeoutMS})
 	if r.NotFound {
 		return "", "herdr CLI not found in PATH"
@@ -420,7 +432,7 @@ func readScreen(machine, pane, source string, lines int, env platform.Env, timeo
 		if code == "agent_not_idle" && strings.HasPrefix(source, "recent") {
 			// The fallback is a visible read too: it reports through the same
 			// hook, so the screen it shows is the one recorded.
-			return readScreen(machine, pane, "visible", 0, env, timeoutMS, onVisibleScreen)
+			return readScreen(machine, pane, "visible", 0, env, floorCallBudget(int(time.Until(deadline).Milliseconds())), onVisibleScreen)
 		}
 		return "", cause
 	}
@@ -958,11 +970,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// finish: the window is at most 15s, below the 30s the calls would
 	// otherwise wait, so the cap is what bounds them.
 	stalledCheckBudget := func(deadline time.Time) int {
-		ms := int(time.Until(deadline).Milliseconds())
-		if ms < 1000 {
-			ms = 1000
-		}
-		return ms
+		return floorCallBudget(int(time.Until(deadline).Milliseconds()))
 	}
 	// stalledTaken checks, with the same rules pollWindow applies, whether a
 	// stalled prompt was taken anyway: a state sequence that moved from an
@@ -1275,14 +1283,60 @@ func codexComposerRegion(visible string) ([]string, bool) {
 	return nil, false
 }
 
+// peerMessageInHistory reports that the visible screen shows this message's
+// peer prompt as a delivered codex turn: its header line, the `end of
+// message` line below it, and a codex turn line after that end line
+// (working, done, or the reply — the `•` lines). On codex a user message in
+// the history starts with `› ` just like the composer, and while the agent
+// works the real composer can be absent from the captured screen, so the
+// history's `›` line would otherwise pass for the composer and a delivered
+// message would read as still typed in the box (D15c). A composer line that
+// still holds this id after the end line means the prompt is typed in the
+// box (the Enter can still deliver it), and a prompt with no turn after its
+// end line — nothing but the status lines — keeps reading as the box.
+func peerMessageInHistory(visible, id string) bool {
+	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
+	header := PeerPrefix + " #" + id
+	end := PeerEndLine(id)
+	for i, line := range lines {
+		if !strings.Contains(line, header) || strings.Contains(line, "end of message") {
+			continue
+		}
+		for j := i + 1; j < len(lines); j++ {
+			if !strings.Contains(lines[j], end) {
+				continue
+			}
+			delivered := false
+			for _, below := range lines[j+1:] {
+				belowNorm := NormalizeScreen(below)
+				head := strings.TrimLeft(belowNorm, " \t")
+				if strings.HasPrefix(head, "›") && strings.Contains(belowNorm, NormalizeScreen(header)) {
+					return false // the composer below still holds the typed prompt
+				}
+				if strings.HasPrefix(head, "•") {
+					delivered = true
+				}
+			}
+			if delivered {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // messageStillInScreen reports whether the visible screen still holds the
 // message's marker, meaning the prompt is typed but not taken yet. For a pi
 // target the marker only counts inside the input box, and for a codex target
 // only inside the composer region: a taken message stays in the chat history,
-// which is part of the visible screen. Without two box borders or the
-// composer line, and for every other kind, the whole visible screen still
-// counts.
+// which is part of the visible screen. A peer message shown as a delivered
+// codex turn (peerMessageInHistory) counts as taken, not held. Without two
+// box borders or the composer line, and for every other kind, the whole
+// visible screen still counts.
 func messageStillInScreen(kind, visible, endLine, id string) bool {
+	if kind == "codex" && peerMessageInHistory(visible, id) {
+		return false
+	}
 	if kind == "pi" {
 		if lines, ok := piInputRegion(visible); ok {
 			region := NormalizeScreen(strings.Join(lines, "\n"))
@@ -1303,8 +1357,13 @@ func messageStillInScreen(kind, visible, endLine, id string) bool {
 // target the id must sit between the box borders, and for a codex target
 // inside the composer region, before an Enter goes to a busy agent; without
 // borders or the composer line, and for every other kind, the last 15 lines
-// still count as before.
+// still count as before. A peer message shown as a delivered codex turn
+// (peerMessageInHistory) is history, not the input area, so it never counts
+// as in the box.
 func idInInputBox(kind, visible, id string) bool {
+	if kind == "codex" && peerMessageInHistory(visible, id) {
+		return false
+	}
 	if kind == "pi" {
 		if lines, ok := piInputRegion(visible); ok {
 			return strings.Contains(NormalizeScreen(strings.Join(lines, "\n")), NormalizeScreen("#"+id))
