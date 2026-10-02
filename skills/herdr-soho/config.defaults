@@ -246,6 +246,7 @@ inbound=auto
 
 # Opt-in performance metrics: with on, the wait that settles a report appends one JSON line
 # per report to <state dir>/metrics.jsonl (role, model, effort and timing — never content).
+# `metrics mark` labels a settled report; `metrics export` prints the anonymized summary; `metrics table` renders the generated table.
 metrics=off
 
 # Herdr toast when a report lands: on | off.
