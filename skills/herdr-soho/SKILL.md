@@ -772,8 +772,9 @@ pane — see "One agent, one growing session"; the reuse JSON carries the
 worker's `model`, `effort` and `agent_args` like a new spawn's; two `spawn`
 calls in a row with no dispatch between them return the same idle worker,
 so dispatch to the first before spawning again; `--fresh` opens another
-worker only when the lane and `max_workers` have room — in a full lane it
-exits 10 (busy), so release a worker or raise the lane's capacity first), `multi_role` (default `on`; one
+worker only when there is room under `max_workers` and in the lane — or,
+with `pane_mode=flex`, a temporary flex slot for that role; a full strict
+lane exits 10 (busy), so release a worker or raise the lane's capacity first), `multi_role` (default `on`; one
 idle agent may take another role — see "Setup: guided configuration"), `feedback` +
 `feedback_repo` (see "Improving this skill"), `approvals`
 (default for roles without one), `auto_approve` + `max_auto_approvals`
