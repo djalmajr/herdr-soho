@@ -781,10 +781,21 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// queues. The stalled path never resends the text, so nothing new can
 	// arrive while waiting: the single check is the whole proof, and it
 	// presses no key. A screen that cannot be read proves nothing: the marker
-	// could still sit in the composer, which is not sent.
+	// could still sit in the composer, which is not sent. The read screen must
+	// show the marker out of the input box and the queues before the
+	// moved-sequence shortcut decides: a read that still holds the marker with
+	// the sequence moved is not taken.
 	stalledTaken := func() bool {
 		visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 		if visibleErr != "" {
+			return false
+		}
+		// The moved-sequence shortcut below checks only the dialog, so the
+		// taken rules are required up front: a marker still in the input box or
+		// in a queue on the read screen is not taken, whatever the sequence
+		// says.
+		if messageStillInScreen(t.Kind, visible, endLine, id) || steeringQueued(visible, id) || claudeQueued(visible, id) ||
+			(t.Kind == "codex" && codexQueued(visible, id)) {
 			return false
 		}
 		curGet := agentGet(t.Machine, t.TargetArg, env)
@@ -862,20 +873,38 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// the message was received. When the transcript proof is armed (a local
 	// claude with a resolved transcript) and the window ends without proof
 	// while the target is still working, keep consulting the transcript until
-	// the command --timeout — the same value as the busy-target wait: a count
-	// growth with no queue line on screen is sent, a visible queue line is
-	// queued, as after the window. No key is sent in the wait, and a target
-	// that leaves working without the growth — or the deadline — follows the
-	// path below, today's outcome. The extension only runs when the arrival
-	// window is at least a second: a sub-second window is a fast-fail tuning,
-	// and pairing it with the full --timeout tail would turn its quick
-	// refusal into a ten-minute wait. The default 15 s window — the case the
-	// extension exists for — always qualifies.
-	if claudeTranscriptArmed && windowMS >= 1000 {
+	// the command --timeout — the same value as the busy-target wait — for any
+	// window, a sub-second one included: a count growth with no queue line on
+	// screen is sent, and a visible queue line is queued, before the wait's
+	// laps and on every lap of it, independent of the count. No key is sent in
+	// the wait, and a target that leaves working without the growth — or the
+	// deadline — follows the path below, today's outcome. The busy warning
+	// announces a real transcript wait, so it goes once only while the
+	// transcript has not shown the message yet: a growth seen in the window
+	// leaves only the queue decision, with nothing to wait for.
+	if claudeTranscriptArmed {
 		if busy := agentGet(t.Machine, t.TargetArg, env); busy.OK && busy.Status == "working" {
 			deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
-			_, _ = fmt.Fprintf(platform.Stderr, "send: %s is busy; waiting for its transcript to show the message (up to %ss)\n", t.RefShown, numberSeconds(timeoutMS))
+			if count, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); !(ok && count > claudeTranscriptPre) {
+				_, _ = fmt.Fprintf(platform.Stderr, "send: %s is busy; waiting for its transcript to show the message (up to %ss)\n", t.RefShown, numberSeconds(timeoutMS))
+			}
+			// The queue line, like the count growth, proves the queued outcome
+			// and is due before the wait's laps and with no key: the same
+			// proof the path below returns after the window.
+			if visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env); visibleErr == "" && claudeQueued(visible, id) {
+				log(senderRef, t.RefShown, "queued")
+				_, _ = fmt.Fprintf(platform.Stdout, "queued for %s: it takes the message when its current turn ends\n", t.RefShown)
+				return 0
+			}
 			for time.Now().Before(deadline) {
+				// The queue line is checked on every lap, independent of the
+				// count growth: the same queued proof, due as soon as it is
+				// visible.
+				if visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env); visibleErr == "" && claudeQueued(visible, id) {
+					log(senderRef, t.RefShown, "queued")
+					_, _ = fmt.Fprintf(platform.Stdout, "queued for %s: it takes the message when its current turn ends\n", t.RefShown)
+					return 0
+				}
 				if count, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); ok && count > claudeTranscriptPre {
 					// As in the window's transcript check, the count growth is
 					// not proof while the visible queue line still holds the id.
