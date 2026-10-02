@@ -430,3 +430,27 @@ func TestMarkBriefTextNeverLeaks(t *testing.T) { // mutation: echoing the brief 
 		}
 	})
 }
+
+func TestMarkOpenFailureExits4(t *testing.T) { // mutation: panicking on the open failure exits through the runtime, not 4
+	f := newMarkFixture(t)
+	f.seedLine(t, markSettledReviewLine)
+	path := filepath.Join(f.ws, "metrics.jsonl")
+	if err := os.Chmod(path, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	if probe, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0); err == nil {
+		_ = probe.Close()
+		t.Skip("this host can write a read-only file (running as root?)")
+	}
+	code, out, stderr := f.run(t, "review-20261001T191548.md", "--missed", "P2")
+	if code != 4 || out != "" || !strings.Contains(stderr, "metrics mark: could not open metrics.jsonl to append the mark line: ") {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(f.ws, "agents.lock")); !os.IsNotExist(err) {
+		t.Fatalf("the state lock was left behind: %v", err)
+	}
+	if lines := f.lines(t); len(lines) != 1 {
+		t.Fatalf("metrics.jsonl changed: %q", lines)
+	}
+}

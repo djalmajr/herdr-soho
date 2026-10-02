@@ -140,7 +140,7 @@ func CmdMark(args []string, c CommandContext) int {
 	core.WithRosterLock(sd, func() {
 		f, err := os.OpenFile(filepath.Join(sd, "metrics.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666)
 		if err != nil {
-			panic(err)
+			core.DieFriction("metrics mark: could not open metrics.jsonl to append the mark line: "+err.Error(), 4, c.FrictionLog, "metrics")
 		}
 		_, werr := f.WriteString(lineOut + "\n")
 		cerr := f.Close()
