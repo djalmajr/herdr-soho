@@ -29,6 +29,13 @@ func TestDispatchHintsR3Paths(t *testing.T) {
 		if !pathsCross("src/*/components/", "src/foo/") || !pathsCross("src/foo/", "src/*/components/") {
 			t.Error("src/*/components/ lost src/foo/, which holds src/foo/components/")
 		}
+		// R-R12D5: a negated class keeps the project's glob dialect.
+		if pathsCross("src/[!ab]/components/", "src/a/") || pathsCross("src/a/", "src/[!ab]/components/") {
+			t.Error("src/[!ab]/components/ crossed src/a/, which the negated class excludes")
+		}
+		if !pathsCross("src/[!ab]/components/", "src/c/") {
+			t.Error("src/[!ab]/components/ lost src/c/, which the negated class allows")
+		}
 		if pathsCross("docs/*/", "src/") || pathsCross("src/*/components/", "lib/foo/") {
 			t.Error("a directory glob crossed an unrelated tree")
 		}

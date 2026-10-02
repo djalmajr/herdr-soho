@@ -1393,7 +1393,8 @@ func pathsCross(a, b string) bool {
 			if gs[i] == "**" {
 				return true
 			}
-			if ok, err := path.Match(gs[i], seg); err != nil || !ok {
+			// The same glob dialect as the rest of pathsCross ([!..] negates).
+			if !glob(gs[i], seg) {
 				return false
 			}
 		}
