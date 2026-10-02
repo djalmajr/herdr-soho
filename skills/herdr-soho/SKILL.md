@@ -548,8 +548,9 @@ both: a character class counts as a wildcard token (`src/[ab].ts` crosses
 `src/*.ts`), and a directory owned with its trailing slash in the brief
 crosses a glob that could match a file inside it (`**/*.ts` crosses
 `src/components/`); a directory owned as a glob is a tree, so it crosses a
-directory it matches, one inside a directory it matches, or one that
-contains its literal root (`src/*/` crosses `src/components/`). A codex worker's composed prompt (brief and
+directory it matches, one inside a directory it matches, or one that holds a
+directory it could match (`src/*/` crosses `src/components/`, and
+`src/*/components/` crosses `src/foo/` but not `src/foo/tests/`). A codex worker's composed prompt (brief and
 amendment) carries the sandbox notes when its opening args do not grant
 the access (`danger-full-access` or
 `--dangerously-bypass-approvals-and-sandbox` drop both): `Your sandbox cannot write under .git: do not run git mv, git
