@@ -132,9 +132,11 @@ func TestSpawnGrokTrustOnlyProceedLineIsNotDialog(t *testing.T) {
 
 func TestSpawnGrokTrustScreenReadBeforeTyping(t *testing.T) {
 	// Without a dialog nothing changes: the dialog check reuses the visible
-	// screen the start window already read (the only read before any typing),
-	// then the same command is typed and confirmed and the JSON is the same
-	// as before.
+	// screen the start window already read, and the path that types the
+	// configured /context-window re-reads the screen right before typing
+	// (the dialog can land on the screen after the start window). The same
+	// command is then typed and confirmed and the JSON is the same as
+	// before.
 	rules := []fakecli.Rule{
 		{Argv: grokScreenRead("worker"), Call: 1, Stdout: "grok-4.7 ready\n"},
 		{Argv: grokScreenRead("worker"), Stdout: "Context window set to 500k\n"},
@@ -160,9 +162,11 @@ func TestSpawnGrokTrustScreenReadBeforeTyping(t *testing.T) {
 			reads = append(reads, i)
 		}
 	}
-	// reads[0] is the start-window read that feeds the dialog check: the only
-	// read before the typing; the confirmation reads come after the Enter.
-	if len(reads) < 2 || !(reads[0] < text && text < enter && reads[1] > enter) {
+	// reads[0] is the start-window read that feeds the first dialog check,
+	// reads[1] is the pre-typing re-read that feeds the second (spent only
+	// on the path that types the command), and the confirmation reads come
+	// after the Enter.
+	if len(reads) < 3 || !(reads[0] < reads[1] && reads[1] < text && text < enter && reads[2] > enter) {
 		t.Fatalf("order reads=%v text=%d enter=%d", reads, text, enter)
 	}
 	if !strings.Contains(stdout, `"status": "ready"`) || !strings.Contains(stdout, `"context_window": "500k"`) {
@@ -237,6 +241,8 @@ func TestSpawnGrokTrustDialogPatterns(t *testing.T) {
 		{"only the proceed line", "Yes, proceed (y)\n", false},
 		{"only the quit line", "No, quit (n)\n", false},
 		{"answers without commas", "Yes proceed (y)\nNo quit (n)\n", false},
+		{"normal sentence citing both answers on one line", `The documentation says "yes, proceed" or "no, quit"; this is an explanation.`, false},
+		{"normal sentence citing both answers on one line, padded", `   The documentation says "yes, proceed" or "no, quit"; this is an explanation.   \n`, false},
 		{"normal grok prompt", "grok-4.7 ready\n❯ /help\n", false},
 		{"the answer words apart", "Type \"yes, proceed\" to continue or press n\n", false},
 		{"empty screen", "", false},
@@ -248,5 +254,114 @@ func TestSpawnGrokTrustDialogPatterns(t *testing.T) {
 				t.Fatalf("isGrokTrustDialog(%q)=%v, want %v", tc.screen, got, tc.want)
 			}
 		})
+	}
+}
+
+// grokTrustCitationScreen is a normal grok screen that cites both dialog
+// answers on one line, quoted from the review: a sentence is not the
+// dialog, which draws one answer per line.
+const grokTrustCitationScreen = `The documentation says "yes, proceed" or "no, quit"; this is an explanation.`
+
+func TestSpawnGrokTrustR2LateDialogWithWindowBlocks(t *testing.T) {
+	// The dialog is drawn after the start-window read: the first read shows
+	// a loading screen, and only the re-read right before typing the
+	// configured /context-window sees the trust dialog. No text is typed
+	// into the dialog: blocked_at_startup, the screen is printed, exit 7,
+	// no pane send-text or send-keys.
+	rules := []fakecli.Rule{
+		{Argv: grokScreenRead("worker"), Call: 1, Stdout: "loading grok\n"},
+		{Argv: grokScreenRead("worker"), Stdout: grokTrustDialogScreen},
+	}
+	rules = append(rules, freshSpawnRules()...)
+	f := newSpawnFixture(t, rules)
+	configureSpawnFixture(t, &f)
+	f.ctx.Entries["context_window_grok"] = core.ConfigEntry{Value: "500k", Source: "user"}
+	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
+	if code != 7 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"status": "blocked_at_startup"`) {
+		t.Fatalf("spawn JSON=%q", stdout)
+	}
+	if !strings.Contains(stdout, "Do you trust the contents of this directory?") {
+		t.Fatalf("the dialog screen was not printed: %q", stdout)
+	}
+	if strings.Contains(stdout, "context_window") {
+		t.Fatalf("the blocked JSON carries context_window: %q", stdout)
+	}
+	if got := sendKeysCalls(calls); len(got) != 0 {
+		t.Fatalf("spawn typed into the trust dialog: %#v", got)
+	}
+}
+
+func TestSpawnGrokTrustR2NormalCitationNotDialog(t *testing.T) {
+	// A normal sentence that cites both dialog answers on one line is not
+	// the trust dialog: the detector says so, and the full spawn proceeds
+	// without blocking — exit 0, ready, no typed text, no block warning.
+	if isGrokTrustDialog(grokTrustCitationScreen) {
+		t.Fatal("the detector treats a one-line citation as the trust dialog")
+	}
+	rules := []fakecli.Rule{{Argv: grokScreenRead("worker"), Stdout: grokTrustCitationScreen}}
+	rules = append(rules, freshSpawnRules()...)
+	f := newSpawnFixture(t, rules)
+	configureSpawnFixture(t, &f)
+	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"status": "ready"`) {
+		t.Fatalf("spawn JSON=%q", stdout)
+	}
+	if strings.Contains(stderr, "blocked during startup") {
+		t.Fatalf("the citation blocked the start: %q", stderr)
+	}
+	if got := sendKeysCalls(calls); len(got) != 0 {
+		t.Fatalf("nothing is typed without a configured window: %#v", got)
+	}
+}
+
+func TestSpawnGrokTrustR2GoneAfterOneScreen(t *testing.T) {
+	// The confirmation window sees a screen without the "Context window
+	// set to" line after the Enter, and then the agent is gone: every
+	// later read fails with agent_not_found and the final agent state is
+	// gone. The exit warning fires even though a screen was seen after the
+	// Enter — the status stays ready and carries no context_window.
+	rules := []fakecli.Rule{
+		{Argv: grokScreenRead("worker"), Call: 1, Stdout: "grok ready\n"},
+		{Argv: grokScreenRead("worker"), Call: 2, Stdout: "not confirmed yet\n"},
+		{Argv: grokScreenRead("worker"), Call: 3, Stdout: "still showing the menu\n"},
+		{Argv: []string{"agent", "read"}, ArgvPrefix: true, Code: 1, Stderr: `{"error":{"code":"agent_not_found","message":"gone"}}`},
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Code: 1, Stderr: `{"error":{"code":"agent_not_found","message":"gone"}}`},
+	}
+	rules = append(rules, freshSpawnRules()...)
+	f := newSpawnFixture(t, rules)
+	configureSpawnFixture(t, &f)
+	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500" // bound the reads inside the 10s window
+	f.ctx.Entries["context_window_grok"] = core.ConfigEntry{Value: "500k", Source: "user"}
+	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"status": "ready"`) {
+		t.Fatalf("the status changed: spawn JSON=%q", stdout)
+	}
+	if strings.Contains(stdout, "context_window") {
+		t.Fatalf("the unconfirmed window leaked into the JSON: %q", stdout)
+	}
+	want := "spawn: grok 'worker' exited after /context-window; it may have been showing a dialog — read its pane"
+	if !strings.Contains(stderr, want) {
+		t.Fatalf("stderr=%q, want %q", stderr, want)
+	}
+	if strings.Contains(stderr, "could not confirm") {
+		t.Fatalf("the generic warning came back: %q", stderr)
+	}
+	pane := spawnPane(calls)
+	if n := countCallArgv(calls, "pane", "send-text", pane, "/context-window 500k"); n != 1 {
+		t.Fatalf("text sent %d times: %#v", n, calls)
+	}
+	if n := countCallArgv(calls, "pane", "send-keys", pane, "Enter"); n != 1 {
+		t.Fatalf("Enter sent %d times: %#v", n, calls)
 	}
 }
