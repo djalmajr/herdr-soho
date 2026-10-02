@@ -204,7 +204,7 @@ func cmdFriction(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	if brief != "" {
 		message += " (brief: " + brief + ")"
 	}
-	line := fmt.Sprintf("%s\tnote\tfriction\t%s\n", core.NowISO(platform.Now()), core.FrictionSafe(message))
+	line := fmt.Sprintf("%s\tnote\tfriction\t%s\n", core.FrictionISO(platform.Now()), core.FrictionSafe(message))
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		platform.DieFriction(fmt.Sprintf("friction add: could not write %s (%v)", logPath, err), 4)

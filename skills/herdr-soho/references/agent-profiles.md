@@ -16,6 +16,12 @@ dispatched tasks:
 - a desktop app that also ships on Windows;
 - a browser extension with its backend;
 - three web apps.
+
+More evidence, on 2026-10-01, from four more projects:
+- a web console with a Go gateway and an Ansible rollout;
+- a web app with chat and model-cost slices;
+- a Windows infrastructure box;
+- an administrative pass.
 - **Time:** from the composed brief to the report.
 - **Rounds:** new slices a review sent back.
 
@@ -23,12 +29,12 @@ dispatched tasks:
 
 | Kind (model, effort) | Best at | Weak at |
 |---|---|---|
-| `codex` (gpt-6-luna, xhigh/max) | Following a closed brief to the letter; test-first with literal RED/GREEN; honest `[partial]`; reviews without false positives | Slow at `xhigh`; its sandbox blocks ports and `ps`, and cannot write under `.git`, so UI, e2e and anything that needs a server go unproved; behaviour of a platform it cannot run |
-| `grok` (grok-4.7, xhigh) | Speed (about 3× codex on the same project); large slices; lean SQL; scripts from a narrow brief | Reshapes production code to make a test or the type check pass; writes expected values without checking the fixture; security and cleanup gaps in scripts |
+| `codex` (gpt-6-luna xhigh/max; gpt-6.1-sol medium) | Following a closed brief to the letter; test-first with literal RED/GREEN; honest `[partial]`; reviews without false positives; at `medium` (gpt-6.1-sol) findings proved with executed probes and a surviving mutation | Slow at `xhigh`; its sandbox blocks ports and `ps`, and cannot write under `.git`, so UI, e2e and anything that needs a server go unproved; behaviour of a platform it cannot run; at `medium` the reports run to 300+ lines and the suite runs in a copy by default |
+| `grok` (grok-4.7, high/xhigh) | Speed (about 3× codex on the same project); large slices; lean SQL; scripts from a narrow brief; reviews without a false positive and a real P1 caught in review | Reshapes production code to make a test or the type check pass; writes expected values without checking the fixture; security and cleanup gaps in scripts; unusable as a builder on Windows until the first-use trust dialog is worked around |
 | `cursor` (grok-4.7, high/xhigh) | Fast, precise review when it can execute what it reviews; multi-file backend slices; spikes that need a running server | Little rigor when there is nothing to execute; confident claims about runtime behaviour it cannot run; fills its context fast |
 | `claude` (opus, xhigh) | Deepest review of UI, architecture and integration, proved with probes | Small sample (7 reviews) |
 | `agy` (gemini-3.8-flash, medium/high) | Found a real privacy P1 in review; says what a test really proves | Missed a state change across requests with confidence 1.0; hits its quota; small sample |
-| `pi` with a small self-hosted model (~27B, high) | Fast and cheap; no invented names; pastes real output; good with a strict report format (claims table, lookup) | Fixes the instance, not the class; skips validation against real systems |
+| `pi` with a small self-hosted model (~27B, high) | Fast and cheap; no invented names; pastes real output; good with a strict report format (claims table, lookup) | Fixes the instance, not the class; skips validation against real systems; async UI transitions; the end of a stream (tested the first token, not the end) |
 
 ## By kind
 
@@ -128,6 +134,32 @@ See "Cheap implementers" below for the briefs that avoid most of this.
   and surfaced only as `settled-no-report`;
 - a CLI self-update at start.
 
+**As reviewer with gpt-6.1-sol medium** (appliance and skedly,
+2026-10-01; a review in about 9 min and a re-review in about 8 min at
+appliance):
+- **Strong:**
+  - found the real problems and proved each one with a headless probe run
+    against the production component: 3 + 1 findings (appliance);
+  - proved a weak test with a mutation that survived; the weak test passed
+    with the groups swapped (appliance);
+  - a probe that held only the write, with a control that proved the cause
+    of the P2, and a reproducible probe left behind (skedly);
+  - honest `[partial]` (appliance);
+  - the fix passed the re-review with 0 findings (skedly).
+- **Weak:**
+  - very long reports, 300+ lines (appliance);
+  - runs the suite in a copy by default, to keep its cache clean; running
+    it in the worktree needs an explicit authorization in the brief
+    (appliance);
+  - a full run timed out on a test outside the slice; it logged the timeout
+    without blaming the patch (appliance);
+  - its sandbox writes only the checkout and `/tmp`; the mutation copies
+    went to `/tmp` (`mutation-copy --dest /tmp/…`), and that worked
+    (skedly).
+
+The operator moved the sol reviews to `low` on 2026-10-01. There is no
+evidence at `low` yet.
+
 ### grok (grok-4.7)
 
 **As implementer** (2 projects, 16 tasks):
@@ -162,6 +194,22 @@ See "Cheap implementers" below for the briefs that avoid most of this.
 
 **As documenter** (1 task, about 8 min): checked the code, and separated
 what was committed from what was still in review.
+
+**As reviewer** (skedly and infra, 2026-10-01):
+- **Strong:**
+  - 5 reviews without a false positive: 4 passed with 0 findings, 1 with a
+    real P3; about 15 min on average (skedly);
+  - found the real P1 the implementer left: a file the build embeds with
+    `include_bytes!` that it had not listed (infra);
+  - good entry-point tables: in one review, every entry of the surface with
+    the line of its check (skedly).
+- **Weak:**
+  - as a builder on Windows it was unusable until the first-use trust
+    dialog is worked around. The dialog asks whether the contents of the
+    directory are trusted; the spawn types `/context-window 500k` right
+    after ready, and the answer "n" is read as "No, quit", so grok exits;
+    3 occurrences. The rc.12 backlog plans to detect the dialog
+    (`blocked_at_startup`, exit 7) and not type before it is gone (infra).
 
 ### cursor running grok-4.7
 
@@ -228,15 +276,35 @@ typical and max 28; multi-file backend and extension slices in the other):
   - ran a package install at the repository root without saying so;
   - wrote a proof file inside a build output directory.
 
-### claude (opus)
+### claude
 
-**As reviewer** (1 project, 7 tasks; median 5 min, max 10):
+**As reviewer** (opus, 1 project, 7 tasks; median 5 min, max 10):
 - **Strong:** the deepest reviewer seen, with no false positive.
   - Proved a UI P1 with the framework's own compiler.
   - Wrote probes that fail on the original code and pass on the fix.
   - Checked a commit message against the schema it described.
 - **Weak:** marks `[partial]` on items that need a browser the brief
   forbade. That is correct by the contract, but it triggers the warning.
+
+**As reviewer with Sonnet 5.5 medium** (appliance and cinzel, 2026-10-01):
+- **Strong:**
+  - on an earlier slice it found 2 real P2s (appliance);
+  - useful static review of a retired composition: it separated the
+    integration from the content of the ancestral HEAD, identified the
+    generic sources, and declared `[partial]` on what it did not verify
+    (cinzel);
+  - three P3 findings on preservation and consumers; the report was useful
+    to decide retention and backup (cinzel);
+  - shorter reports than the sol reviews (appliance).
+- **Weak:**
+  - less deep than the sol reviewer on the async transitions; on the
+    Go/Ansible slices it found only P3s (appliance);
+  - no execution test and no amendment round in the cinzel review.
+
+**As scouter** (infra on Windows, 2026-10-01):
+- **Weak:** compared a local clone with the remote without `git fetch` and
+  asserted a wrong state of the fork. The scouter briefs now say to fetch
+  before comparing with the remote.
 
 ### pi with a small self-hosted model (~27B)
 
@@ -256,12 +324,46 @@ typical and max 28; multi-file backend and extension slices in the other):
   - once created a local cluster the brief did not ask for. The role now
     forbids this.
 
+**As implementer, continued** (Qwen 27B at `high`, 2026-10-01; skedly: 8
+tasks, average 13.8 min, max 25.9; infra on Windows: a large 42-min slice;
+appliance: a UI slice, first delivery in about 16 min with 174 tests
+green):
+- **Strong:**
+  - good volume and coverage: 174 tests green on the first delivery, with
+    light/dark screenshots and a detailed report (appliance);
+  - honest `[partial]` with the proof by file:line: when the brief's
+    premise did not hold (the TTS cost is recorded per character, not per
+    minute), it said so and proved it (skedly);
+  - mutation in a copy in every code slice (skedly);
+  - good diff without invention (infra);
+  - touched files outside its own only when a gate forced it, and said so
+    (skedly).
+- **Weak, the typical errors seen on 2026-10-01:**
+  - async UI transitions: good on volume and coverage, but the weak point
+    was the transitions (react-query pending/cache/refetch): 2 P2
+    on the first delivery of a UI slice (a hidden selection still sent on
+    submit; text citing a service that was not there), and a new P2 after
+    the first amendment (a reset with cached data during a refetch) — the
+    brief has to list these scenarios (appliance);
+  - the end of the stream: the brief said the write must not delay the
+    stream; it tested the first token, not the end, and the write held the
+    stream close (skedly, the P2 the sol review caught);
+  - a file the build embeds with `include_bytes!` left out of the build
+    (infra, the P1 the grok review caught);
+  - installed `pyyaml` with `pip --user` without authorization (infra);
+  - a regression it did not see: three stale fixed-count tests stayed
+    masked behind tests that already failed by platform on Windows (infra).
+
 **As scouter or researcher** (9 tasks; median 10 to 15 min): with the
 lookup directive, the surveys were ready for a decision. It once claimed an
-absence without searching.
+absence without searching. A survey of 173 files was very useful (infra on
+Windows, 2026-10-01).
 
 **As documenter** (11 tasks; median 5 min): with the claims table, no round
-back. Without it, it stated the plausible.
+back. Without it, it stated the plausible. A docs slice (business docs, ADR,
+runbook, help) with a phrase-to-file:line table passed with 0 findings, and
+the rule zeroed the overclaims of the previous round: 6 P2 on 2026-09-30,
+0 on 2026-10-01 (skedly).
 
 **As tasker** (2 tasks): 2 to 3 min.
 
@@ -317,6 +419,13 @@ it should say so instead of guessing.
   - `codex` for closed briefs and sensitive correctness (TDD,
     atomicity, payments, access control); for volume work, small slices
     and the quality bar of "Cheap implementers" in the first brief;
+  - `pi` with Qwen 27B at `high` for volume and coverage: 8 tasks in about
+    14 min on average, and a good diff without invention (skedly and
+    infra, 2026-10-01) — but with a brief that lists the async scenarios
+    and forbids installing dependencies; the typical misses are the async
+    UI transitions, the end of a stream (it tested the first token, not
+    the end), a forgotten embedded file, and a regression masked by
+    platform failures (2026-10-01);
   - `grok` for speed on well-specified slices and scripts, with a
     reviewer that looks for design shortcuts and missing cleanup;
   - `cursor` for multi-file backend slices and spikes that need a server;
@@ -327,7 +436,14 @@ it should say so instead of guessing.
   browser. Not `codex` inside its sandbox.
 - **reviewer:** another family than the implementer (the rule that never
   moves):
-  - `claude` for UI, architecture and integration;
+  - `claude` for UI, architecture and integration; Sonnet 5.5 medium is a
+    useful static reviewer, but less deep than `codex` on the async
+    transitions (appliance and cinzel, 2026-10-01);
+  - `codex` with gpt-6.1-sol at `medium` proved useful: it executes the
+    probes, proves a weak test with a surviving mutation, and is honest
+    about `[partial]` (appliance and skedly, 2026-10-01). Expect long
+    reports and the suite running in a copy by default; the operator moved
+    it to `low` on 2026-10-01, with no evidence at `low` yet;
   - `cursor`/`grok` for SQL, atomicity and tests;
   - `codex` when the implementer is `grok` or `cursor`, at `high` effort
     (`xhigh` for security and large slices);
@@ -339,7 +455,11 @@ it should say so instead of guessing.
 - **security-reviewer:** `cursor`/`grok` or `codex`, both precise when
   they could execute their probes.
 - **scouter and researcher:**
-  - `codex` or a small model when the evidence is text in the repository;
+  - `codex` or a small model when the evidence is text in the repository; a
+    small model on `pi` surveyed 173 files usefully (infra, 2026-10-01);
+  - fetch before comparing a local clone with the remote: an opus scouter
+    compared without `git fetch` and asserted a wrong state of the fork
+    (infra, 2026-10-01);
   - none of them when the evidence is visual and the images are not
     reachable. Map it yourself first.
 - **documenter:** `codex`, `grok` or a small model, with the claims table.
@@ -404,7 +524,18 @@ up on a long port with four cheap panes:
   - ports a test through the entry point the original uses, and reports a
     difference instead of skipping it;
   - keeps tests hermetic and runs the gate uncached, and makes a failing
-    platform assertion print what the next run needs.
+    platform assertion print what the next run needs;
+  - installs no dependency the brief did not ask for: one made it in with
+    `pip --user` on a Windows slice (infra, 2026-10-01).
+- The brief for a UI slice lists the async scenarios the slice must cover
+  (pending, cache, refetch): a UI slice missed its async state transitions
+  (appliance, 2026-10-01).
+- The brief for a streaming slice names the end of the stream when that is
+  what must not wait: one slice tested the first token, not the end, and its
+  write still held the stream's close (skedly, 2026-10-01).
+- On Windows, the brief asks for a base × current comparison of the tests,
+  or the tests run on Linux: a regression hides in a test that already
+  failed by platform (infra, 2026-10-01).
 - Workers stop the processes they started by PID, and never list every
   process command line.
 - The scouter and the researcher look up before they state; the documenter

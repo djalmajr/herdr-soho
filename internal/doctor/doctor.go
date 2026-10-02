@@ -100,8 +100,9 @@ func CmdInit(ctx *core.Config, env platform.Env, cwd string) {
 	platform.Stdout = oldOut
 	state := core.StateDir(ctx, env, cwd)
 	friction := filepath.Join(state, "friction.log")
-	name := spawn.EnsureOrchestratorName(ctx, env)
+	name := spawn.EnsureOrchestratorName(ctx, env, cwd, "init")
 	pane := env.Get("HERDR_PANE_ID")
+	_, _, callerInRoster := spawn.RosterCaller(ctx, env, cwd, pane)
 	paneID := ""
 	title := ""
 	if pane != "" {
@@ -130,7 +131,9 @@ func CmdInit(ctx *core.Config, env platform.Env, cwd string) {
 			paneID = pane
 			if existing != "" {
 				title = existing
-			} else {
+			} else if !callerInRoster {
+				// A roster pane is a worker another orchestrator opened: this
+				// init does not touch its title.
 				fresh := "orchestrator: " + filepath.Base(platform.ProjectRoot(env, cwd))
 				if herdr.PaneTitle(pane, &fresh, env) {
 					title = fresh

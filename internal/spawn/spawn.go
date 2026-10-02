@@ -3,6 +3,7 @@ package spawn
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"os"
 	"path/filepath"
@@ -453,7 +454,7 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	if err != nil || !info.IsDir() {
 		core.DieFriction("spawn: --cwd "+o.cwd+" is not a directory", 2, "", "")
 	}
-	EnsureOrchestratorName(ctx, env)
+	EnsureOrchestratorName(ctx, env, cwd, "spawn")
 	core.ResolveRole(o.role, env, cwd)
 	if o.role == "planner" {
 		core.DieFriction("spawn planner: the orchestrator is the planner and does not open a pane. Plan in this session.", 12, "", "")
@@ -792,6 +793,21 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 			layout.HerdTabsRelabel(ctx, env, cwd)
 		}()
 	}
+	// grok's first-run trust dialog must take no typed text: herdr reports the
+	// agent ready while the dialog is on its screen, and the "n" of the next
+	// typed line — "/context-window <value>" or a dispatch prompt — is "No,
+	// quit", so the agent exits. This is the new-grok path only (every reuse
+	// path returned before this point), before any text is typed, with or
+	// without a configured window. A dialog on the screen blocks the start
+	// like the other startup dialogs (screen printed, exit 7) — the user
+	// must answer it, spawn never does. The first check reuses the visible
+	// screen the start window just read of this new agent, so a grok without
+	// a configured window gains no extra read; the typing path re-reads the
+	// screen right before it types, because that read is one start-window
+	// iteration old and a dialog can land on the screen in the meantime.
+	if !blocked && kind == "grok" && isGrokTrustDialog(lastScreen) {
+		blocked = true
+	}
 	contextWindow := ""
 	if !blocked && kind == "grok" {
 		// context_window.grok opens the fresh grok with the requested window
@@ -800,9 +816,27 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		// working grok never takes the command. An invalid value is ignored
 		// here; doctor names it.
 		value := core.Cfg(ctx, core.ContextWindowKey("grok"), "", env)
-		if value != "" && core.ContextWindowValueOk(value) {
-			if confirmGrokContextWindow(o, value, env) {
+		typing := value != "" && core.ContextWindowValueOk(value)
+		if typing && isGrokTrustDialog(herdr.AgentRead(env, o.name, "visible", intPtr(40))) {
+			// The pre-typing re-read sees the trust dialog: the same block as
+			// the first check — no text is typed and the start exits 7 with
+			// the screen. Only the path that types the command spends this
+			// read, so a grok without a configured window keeps its call
+			// pattern and the frozen parity goldens stay untouched.
+			blocked = true
+		}
+		if !blocked && typing {
+			if confirmed := confirmGrokContextWindow(o, value, env); confirmed {
 				contextWindow = value
+			} else if herdr.AgentState(o.name, env, herdr.Timeout, nil).State == "gone" {
+				// The confirmation failed and the agent is gone
+				// (agent_not_found), whatever the confirmation window's reads
+				// showed: it quit during the window — the typed text answered
+				// a dialog. Say that, instead of the generic no-confirmation
+				// warning; the status stays ready, the dispatch will name the
+				// missing agent. A live grok or a transient state read keeps
+				// the old warning.
+				Warn(fmt.Sprintf("spawn: grok '%s' exited after /context-window; it may have been showing a dialog — read its pane", o.name), ctx, env, "spawn")
 			} else {
 				Warn(fmt.Sprintf("spawn: could not confirm grok's context window %s for '%s' (no \"Context window set to\" line); set it by hand with /context-window", value, o.name), ctx, env, "spawn")
 			}
@@ -989,13 +1023,51 @@ func startWrapperTimeoutMs(raw string) float64 {
 	return n + 30_000
 }
 
+// grokTrustDialogQuestion is grok's first-run trust question line and
+// grokTrustDialogYes / grokTrustDialogNo its answer lines, quoted from the
+// dialog on a real machine: "Do you trust the contents of this directory?"
+// with "Yes, proceed" (y) and "No, quit" (n).
+const (
+	grokTrustDialogQuestion = "do you trust the contents of this directory"
+	grokTrustDialogYes      = "yes, proceed"
+	grokTrustDialogNo       = "no, quit"
+)
+
+// isGrokTrustDialog reports whether the visible screen of a fresh grok shows
+// its first-run trust dialog: the question line, or both answer lines on
+// distinct lines. The match is case-insensitive and tolerant of the extra
+// spaces the TUI padding adds to the lines. One answer line alone is not a
+// dialog, and neither is a normal sentence that cites both answers on one
+// line — the dialog draws one answer per line, so a line that holds both
+// answers contributes neither.
+func isGrokTrustDialog(screen string) bool {
+	question, yes, no := false, false, false
+	for _, line := range strings.Split(screen, "\n") {
+		norm := strings.Join(strings.Fields(text.ASCIILower(line)), " ")
+		if strings.Contains(norm, grokTrustDialogQuestion) {
+			question = true
+		}
+		hasYes, hasNo := strings.Contains(norm, grokTrustDialogYes), strings.Contains(norm, grokTrustDialogNo)
+		if hasYes && !hasNo {
+			yes = true
+		}
+		if hasNo && !hasYes {
+			no = true
+		}
+	}
+	return question || (yes && no)
+}
+
 // confirmGrokContextWindow opens the requested context window on the fresh
 // grok: it types /context-window <value> into the pane, pauses for the menu,
 // sends the Enter, and then reads the visible screen until grok's
-// "Context window set to <value>" line appears (up to the window). True only
-// when the line was seen — spawn records the window in its JSON; otherwise it
-// warns and the spawn still succeeds. Callers run it on the new-spawn path
-// only, after the start window; a reused or working grok never gets it.
+// "Context window set to <value>" line appears (up to the window). It is
+// true only when the line was seen — spawn records the window in its JSON;
+// otherwise it warns and the spawn still succeeds. When it is false the
+// caller spends one agent state read: a gone agent (agent_not_found) gets
+// the exit warning, a live one or a transient state read keeps the generic
+// warning. Callers run it on the new-spawn path only, after the start
+// window; a reused or working grok never gets it.
 func confirmGrokContextWindow(o spawnOptions, value string, env platform.Env) bool {
 	_ = herdr.PaneSendText(o.pane, "/context-window "+value, env)
 	time.Sleep(contextWindowSettle)
@@ -1140,10 +1212,43 @@ func sameTreeEditors(thisName, role, workerCwd, sd string, env platform.Env, cwd
 			if fieldString(agent, "name") != cand.name || cand.pane != "" && fieldString(agent, "pane_id") != cand.pane {
 				continue
 			}
+			if !sharedTreeWarnDue(sd, thisName, cand.name, workerCwd, ctx, env) {
+				break
+			}
 			Warn(fmt.Sprintf("'%s' and '%s' both edit %s: builds and test runs see each other's changes in progress; give each a git worktree (spawn --cwd <worktree>) to isolate them", thisName, cand.name, workerCwd), ctx, env, "spawn")
 			break
 		}
 	}
+}
+
+// sharedTreeWarnDue records the shared-tree warn of one unordered pair in
+// one cwd as a wait marker (shared-tree-<hash>.warned, written like the
+// other state markers) and reports whether the warn is still due: the same
+// pair in the same cwd stays silent, a new pair or another cwd warns again.
+// The marker lives in the workspace's wait dir; the state dir only reached
+// spawn through core.StateDir, whose inside-the-skill refusal dies before any
+// write, so a marker is never created inside the skill.
+func sharedTreeWarnDue(sd, a, b, workerCwd string, ctx *core.Config, env platform.Env) bool {
+	first, second := a, b
+	if second < first {
+		first, second = second, first
+	}
+	stored := first + "\x00" + second + "\x00" + workerCwd
+	sum := fnv.New64a()
+	_, _ = sum.Write([]byte(stored))
+	marker := filepath.Join(sd, "wait", "shared-tree-"+fmt.Sprintf("%016x", sum.Sum64())+".warned")
+	if prev, err := platform.ReadTextFile(marker); err == nil && strings.TrimRight(prev, "\n") == stored {
+		return false
+	}
+	if err := os.MkdirAll(filepath.Join(sd, "wait"), 0o777); err != nil {
+		Warn(fmt.Sprintf("spawn: could not record the shared-tree warning marker: %s", text.SanitizeCause(err.Error())), ctx, env, "spawn")
+		return true
+	}
+	if err := os.WriteFile(marker, []byte(stored+"\n"), 0o666); err != nil {
+		Warn(fmt.Sprintf("spawn: could not record the shared-tree warning marker: %s", text.SanitizeCause(err.Error())), ctx, env, "spawn")
+		return true
+	}
+	return true
 }
 
 // PollIntervalMs is the shared wait poll override used by spawn start checks.

@@ -509,6 +509,48 @@ func CmdStats(args []string, command CommandContext) int {
 			last[p.agent] = i
 		}
 	}
+	// An amendment belongs to the brief it amends (SKILL.md): the task report
+	// pointer (task-report-<agent>.json) keeps the task's report paths in
+	// dispatch order (history plus current), and a member whose report exists
+	// closes every earlier member of the same task — the worker reports on the
+	// last amendment's path, covering the amended brief. A closed brief is
+	// never pending or lost.
+	closedReports := map[string]bool{}
+	seenAgents := map[string]bool{}
+	for _, p := range pairs {
+		if seenAgents[p.agent] {
+			continue
+		}
+		seenAgents[p.agent] = true
+		pointer := taskreport.ReadTaskReportPointer(sd, p.agent)
+		if pointer == nil {
+			continue
+		}
+		sequence := []string{}
+		if v, ok := pointer.Get("history"); ok {
+			if items, ok := v.([]any); ok {
+				for _, item := range items {
+					if s, ok := item.(string); ok {
+						sequence = append(sequence, s)
+					}
+				}
+			}
+		}
+		if v, ok := pointer.Get("current"); ok {
+			if s, ok := v.(string); ok {
+				sequence = append(sequence, s)
+			}
+		}
+		reported := false
+		for i := len(sequence) - 1; i >= 0; i-- {
+			if reported {
+				closedReports[filepath.Clean(sequence[i])] = true
+			}
+			if st, e := os.Stat(sequence[i]); e == nil && st.Size() > 0 {
+				reported = true
+			}
+		}
+	}
 	for i := range pairs {
 		pairs[i].isLast = pairs[i].counted && last[pairs[i].agent] == i
 	}
@@ -547,7 +589,7 @@ func CmdStats(args []string, command CommandContext) int {
 		} else {
 			a.tasks++
 		}
-		if !p.amendment && !p.hasReport {
+		if !p.amendment && !p.hasReport && !closedReports[filepath.Clean(p.report)] {
 			if roster[p.agent] && p.isLast {
 				p.noReport = "pending"
 				a.pending++

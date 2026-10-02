@@ -183,7 +183,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
-		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
+		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -209,7 +209,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
-		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
+		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -234,7 +234,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
-		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
+		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -258,7 +258,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, assistantLine)
-		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
+		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
