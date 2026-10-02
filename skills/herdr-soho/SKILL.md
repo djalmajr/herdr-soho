@@ -782,6 +782,9 @@ $S collect impl [--lines N] [--verify]      # prints the report file (or recent 
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
 $S wait a b [--any] [--timeout MS]         # block on report files
 $S stats [--since <date>] [--by role|kind|model|kind-model|agent|effort] [--json] # tasks, times and review findings; <date> is YYYY-MM-DD or ISO 8601
+$S metrics mark <report> [--finding <n>=real|false]... [--missed P0|P1|P2|P3]... [--amendment implementer|brief] # label a report after checking it (its metrics line was recorded with metrics=on)
+$S metrics export [--since <date>] [--project-label <label>] # anonymized summary of metrics.jsonl, one JSON line per report
+$S metrics table [--write <file>] <export.jsonl>... # markdown table per role, slice type and model from exported summaries; --write replaces the generated block of <file>
 $S friction [--since <date>] [--level warning|note|error] [--command <cmd>] [--agent <name>] [--summary]  # errors/warnings of this workspace (review at end); the options AND together over the log lines (<date> as in stats --since; --level error matches error(exit N); --agent matches '<name>' in the message); --summary prints a count/level/command table instead of the lines
 $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before sending; no dispatch, no state
 $S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
@@ -833,6 +836,78 @@ otherwise. Each group also has `no_report`, `minutes`,
 arrival-check result even if a later wait recovers. JSON
 `lost_briefs` maps each group to the stored composed-prompt paths for
 lost pairs, and the text output lists them below the tables.
+
+`metrics` records the team's performance over the lines that `metrics=on`
+(default `off`) appends to `<state>/metrics.jsonl`, one per settled report:
+the wait that settles the report writes the line, a second wait on the same
+report appends nothing, and a failed append only warns, never changing the
+wait result. The line carries only the performance facts — `ts`, `agent`,
+`report` (the report's file name, never a path), the roster's `role`,
+`kind`, `model`, `effort` and `family`, the brief's `Type:` value as `type`
+(one of `mechanical`, `backend`, `ui`, `docs`, `review`, `security`), the
+dispatch-to-report `duration_s`, `amendment` when the report replaced an
+earlier one, the dispatch sidecar's `session` and `arrival`, the `items`
+counters (`done`, `partial`, `skipped`), and, for the review roles,
+`verdict`, `findings`, `severity` (`P0`..`P3`), `verdict_effective` and
+`for` — the `--for` authors as their `kind`/`model`/`effort`/`family`
+columns (the non-empty ones), never their names. Nothing else goes in:
+no brief text, code, diffs, file paths (not the report's own), no URLs,
+credentials or the report body. `metrics mark <report>` labels that
+settled line after you checked the report: it appends a `label:"mark"`
+line to the same `metrics.jsonl` (marking is an explicit action, so it
+also works with `metrics` off), but the report needs a settled line,
+which exists only when `metrics` was `on` when it settled; the options
+are `--finding <n>=real|false` (repeatable, `n` within the line's
+`findings`), `--missed P0|P1|P2|P3` (repeatable) and `--amendment implementer|brief`;
+a refusal — bad usage, no metrics line for the report, a `--finding`
+outside the line's findings or on a line without a findings count,
+a duplicate `--finding <n>`, a `--missed` on a line without a `verdict`,
+or an `--amendment` on a line not marked `"amendment": true` — exits 2,
+and an open or write failure of `metrics.jsonl` exits 4. A later mark
+appends a later line: readers apply the lines in file order, and for the
+same finding the last one wins.
+`metrics export` is read-only: it scans every `<state root>/*/metrics.jsonl`
+(all workspaces), applies the mark lines of a report to the settled lines
+that share the report name, and prints one JSON line per settled report to
+stdout, sorted by `ts`; without any file it exits 0 with no output, and
+malformed lines are skipped with a stderr note. Each output line keeps only
+a closed list of keys — `role`, `kind`, `model`, `effort`, `family`,
+`type`, `duration_s`, `amendment`, `session`, `arrival`, `items` (only
+`done`/`partial`/`skipped`), `verdict`, `findings`, `severity` (only
+`P0`..`P3`), `verdict_effective`, and `for` reduced to each author's
+`kind`/`model`/`effort`/`family` — plus `project` and the UTC `date` of
+`ts`; `agent`, `report`, the full `ts`, paths, URLs and any other key stay
+out. When the report was marked, the line also carries the mark-derived
+`findings_real`, `findings_false`, `findings_unlabeled`, `missed` (summed
+across the marks) and `amendment_cause`; for the same finding the last mark
+wins, the missed counts add up, and the last `--amendment` is the cause.
+`--since <date>` keeps only the lines dated on or after the date (the same
+formats `stats` accepts), dropping any line whose `ts` cannot be parsed,
+and `--project-label <label>` (`[a-z0-9][a-z0-9-]{0,31}`) sets `project`,
+whose default is `p-` plus the first 8 hex of the sha256 of the base name
+of the directory that contains the state root. From inside the skill the
+state root would land inside the skill, so the command refuses with exit 2
+and writes nothing. `metrics table` turns the exported summaries into the
+generated table of `references/agent-profiles.md`: one row per role, slice
+type, kind, model and effort (`-` where a field is absent), with `n`,
+`Median min` (the median of `duration_s` in minutes, one decimal),
+`Partial` (the integer share, with a `%` sign, of the lines with
+`items.partial > 0` among the lines that have `items`), `Precision` and
+`Missed` (only for the review roles `reviewer`, `security-reviewer`,
+`ui-reviewer` and `inspector`: the share of the labeled findings that
+turned out real, `NN% (k)`, and the sum of the `missed` values), and
+`Confidence` (`low` under 5 lines, `medium` under 20, `high` at 20 or
+more); the rows are ordered by role and type, then `n` descending, then
+kind, model and effort. Without `--write` the table goes to stdout and the
+command never reads or writes the project state; `--write <file>` replaces
+the block between the `<!-- herdr-soho:metrics-table:start -->` and
+`<!-- herdr-soho:metrics-table:end -->` markers atomically, keeping
+everything else byte for byte; it exits 2 on a missing or misplaced marker
+pair, 4 when it cannot write `<file>`, and 4 on a missing input file, with
+malformed lines skipped and counted on stderr. The flow:
+`metrics export > evals/field/<date>.jsonl`, reviewed by the operator
+before the commit, then
+`metrics table --write skills/herdr-soho/references/agent-profiles.md evals/field/*.jsonl`.
 
 `find` lists the live panes (one line per pane) of the local Herdr and,
 with `--machine <label>` (repeatable) or `--all` (every enabled machine
