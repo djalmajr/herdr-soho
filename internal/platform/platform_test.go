@@ -877,6 +877,22 @@ func TestRunCliMatchesJSFixtures(t *testing.T) {
 			if tc.Mode == "timeout" && options.TimeoutMs == 0 {
 				options.TimeoutMs = 100
 			}
+			// D17: the fixture records the deadline firing (error ETIMEDOUT)
+			// while the child still exits on its own (status set, signal and
+			// timedOut absent): the recorded result does not depend on the
+			// deadline's value, only on it firing before the child exits on
+			// its own (the node scripts park on an interval). The fixture's
+			// 300 ms is not enough for node to start and install its SIGTERM
+			// trap on a loaded host — the deadline fired mid-startup and the
+			// child died on the signal, or was SIGKILLed by the 100 ms
+			// WaitDelay — so the Go test gives exactly those cases (the
+			// fixture rows that need a live child to trap the timeout) a
+			// generous deadline. The comparison with the fixture is
+			// unchanged: status, signal, stdout, timedOut and error are
+			// identical for any deadline the node child reaches.
+			if tc.Result.Error != nil && !tc.Result.TimedOut && tc.Result.Status != nil {
+				options.TimeoutMs = 5000
+			}
 			command := tc.Command
 			if command == "" {
 				command = tc.Name
