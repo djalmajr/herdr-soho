@@ -1024,12 +1024,13 @@ func ownedPaths(body string, aliases map[string][]string) []string {
 		for strings.HasPrefix(p, "./") {
 			p = strings.TrimPrefix(p, "./")
 		}
-		p = strings.TrimSuffix(p, "/")
+		// The trailing slash is kept: it marks a directory owned in the brief,
+		// and pathsCross decides whether a glob can reach a file inside it.
 		trimmed := strings.TrimRight(p, ".,;:")
-		if trimmed == "" || strings.Contains(trimmed, " ") || ownershipStopwords[strings.ToLower(trimmed)] || !(strings.ContainsAny(trimmed, "/.")) || seen[trimmed] {
+		if trimmed == "" || strings.Contains(trimmed, " ") || ownershipStopwords[strings.ToLower(trimmed)] || !(strings.ContainsAny(trimmed, "/.")) || seen[strings.TrimRight(trimmed, "/")] {
 			return
 		}
-		seen[trimmed] = true
+		seen[strings.TrimRight(trimmed, "/")] = true
 		out = append(out, trimmed)
 	}
 	for _, line := range lines[start+1:] {
@@ -1189,47 +1190,209 @@ func pathsCross(a, b string) bool {
 		re, err := regexp.Compile("^" + out.String() + "$")
 		return err == nil && re.MatchString(value)
 	}
-	if !hasGlob(a) && !hasGlob(b) {
-		return inside(a, b)
+	// span returns the literal text before the first glob token and after the
+	// last one, walking whole tokens: a [class] counts up to its `]` inclusive,
+	// so class members are never treated as literal anchors.
+	span := func(s string) (pre, suf string, has bool) {
+		first, last := -1, 0
+		for i := 0; i < len(s); {
+			switch s[i] {
+			case '*':
+				j := i + 1
+				if j < len(s) && s[j] == '*' {
+					j++
+				}
+				if first < 0 {
+					first = i
+				}
+				last = j
+				i = j
+			case '?':
+				if first < 0 {
+					first = i
+				}
+				last = i + 1
+				i++
+			case '[':
+				if k := strings.IndexByte(s[i+1:], ']'); k >= 0 {
+					if first < 0 {
+						first = i
+					}
+					last = i + k + 2
+					i += k + 2
+				} else {
+					i++ // an unclosed class is a literal `[` in the matcher
+				}
+			default:
+				i++
+			}
+		}
+		if first < 0 {
+			return s, s, false
+		}
+		return s[:first], s[last:], true
+	}
+	// classMembers lists single characters a class token can stand for: the
+	// written members of a plain class (ranges reduced to their endpoints, `-`
+	// skipped) or one character outside a negated class.
+	classMembers := func(cl string) []string {
+		body := cl[1 : len(cl)-1]
+		neg := false
+		if strings.HasPrefix(body, "!") || strings.HasPrefix(body, "^") {
+			neg = true
+			body = body[1:]
+		}
+		if !neg {
+			var out []string
+			for _, r := range body {
+				if r == '-' {
+					continue
+				}
+				out = append(out, string(r))
+				if len(out) >= 8 {
+					return out
+				}
+			}
+			if len(out) == 0 {
+				return []string{"x"}
+			}
+			return out
+		}
+		for _, r := range []rune{'z', 'Z', '0', '9', 'a', 'b', 'c'} {
+			if !strings.ContainsRune(body, r) {
+				return []string{string(r)}
+			}
+		}
+		return []string{"x"}
+	}
+	// midFills lists candidate texts for the middle of s (between its literal
+	// prefix and suffix): the base with every non-class token at its first
+	// representative, plus one variant per character-class member.
+	midFills := func(s string) []string {
+		pre, suf, has := span(s)
+		if !has {
+			return nil
+		}
+		mid := s[len(pre) : len(s)-len(suf)]
+		type cls struct {
+			pos  int
+			wid  int
+			reps []string
+		}
+		var classes []cls
+		var base []byte
+		for i := 0; i < len(mid); {
+			switch mid[i] {
+			case '*':
+				j := i + 1
+				if j < len(mid) && mid[j] == '*' {
+					j++
+				}
+				i = j // the first representative of `*` / `**` is empty
+			case '?':
+				base = append(base, 'x')
+				i++
+			case '[':
+				if k := strings.IndexByte(mid[i+1:], ']'); k >= 0 {
+					reps := classMembers(mid[i : i+k+2])
+					classes = append(classes, cls{len(base), len([]byte(reps[0])), reps})
+					base = append(base, []byte(reps[0])...)
+					i += k + 2
+				} else {
+					base = append(base, '[')
+					i++
+				}
+			default:
+				base = append(base, mid[i])
+				i++
+			}
+		}
+		fills := []string{string(base)}
+		for _, c := range classes {
+			for _, m := range c.reps[1:] {
+				fills = append(fills, string(base[:c.pos])+m+string(base[c.pos+c.wid:]))
+			}
+		}
+		return fills
+	}
+	// classChars collects the member characters of every class token of s, as
+	// standalone candidates: a common file may pin them even when the pattern's
+	// prefix or a leading `**` leaves its middle unanchored.
+	classChars := func(s string) []string {
+		var out []string
+		for i := 0; i < len(s); {
+			if s[i] == '[' {
+				if k := strings.IndexByte(s[i+1:], ']'); k >= 0 {
+					out = append(out, classMembers(s[i:i+k+2])...)
+					i += k + 2
+					continue
+				}
+			}
+			i++
+		}
+		return out
+	}
+	da := strings.HasSuffix(a, "/") && a != "/"
+	db := strings.HasSuffix(b, "/") && b != "/"
+	a = strings.TrimRight(a, "/")
+	b = strings.TrimRight(b, "/")
+	ga, gb := hasGlob(a), hasGlob(b)
+	// A plain path that is a directory (the trailing slash in the brief) crosses
+	// a glob when a file inside it could match the glob.
+	crossDir := func(g, d string) bool {
+		p, s, _ := span(g)
+		p = strings.TrimRight(p, "/")
+		if p == "" {
+			// An unanchored glob may match at any depth: it can reach into d.
+			return true
+		}
+		if p == d || strings.HasPrefix(p, d+"/") {
+			// Everything the glob matches lives inside d.
+			return true
+		}
+		for _, f := range []string{"", "x", "x/y"} {
+			if glob(g, d+"/"+f) {
+				return true
+			}
+			if s != "" && glob(g, d+"/"+f+s) {
+				return true
+			}
+		}
+		return false
 	}
 	crossPlain := func(g, t string) bool {
 		if glob(g, t) {
 			return true
 		}
-		i := strings.IndexAny(g, "*?[")
-		prefix := g
-		if i >= 0 {
-			prefix = strings.TrimRight(g[:i], "/")
+		p, _, has := span(g)
+		if !has {
+			return inside(g, t)
 		}
 		// A glob that starts with a wildcard has no literal prefix to anchor
 		// a directory relation: it crosses a path only when it matches it.
-		return prefix != "" && inside(prefix, t)
+		p = strings.TrimRight(p, "/")
+		return p != "" && inside(p, t)
 	}
-	if hasGlob(a) && !hasGlob(b) {
+	switch {
+	case da && db:
+		return inside(a, b)
+	case da && gb:
+		return crossDir(b, a)
+	case db && ga:
+		return crossDir(a, b)
+	case ga && !gb:
 		return crossPlain(a, b)
-	}
-	if hasGlob(b) && !hasGlob(a) {
+	case gb && !ga:
 		return crossPlain(b, a)
 	}
-	prefix := func(s string) string {
-		i := strings.IndexAny(s, "*?[")
-		if i < 0 {
-			return s
-		}
-		return s[:i]
+	if !ga || !gb {
+		return inside(a, b)
 	}
-	x, y := prefix(a), prefix(b)
+	x, u, _ := span(a)
+	y, v, _ := span(b)
 	if !strings.HasPrefix(x, y) && !strings.HasPrefix(y, x) {
 		return false
 	}
-	suffix := func(s string) string {
-		i := strings.LastIndexAny(s, "*?[")
-		if i < 0 {
-			return s
-		}
-		return s[i+1:]
-	}
-	u, v := suffix(a), suffix(b)
 	if !strings.HasSuffix(u, v) && !strings.HasSuffix(v, u) {
 		return false
 	}
@@ -1243,8 +1406,23 @@ func pathsCross(a, b string) bool {
 		return t
 	}
 	p, s := longer(x, y), longer(u, v)
-	for _, fill := range []string{"", "x", "x/y", "x/", "x/y/z"} {
-		if c := p + fill + s; glob(a, c) && glob(b, c) {
+	fills := map[string]bool{
+		"": true, "x": true, "x/y": true, "x/": true, "x/y/z": true,
+	}
+	for _, f := range midFills(a) {
+		fills[f] = true
+	}
+	for _, f := range midFills(b) {
+		fills[f] = true
+	}
+	for _, f := range classChars(a) {
+		fills[f] = true
+	}
+	for _, f := range classChars(b) {
+		fills[f] = true
+	}
+	for f := range fills {
+		if c := p + f + s; glob(a, c) && glob(b, c) {
 			return true
 		}
 	}
