@@ -25,6 +25,11 @@ const metricsBriefBackend = "# Brief — metrics probe\n\nType: backend\n\nSECRE
 
 const metricsSidecarQueued = `{"version":1,"kind":"claude","model":"claude-opus","effort":"high","submission":"accepted","arrival":"queued","session":"20260930T210000"}`
 
+// The sidecar of a reviewer dispatch that resolved --for: one anonymized
+// object per author (the roster author's columns, then a family-only
+// author), the names kept out.
+const metricsSidecarForReviewer = `{"version":1,"kind":"claude","model":"claude-opus","effort":"high","submission":"accepted","arrival":"queued","session":"20260930T210000","for":[{"kind":"codex","model":"gpt-5","effort":"high","family":"openai"},{"family":"anthropic"}]}`
+
 // metricsFixture holds a settled-report fixture like waitVerdictRun, with a
 // brief and a dispatch sidecar beside the report; run() drives WaitFor once.
 type metricsFixture struct {
@@ -198,6 +203,77 @@ func TestMetricsOncePerReport(t *testing.T) { // mutation: dropping the metrics-
 		}
 		if lines := m.lines(t); len(lines) != 1 {
 			t.Fatalf("want exactly 1 line after two waits, got %d: %q", len(lines), lines)
+		}
+	})
+}
+
+func TestMetricsReportField(t *testing.T) { // mutation: recording the report path instead of its name leaks a path into the line
+	t.Run("wait: the settled line carries the report file name, never a path", func(t *testing.T) {
+		m := newMetricsFixture(t, "on", metricsImplementerRoster, metricsImplementerReport, metricsBriefBackend, metricsSidecarQueued)
+		_, _, code := m.run(t)
+		if code != 0 {
+			t.Fatalf("code=%d", code)
+		}
+		raw := m.lines(t)[0]
+		if strings.Contains(raw, "/") || strings.Contains(raw, "\\") {
+			t.Fatalf("metrics line carries a path separator: %q", raw)
+		}
+		line := parseMetricsLine(t, raw)
+		if line["report"] != "worker.md" {
+			t.Fatalf("report field wrong: %q", raw)
+		}
+	})
+	t.Run("wait: the report field comes right after agent", func(t *testing.T) {
+		m := newMetricsFixture(t, "on", metricsImplementerRoster, metricsImplementerReport, "", "")
+		_, _, code := m.run(t)
+		if code != 0 {
+			t.Fatalf("code=%d", code)
+		}
+		raw := m.lines(t)[0]
+		if !strings.Contains(raw, `"agent":"worker","report":"worker.md"`) {
+			t.Fatalf("report must follow agent: %q", raw)
+		}
+	})
+}
+
+func TestMetricsForField(t *testing.T) { // mutation: the review line drops the sidecar for array (or a non-review line takes it)
+	t.Run("wait: a review line copies the sidecar for array right after verdict_effective", func(t *testing.T) {
+		m := newMetricsFixture(t, "on", metricsReviewerRoster, reviewReportBody(0, 0, 1, 0, "pass"), metricsBriefBackend, metricsSidecarForReviewer)
+		_, _, code := m.run(t)
+		if code != 0 {
+			t.Fatalf("code=%d", code)
+		}
+		raw := m.lines(t)[0]
+		wantSuffix := `"verdict_effective":"fail","for":[{"kind":"codex","model":"gpt-5","effort":"high","family":"openai"},{"family":"anthropic"}]}`
+		if !strings.HasSuffix(raw, wantSuffix) {
+			t.Fatalf("for must be the last field, after verdict_effective: %q", raw)
+		}
+		line := parseMetricsLine(t, raw)
+		forValue, ok := line["for"].([]any)
+		if !ok || len(forValue) != 2 {
+			t.Fatalf("for wrong: %q", raw)
+		}
+	})
+	t.Run("wait: a review line without a sidecar for array has no for field", func(t *testing.T) {
+		m := newMetricsFixture(t, "on", metricsReviewerRoster, reviewReportBody(0, 0, 1, 0, "pass"), metricsBriefBackend, metricsSidecarQueued)
+		_, _, code := m.run(t)
+		if code != 0 {
+			t.Fatalf("code=%d", code)
+		}
+		line := parseMetricsLine(t, m.lines(t)[0])
+		if _, ok := line["for"]; ok {
+			t.Fatalf("for must be absent without --for: %q", m.lines(t)[0])
+		}
+	})
+	t.Run("wait: a non-review line never takes the for field", func(t *testing.T) {
+		m := newMetricsFixture(t, "on", metricsImplementerRoster, metricsImplementerReport, metricsBriefBackend, metricsSidecarForReviewer)
+		_, _, code := m.run(t)
+		if code != 0 {
+			t.Fatalf("code=%d", code)
+		}
+		line := parseMetricsLine(t, m.lines(t)[0])
+		if _, ok := line["for"]; ok {
+			t.Fatalf("for must be review-only: %q", m.lines(t)[0])
 		}
 	})
 }
