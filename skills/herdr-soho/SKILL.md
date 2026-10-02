@@ -839,9 +839,10 @@ lost pairs, and the text output lists them below the tables.
 
 `metrics` records the team's performance over the lines that `metrics=on`
 (default `off`) appends to `<state>/metrics.jsonl`, one per settled report:
-the wait that settles the report writes the line, a second wait on the same
-report appends nothing, and a failed append only warns, never changing the
-wait result. The line carries only the performance facts — `ts`, `agent`,
+the wait that settles the report writes the line and then records a marker,
+so a second wait on the same report appends nothing (when the marker itself
+cannot be written, it warns and a later wait may append the line again); a
+failed append only warns, never changing the wait result. The line carries only the performance facts — `ts`, `agent`,
 `report` (the report's file name, never a path), the roster's `role`,
 `kind`, `model`, `effort` and `family`, the brief's `Type:` value as `type`
 (one of `mechanical`, `backend`, `ui`, `docs`, `review`, `security`), the
@@ -877,17 +878,19 @@ a closed list of keys — `role`, `kind`, `model`, `effort`, `family`,
 `P0`..`P3`), `verdict_effective`, and `for` reduced to each author's
 `kind`/`model`/`effort`/`family` — plus `project` and the UTC `date` of
 `ts`; `agent`, `report`, the full `ts`, paths, URLs and any other key stay
-out. When the report was marked, the line also carries the mark-derived
-`findings_real`, `findings_false`, `findings_unlabeled`, `missed` (summed
-across the marks) and `amendment_cause`; for the same finding the last mark
-wins, the missed counts add up, and the last `--amendment` is the cause.
+out. When the report was marked, the line also carries `findings_real` and
+`findings_false`, and, only when they apply, `findings_unlabeled` (when the
+settled line has a numeric `findings`), `missed` (when a mark counted any,
+summed across the marks) and `amendment_cause` (when a mark gave one); for
+the same finding the last mark wins, the missed counts add up, and the last
+`--amendment` is the cause.
 `--since <date>` keeps only the lines dated on or after the date (the same
 formats `stats` accepts), dropping any line whose `ts` cannot be parsed,
 and `--project-label <label>` (`[a-z0-9][a-z0-9-]{0,31}`) sets `project`,
 whose default is `p-` plus the first 8 hex of the sha256 of the base name
-of the directory that contains the state root. From inside the skill the
-state root would land inside the skill, so the command refuses with exit 2
-and writes nothing. `metrics table` turns the exported summaries into the
+of the directory that contains the state root. When the resolved state
+root is inside the installed skill, the command refuses with exit 2 and
+writes nothing. `metrics table` turns the exported summaries into the
 generated table of `references/agent-profiles.md`: one row per role, slice
 type, kind, model and effort (`-` where a field is absent), with `n`,
 `Median min` (the median of `duration_s` in minutes, one decimal),
@@ -898,8 +901,9 @@ type, kind, model and effort (`-` where a field is absent), with `n`,
 turned out real, `NN% (k)`, and the sum of the `missed` values), and
 `Confidence` (`low` under 5 lines, `medium` under 20, `high` at 20 or
 more); the rows are ordered by role and type, then `n` descending, then
-kind, model and effort. Without `--write` the table goes to stdout and the
-command never reads or writes the project state; `--write <file>` replaces
+kind, model and effort. Without `--write` the table goes to stdout; its data
+are only the files given (it reads no `metrics.jsonl` or roster and writes
+no state, though the CLI still loads the configuration layers); `--write <file>` replaces
 the block between the `<!-- herdr-soho:metrics-table:start -->` and
 `<!-- herdr-soho:metrics-table:end -->` markers atomically, keeping
 everything else byte for byte; it exits 2 on a missing or misplaced marker
