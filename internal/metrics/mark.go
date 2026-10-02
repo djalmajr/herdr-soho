@@ -150,7 +150,7 @@ func CmdMark(args []string, c CommandContext) int {
 			err = cerr
 		}
 		if err != nil {
-			core.DieFriction("metrics mark: could not append the mark line to metrics.jsonl: "+err.Error(), 2, c.FrictionLog, "metrics")
+			core.DieFriction("metrics mark: could not append the mark line to metrics.jsonl: "+err.Error(), 4, c.FrictionLog, "metrics")
 		}
 	})
 	_, _ = fmt.Fprintln(platform.Stdout, lineOut)
