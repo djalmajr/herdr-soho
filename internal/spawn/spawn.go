@@ -453,7 +453,7 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	if err != nil || !info.IsDir() {
 		core.DieFriction("spawn: --cwd "+o.cwd+" is not a directory", 2, "", "")
 	}
-	EnsureOrchestratorName(ctx, env)
+	EnsureOrchestratorName(ctx, env, cwd, "spawn")
 	core.ResolveRole(o.role, env, cwd)
 	if o.role == "planner" {
 		core.DieFriction("spawn planner: the orchestrator is the planner and does not open a pane. Plan in this session.", 12, "", "")
