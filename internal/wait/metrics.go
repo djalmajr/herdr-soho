@@ -80,10 +80,11 @@ func recordMetrics(sd, agent, report, text string, header *reportscan.ReviewHead
 }
 
 // metricsLine builds the one JSON line for a settled report. Every field is
-// optional except ts and agent: a value that does not exist (no sidecar, no
-// Type line, empty roster column) stays out of the line.
+// optional except ts, agent and report: a value that does not exist (no
+// sidecar, no Type line, empty roster column) stays out of the line. The
+// report field is the report's file name (filepath.Base), never a path.
 func metricsLine(sd, agent, report, text string, header *reportscan.ReviewHeaderResult, partial int) string {
-	line := jsonjs.O("ts", platform.Now().UTC().Format(time.RFC3339), "agent", agent)
+	line := jsonjs.O("ts", platform.Now().UTC().Format(time.RFC3339), "agent", agent, "report", filepath.Base(report))
 	roster := strings.Split(core.RosterLine(sd, agent), "\t")
 	role := field(roster, 3)
 	if role != "" {
@@ -110,18 +111,19 @@ func metricsLine(sd, agent, report, text string, header *reportscan.ReviewHeader
 	if amendmentReport(sd, agent, report) {
 		line.Set("amendment", true)
 	}
-	if session, arrival := metricsSidecarFields(sd, report); session != "" || arrival != "" {
-		if session != "" {
-			line.Set("session", session)
-		}
-		if arrival != "" {
-			line.Set("arrival", arrival)
-		}
+	session, arrival, sidecarFor := metricsSidecarFields(sd, report)
+	if session != "" {
+		line.Set("session", session)
+	}
+	if arrival != "" {
+		line.Set("arrival", arrival)
 	}
 	line.Set("items", jsonjs.O("done", metricsMarkerCount(text, "[done]"), "partial", partial, "skipped", metricsMarkerCount(text, "[skipped]")))
 	// The review roles take the review fields with exactly the values the
 	// wait line prints (verdict/findings/severity from the header, the
-	// effective verdict from the header or a partial item).
+	// effective verdict from the header or a partial item). The "for" field
+	// copies the dispatch sidecar's anonymized --for authors, right after
+	// verdict_effective: the author names stay out of the line.
 	if core.IsReviewRole(role) {
 		if header != nil {
 			line.Set("verdict", header.Verdict)
@@ -134,6 +136,9 @@ func metricsLine(sd, agent, report, text string, header *reportscan.ReviewHeader
 				effective = "fail"
 			}
 			line.Set("verdict_effective", effective)
+		}
+		if len(sidecarFor) > 0 {
+			line.Set("for", sidecarFor)
 		}
 	}
 	return jsonjs.Stringify(line)
@@ -167,10 +172,12 @@ func metricsBriefType(sd, report string) string {
 	return ""
 }
 
-// metricsSidecarFields reads the dispatch sidecar's session and arrival,
-// from the state dir when the dispatch wrote it there, else from beside the
-// report.
-func metricsSidecarFields(sd, report string) (string, string) {
+// metricsSidecarFields reads the dispatch sidecar's session, arrival and
+// for array, from the state dir when the dispatch wrote it there, else from
+// beside the report. The for array is the --for authors the dispatch
+// anonymized (kind/model/effort/family objects, never names) and is copied
+// to the review line as "for" (issue #39, part 2).
+func metricsSidecarFields(sd, report string) (string, string, []any) {
 	base := strings.TrimSuffix(filepath.Base(report), ".md")
 	for _, file := range []string{
 		filepath.Join(sd, "briefs", base+".dispatch.json"),
@@ -183,13 +190,26 @@ func metricsSidecarFields(sd, report string) (string, string) {
 		value, err := jsonjs.Parse(raw)
 		obj, _ := value.(*jsonjs.Object)
 		if err != nil || obj == nil {
-			return "", ""
+			return "", "", nil
 		}
 		session, _ := sidecarString(obj, "session")
 		arrival, _ := sidecarString(obj, "arrival")
-		return session, arrival
+		forEntries, _ := sidecarForArray(obj)
+		return session, arrival, forEntries
 	}
-	return "", ""
+	return "", "", nil
+}
+
+func sidecarForArray(obj *jsonjs.Object) ([]any, bool) {
+	value, ok := obj.Get("for")
+	if !ok {
+		return nil, false
+	}
+	entries, ok := value.([]any)
+	if !ok || len(entries) == 0 {
+		return nil, false
+	}
+	return entries, true
 }
 
 func sidecarString(obj *jsonjs.Object, key string) (string, bool) {
