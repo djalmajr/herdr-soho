@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
@@ -35,30 +36,23 @@ func PiSessionPath(agent string, env platform.Env) string {
 	return value
 }
 
-// piTranscriptMessageType and piTranscriptUserRole mark the session lines
-// that hold a message taken from pi's input: the delivered peer message
-// lands in a "type":"message" line whose message role is "user", and the
-// assistant replies and the tool results only cite the marker.
-const (
-	piTranscriptMessageType = `"type":"message"`
-	piTranscriptUserRole    = `"role":"user"`
-)
-
-var (
-	piTranscriptMessageTypeBytes = []byte(piTranscriptMessageType)
-	piTranscriptUserRoleBytes    = []byte(piTranscriptUserRole)
-)
-
-// CountPiUserMarkerLines counts the session lines that contain the user
-// message record ("type":"message" with "role":"user") and the given peer
-// marker (#id). Like CountClaudeUserMarkerLines it streams the file line by
-// line and returns only the number: it does not read into, retain, log, or
-// return the content of any line, matching or not. The text pi writes inside
-// the record is JSON-escaped, so a marker with a backslash or a quote must
-// be passed escaped the same way (see transcriptPathMarker in the cli
-// package); a line that only holds the escaped form cannot fake the user
-// record, since the record markers themselves are plain JSON. ok is false
-// when the file cannot be read.
+// CountPiUserMarkerLines counts the session lines that hold the user
+// message record for the given peer marker (#id). A line counts only when
+// it decodes as a "type":"message" entry whose message role is "user" and
+// whose message content holds the marker: the role is read from the
+// message itself, never located as a substring, so an assistant reply or a
+// tool result that carries a nested "role":"user" in its own data (a tool
+// call's arguments quoting the record) does not count. Like
+// CountClaudeUserMarkerLines it streams the file line by line and returns
+// only the number: it does not read into, retain, log, or return the
+// content of any line, matching or not. The text pi writes inside the
+// record is JSON-escaped, so a marker with a backslash or a quote must be
+// passed escaped the same way (see transcriptPathMarker in the cli
+// package); the content check re-encodes the message's content the way
+// JSON writes it, so the escaped marker matches whether it sits in a text
+// block, in a tool call's arguments, or in a tool result's nested content.
+// A line that does not hold the marker is never decoded, and a line that
+// does not decode does not count. ok is false when the file cannot be read.
 func CountPiUserMarkerLines(path, marker string) (int, bool) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -73,7 +67,19 @@ func CountPiUserMarkerLines(path, marker string) (int, bool) {
 	n := 0
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		if bytes.Contains(line, piTranscriptMessageTypeBytes) && bytes.Contains(line, piTranscriptUserRoleBytes) && bytes.Contains(line, markerBytes) {
+		if !bytes.Contains(line, markerBytes) {
+			continue
+		}
+		entry := parsed(string(line))
+		if str(get(entry, "type")) != "message" {
+			continue
+		}
+		message := get(entry, "message")
+		if str(get(message, "role")) != "user" {
+			continue
+		}
+		content := get(message, "content")
+		if content != nil && bytes.Contains([]byte(jsonjs.Stringify(content)), markerBytes) {
 			n++
 		}
 	}

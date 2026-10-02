@@ -180,6 +180,39 @@ func TestSendPiTranscriptProof(t *testing.T) {
 			t.Fatalf("a tool-cited marker presses nothing: %d enters", enters)
 		}
 	})
+	t.Run("pi working: an assistant tool call whose arguments hold a nested user role and the id is not proof", func(t *testing.T) {
+		// The tool call's arguments are the tool's own data: a nested
+		// "role":"user" and the marker inside them must not be read as the
+		// message's role, so the line does not prove delivery and the result
+		// is today's screen-based one, not sent.
+		prompt := newPromptFixture(t)
+		sessionsRoot := t.TempDir()
+		sessionPath := piTranscriptSessionPath(sessionsRoot)
+		writePiSessionFile(t, sessionPath, piSessionLine("user", "earlier conversation")+"\n")
+		rules := []fakecli.Rule{
+			{Argv: []string{"agent", "get", "w0test:p0a"}, ArgvPrefix: true, Stdout: piSessionAgentJSON("working", "1", sessionPath)},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: piWorkingScreen},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stderr: notIdleErr, Code: 1},
+			promptRule(prompt),
+		}
+		f := newFixture(t, rules)
+		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		toolCallLine := `{"type":"message","id":"9a234373","parentId":"7dfce086","message":{"role":"assistant","content":[{"type":"text","text":"running the tool"},{"type":"toolCall","id":"t1","name":"bash","arguments":{"command":"herdr-soho send w0test:p0a hi","context":{"role":"user","content":[{"type":"text","text":"` + peer.PeerPrefix + ` #` + id + ` nested in the arguments"}]}}}]}}`
+		done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), sessionPath, id, toolCallLine)
+		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
+		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+			t.Fatalf("code=%d stderr=%q", code, stderr)
+		}
+		if !<-done {
+			t.Fatal("the tool call line was not appended after the prompt call")
+		}
+		if strings.Contains(stderr, "is busy; waiting for its transcript") {
+			t.Fatalf("a pi busy wait warning went out: %q", stderr)
+		}
+		if enters := countSendKeyEnters(t, f); enters != 0 {
+			t.Fatalf("a nested-role marker presses nothing: %d enters", enters)
+		}
+	})
 	t.Run("pi working: a user line with the id already present before the send is not proof", func(t *testing.T) {
 		prompt := newPromptFixture(t)
 		sessionsRoot := t.TempDir()

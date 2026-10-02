@@ -1,6 +1,8 @@
 package herdr
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,13 +20,19 @@ func piSessionValue(root string) string {
 }
 
 // piAgentGetWithSession is an agent get response carrying the agent_session
-// the way `herdr agent get` reports it for a pi agent.
+// the way `herdr agent get` reports it for a pi agent. The body is built
+// with json.Marshal so a session path with a backslash or a quote stays
+// valid JSON (a path concatenated between quotes would not).
 func piAgentGetWithSession(kind, value string) string {
-	body := `{"result":{"agent":{"agent":"pi","agent_status":"idle"`
+	agent := map[string]any{"agent": "pi", "agent_status": "idle"}
 	if kind != "" || value != "" {
-		body += `,"agent_session":{"source":"herdr:pi","agent":"pi","kind":"` + kind + `","value":"` + value + `"}`
+		agent["agent_session"] = map[string]any{"source": "herdr:pi", "agent": "pi", "kind": kind, "value": value}
 	}
-	return body + `}}}`
+	body, err := json.Marshal(map[string]any{"result": map[string]any{"agent": agent}})
+	if err != nil {
+		panic(fmt.Sprintf("piAgentGetWithSession: %v", err))
+	}
+	return string(body)
 }
 
 // writePiSession creates the pi session file at the given absolute path and
@@ -90,6 +98,18 @@ func TestPiSessionPath(t *testing.T) {
 			t.Fatalf("path=%q want empty", got)
 		}
 	})
+	t.Run("a session file whose directory name holds a backslash resolves", func(t *testing.T) {
+		// On Darwin and Linux a backslash is a valid directory-name character;
+		// the fake get's response must carry it escaped the way JSON writes
+		// it, or the resolution silently tests a malformed response.
+		dir := filepath.Join(t.TempDir(), "agent\\sessions")
+		value := filepath.Join(dir, piSessionFile)
+		writePiSession(t, value, `{"type":"message"}`+"\n")
+		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "w"}, Stdout: piAgentGetWithSession("path", value)}})
+		if got := PiSessionPath("w", env); got != value {
+			t.Fatalf("path=%q want %q", got, value)
+		}
+	})
 	t.Run("an agent get failure yields nothing", func(t *testing.T) {
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "w"}, Code: 1, Stderr: `{"error":{"code":"agent_not_found","message":"gone"}}`}})
 		if got := PiSessionPath("w", env); got != "" {
@@ -142,6 +162,24 @@ func TestCountPiUserMarkerLines(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, piSessionFile)
 		content := `{"type":"message","id":"a","parentId":"0","message":{"role":"user","content":[{"type":"text","text":"` + marker + ` ` + marker + `"}]}}` + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountPiUserMarkerLines(path, marker)
+		if !ok || n != 1 {
+			t.Fatalf("count=(%d,%v) want (1,true)", n, ok)
+		}
+	})
+	t.Run("an assistant line with a tool call whose arguments hold a nested user role and the marker does not count", func(t *testing.T) {
+		// A tool call's arguments are the tool's own data and may quote the
+		// user record (a nested "role":"user") and the marker; the role is
+		// read from the message itself, so the line does not count. The file
+		// also holds the real user line with the marker: the count comes only
+		// from it.
+		dir := t.TempDir()
+		path := filepath.Join(dir, piSessionFile)
+		assistantToolCall := `{"type":"message","id":"a","parentId":"0","message":{"role":"assistant","content":[{"type":"text","text":"running the tool"},{"type":"toolCall","id":"t1","name":"bash","arguments":{"command":"herdr-soho send w0test:p0a hi","context":{"role":"user","content":[{"type":"text","text":"[herdr-soho:peer] ` + marker + ` nested in the arguments"}]}}}]}}`
+		content := assistantToolCall + "\n" + userLine + "\n"
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
