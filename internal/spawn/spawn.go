@@ -265,7 +265,9 @@ func EmitReuse(name, role, kind string, ctx *core.Config, env platform.Env, cwd 
 		line = core.RosterLine(sd, name)
 		f = strings.Split(line, "\t")
 	}
-	out := jsonjs.O("name", name, "pane_id", fieldAt(f, 1), "kind", kind, "role", role, "family", fieldAt(f, 4), "reused", true, "previous_role", prev, "status", "ready")
+	// model, effort and agent_args are the roster columns the spawn recorded
+	// (8, 14, 13); a missing value comes out as "".
+	out := jsonjs.O("name", name, "pane_id", fieldAt(f, 1), "kind", kind, "role", role, "family", fieldAt(f, 4), "reused", true, "previous_role", prev, "effort", fieldAt(f, 14), "model", fieldAt(f, 8), "agent_args", fieldAt(f, 13), "status", "ready")
 	_, _ = fmt.Fprintln(platform.Stdout, jsonjs.StringifyIndent(out, 2))
 	return true
 }
