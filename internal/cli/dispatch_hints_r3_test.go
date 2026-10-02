@@ -25,6 +25,13 @@ func TestDispatchHintsR3Paths(t *testing.T) {
 		if !pathsCross("src/*/components/", "src/") || !pathsCross("src/*/components/", "src/foo/components/x/") {
 			t.Error("the directory glob lost its root or a tree it matches")
 		}
+		// R-R12D4: a directory that contains a match of the glob crosses.
+		if !pathsCross("src/*/components/", "src/foo/") || !pathsCross("src/foo/", "src/*/components/") {
+			t.Error("src/*/components/ lost src/foo/, which holds src/foo/components/")
+		}
+		if pathsCross("docs/*/", "src/") || pathsCross("src/*/components/", "lib/foo/") {
+			t.Error("a directory glob crossed an unrelated tree")
+		}
 	})
 	// JS: "dispatch: a character class crosses the star glob that shares a file with it"
 	t.Run("pathsCross: a character class and a star glob cross on their common file", func(t *testing.T) {

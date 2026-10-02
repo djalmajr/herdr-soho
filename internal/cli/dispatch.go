@@ -1375,19 +1375,29 @@ func pathsCross(a, b string) bool {
 		return p != "" && inside(p, t)
 	}
 	// dirTreeCross: g is a directory glob (a tree) and d a literal directory.
-	// They cross when d is, or sits inside, a directory g matches, or when d
-	// contains the glob's literal root.
+	// They cross when d is, or sits inside, a directory g matches (an
+	// ancestor of d matches g), or when d contains a directory g could match
+	// (d's segments match g's leading segments, a ** segment matching the
+	// rest). A sibling tree under the same prefix crosses neither way.
 	dirTreeCross := func(g, d string) bool {
 		for p := d; p != "" && p != "." && p != "/"; p = path.Dir(p) {
 			if glob(g, p) {
 				return true
 			}
 		}
-		pre, _, _ := span(g)
-		pre = strings.TrimRight(pre, "/")
-		// One-sided: d contains the root; a d merely under the prefix is a
-		// sibling tree unless an ancestor matched above.
-		return pre != "" && (d == pre || strings.HasPrefix(pre, d+"/"))
+		gs, ds := strings.Split(g, "/"), strings.Split(d, "/")
+		if len(ds) > len(gs) {
+			return false
+		}
+		for i, seg := range ds {
+			if gs[i] == "**" {
+				return true
+			}
+			if ok, err := path.Match(gs[i], seg); err != nil || !ok {
+				return false
+			}
+		}
+		return true
 	}
 	switch {
 	case da && db && !ga && !gb:
