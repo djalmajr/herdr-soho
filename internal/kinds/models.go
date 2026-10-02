@@ -146,7 +146,7 @@ func modelIDs(kind string, env platform.Env, skipCopy bool) ([]string, bool) {
 		}
 	}
 	if kind != "codex" && !short && len(out) > 0 {
-		_ = os.WriteFile(file, []byte(strings.Join(out, "\n")+"\n"), 0600)
+		_ = platform.AtomicWrite(file, strings.Join(out, "\n")+"\n")
 	}
 	return out, false
 }
