@@ -239,7 +239,7 @@ func TestMarkFindingContract(t *testing.T) { // mutation: a wrong report name or
 	})
 }
 
-const usageTail = " — metrics: usage: herdr-soho metrics mark <report> [--finding <n>=real|false]... [--missed P0|P1|P2|P3]... [--amendment implementer|brief] | metrics export [--since <date>] [--project-label <label>]"
+const usageTail = " — " + usageLine
 
 func TestMarkRefusals(t *testing.T) { // mutation: dropping a guard lets a mark land on the wrong line
 	cases := []struct {
