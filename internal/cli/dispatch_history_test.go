@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/dispatch"
+	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/stats"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
@@ -456,5 +459,91 @@ func TestDispatchHistoryRestoredPointer(t *testing.T) {
 	}
 	if side["task_report"] != current {
 		t.Fatalf("failed sidecar task_report=%v, want the restored pointer's %q: %v", side["task_report"], current, side)
+	}
+}
+
+// s72, emenda 3 (revisão 44a955b): adapted from the reviewer's probe
+// TestReviewFailedReportClosure (review-4-20261002T120658.probe.go).
+// A failed plain send points its sidecar at the restored pointer's
+// task_report; a late report on the failed send's own path must not close
+// the earlier accepted task in stats.
+
+// refuseDispatchTransport rewrites the fake herdr's config so every
+// `agent prompt worker` fails with code 7 (the transport refusal).
+func refuseDispatchTransport(t *testing.T, f *dispatchArrivalFixture) {
+	t.Helper()
+	p := filepath.Join(f.bin, "herdr.json")
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg["rules"] = []fakecli.Rule{
+		{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Code: 7, Stderr: "uncertain transport failure"},
+		{Argv: []string{"agent", "list"}, ArgvPrefix: true, Stdout: `{"result":{"agents":[]}}`},
+	}
+	raw, err = json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// statsPending runs `stats --json` in the fixture and sums no_report.pending
+// across the role groups.
+func statsPending(t *testing.T, f *dispatchArrivalFixture) int {
+	t.Helper()
+	old := platform.Stdout
+	var out bytes.Buffer
+	platform.Stdout = &out
+	t.Cleanup(func() { platform.Stdout = old })
+	code := stats.CmdStats([]string{"--json"}, stats.CommandContext{Config: f.config, Env: f.env, Cwd: f.root})
+	var doc struct {
+		Roles map[string]struct {
+			NoReport struct {
+				Pending int `json:"pending"`
+			} `json:"no_report"`
+		} `json:"roles"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil || code != 0 {
+		t.Fatal(err, code, out.String())
+	}
+	total := 0
+	for _, g := range doc.Roles {
+		total += g.NoReport.Pending
+	}
+	t.Logf("stats output=%s", out.String())
+	return total
+}
+
+func TestDispatchHistoryFailedReportClosure(t *testing.T) {
+	f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
+	firstDispatch(t, f)
+	before := statsPending(t, f)
+	refuseDispatchTransport(t, f)
+	if err := os.WriteFile(f.brief, []byte("# Goal\nIndependent task B\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
+	report, _ := dispatchOutputField(t, out, "report")
+	composed, _ := dispatchOutputField(t, out, "composed_prompt")
+	side := readSidecarFields(t, f, composed)
+	if code != 4 {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	// A transport error can leave a delivered prompt uncertain; simulate the
+	// worker's eventual report for B. B is a normal task, not an amendment of A.
+	if err := os.WriteFile(report, []byte("late report of B\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	after := statsPending(t, f)
+	t.Logf("before=%d after=%d failed_sidecar=%v", before, after, side)
+	if before != 1 || after != 1 {
+		t.Fatalf("failed normal task B's report closed independent pending A: before=%d after=%d sidecar=%v", before, after, side)
 	}
 }
