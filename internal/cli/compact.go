@@ -213,17 +213,14 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	// opencode proves the compaction with the done-line regex instead of a
 	// substring, and counts a screen whose count of proof lines grew (it does
 	// not echo the /compact it runs); the other kinds keep the substring rule.
-	// The count of proof lines already on screen before the send is the
-	// baseline a proof must grow past to be new (an unchanged screen with the
-	// old echo and old proof is not this compaction's).
-	beforeProofCount := compactLineCount(before, proof)
 	var seen map[string]bool
 	var proofNew func(screen string) bool
 	if kind == "opencode" {
 		seen = compactOpenCodeProofLines(before)
 		proofNew = func(screen string) bool { return compactOpenCodeProofNew(screen, before, seen) }
 	} else {
-		proofNew = func(screen string) bool { return compactProofNew(screen, proof, before, beforeProofCount) }
+		seen = compactProofLines(before, proof)
+		proofNew = func(screen string) bool { return compactProofNew(screen, proof, seen) }
 	}
 	endings := compactEndings(kind)
 	endSeen := make([]map[string]bool, len(endings))
@@ -633,28 +630,19 @@ func compactProofLines(screen, proof string) map[string]bool {
 	return out
 }
 
-// compactProofNew reports a proof of this compaction. The proof counts when
-// the count of proof lines grew past the pre-send baseline (a new line, a
-// repeated identical line, or a scroll that replaced the older proof), or
-// when it sits below the last /compact echo and either the visible screen
-// changed since the pre-send read with the echo not being the composer line
-// (a delivered compaction whose older proof scrolled off shows the same proof
-// text at the same count, so the count alone cannot tell), or there is no
-// composer line to read (a read before the TUI drew the box, or a fixture
-// without one). An unchanged screen with the old echo, old proof and a
-// visible box does not read as this compaction's proof.
-func compactProofNew(screen, proof, before string, beforeCount int) bool {
-	if compactLineCount(screen, proof) > beforeCount {
+// compactProofNew reports a proof below the echoed /compact, or a proof line
+// that was not on screen before the send (pi prints `Compacted from <n>
+// tokens` with no echo of the command).
+func compactProofNew(screen, proof string, seen map[string]bool) bool {
+	if compactProofBelow(screen, proof) {
 		return true
 	}
-	if !compactProofBelow(screen, proof) {
-		return false
+	for line := range compactProofLines(screen, proof) {
+		if !seen[line] {
+			return true
+		}
 	}
-	if screen != before && !compactCodexComposerStuck(screen) {
-		return true
-	}
-	_, hasComposer := compactCodexComposerLine(screen)
-	return !hasComposer
+	return false
 }
 
 func compactProofBelow(screen, proof string) bool {
