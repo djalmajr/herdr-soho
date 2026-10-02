@@ -234,11 +234,16 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		lane = cols[11]
 	}
 	// Compact before any task state is written: a busy worker or a timeout
-	// leaves no pointer to a report that will never come.
+	// leaves no pointer to a report that will never come. compactRun ends
+	// some failures (a busy or dead worker, a failed send, a /compact that
+	// stayed in the codex composer after two Enters) in a DieFriction panic,
+	// which would skip the note below; compactDispatchStep prints the note
+	// there and re-raises, so the CLI boundary still prints the compact
+	// message and records the friction line.
 	if compact {
 		if compactProof(kind) == "" {
 			core.Warn(fmt.Sprintf("dispatch: --compact skipped: kind '%s' has no verified compact command", kind), frictionLogPath, "dispatch")
-		} else if code := compactRun(agent, at(1), kind, role, lane, model, compactDefaultTimeoutMS, ctx, env, cwd, true); code != 0 {
+		} else if code := compactDispatchStep(agent, at(1), kind, role, lane, model, compactDefaultTimeoutMS, ctx, env, cwd); code != 0 {
 			// The compaction phase did not finish: say so, and that this brief was
 			// not sent, so the orchestrator does not look for it on the screen.
 			fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: the compact step of '%s' did not finish (exit %d); the brief was not sent\n", agent, code)
@@ -589,6 +594,29 @@ func containsWord(list, word string) bool {
 		}
 	}
 	return false
+}
+
+// compactDispatchStep runs the compact step behind dispatch --compact.
+// compactRun reports some failures (a busy or dead worker, a failed send,
+// a /compact that stayed in the codex composer after two Enters) with a
+// DieFriction panic, which would skip the dispatch's own "did not finish"
+// note on its way to the CLI boundary; the panic is re-raised only after
+// the note is printed, so the boundary still prints the compact message and
+// records the friction line.
+func compactDispatchStep(agent, pane, kind, role, lane, model string, timeoutMS int64, ctx *core.Config, env platform.Env, cwd string) int {
+	defer func() {
+		value := recover()
+		if value == nil {
+			return
+		}
+		exitErr, ok := value.(*platform.ExitError)
+		if !ok {
+			panic(value)
+		}
+		fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: the compact step of '%s' did not finish (exit %d); the brief was not sent\n", agent, exitErr.Code)
+		panic(value)
+	}()
+	return compactRun(agent, pane, kind, role, lane, model, timeoutMS, ctx, env, cwd, true)
 }
 
 // writeDispatchSidecar writes the attempt sidecar and, when the dispatch
