@@ -56,6 +56,9 @@ type agentInfo struct {
 	WorkspaceID string
 	Kind        string
 	Seq         string
+	// SessionKind is the agent's agent_session kind ("" when the get does
+	// not report an agent_session); the local transcript proof arms from it.
+	SessionKind string
 }
 
 type resolvedTarget struct {
@@ -70,6 +73,21 @@ type resolvedTarget struct {
 	Workspace string
 	Kind      string
 	Seq       string
+}
+
+// transcriptProof is the session-transcript delivery proof for a local target
+// that writes every taken message as a user line in a local transcript file
+// (a Claude Code session transcript, a pi session file): the pre-send count
+// of the user lines that hold the peer marker, and the screen queue check a
+// grown count must pass before it proves. Armed only when the transcript
+// resolves and its pre-send count can be read; without it the send keeps the
+// screen-based path, with no new warning.
+type transcriptProof struct {
+	path   string
+	pre    int
+	armed  bool
+	count  func(path, marker string) (int, bool)
+	queued func(visible, id string) bool
 }
 
 func RandomPeerID() string {
@@ -265,7 +283,8 @@ func agentGet(machine, target string, env platform.Env) agentInfo {
 		return agentInfo{Cause: "agent get returned no agent_status"}
 	}
 	return agentInfo{OK: true, Status: valueString(state), PaneID: nonEmptyString(ag["pane_id"]),
-		Cwd: stringValue(ag["cwd"]), WorkspaceID: stringValue(ag["workspace_id"]), Kind: stringValue(ag["agent"]), Seq: optionalString(ag["state_change_seq"])}
+		Cwd: stringValue(ag["cwd"]), WorkspaceID: stringValue(ag["workspace_id"]), Kind: stringValue(ag["agent"]), Seq: optionalString(ag["state_change_seq"]),
+		SessionKind: stringValue(object(ag["agent_session"])["kind"])}
 }
 
 func nonEmptyString(v any) string {
@@ -752,28 +771,33 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	message := header + "\n\n" + quotedBody + "\n" + endLine
 	msgLines := strings.Count(message, "\n") + 1
 	recentLines := msgLines + 60
-	// A Claude Code target writes every taken message to its session
-	// transcript as a "type":"user" line that holds the peer marker, and the
-	// alternate screen can scroll the marker out of the visible area in the
-	// same turn: a line the new id has not held before the send is delivery
-	// proof. The id is new, so the pre-send count is zero. Without a
-	// transcript (no agent_session, a session kind that is not id, or a file
-	// that is missing or unreadable) the send keeps the screen-based path,
-	// with no new warning. The transcript is local to the machine that runs
-	// the Claude Code session, and ClaudeTranscriptPath resolves it with a
-	// local `agent get` plus a local file: it only applies to a local target.
-	// A remote target with a pane of the same id locally would otherwise be
-	// proved by another claude's transcript, so for it the proof is not armed
-	// at all (no machineless get, no file read).
-	claudeTranscriptPath := ""
-	claudeTranscriptPre := 0
-	claudeTranscriptArmed := false
-	if t.Kind == "claude" && (t.Machine == sessionref.LocalMachine || t.Machine == "") {
-		claudeTranscriptPath = herdr.ClaudeTranscriptPath(t.TargetArg, env)
-		if claudeTranscriptPath != "" {
-			if pre, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); ok {
-				claudeTranscriptArmed = true
-				claudeTranscriptPre = pre
+	// A local Claude Code or pi target writes every taken message to its
+	// session transcript as a user line that holds the peer marker, and the
+	// screen can scroll the marker out of the visible area in the same turn:
+	// a line the new id has not held before the send is delivery proof. The
+	// id is new, so the pre-send count is zero. Without a transcript (no
+	// agent_session, a session kind that is not a local file, or a file that
+	// is missing or unreadable) the send keeps the screen-based path, with no
+	// new warning. The transcript is local to the machine that runs the
+	// session: ClaudeTranscriptPath and PiSessionPath resolve it with a local
+	// `agent get` plus a local file, so the proof only applies to a local
+	// target. A remote target with a pane of the same id locally would
+	// otherwise be proved by another agent's transcript, so for it the proof
+	// is not armed at all (no machineless get, no file read). The pi resolver
+	// is consulted only when the pre-send get reports an agent_session:
+	// without one the pi target keeps today's exact call sequence (no
+	// transcript get, no file read).
+	transcript := transcriptProof{}
+	if t.Machine == sessionref.LocalMachine || t.Machine == "" {
+		if t.Kind == "claude" {
+			transcript = transcriptProof{path: herdr.ClaudeTranscriptPath(t.TargetArg, env), count: herdr.CountClaudeUserMarkerLines, queued: claudeQueued}
+		} else if t.Kind == "pi" && preGet.OK && preGet.SessionKind != "" {
+			transcript = transcriptProof{path: herdr.PiSessionPath(t.TargetArg, env), count: herdr.CountPiUserMarkerLines, queued: steeringQueued}
+		}
+		if transcript.path != "" {
+			if pre, ok := transcript.count(transcript.path, "#"+id); ok {
+				transcript.pre = pre
+				transcript.armed = true
 			}
 		}
 	}
@@ -803,15 +827,14 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			} else if curGet.Cause != "" {
 				result.LastCause = curGet.Cause
 			}
-			if claudeTranscriptArmed {
-				if count, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); ok && count > claudeTranscriptPre {
-					// Claude Code also writes the taken message to the
-					// transcript while it sits unread in its open queue: the
-					// count growth is not proof while the visible queue line
-					// still holds the id.
+			if transcript.armed {
+				if count, ok := transcript.count(transcript.path, "#"+id); ok && count > transcript.pre {
+					// The target also writes the taken message to the transcript
+					// while it sits unread in its open queue: the count growth is
+					// not proof while the visible queue line still holds the id.
 					visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env)
 					if visibleErr == "" {
-						if !claudeQueued(visible, id) {
+						if !transcript.queued(visible, id) {
 							return proofResult{Proven: true, RecentReadSucceeded: result.RecentReadSucceeded, LastCause: result.LastCause}
 						}
 					} else {
@@ -944,9 +967,10 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// Claude Code can hold a sent message until a long tool call ends and only
 	// then write the user line to its session transcript, later than the
 	// proof window: the rc.12 claude-on-a-37s-tool case exited 15 (lost) while
-	// the message was received. When the transcript proof is armed (a local
-	// claude with a resolved transcript) and the window ends without proof
-	// while the target is still working, keep consulting the transcript until
+	// the message was received. This wait stays claude's: a working pi shows
+	// its Steering queue on the screen, and the path below returns queued for
+	// it. When the transcript proof is armed (a local claude with a resolved
+	// transcript) and the window ends without proof while the target is still working, keep consulting the transcript until
 	// the command --timeout — the same value as the busy-target wait — for any
 	// window, a sub-second one included: a count growth with no queue line on
 	// screen is sent, and a visible queue line is queued, before the wait's
@@ -957,7 +981,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// transcript has not shown the message yet, or at the first lap that ends
 	// undecided (a grown count whose screen cannot be read); a growth whose
 	// queue decision is immediate waits for nothing and says nothing.
-	if claudeTranscriptArmed {
+	if t.Kind == "claude" && transcript.armed {
 		if busy := agentGet(t.Machine, t.TargetArg, env); busy.OK && busy.Status == "working" {
 			deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
 			warned := false
@@ -967,7 +991,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 					_, _ = fmt.Fprintf(platform.Stderr, "send: %s is busy; waiting for its transcript to show the message (up to %ss)\n", t.RefShown, numberSeconds(timeoutMS))
 				}
 			}
-			if count, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); !(ok && count > claudeTranscriptPre) {
+			if count, ok := herdr.CountClaudeUserMarkerLines(transcript.path, "#"+id); !(ok && count > transcript.pre) {
 				warnBusy()
 			}
 			// The queue line, like the count growth, proves the queued outcome
@@ -987,7 +1011,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 					_, _ = fmt.Fprintf(platform.Stdout, "queued for %s: it takes the message when its current turn ends\n", t.RefShown)
 					return 0
 				}
-				if count, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); ok && count > claudeTranscriptPre {
+				if count, ok := herdr.CountClaudeUserMarkerLines(transcript.path, "#"+id); ok && count > transcript.pre {
 					// As in the window's transcript check, the count growth is
 					// not proof while the visible queue line still holds the id.
 					if visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env); visibleErr == "" {

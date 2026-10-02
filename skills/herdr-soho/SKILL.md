@@ -449,6 +449,21 @@ dispatch or amendment the transport refused restores `last-report-<agent>`,
 the pointer and the copy as they were, so the wait never follows a report
 that will not come.
 
+**One send per open brief.** Each dispatch records in its sidecar
+(`<state>/briefs/<agent>-<ts>.dispatch.json`) the task it belongs to
+(`task_report`) and the sha256 of the brief file's bytes (`brief_sha256`).
+Dispatching the same brief again to the same agent while its task is open
+sends nothing. Open means the task's current report is missing or empty,
+and the earlier member with the same bytes was accepted, is not
+`not-received`, and has no non-empty report of its own; a plain brief
+matches a plain one, an amendment an amendment. Then: `herdr-soho: dispatch: <agent> already has this
+brief (<path>); waiting on it without sending again (--resend sends it
+again)`, and the dispatch waits on the task's current report as if it had
+just sent it, with `duplicate_of` in the JSON (`--no-wait` exits 0 with it).
+A task whose current report is non-empty is closed: the same plain brief
+starts a new task, and the same amendment goes out as one more amendment
+of that task. `--resend` skips the check.
+
 `wait` prints one JSON line per agent (`done`, `blocked`, `question`,
 `settled-no-report`, `gone`, `unavailable`, `quota`, `provider-error`,
 `capacity`, `not-received`, `timeout`) and exits 0 only when all reports
@@ -610,7 +625,11 @@ rise in the count of its session transcript's `"type":"user"` lines that
 hold the composed path (escaped the way JSON writes it), read before the
 send, also confirms receipt within the window: a working claude can show
 none of the prompt on screen; only the count is read, and a remote target or
-a missing transcript keeps the screen checks. The generic `Read the file `
+a missing transcript keeps the screen checks. A local pi target gets the
+same proof from the session file Herdr reports for it (`agent_session` of
+kind `path`): only a line whose top-level `type` is `message` and whose
+`message.role` is `user`, with the path in its content, counts — an
+assistant reply or a tool result that cites the path never does. The generic `Read the file `
 marker from an earlier prompt does not count. Only this dispatch's unique
 composed prompt path in the recent screen confirms that the
 prompt is queued; with `--no-wait`, dispatch returns `queued`, and otherwise
@@ -796,7 +815,7 @@ $S session show | session clear [key]
 $S roles                                   # roles with the kind, model and effort in effect and where each comes from
 $S role reviewer                           # resolved file + frontmatter
 $S spawn implementer [--name impl] [--kind codex] [--direction right|down]
-$S dispatch impl <brief.md> [--timeout 900000] [--amend] [--compact]   # role prompt + brief → agent, waits; --amend amends the agent's current brief; --compact compacts an idle worker (claude, codex, pi, opencode) before the brief and keeps it unsent on a timeout (9) or a busy worker (10)
+$S dispatch impl <brief.md> [--timeout 900000] [--amend] [--resend] [--compact]   # role prompt + brief → agent, waits; --amend amends the agent's current brief; --resend sends a brief the agent already has open (see "One send per open brief"); --compact compacts an idle worker (claude, codex, pi, opencode) before the brief and keeps it unsent on a timeout (9) or a busy worker (10)
 $S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, pi, opencode): sends /compact once and waits for the CLI's proof plus its return to idle; a kind without a verified command exits 2, a timeout 9 (a claude timeout JSON carries a `transcript` field: `counted` when the session transcript was found and counted, `missing` without an id session or the file, `unreadable` when the file could not be read); a claude, pi or opencode with nothing to compact exits 0 with `nothing-to-compact`, and a failed compaction exits 9 with `failed` and a warning that cites the failing screen line (claude's `Error compacting conversation`, pi's `Compaction failed: …`); for pi the thinking goes to `off` during the compaction and comes back to the level it had, and a level that does not come back is warned; a pi timeout while "Compacting context" is still on screen adds `still_compacting: true` and a warning: wait and read the screen, do not send /compact again; for claude the proof can also come from the session transcript (a new `compact_boundary` line), because the Claude Code screen does not show the confirmation; for opencode the proof is the `▣ Compaction · <model> · <duration>` line (the line without the duration is not proof), and the command menu is checked before the Enter: only /compact on the first menu item gets the Enter, a menu without /compact (an empty session) clears the box with ctrl+u and exits 0, and /compact not on top or a menu that never appears clears the box and exits 4
 $S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines, one `<sha256>  <path>` per file as `sha256sum` prints it (a trailing `# note` after the path is dropped when the path without it exists; exit 16 on changed/missing or when the report has none, 4 when the report cannot be read)
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
@@ -855,9 +874,13 @@ otherwise — unless a later report of the agent's current task covers it:
 that task's report history (`<state>/task-report-<agent>.json`, the report
 paths in dispatch order) closes every earlier member of the task once a
 later one exists — the worker reports on the last amendment's path,
-covering the amended brief. The history is the current task's only: once
-the agent gets a new (non-amendment) brief, a brief of an older task that
-was closed this way can count as lost again. Each group
+covering the amended brief. The sidecars keep that relation for good: a
+brief whose sidecar names the same `task_report` as a later member that was
+accepted (`submission: accepted`, `not-received` included) and has a
+report is closed even after the agent moves on to a new task; a later
+member that failed or was only attempted closes nothing. Sidecars
+written before rc.13 have no `task_report`, and their briefs fall back to
+the current task's history only. Each group
 also has `no_report`, `minutes`,
 `partials` and `not_received`. The last field records a dispatch's
 arrival-check result even if a later wait recovers. JSON
@@ -1124,7 +1147,7 @@ logging `dialog` without typing into the dialog.
 The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.
 Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).
 Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000` (it never automatically re-prompts).
-Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof). For a pi target whose screen carries its two input-box borders (lines of `─`, or the working border `── ⠴ Working ──…` while it works), the closing line and the id count only inside its input box (the region between those lines), so a message already in its chat history is delivered, a message in its `Steering:` queue is queued, and the Enter goes only when the id is in that box. For a codex target whose screen holds a composer line (the last line that, without its left spaces, is `›` alone or begins with `› `, and sits within the last 8 non-empty lines), the closing line and the id count only inside its composer region (from that line to the bottom of the screen), so a message already in its history above the composer is delivered; a `↳` line holding the id above the composer is its follow-up queue — the result is `queued`, with no Enter sent. A Claude Code queue is recognized the same way: when the visible screen holds the message's id and the line `Press up to edit queued messages`, the result is `queued`, with no Enter sent.
+Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof). For a pi target whose screen carries its two input-box borders (lines of `─`, or the working border `── ⠴ Working ──…` while it works), the closing line and the id count only inside its input box (the region between those lines), so a message already in its chat history is delivered, a message in its `Steering:` queue is queued, and the Enter goes only when the id is in that box. For a codex target whose screen holds a composer line (the last line that, without its left spaces, is `›` alone or begins with `› `, and sits within the last 8 non-empty lines), the closing line and the id count only inside its composer region (from that line to the bottom of the screen), so a message already in its history above the composer is delivered; a `↳` line holding the id above the composer is its follow-up queue — the result is `queued`, with no Enter sent. A Claude Code queue is recognized the same way: when the visible screen holds the message's id and the line `Press up to edit queued messages`, the result is `queued`, with no Enter sent. A local claude or pi target whose session file resolves (claude: its transcript; pi: the file Herdr reports as its `agent_session`) also proves delivery in the window when the count of its user-message lines holding `#<id>` rises (for pi only a line whose top-level `type` is `message` and `message.role` is `user`; a pi `Steering:` line holding the id on screen keeps it `queued`); a remote target never reads a local file.
 When `agent prompt` reports `agent_prompt_stalled` — the prompt may be typed with its Enter missing — `send` reads the target's visible screen and, when `#<id>` sits in its input box (for pi between the box borders, for codex the composer region, for every other kind the last 15 non-empty lines) and no dialog is on screen, presses one Enter and runs the arrival window; a dialog on screen would take the Enter as its answer, so nothing is pressed and it exits 17 (`send: <ref> is showing a dialog after the message was typed; press nothing and read its pane`). Still unproven after the Enter, it exits 15 (`send: <ref> did not take the message: it sits in its input box after one Enter; read its pane before sending again`). Without the id in the box a single arrival check proves the taking once with the window's own rules (no key, no resend): proven taken is `sent`, not proven keeps the plain stalled exit 15. One Enter at most, no resend.
 If not verified by the end of the window: a local claude that is still `working` and whose session transcript was resolved keeps the transcript in evidence until the command's `--timeout` (the same value as the busy-target wait) — the transcript showing the message's `#<id>` line with no queue line on the visible screen is `sent`, and a visible queue line is `queued` (`queued for <ref>: it takes the message when its current turn ends`), due before the wait's laps and on every lap of it, independent of the count; no key is sent in the wait, and the warning `send: <ref> is busy; waiting for its transcript to show the message (up to <s>s)` goes once. Then, if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
 If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or screen)`).

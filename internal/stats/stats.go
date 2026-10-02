@@ -63,7 +63,7 @@ type CommandContext struct {
 	FrictionLog string
 }
 
-type sidecar struct{ submission, kind, model, effort, arrival, session string }
+type sidecar struct{ submission, kind, model, effort, arrival, session, taskReport, briefSHA string }
 type sessionInfo struct{ session, kind, model string }
 
 // sameSession decides whether two counted non-amendment pairs of the same
@@ -240,6 +240,10 @@ func readSidecar(p *prompt, logFile string) {
 	effort, eok := get("effort")
 	arrival, aok := get("arrival")
 	session, seok := get("session")
+	// s72 durable fields: optional; a sidecar without them stays valid, and a
+	// wrong-typed value is ignored rather than invalidating the sidecar.
+	taskReport, _ := get("task_report")
+	briefSHA, _ := get("brief_sha256")
 	av, ap := o.Get("arrival")
 	_, sp := o.Get("session")
 	_ = av
@@ -255,7 +259,7 @@ func readSidecar(p *prompt, logFile string) {
 	if sp {
 		ses = session
 	}
-	p.snapshot = &sidecar{sub, kind, model, effort, ar, ses}
+	p.snapshot = &sidecar{sub, kind, model, effort, ar, ses, taskReport, briefSHA}
 	p.counted = sub == "accepted"
 }
 func invalidSidecar(p *prompt, logFile string) {
@@ -551,6 +555,30 @@ func CmdStats(args []string, command CommandContext) int {
 			}
 		}
 	}
+	// The durable closure (s72): the sidecar's task_report ties each brief to
+	// its task and survives a later dispatch that repoints the pointer (D20);
+	// when a member has a non-empty report, every earlier member of the same
+	// task is closed, in dispatch order. This adds to the pointer closure
+	// above, which stays for the old sidecars without the field.
+	closedByTask := map[string]bool{}
+	for i := range pairs {
+		p := &pairs[i]
+		if p.snapshot == nil || p.snapshot.taskReport == "" || !p.hasReport {
+			continue
+		}
+		// A member whose sidecar is not an accepted submission (failed,
+		// attempted, or the field absent) does not close the group: a failed
+		// plain send points at the restored pointer's task and its late
+		// report belongs to its own, different task.
+		if p.snapshot.submission != "accepted" {
+			continue
+		}
+		for j := 0; j < i; j++ {
+			if q := &pairs[j]; q.snapshot != nil && q.snapshot.taskReport == p.snapshot.taskReport {
+				closedByTask[filepath.Clean(q.report)] = true
+			}
+		}
+	}
 	for i := range pairs {
 		pairs[i].isLast = pairs[i].counted && last[pairs[i].agent] == i
 	}
@@ -589,7 +617,7 @@ func CmdStats(args []string, command CommandContext) int {
 		} else {
 			a.tasks++
 		}
-		if !p.amendment && !p.hasReport && !closedReports[filepath.Clean(p.report)] {
+		if !p.amendment && !p.hasReport && !closedReports[filepath.Clean(p.report)] && !closedByTask[filepath.Clean(p.report)] {
 			if roster[p.agent] && p.isLast {
 				p.noReport = "pending"
 				a.pending++
