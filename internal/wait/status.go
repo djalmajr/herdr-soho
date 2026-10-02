@@ -12,7 +12,71 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/provider"
+	"github.com/djalmajr/herdr-soho/internal/sessionref"
 )
+
+// probeNotInRoster runs the D11 agent get for an agent outside the roster
+// and reports whether Herdr knows it (the call succeeds with an
+// agent_status), plus the command form that worked, for the hint. A
+// reference is resolved with sessionref.ParseRef like send: a remote
+// machine is queried with `herdr --machine <m> agent get <pane>`, and a
+// local reference (or a bare name) takes the local query
+// `herdr agent get <x>` — the pane id for a reference. A value that does
+// not parse as a reference keeps the local name behavior.
+func probeNotInRoster(agent string, env platform.Env) (bool, string) {
+	target, machine := agent, sessionref.LocalMachine
+	if ref := sessionref.ParseRef(agent); ref != nil {
+		target, machine = ref.PaneID, ref.Machine
+	}
+	if args := sessionref.HerdrMachineArgs(machine); len(args) > 0 {
+		query := append(append([]string{}, args...), "agent", "get", target)
+		return remoteAgentGetOK(query, env), "herdr " + strings.Join(query, " ")
+	}
+	st := herdr.AgentState(target, env, herdr.Timeout, nil)
+	return st.State != "gone" && st.State != "unavailable", "herdr agent get " + target
+}
+
+// remoteAgentGetOK reports whether a `herdr --machine <m> agent get <pane>`
+// succeeds with an agent_status — the remote half of the D11 probe. It
+// classifies like herdr.AgentState (a success with an agent_status is
+// known; agent_not_found and every failed call are not) but spends no
+// retry pause: a machine that does not answer reads as unknown-agent.
+func remoteAgentGetOK(args []string, env platform.Env) bool {
+	r := platform.RunCli("herdr", args, platform.RunOptions{Env: env, TimeoutMs: int(herdr.Timeout.Milliseconds())})
+	if r.TimedOut || r.Error == "ETIMEDOUT" || r.NotFound || r.Status == nil || *r.Status != 0 {
+		return false
+	}
+	v, err := jsonjs.Parse([]byte(r.Stdout))
+	if err != nil {
+		return false
+	}
+	o, okObj := v.(*jsonjs.Object)
+	if !okObj {
+		return false
+	}
+	res, okGet := o.Get("result")
+	if !okGet {
+		return false
+	}
+	ro, okObj := res.(*jsonjs.Object)
+	if !okObj {
+		return false
+	}
+	ag, okGet := ro.Get("agent")
+	if !okGet {
+		return false
+	}
+	ao, okObj := ag.(*jsonjs.Object)
+	if !okObj {
+		return false
+	}
+	status, okGet := ao.Get("agent_status")
+	if !okGet {
+		return false
+	}
+	s, okStr := status.(string)
+	return okStr && s != ""
+}
 
 func aliveInOtherPane(name, pane string, env platform.Env) (alive bool) {
 	defer func() {
@@ -75,7 +139,22 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 		if reportNonEmpty(report) {
 			state = "done"
 		} else if core.RosterLine(sd, agent) == "" {
-			state = "unknown-agent"
+			// D11: an agent outside this workspace's roster that Herdr knows —
+			// a local `agent get`, or the reference machine's, succeeds (find
+			// showed it: done or blocked) — is `not-in-roster`, not
+			// `unknown-agent`, which now stays for what Herdr does not know
+			// either (agent_not_found, or a failed agent get). The probe only
+			// runs here, on the not-in-roster branch: roster agents take the
+			// branch below and spend no extra agent get. A reference
+			// (machine/pane) is resolved like send: the query goes to the
+			// reference's machine, and a local reference or a bare name takes
+			// the local query; the hint cites the command form that worked.
+			if known, cmd := probeNotInRoster(agent, env); known {
+				state = "not-in-roster"
+				fmt.Fprintf(platform.Stderr, "herdr-soho: status: '%s' is not a worker of this workspace's team; %s shows its state\n", agent, cmd)
+			} else {
+				state = "unknown-agent"
+			}
 		} else {
 			fields := strings.Split(core.RosterLine(sd, agent), "\t")
 			pane := field(fields, 1)
