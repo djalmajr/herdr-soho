@@ -955,9 +955,8 @@ listed.
 `scripts/herdr-soho` is a POSIX `sh` launcher: it prefers the installed
 `herdr-soho` Go binary (or the path in `HERDR_SOHO_BIN`), then falls back to
 `scripts/herdr-soho.mjs` with `node` (20+) or `bun`. Set `HERDR_SOHO_JS=1` to
-force the JavaScript fallback. The fallback is frozen: behavior added since
-the Go port (the rc.8 metrics and later changes described here) exists only
-in the Go binary. Install the binary with `install.sh` (POSIX)
+force the JavaScript fallback. The fallback is frozen at the Go port:
+behavior added after it exists only in the Go binary. Install the binary with `install.sh` (POSIX)
 or `install.ps1` (Windows) from the GitHub releases. If no binary or JS
 runtime is available it exits 2 with an installation message.
 `scripts/herdr-soho.cmd` follows the same order for Windows. The `setup`
