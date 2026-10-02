@@ -229,7 +229,10 @@ resolved model id — `grok-4.7-xhigh` is xai); a reviewer must come from a
 dispatch a reviewer whose family matches a live edit agent unless
 `--allow-same-family` is passed. Pass `--for <author>` to compare only with
 whoever wrote the slice: an agent in the roster, a kind with a fixed family
-(`codex`, `claude`, …) or a family. Use it when another family's editor is
+(`codex`, `claude`, …), a family, or — when none of those matches — a model
+name or id whose family the skill recognizes (`qwen` or `qwen3.8-27b` is
+alibaba, `gpt-6.1-sol` openai, `grok-4.7` xai; a bare `opus` is not
+recognized: pass `--for anthropic`). Use it when another family's editor is
 alive, such as a cursor designer while a cursor reviewer checks codex code,
 and for code the orchestrator wrote itself (`--for anthropic` when it runs
 on claude).
@@ -765,7 +768,10 @@ worker of the same role, kind and cwd whose last report exists instead of
 opening a pane, and a reuse never counts against `max_workers`; `--reuse`/`--fresh`
 override per call; a reused worker keeps earlier briefs in context: compact
 or clear its session before an unrelated slice instead of opening another
-pane — see "One agent, one growing session"), `multi_role` (default `on`; one
+pane — see "One agent, one growing session"; the reuse JSON carries the
+worker's `model`, `effort` and `agent_args` like a new spawn's; two `spawn`
+calls in a row with no dispatch between them return the same idle worker,
+so dispatch to the first before spawning again, or pass `--fresh`), `multi_role` (default `on`; one
 idle agent may take another role — see "Setup: guided configuration"), `feedback` +
 `feedback_repo` (see "Improving this skill"), `approvals`
 (default for roles without one), `auto_approve` + `max_auto_approvals`
@@ -1255,7 +1261,12 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   `[partial]` and run by the orchestrator. A role or lane that needs
   network: `args.codex=-c sandbox_workspace_write.network_access=true`
   (every codex worker), or `role.<role>.args`/`lane.<name>.args` with the
-  same flag when that role or lane is configured with kind codex. They are flags of one CLI: they reach a worker only when the spawn runs the kind the configuration resolves for that role or lane (a `--kind` flag to another kind drops them, with a warning), because a codex `-c <key>=<value>` is `--continue` to claude, which resumes the orchestrator's conversation in the same cwd, and `--cloud` to cursor. `spawn` also refuses a resume flag for claude or cursor (`-c`, `--continue`, `-r`, `--resume`, `--cloud`) from any source, before a pane opens. The Herdr control socket is blocked
+  same flag when that role or lane is configured with kind codex. A codex
+  reviewer that must also write in a sibling repository the brief names
+  (its tests create files there) gets that directory with `--add-dir`:
+  `herdr-soho session set lane.review.args --add-dir /abs/path/to/sibling`
+  (an absolute path; join it with any other flags of that lane in one
+  value), then `release <name> --close` and spawn the reviewer again. They are flags of one CLI: they reach a worker only when the spawn runs the kind the configuration resolves for that role or lane (a `--kind` flag to another kind drops them, with a warning), because a codex `-c <key>=<value>` is `--continue` to claude, which resumes the orchestrator's conversation in the same cwd, and `--cloud` to cursor. `spawn` also refuses a resume flag for claude or cursor (`-c`, `--continue`, `-r`, `--resume`, `--cloud`) from any source, before a pane opens. The Herdr control socket is blocked
   the same way, so a nested orchestrator must not be a sandboxed codex.
 - **`release` without `--close` leaves the agent running.** `--close` ends
   it by closing the pane. Panes passed with `--pane` are never closed.
