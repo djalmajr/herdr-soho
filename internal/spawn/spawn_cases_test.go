@@ -303,16 +303,16 @@ func TestSpawnHelperJavaScriptCases(t *testing.T) {
 		})
 		f.env["HERDR_PANE_ID"] = "p1"
 		f.env["HERDR_AGENT_NAME"] = "caller"
-		if got := EnsureOrchestratorName(f.ctx, f.env); got != "orchestrator" {
+		if got := EnsureOrchestratorName(f.ctx, f.env, f.cwd, "test"); got != "orchestrator" {
 			t.Fatalf("name=%q", got)
 		}
 		f.env["HERDR_AGENT_NAME"] = "orchestrator"
-		if got := EnsureOrchestratorName(f.ctx, f.env); got != "orchestrator" {
+		if got := EnsureOrchestratorName(f.ctx, f.env, f.cwd, "test"); got != "orchestrator" {
 			calls, _ := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
 			t.Fatalf("idempotent name=%q calls=%#v", got, calls)
 		}
 		delete(f.env, "HERDR_PANE_ID")
-		if got := EnsureOrchestratorName(f.ctx, f.env); got != "" {
+		if got := EnsureOrchestratorName(f.ctx, f.env, f.cwd, "test"); got != "" {
 			t.Fatalf("without pane name=%q", got)
 		}
 	})
@@ -901,4 +901,33 @@ func TestSpawnNameDiffersFromBase(t *testing.T) {
 			t.Fatalf("spawn JSON=%q", stdout)
 		}
 	})
+}
+
+func Test_init_sub_orchestrator_spawn_lazy_rename_keeps_name(t *testing.T) {
+	// D12: the spawn's lazy rename of the caller must not rename a caller
+	// pane that is a roster row of this project (a sub-orchestrator the
+	// upper orchestrator opened): no agent rename of the caller, one stderr
+	// line naming it, and the spawn still opens the worker.
+	rules := []fakecli.Rule{{Argv: []string{"agent", "get", "p-sub"}, Stdout: `{"result":{"agent":{"name":"sub-orch","agent_status":"working"}}}`}}
+	rules = append(rules, freshSpawnRules()...)
+	f := newSpawnFixture(t, rules)
+	configureSpawnFixture(t, &f)
+	f.env["HERDR_PANE_ID"] = "p-sub"
+	f.roster(t, "sub-orch\tp-sub\tclaude\tsub-orchestrator\tanthropic\t1\t/tmp/work\tnow\t\t\t\t")
+	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"created_pane": true`) {
+		t.Fatalf("the spawn did not open the worker:\n%s", stdout)
+	}
+	want := "herdr-soho: spawn: this pane is 'sub-orch' in the roster (a sub-orchestrator opened by another orchestrator); keeping its name\n"
+	if !strings.Contains(stderr, want) {
+		t.Fatalf("missing the roster line:\n%s", stderr)
+	}
+	for _, c := range calls {
+		if len(c.Argv) >= 2 && c.Argv[0] == "agent" && c.Argv[1] == "rename" {
+			t.Fatalf("the caller's agent was renamed: %#v", calls)
+		}
+	}
 }
