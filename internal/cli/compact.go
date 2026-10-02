@@ -591,6 +591,13 @@ func compactCodexComposerRetry(agent, pane, kind string, env platform.Env) strin
 	if state.State != "idle" && state.State != "done" {
 		core.DieFriction(fmt.Sprintf("compact: '/compact' stayed in the composer of '%s' after the first Enter and the worker is %s; pressed nothing, nothing was compacted", agent, state.State), 4, frictionLogPath, "compact")
 	}
+	// The box can have changed since the confirm gave up (/compact ran late,
+	// or another command is in it now): the second Enter goes only to a
+	// composer that still holds /compact; any other screen goes back to the
+	// proof check with no key.
+	if !compactCodexComposerStuck(screen) {
+		return screen
+	}
 	herdr.PaneSendKeys(pane, "Enter", env)
 	if screen := compactComposerCleared(agent, env); screen != "" {
 		return screen

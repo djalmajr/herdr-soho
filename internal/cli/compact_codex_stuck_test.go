@@ -469,3 +469,36 @@ func TestCompactOnlyClockChanged(t *testing.T) {
 		t.Fatalf("json=%v want the timeout (a clock tick is not a proof)", value)
 	}
 }
+
+// TestCompactCodexRereadNotStuckSendsNoSecondEnter covers the R-S80d P2: the
+// re-read right before the second Enter no longer shows /compact in the box
+// (another command is there now, or /compact ran late), so no second Enter
+// goes out and the screen returns to the proof check.
+func TestCompactCodexRereadNotStuckSendsNoSecondEnter(t *testing.T) {
+	fakeFastClock(t, 6*time.Second)
+	const otherCommand = "earlier reply\n› /review\n"
+	f := newCompactFixture(t, "codex", []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
+		// 1: pre-send. 2: the first proof poll and 3: the confirm, both stuck.
+		// 4 on: the re-read before the second Enter and every later read show
+		// another command in the box.
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: codexClearedComposer},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: codexStuckComposer},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: codexStuckComposer},
+		{Argv: compactReadArgv("worker"), Stdout: otherCommand},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}}`},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "3000")
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 1 {
+		t.Fatalf("Enter calls=%d want 1 (no second Enter to another command): code=%d out=%s stderr=%s %#v", n, code, out, errText, calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 0 {
+		t.Fatalf("ctrl+u calls=%d want 0: %#v", n, calls)
+	}
+	if code == 0 {
+		t.Fatalf("no proof on screen, the compact must not report success: out=%s", out)
+	}
+}
