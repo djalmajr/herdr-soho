@@ -15,6 +15,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/doctor"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/kinds"
+	"github.com/djalmajr/herdr-soho/internal/metrics"
 	"github.com/djalmajr/herdr-soho/internal/peer"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	pluginpkg "github.com/djalmajr/herdr-soho/internal/plugin"
@@ -32,7 +33,7 @@ var knownCommands = map[string]bool{
 	"doctor": true, "explain": true, "init": true, "title": true, "regrid": true,
 	"roster": true, "friction": true, "feedback": true, "tab-label": true,
 	"layout-plan": true, "env": true, "mutation-guard": true, "mutation-copy": true,
-	"reopen": true, "compact": true,
+	"reopen": true, "compact": true, "metrics": true,
 }
 
 var frictionLogPath string
@@ -116,7 +117,7 @@ func Run(args []string, env platform.Env) (code int) {
 	commandCwd, _ := os.Getwd()
 	var commandConfig *core.Config
 	readOnlyRejectedDoctor := command == "doctor" && decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && len(args) > 1
-	if !readOnlyRejectedDoctor && (command == "config" || command == "session" || command == "roles" || command == "role" || command == "explain" || command == "layout-plan" || command == "regrid" || command == "tab-label" || command == "stats" || command == "collect" || command == "setup" || command == "release" || command == "doctor" || command == "init" || command == "spawn" || command == "dispatch" || command == "run" || command == "lint" || command == "wait" || command == "status") {
+	if !readOnlyRejectedDoctor && (command == "config" || command == "session" || command == "roles" || command == "role" || command == "explain" || command == "layout-plan" || command == "regrid" || command == "tab-label" || command == "stats" || command == "metrics" || command == "collect" || command == "setup" || command == "release" || command == "doctor" || command == "init" || command == "spawn" || command == "dispatch" || command == "run" || command == "lint" || command == "wait" || command == "status") {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		configCtx = &ctx
 	}
@@ -291,6 +292,8 @@ func Run(args []string, env platform.Env) (code int) {
 		return cmdTabLabel(args[1:], ctx, decisionEnv, commandCwd)
 	case "stats":
 		return stats.CmdStats(args[1:], stats.CommandContext{Config: ctx, Env: decisionEnv, Cwd: commandCwd, FrictionLog: frictionLogPath})
+	case "metrics":
+		return metrics.CmdMetrics(args[1:], metrics.CommandContext{Config: ctx, Env: decisionEnv, Cwd: commandCwd, FrictionLog: frictionLogPath})
 	case "collect":
 		return stats.CmdCollect(args[1:], stats.CommandContext{Config: ctx, Env: decisionEnv, Cwd: commandCwd, FrictionLog: frictionLogPath})
 	case "wait":
