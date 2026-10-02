@@ -73,10 +73,12 @@ if [ "$js_only" -eq 0 ]; then
   # try where install.sh (HERDR_SOHO_INSTALL_DIR or ~/.local/bin) or
   # install.ps1 (Git Bash: %LOCALAPPDATA%) put it.
   if [ -n "${HERDR_SOHO_INSTALL_DIR:-}" ]; then
-    candidate="$HERDR_SOHO_INSTALL_DIR/herdr-soho"
-    if usable_candidate "$candidate"; then
-      exec "$candidate" "$@"
-    fi
+    # install.ps1 names it herdr-soho.exe (Git Bash on Windows).
+    for candidate in "$HERDR_SOHO_INSTALL_DIR/herdr-soho" "$HERDR_SOHO_INSTALL_DIR/herdr-soho.exe"; do
+      if usable_candidate "$candidate"; then
+        exec "$candidate" "$@"
+      fi
+    done
   fi
   if [ -n "${HOME:-}" ]; then
     candidate="$HOME/.local/bin/herdr-soho"

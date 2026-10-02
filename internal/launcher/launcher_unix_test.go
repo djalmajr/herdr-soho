@@ -85,6 +85,7 @@ func TestPOSIXLauncherChoosesBinaryAndPreservesArguments(t *testing.T) {
 		// the fake fixture values below (never the host's).
 		{name: "HOME install dir binary, PATH without it", env: map[string]string{"HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23, noPathBinary: true, homeDir: "binary"},
 		{name: "custom install dir beats HOME", env: map[string]string{"HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23, noPathBinary: true, homeDir: "junk", installDir: "binary"},
+		{name: "custom install dir with the install.ps1 name (herdr-soho.exe)", env: map[string]string{"HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23, noPathBinary: true, installDir: "exe"},
 		{name: "install dir holding the shim falls back to JS with the warning", env: map[string]string{"HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23, noPathBinary: true, homeDir: "shim", wantStderr: "the herdr-soho binary was not found (PATH or the install directory)"},
 		{name: "no binary: JS with the warning", env: map[string]string{"HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23, noPathBinary: true, wantStderr: "the herdr-soho binary was not found (PATH or the install directory)"},
 		{name: "forced JS without any binary: no warning", env: map[string]string{"HERDR_SOHO_JS": "1", "HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23, noPathBinary: true, notStderr: "warning"},
@@ -165,7 +166,11 @@ func TestPOSIXLauncherChoosesBinaryAndPreservesArguments(t *testing.T) {
 			}
 			if test.installDir != "" {
 				dir := t.TempDir()
-				fixture.copyTestBinary(t, filepath.Join(dir, "herdr-soho"))
+				name := "herdr-soho"
+				if test.installDir == "exe" {
+					name = "herdr-soho.exe"
+				}
+				fixture.copyTestBinary(t, filepath.Join(dir, name))
 				test.env["HERDR_SOHO_INSTALL_DIR"] = dir
 			}
 
