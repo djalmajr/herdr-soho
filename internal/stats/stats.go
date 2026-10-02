@@ -566,6 +566,13 @@ func CmdStats(args []string, command CommandContext) int {
 		if p.snapshot == nil || p.snapshot.taskReport == "" || !p.hasReport {
 			continue
 		}
+		// A member whose sidecar is not an accepted submission (failed,
+		// attempted, or the field absent) does not close the group: a failed
+		// plain send points at the restored pointer's task and its late
+		// report belongs to its own, different task.
+		if p.snapshot.submission != "accepted" {
+			continue
+		}
 		for j := 0; j < i; j++ {
 			if q := &pairs[j]; q.snapshot != nil && q.snapshot.taskReport == p.snapshot.taskReport {
 				closedByTask[filepath.Clean(q.report)] = true
