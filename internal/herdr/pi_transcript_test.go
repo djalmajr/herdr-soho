@@ -1,0 +1,213 @@
+package herdr
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+)
+
+const piSessionFile = "2026-10-02T06-18-06-537Z_01a0fb43-4b49-70d7-8f62-5e7a10390e69.jsonl"
+
+// piSessionValue is the session file path the fake `agent get` reports for
+// the pi agent, under the given sessions root.
+func piSessionValue(root string) string {
+	return filepath.Join(root, "agent", "sessions", "--tmp-pi-work--", piSessionFile)
+}
+
+// piAgentGetWithSession is an agent get response carrying the agent_session
+// the way `herdr agent get` reports it for a pi agent.
+func piAgentGetWithSession(kind, value string) string {
+	body := `{"result":{"agent":{"agent":"pi","agent_status":"idle"`
+	if kind != "" || value != "" {
+		body += `,"agent_session":{"source":"herdr:pi","agent":"pi","kind":"` + kind + `","value":"` + value + `"}`
+	}
+	return body + `}}}`
+}
+
+// writePiSession creates the pi session file at the given absolute path and
+// returns it.
+func writePiSession(t *testing.T, path, content string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestPiSessionPath(t *testing.T) {
+	t.Run("a kind path session value that exists resolves to it", func(t *testing.T) {
+		root := t.TempDir()
+		value := piSessionValue(root)
+		writePiSession(t, value, `{"type":"message","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}`+"\n")
+		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "w"}, Stdout: piAgentGetWithSession("path", value)}})
+		if got := PiSessionPath("w", env); got != value {
+			t.Fatalf("path=%q want %q", got, value)
+		}
+	})
+	t.Run("an agent_session kind that is not path yields nothing", func(t *testing.T) {
+		root := t.TempDir()
+		value := piSessionValue(root)
+		writePiSession(t, value, `{"type":"message","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}`+"\n")
+		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "w"}, Stdout: piAgentGetWithSession("id", value)}})
+		if got := PiSessionPath("w", env); got != "" {
+			t.Fatalf("path=%q want empty", got)
+		}
+	})
+	t.Run("a missing agent_session yields nothing", func(t *testing.T) {
+		root := t.TempDir()
+		value := piSessionValue(root)
+		writePiSession(t, value, `{"type":"message"}`+"\n")
+		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "w"}, Stdout: `{"result":{"agent":{"agent":"pi","agent_status":"idle"}}}`}})
+		if got := PiSessionPath("w", env); got != "" {
+			t.Fatalf("path=%q want empty", got)
+		}
+	})
+	t.Run("an empty session value yields nothing", func(t *testing.T) {
+		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "w"}, Stdout: piAgentGetWithSession("path", "")}})
+		if got := PiSessionPath("w", env); got != "" {
+			t.Fatalf("path=%q want empty", got)
+		}
+	})
+	t.Run("a relative session value yields nothing even though a same-named file exists", func(t *testing.T) {
+		root := t.TempDir()
+		writePiSession(t, filepath.Join(root, piSessionFile), `{"type":"message"}`+"\n")
+		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "w"}, Stdout: piAgentGetWithSession("path", piSessionFile)}})
+		if got := PiSessionPath("w", env); got != "" {
+			t.Fatalf("path=%q want empty", got)
+		}
+	})
+	t.Run("a missing session file yields nothing", func(t *testing.T) {
+		root := t.TempDir()
+		value := piSessionValue(root)
+		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "w"}, Stdout: piAgentGetWithSession("path", value)}})
+		if got := PiSessionPath("w", env); got != "" {
+			t.Fatalf("path=%q want empty", got)
+		}
+	})
+	t.Run("an agent get failure yields nothing", func(t *testing.T) {
+		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "w"}, Code: 1, Stderr: `{"error":{"code":"agent_not_found","message":"gone"}}`}})
+		if got := PiSessionPath("w", env); got != "" {
+			t.Fatalf("path=%q want empty", got)
+		}
+	})
+}
+
+func TestCountPiUserMarkerLines(t *testing.T) {
+	marker := "#01020304"
+	userLine := `{"type":"message","id":"9a234373","parentId":"7dfce086","message":{"role":"user","content":[{"type":"text","text":"[herdr-soho:peer] ` + marker + ` end of message"}]}}`
+	t.Run("only the user message lines that hold the marker count", func(t *testing.T) {
+		// The assistant and toolResult lines model pi citing the id back in
+		// its own reply or in a tool result: a marker without the user
+		// message record is not delivery.
+		dir := t.TempDir()
+		path := filepath.Join(dir, piSessionFile)
+		content := strings.Join([]string{
+			`{"type":"message","id":"a","parentId":"0","message":{"role":"assistant","content":[{"type":"text","text":"did you mean ` + marker + `? I am still working"}]}}`,
+			userLine,
+			`{"type":"message","id":"b","parentId":"a","message":{"role":"toolResult","content":[{"type":"text","text":"the brief says ` + marker + ` but I have not started"}]}}`,
+			`{"type":"message","id":"c","parentId":"b","message":{"role":"user","content":[{"type":"text","text":"an earlier message without the marker"}]}}`,
+			`{"type":"message","id":"d","parentId":"c","message":{"role":"user","content":[{"type":"text","text":"[herdr-soho:peer] #99999999 end of message"}]}}`,
+			userLine,
+		}, "\n") + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountPiUserMarkerLines(path, marker)
+		if !ok || n != 2 {
+			t.Fatalf("count=(%d,%v) want (2,true)", n, ok)
+		}
+	})
+	t.Run("an assistant line whose text quotes the user record marker does not count", func(t *testing.T) {
+		// pi writes the text the way JSON.stringify does: the quotes of a
+		// quoted `"role":"user"` are escaped, so the record marker never
+		// appears as plain bytes in a non-user line.
+		dir := t.TempDir()
+		path := filepath.Join(dir, piSessionFile)
+		content := `{"type":"message","id":"a","parentId":"0","message":{"role":"assistant","content":[{"type":"text","text":"the record looks like \"type\":\"message\" \"role\":\"user\" with ` + marker + `"}]}}` + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountPiUserMarkerLines(path, marker)
+		if !ok || n != 0 {
+			t.Fatalf("count=(%d,%v) want (0,true)", n, ok)
+		}
+	})
+	t.Run("a line that holds the user record and the marker twice still counts once", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, piSessionFile)
+		content := `{"type":"message","id":"a","parentId":"0","message":{"role":"user","content":[{"type":"text","text":"` + marker + ` ` + marker + `"}]}}` + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountPiUserMarkerLines(path, marker)
+		if !ok || n != 1 {
+			t.Fatalf("count=(%d,%v) want (1,true)", n, ok)
+		}
+	})
+	t.Run("a matching line without a trailing newline still counts", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, piSessionFile)
+		content := `{"type":"message","id":"a","parentId":"0","message":{"role":"user","content":[{"type":"text","text":"earlier"}]}}` + "\n" +
+			`{"type":"message","id":"b","parentId":"a","message":{"role":"user","content":[{"type":"text","text":"` + marker + `"}]}}`
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountPiUserMarkerLines(path, marker)
+		if !ok || n != 1 {
+			t.Fatalf("count=(%d,%v) want (1,true)", n, ok)
+		}
+	})
+	t.Run("a line far past the default 64 KiB token still counts", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, piSessionFile)
+		long := `{"type":"message","id":"a","parentId":"0","message":{"role":"user","content":[{"type":"text","text":"` + strings.Repeat("a", 200*1024) + marker + `"}]}}` + "\n"
+		if err := os.WriteFile(path, []byte(long), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountPiUserMarkerLines(path, marker)
+		if !ok || n != 1 {
+			t.Fatalf("count=(%d,%v) want (1,true)", n, ok)
+		}
+	})
+	t.Run("an empty file counts zero", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), piSessionFile)
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountPiUserMarkerLines(path, marker)
+		if !ok || n != 0 {
+			t.Fatalf("count=(%d,%v) want (0,true)", n, ok)
+		}
+	})
+	t.Run("an unreadable file reports not ok with no count", func(t *testing.T) {
+		n, ok := CountPiUserMarkerLines(filepath.Join(t.TempDir(), "missing.jsonl"), marker)
+		if ok || n != 0 {
+			t.Fatalf("count=(%d,%v) want (0,false)", n, ok)
+		}
+	})
+	t.Run("the function returns no line text: its result is only the number", func(t *testing.T) {
+		// The signature is the contract (int, bool): no line content leaves
+		// the function. Run it on a session whose matching lines hold
+		// distinctive sentinel payloads and check only the count comes back.
+		dir := t.TempDir()
+		path := filepath.Join(dir, piSessionFile)
+		content := strings.Join([]string{
+			`{"type":"message","id":"a","parentId":"0","message":{"role":"user","content":[{"type":"text","text":"USER-SENTINEL-1 ` + marker + `"}]}}`,
+			`{"type":"message","id":"b","parentId":"a","message":{"role":"user","content":[{"type":"text","text":"USER-SENTINEL-2 ` + marker + `"}]}}`,
+			`{"type":"message","id":"c","parentId":"b","message":{"role":"assistant","content":[{"type":"text","text":"ASSISTANT-SENTINEL ` + marker + `"}]}}`,
+		}, "\n") + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n, ok := CountPiUserMarkerLines(path, marker)
+		if !ok || n != 2 {
+			t.Fatalf("count=(%d,%v) want (2,true)", n, ok)
+		}
+	})
+}

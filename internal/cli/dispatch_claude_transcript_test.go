@@ -111,7 +111,7 @@ func (f *claudeDispatchFixture) seedTranscript(t *testing.T, lines ...string) {
 // transcript does: the whole line is JSON, so the text inside its string is
 // escaped the way JSON writes it (a Windows path separator doubled, a quote
 // escaped). The product counts the path in that escaped form
-// (claudeTranscriptPathMarker, internal/cli/dispatch.go); a line written with
+// (transcriptPathMarker, internal/cli/dispatch.go); a line written with
 // the raw text never carries the marker on Windows, which is how the rc.11
 // gowin51 round failed.
 func claudeTranscriptLine(role, text string) string {
@@ -316,7 +316,7 @@ func TestDispatchClaudeTranscriptArrival(t *testing.T) {
 // TestClaudeTranscriptLineCarriesTheWindowsMarker: the rc.11 Windows round
 // (gowin51) failed TestDispatchClaudeTranscriptArrival because the fixture
 // line wrote the composed path as raw text while the product counts the path
-// the way JSON writes it (claudeTranscriptPathMarker): a Windows separator
+// the way JSON writes it (transcriptPathMarker): a Windows separator
 // doubled, a quote escaped. The line the fixture appends must carry the
 // marker the product counts, for a Windows-shaped composed path as well as a
 // Unix one.
@@ -325,9 +325,9 @@ func TestClaudeTranscriptLineCarriesTheWindowsMarker(t *testing.T) {
 	unixComposed := "/tmp/hs/001/state/ws/briefs/worker-20260929T000000.md"
 	report := "/tmp/hs/001/state/ws/reports/worker-20260929T000000.md"
 	cases := []struct{ name, line, marker string }{
-		{"amend text to a windows composed path", claudeTranscriptLine("user", claudeDispatchText(windowsComposed, report, true)), claudeTranscriptPathMarker(windowsComposed)},
-		{"normal text to a windows composed path", claudeTranscriptLine("user", claudeDispatchText(windowsComposed, report, false)), claudeTranscriptPathMarker(windowsComposed)},
-		{"amend text to a unix composed path", claudeTranscriptLine("user", claudeDispatchText(unixComposed, report, true)), claudeTranscriptPathMarker(unixComposed)},
+		{"amend text to a windows composed path", claudeTranscriptLine("user", claudeDispatchText(windowsComposed, report, true)), transcriptPathMarker(windowsComposed)},
+		{"normal text to a windows composed path", claudeTranscriptLine("user", claudeDispatchText(windowsComposed, report, false)), transcriptPathMarker(windowsComposed)},
+		{"amend text to a unix composed path", claudeTranscriptLine("user", claudeDispatchText(unixComposed, report, true)), transcriptPathMarker(unixComposed)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -349,8 +349,8 @@ func TestClaudeTranscriptPathMarker(t *testing.T) {
 		{"plain.md", "plain.md"},
 	}
 	for _, tc := range cases {
-		if got := claudeTranscriptPathMarker(tc.in); got != tc.want {
-			t.Fatalf("claudeTranscriptPathMarker(%q)=%q want %q", tc.in, got, tc.want)
+		if got := transcriptPathMarker(tc.in); got != tc.want {
+			t.Fatalf("transcriptPathMarker(%q)=%q want %q", tc.in, got, tc.want)
 		}
 	}
 }

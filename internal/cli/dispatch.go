@@ -368,35 +368,49 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			priorAuth[cause] = true
 		}
 	}
-	// A Claude Code target writes every prompt it takes into its local
-	// session transcript as a "type":"user" line, and a working claude can
-	// show none of the prompt on screen (the alternate screen scrolls, and
-	// the long composed path is split over lines): when the transcript
-	// resolves, a rise in the count of those lines holding this prompt's
-	// path, read before the send, is arrival proof within the check window.
-	// ClaudeTranscriptPath resolves with a local `agent get` plus a local
-	// file, so a remote target or one without a local agent_session resolves
+	// A Claude Code or pi target writes every prompt it takes into its local
+	// session transcript as a user line, and a working target can show none
+	// of the prompt on screen (the alternate screen scrolls, and the long
+	// composed path is split over lines): when the transcript resolves, a
+	// rise in the count of those lines holding this prompt's path, read
+	// before the send, is arrival proof within the check window.
+	// ClaudeTranscriptPath and PiSessionPath resolve with a local `agent get`
+	// plus a local file, so a target without a local session file (no
+	// agent_session, a kind that is not a local file, a missing file) resolves
 	// nothing and keeps the screen-based path, with no new warning. The
 	// count is the only thing read from the transcript: no line content is
 	// retained, logged, or returned.
-	claudeTranscriptPath := ""
-	claudeTranscriptPre := 0
-	claudeTranscriptArmed := false
-	if checkOn && kind == "claude" {
-		if path := herdr.ClaudeTranscriptPath(agent, env); path != "" {
-			if pre, ok := herdr.CountClaudeUserMarkerLines(path, claudeTranscriptPathMarker(composed)); ok {
-				claudeTranscriptPath = path
-				claudeTranscriptPre = pre
-				claudeTranscriptArmed = true
+	transcriptPath := ""
+	transcriptPre := 0
+	transcriptArmed := false
+	transcriptCount := func(path, marker string) (int, bool) { return 0, false }
+	if checkOn && (kind == "claude" || kind == "pi") {
+		switch kind {
+		case "claude":
+			transcriptCount = herdr.CountClaudeUserMarkerLines
+		case "pi":
+			transcriptCount = herdr.CountPiUserMarkerLines
+		}
+		var path string
+		if kind == "claude" {
+			path = herdr.ClaudeTranscriptPath(agent, env)
+		} else {
+			path = herdr.PiSessionPath(agent, env)
+		}
+		if path != "" {
+			if pre, ok := transcriptCount(path, transcriptPathMarker(composed)); ok {
+				transcriptPath = path
+				transcriptPre = pre
+				transcriptArmed = true
 			}
 		}
 	}
 	transcriptArrival := func() bool {
-		if !claudeTranscriptArmed {
+		if !transcriptArmed {
 			return false
 		}
-		count, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, claudeTranscriptPathMarker(composed))
-		return ok && count > claudeTranscriptPre
+		count, ok := transcriptCount(transcriptPath, transcriptPathMarker(composed))
+		return ok && count > transcriptPre
 	}
 	p := herdr.AgentPrompt(agent, text, env)
 	if !p.Ok {
@@ -732,12 +746,13 @@ func composedPathSeenOutsideInput(agent, composed string, env platform.Env) bool
 	return false
 }
 
-// claudeTranscriptPathMarker returns a path the way a Claude Code session
-// transcript writes it inside a JSON string: a backslash (the Windows path
-// separator) is written as two and a quote escaped, as JSON writes them. A
-// path without those characters comes back unchanged, so the Unix composed
-// path matches the transcript line verbatim.
-func claudeTranscriptPathMarker(path string) string {
+// transcriptPathMarker returns a path the way a session transcript (a
+// Claude Code session transcript, a pi session file) writes it inside a JSON
+// string: a backslash (the Windows path separator) is written as two and a
+// quote escaped, as JSON writes them. A path without those characters comes
+// back unchanged, so the Unix composed path matches the transcript line
+// verbatim.
+func transcriptPathMarker(path string) string {
 	var out strings.Builder
 	for _, r := range path {
 		switch r {
