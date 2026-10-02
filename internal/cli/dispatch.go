@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -1373,9 +1374,28 @@ func pathsCross(a, b string) bool {
 		p = strings.TrimRight(p, "/")
 		return p != "" && inside(p, t)
 	}
+	// dirTreeCross: g is a directory glob (a tree) and d a literal directory.
+	// They cross when d is, or sits inside, a directory g matches, or when d
+	// contains the glob's literal root.
+	dirTreeCross := func(g, d string) bool {
+		for p := d; p != "" && p != "." && p != "/"; p = path.Dir(p) {
+			if glob(g, p) {
+				return true
+			}
+		}
+		pre, _, _ := span(g)
+		pre = strings.TrimRight(pre, "/")
+		return pre != "" && inside(d, pre)
+	}
 	switch {
-	case da && db:
+	case da && db && !ga && !gb:
 		return inside(a, b)
+	case da && db && ga && !gb:
+		return dirTreeCross(a, b)
+	case da && db && gb && !ga:
+		return dirTreeCross(b, a)
+	case da && db:
+		// Two directory globs: the glob x glob comparison below.
 	case da && gb:
 		return crossDir(b, a)
 	case db && ga:
