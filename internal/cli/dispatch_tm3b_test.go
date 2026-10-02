@@ -24,7 +24,9 @@ func TestDispatchTM3bOwnedPathsAndOverlap(t *testing.T) {
 	t.Run("ownedPaths: spans, list items, normalization, stopwords, aliases, section end", func(t *testing.T) {
 		body := "# Goal\ntext\n## Owned files\n- `./internal/a.go`,\n- docs/\n- none\n- not `internal/no.go`\n### detail\n- internal/inside.go\n## Later\n- internal/ignored.go\n"
 		got := ownedPaths(body, nil)
-		want := []string{"internal/a.go", "internal/inside.go"}
+		// rc.12 (R-R12D): an owned directory keeps its trailing slash, so a
+		// glob such as *.md still crosses docs/; the frozen JS dropped it.
+		want := []string{"internal/a.go", "docs/", "internal/inside.go"}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("owned paths=%v, want %v", got, want)
 		}

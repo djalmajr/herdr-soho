@@ -3,6 +3,7 @@ package spawn
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"os"
 	"path/filepath"
@@ -1211,10 +1212,43 @@ func sameTreeEditors(thisName, role, workerCwd, sd string, env platform.Env, cwd
 			if fieldString(agent, "name") != cand.name || cand.pane != "" && fieldString(agent, "pane_id") != cand.pane {
 				continue
 			}
+			if !sharedTreeWarnDue(sd, thisName, cand.name, workerCwd, ctx, env) {
+				break
+			}
 			Warn(fmt.Sprintf("'%s' and '%s' both edit %s: builds and test runs see each other's changes in progress; give each a git worktree (spawn --cwd <worktree>) to isolate them", thisName, cand.name, workerCwd), ctx, env, "spawn")
 			break
 		}
 	}
+}
+
+// sharedTreeWarnDue records the shared-tree warn of one unordered pair in
+// one cwd as a wait marker (shared-tree-<hash>.warned, written like the
+// other state markers) and reports whether the warn is still due: the same
+// pair in the same cwd stays silent, a new pair or another cwd warns again.
+// The marker lives in the workspace's wait dir; the state dir only reached
+// spawn through core.StateDir, whose inside-the-skill refusal dies before any
+// write, so a marker is never created inside the skill.
+func sharedTreeWarnDue(sd, a, b, workerCwd string, ctx *core.Config, env platform.Env) bool {
+	first, second := a, b
+	if second < first {
+		first, second = second, first
+	}
+	stored := first + "\x00" + second + "\x00" + workerCwd
+	sum := fnv.New64a()
+	_, _ = sum.Write([]byte(stored))
+	marker := filepath.Join(sd, "wait", "shared-tree-"+fmt.Sprintf("%016x", sum.Sum64())+".warned")
+	if prev, err := platform.ReadTextFile(marker); err == nil && strings.TrimRight(prev, "\n") == stored {
+		return false
+	}
+	if err := os.MkdirAll(filepath.Join(sd, "wait"), 0o777); err != nil {
+		Warn(fmt.Sprintf("spawn: could not record the shared-tree warning marker: %s", text.SanitizeCause(err.Error())), ctx, env, "spawn")
+		return true
+	}
+	if err := os.WriteFile(marker, []byte(stored+"\n"), 0o666); err != nil {
+		Warn(fmt.Sprintf("spawn: could not record the shared-tree warning marker: %s", text.SanitizeCause(err.Error())), ctx, env, "spawn")
+		return true
+	}
+	return true
 }
 
 // PollIntervalMs is the shared wait poll override used by spawn start checks.
