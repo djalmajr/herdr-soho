@@ -115,8 +115,9 @@ var senderHostname = func() string {
 // PeerHeaderRemote is PeerHeader for a target on another machine: there, the
 // sender's own "local/<pane>" label would point at the target's machine and
 // the reply would fail, so line one names the pane on this machine's
-// hostname and the reply line uses the hostname as the machine part of the
-// reference (the parenthetical tells the receiver which hostname it is).
+// hostname and the reply line asks for this machine's name in the
+// receiver's herdr machine list (the sender cannot know that label), with the
+// hostname as the hint in the parenthetical.
 // Without a hostname (empty or emptied by the cleaning) the pane reads
 // "this machine" and the reply line drops the parenthetical: there is no
 // hostname for the receiver to look up. The second and fourth lines are the
@@ -130,7 +131,7 @@ func PeerHeaderRemote(pane, hostname, senderName, senderKind, senderRole, id str
 	if id != "" {
 		prefix += " #" + id
 	}
-	reply := fmt.Sprintf("Reply, if useful, with: herdr-soho send %s/%s \"<your reply>\"", machine, pane)
+	reply := fmt.Sprintf("Reply, if useful, with: herdr-soho send <this machine's name in your herdr machine list>/%s \"<your reply>\"", pane)
 	if hostname != "" {
 		reply += fmt.Sprintf(" (this machine is %s)", hostname)
 	}
@@ -154,6 +155,14 @@ func QuotePeerBody(body string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// HeaderField cleans a value that goes inside a header line: the
+// LiteralPeerText cleaning, then every run of whitespace (line breaks and
+// tabs included) becomes one space, so a value can never start a new line
+// of the header or forge a closing line.
+func HeaderField(s string) string {
+	return strings.Join(strings.Fields(LiteralPeerText(s)), " ")
 }
 
 func LiteralPeerText(s string) string {
@@ -730,14 +739,15 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	clean := LiteralPeerText
 	quotedBody := QuotePeerBody(clean(body))
 	endLine := PeerEndLine(id)
-	header := PeerHeader(clean(senderRef), clean(senderName), clean(senderKind), clean(senderRole), id)
+	field := HeaderField
+	header := PeerHeader(field(senderRef), field(senderName), field(senderKind), field(senderRole), id)
 	if t.Machine != sessionref.LocalMachine {
 		// A remote target would resolve the sender's "local/<pane>" back to
 		// its own machine: name the pane on this machine's hostname instead,
-		// and make the reply use the hostname as the machine part of the
-		// reference. The local header is byte-identical to before.
-		header = PeerHeaderRemote(strings.TrimPrefix(clean(senderRef), sessionref.LocalMachine+"/"),
-			clean(senderHostname()), clean(senderName), clean(senderKind), clean(senderRole), id)
+		// and ask for this machine's name in the receiver's machine list.
+		// The local header is byte-identical to before.
+		header = PeerHeaderRemote(strings.TrimPrefix(field(senderRef), sessionref.LocalMachine+"/"),
+			field(senderHostname()), field(senderName), field(senderKind), field(senderRole), id)
 	}
 	message := header + "\n\n" + quotedBody + "\n" + endLine
 	msgLines := strings.Count(message, "\n") + 1
