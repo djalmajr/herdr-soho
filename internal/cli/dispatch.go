@@ -261,14 +261,19 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		}
 	}
 	// The one-send-once guard (s72): the same brief for the agent's open task
-	// is never sent twice. The brief's bytes are read for the sidecar's
-	// brief_sha256 before the decision, so nothing is written when a member
-	// already carries the brief.
+	// is never sent twice. The sidecar's brief_sha256 is the digest of the
+	// brief's raw input bytes, read before the decision, so nothing is
+	// written when a member already carries the brief; the normalized text
+	// still serves the prompt composition.
 	briefRaw, err := platform.ReadTextFile(brief)
 	if err != nil {
 		panic(err)
 	}
-	briefSHA := sha256Hex([]byte(briefRaw))
+	rawBrief, err := os.ReadFile(brief)
+	if err != nil {
+		panic(err)
+	}
+	briefSHA := sha256Hex(rawBrief)
 	if !resend {
 		if dup := findDispatchDuplicate(sd, agent, briefSHA, amend); dup != nil {
 			return dispatchDuplicateResult(agent, role, kind, dup, noWait, timeoutRaw, sd, ctx, env, cwd)
@@ -409,10 +414,21 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	p := herdr.AgentPrompt(agent, text, env)
 	if !p.Ok {
-		if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, taskReport, briefSHA, "failed", "", session); err != nil {
+		_ = restoreTaskDispatch(sd, agent, lastPath, lastData, priorPointer)
+		// The failed sidecar records the pointer's task_report after the
+		// restoration — the task the pointer actually keeps; without a
+		// restored pointer the field is absent.
+		restoredReport := ""
+		if restored := taskreport.ReadTaskReportPointer(sd, agent); restored != nil {
+			if v, ok := restored.Get("task_report"); ok {
+				if s, isStr := v.(string); isStr {
+					restoredReport = s
+				}
+			}
+		}
+		if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, restoredReport, briefSHA, "failed", "", session); err != nil {
 			core.Warn(fmt.Sprintf("could not record the failed submission in the attempt sidecar %s: %s", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 		}
-		_ = restoreTaskDispatch(sd, agent, lastPath, lastData, priorPointer)
 		return writeDispatchError(agent, role, kind, composed, report, taskReport, p.Raw, 4,
 			"prompt submission failed; inspect with: herdr agent get "+agent+" && herdr agent read "+agent+". Do not resend blindly.")
 	}

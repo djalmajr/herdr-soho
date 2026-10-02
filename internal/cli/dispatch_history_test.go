@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/dispatch"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
 // s72: the durable task link of the dispatch sidecars (task_report +
@@ -359,4 +360,101 @@ func TestDispatchHistoryOneSendOnce(t *testing.T) {
 			t.Fatalf("composed briefs missing: %v", want)
 		}
 	})
+}
+
+// s72, emenda 2 (R-S72, revisão 026bc92): adapted from the reviewer's probes
+// in review-4-20261002T114058.probe.go (TestReviewCompletedAmendment,
+// TestReviewRawHash, TestReviewRestoredPointer). Before the three P2 fixes
+// they fail; after, they pass.
+
+// TestDispatchHistoryCompletedAmendment: a task closed through its current
+// report (the amendment's) does not keep suppressing a plain send of the
+// same content: the send happens as a new task.
+func TestDispatchHistoryCompletedAmendment(t *testing.T) {
+	f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
+	firstDispatch(t, f)
+	amend := filepath.Join(f.root, "amend.md")
+	if err := os.WriteFile(amend, []byte("# Amendment to your current brief\nChange it.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errText := f.run(t, "worker", amend, "--amend", "--no-wait")
+	if code != 0 {
+		t.Fatalf("amend code=%d out=%s stderr=%s", code, out, errText)
+	}
+	current, _ := dispatchOutputField(t, out, "report")
+	if err := os.WriteFile(current, []byte("completed task\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errText = f.run(t, "worker", f.brief, "--no-wait")
+	if code != 0 {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	if got := countDispatchCalls(mustCalls(t, f), "prompt"); got != 3 {
+		t.Fatalf("agent prompt calls=%d, want 3 (the completed task must not block a new send): %v", got, mustCalls(t, f))
+	}
+	if strings.Contains(out, "duplicate_of") {
+		t.Fatalf("the completed task was reported as a duplicate: %s", out)
+	}
+}
+
+// TestDispatchHistoryRawHash: the sidecar's brief_sha256 is the digest of
+// the brief's input bytes (raw, CRLF and all), not of the normalized text.
+func TestDispatchHistoryRawHash(t *testing.T) {
+	f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
+	raw, err := os.ReadFile(f.brief)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.brief, []byte(strings.ReplaceAll(string(raw), "\n", "\r\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	composed, _ := firstDispatch(t, f)
+	side := readSidecarFields(t, f, composed)
+	want := briefSHA256File(t, f.brief)
+	if side["brief_sha256"] != want {
+		t.Fatalf("brief_sha256=%v, want the raw input bytes digest %q: %v", side["brief_sha256"], want, side)
+	}
+}
+
+// TestDispatchHistoryRestoredPointer: a failed plain send restores the
+// pointer to the previous task, and the failed sidecar records the restored
+// pointer's task_report (absent without a restored pointer).
+func TestDispatchHistoryRestoredPointer(t *testing.T) {
+	f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0", fakecli.Rule{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Call: 2, Code: 7, Stderr: "refused second transport"})
+	firstDispatch(t, f)
+	prior := readPointerTaskReport(t, f, "worker")
+	configPath := filepath.Join(f.bin, "herdr.json")
+	cfgRaw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(cfgRaw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg["rules"] = []fakecli.Rule{
+		{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Code: 7, Stderr: "refused transport"},
+		{Argv: []string{"agent", "list"}, ArgvPrefix: true, Stdout: `{"result":{"agents":[]}}`},
+	}
+	cfgRaw, err = json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, cfgRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.brief, []byte("# Goal\nA different task\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
+	composed, _ := dispatchOutputField(t, out, "composed_prompt")
+	side := readSidecarFields(t, f, composed)
+	current := readPointerTaskReport(t, f, "worker")
+	t.Logf("code=%d prior=%s restored=%s failed_sidecar=%v", code, prior, current, side)
+	if code != 4 || current != prior || side["submission"] != "failed" {
+		t.Fatalf("restoration fixture failed: code=%d prior=%s restored=%s sidecar=%v out=%s stderr=%s", code, prior, current, side, out, errText)
+	}
+	if side["task_report"] != current {
+		t.Fatalf("failed sidecar task_report=%v, want the restored pointer's %q: %v", side["task_report"], current, side)
+	}
 }

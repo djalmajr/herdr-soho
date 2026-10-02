@@ -138,6 +138,12 @@ func findDispatchDuplicate(sd, agent, briefSHA string, amend bool) *dispatchDupl
 	if current != "" {
 		members = append(members, current)
 	}
+	// A task whose current report already exists and is not empty is
+	// finished: none of its members is a duplicate, and the same brief
+	// starts a new task.
+	if nonEmpty(current) {
+		return nil
+	}
 	for _, member := range members {
 		if nonEmpty(member) {
 			continue
