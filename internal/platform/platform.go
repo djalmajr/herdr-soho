@@ -87,6 +87,14 @@ var Stderr io.Writer = os.Stderr
 var Now = time.Now
 var renameFile = os.Rename
 
+// waitDelay bounds how long Wait tolerates a child still running after the
+// timeout fired and Cancel signalled it (SIGTERM on Unix): under heavy load
+// a well-behaved SIGTERM handler can take longer than the old 100 ms to
+// finish, and the child then ends up SIGKILLed instead of exiting through
+// its own handler. 1 s covers handlers on the order of a few hundred
+// milliseconds without hiding a genuinely stuck process for long.
+const waitDelay = 1 * time.Second
+
 func Current() string {
 	switch runtime.GOOS {
 	case "windows":
@@ -763,7 +771,7 @@ func runResolved(resolved string, args []string, opts RunOptions) (result RunRes
 			return cmd.Process.Kill()
 		}
 	}
-	cmd.WaitDelay = 100 * time.Millisecond
+	cmd.WaitDelay = waitDelay
 	cmd.Env = opts.Env.List()
 	cmd.Dir = opts.Cwd
 	if opts.Input != "" {
