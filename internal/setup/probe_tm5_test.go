@@ -157,9 +157,37 @@ func TestSetupProbeTM5ParityGoldens(t *testing.T) {
 		}
 	})
 	t.Run("// JS: \"parity: setup --probe a hung CLI is a timeout after the limit\"", func(t *testing.T) { // Mutation captured: dropping the timeout returns after the fake CLI's full delay instead of the golden timeout.
+		// D8: the Go timeout cause gained the fixed retry hint (timeoutRetryHint)
+		// while the frozen JS golden keeps "timeout after 1s": assert the golden's
+		// exact output with the cause substituted, so the rest stays
+		// byte-identical to the golden.
 		golden := readProbeGoldens(t)["probe-timeout"].Steps[0]
+		want := strings.Replace(golden.Out, "timeout after 1s\"", "timeout after 1s"+timeoutRetryHint+"\"", 1)
 		env, ctx := probeGoldenContext(t, "pi", "", []fakecli.Rule{{Argv: []string{"-p", "--no-session", ProbePrompt}, Delay: 1600}})
-		runProbeGoldenStep(t, golden, env, ctx)
+		old := platform.Stdout
+		var out bytes.Buffer
+		platform.Stdout = &out
+		t.Cleanup(func() { platform.Stdout = old })
+		code, message := 0, ""
+		func() {
+			defer func() {
+				if value := recover(); value != nil {
+					e, ok := value.(*platform.ExitError)
+					if !ok {
+						panic(value)
+					}
+					code, message = e.Code, e.Msg
+				}
+			}()
+			CmdProbe(golden.Args[2:], ctx, env, t.TempDir())
+		}()
+		gotErr := ""
+		if message != "" {
+			gotErr = "PROG: " + message + "\n"
+		}
+		if code != golden.RC || gotErr != golden.Err || out.String() != want {
+			t.Fatalf("args=%q got rc=%d err=%q out=%q; want rc=%d err=%q out=%q", golden.Args, code, gotErr, out.String(), golden.RC, golden.Err, want)
+		}
 	})
 }
 
@@ -189,7 +217,7 @@ func TestSetupProbeTM5Continuation(t *testing.T) {
 		start := time.Now()
 		got := probeOne(nil, "pi", "", "configured", 1, env, t.TempDir())
 		elapsed := time.Since(start)
-		if got.Status != "error" || got.Cause != "timeout after 1s" || elapsed < 900*time.Millisecond || elapsed > 2500*time.Millisecond {
+		if got.Status != "error" || got.Cause != "timeout after 1s (a timeout does not prove the assistant is unavailable; retry with --timeout 90)" || elapsed < 900*time.Millisecond || elapsed > 2500*time.Millisecond {
 			t.Fatalf("probe=%+v elapsed=%v", got, elapsed)
 		}
 	})
@@ -213,7 +241,7 @@ func TestSetupProbeTM5Continuation(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 			t.Fatal(err)
 		}
-		if len(got.Probes) != 1 || got.Probes[0].Cause != "timeout after 1s" || elapsed > 2500*time.Millisecond {
+		if len(got.Probes) != 1 || got.Probes[0].Cause != "timeout after 1s (a timeout does not prove the assistant is unavailable; retry with --timeout 90)" || elapsed > 2500*time.Millisecond {
 			t.Fatalf("probe=%+v elapsed=%v output=%s", got.Probes, elapsed, out.String())
 		}
 	})

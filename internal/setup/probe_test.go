@@ -26,16 +26,21 @@ func TestSetupProbeJavaScriptCases(t *testing.T) {
 		name string
 		run  func(*testing.T)
 	}{
-		{"probeTimeout: the env value wins, the default is 20 s", func(t *testing.T) {
-			if n, s := ProbeTimeout(platform.Env{}); n != 20 || s != "20" {
-				t.Fatalf("default=%d/%s", n, s)
+		{"probeTimeout: the defaults are 60 s for codex and 20 s for the rest", func(t *testing.T) {
+			if n := probeKindDefaultTimeout("codex"); n != 60 {
+				t.Fatalf("codex default=%d, want 60", n)
 			}
-			if n, s := ProbeTimeout(platform.Env{"HERDR_SOHO_PROBE_TIMEOUT": "7"}); n != 7 || s != "7" {
-				t.Fatalf("env=%d/%s", n, s)
+			for _, kind := range []string{"claude", "grok", "agy", "gemini", "cursor", "pi", "opencode"} {
+				if n := probeKindDefaultTimeout(kind); n != 20 {
+					t.Fatalf("%s default=%d, want 20", kind, n)
+				}
 			}
 		}},
 		{"probeTimeout: an invalid env value is a usage error 2, not a fallback", func(t *testing.T) {
+			env := fakeEnv(t, t.TempDir())
+			env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
 			for _, value := range []string{"0", "-1", "1.5", "abc"} {
+				env["HERDR_SOHO_PROBE_TIMEOUT"] = value
 				func() {
 					defer func() {
 						e, ok := recover().(*platform.ExitError)
@@ -43,7 +48,7 @@ func TestSetupProbeJavaScriptCases(t *testing.T) {
 							t.Errorf("value %q panic=%#v", value, recover())
 						}
 					}()
-					ProbeTimeout(platform.Env{"HERDR_SOHO_PROBE_TIMEOUT": value})
+					CmdProbe(nil, nil, env, t.TempDir())
 				}()
 			}
 		}},

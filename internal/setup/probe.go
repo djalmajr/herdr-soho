@@ -17,6 +17,22 @@ import (
 
 const ProbePrompt = "Reply with exactly ok"
 
+// timeoutRetryHint is the fixed hint appended to a probe timeout cause: a
+// timeout only bounds the probe, it does not prove the assistant is down
+// (rc.11: codex timed out at 20 s on Windows, then answered at 60 s).
+const timeoutRetryHint = " (a timeout does not prove the assistant is unavailable; retry with --timeout 90)"
+
+// probeKindDefaultTimeout is the window a kind probes with when neither
+// --timeout nor HERDR_SOHO_PROBE_TIMEOUT is set: codex gets 60 s (its
+// Windows cold start timed out at the 20 s window, a false negative), every
+// other kind stays at 20 s.
+func probeKindDefaultTimeout(kind string) int {
+	if kind == "codex" {
+		return 60
+	}
+	return 20
+}
+
 var noAuthRE = regexp.MustCompile(`(?i)not logged in|not (yet )?authenticated|please (log|sign) ?in|log ?in (to|first)|unauthorized|unauthenticated|(missing|no|invalid) (api )?key|api key (is )?(missing|required)|authentication (failed|required|error)|access denied|no (valid )?credentials`)
 
 type Probe struct {
@@ -27,17 +43,6 @@ type Probe struct {
 	Source string `json:"source"`
 }
 
-func ProbeTimeout(env platform.Env) (int, string) {
-	v := env.Get("HERDR_SOHO_PROBE_TIMEOUT")
-	if v == "" {
-		return 20, "20"
-	}
-	n, e := strconv.Atoi(v)
-	if e != nil || n < 1 || strconv.Itoa(n) != v {
-		platform.DieFriction("setup --probe: timeout must be a whole number of seconds ≥ 1", 2)
-	}
-	return n, v
-}
 func probeDefaultModel(ctx *core.Config, k string, env platform.Env, cwd string) string {
 	m := core.Cfg(ctx, "model_"+k+"_worker", "", env)
 	if m == "" {
@@ -78,7 +83,7 @@ func probeOne(ctx *core.Config, k, m, source string, timeout int, env platform.E
 	r := platform.RunCli(exe, probeArgs(k, m), platform.RunOptions{Env: env, Cwd: cwd, TimeoutMs: timeout * 1000, OutputFiles: true})
 	combined := r.Stdout + r.Stderr
 	if r.TimedOut || (r.Status == nil && r.Signal != "") {
-		return Probe{k, m, "error", fmt.Sprintf("timeout after %ds", timeout), source}
+		return Probe{k, m, "error", fmt.Sprintf("timeout after %ds%s", timeout, timeoutRetryHint), source}
 	}
 	for _, line := range strings.Split(combined, "\n") {
 		if noAuthRE.MatchString(line) {
@@ -131,16 +136,25 @@ func CmdProbe(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	if model != "" && kind == "" {
 		platform.DieFriction("setup --probe: --model needs --kind (probe one kind/model: --kind K --model M)", 2)
 	}
-	timeout, timeoutText := ProbeTimeout(env)
+	// HERDR_SOHO_PROBE_TIMEOUT and --timeout win over the kind defaults; an
+	// invalid value dies 2 before any probe CLI runs (the variable is checked
+	// first, as before).
+	envTimeout := 0
+	if v := env.Get("HERDR_SOHO_PROBE_TIMEOUT"); v != "" {
+		n, e := strconv.Atoi(v)
+		if e != nil || n < 1 || strconv.Itoa(n) != v {
+			platform.DieFriction("setup --probe: timeout must be a whole number of seconds ≥ 1", 2)
+		}
+		envTimeout = n
+	}
+	flagTimeout := 0
 	if to != "" {
 		n, e := strconv.Atoi(to)
 		if e != nil || n < 1 || strconv.Itoa(n) != to {
 			platform.DieFriction("setup --probe: timeout must be a whole number of seconds ≥ 1", 2)
 		}
-		timeout = n
-		timeoutText = to
+		flagTimeout = n
 	}
-	_ = timeoutText
 	if kind != "" {
 		found := false
 		for _, k := range kinds.KnownKinds {
@@ -189,6 +203,13 @@ func CmdProbe(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	probes := make([]any, 0, len(pairs))
 	eligible := make([]string, 0)
 	for _, p := range pairs {
+		timeout := probeKindDefaultTimeout(p.k)
+		if envTimeout > 0 {
+			timeout = envTimeout
+		}
+		if flagTimeout > 0 {
+			timeout = flagTimeout
+		}
 		result := probeOne(ctx, p.k, p.m, p.s, timeout, env, cwd)
 		probes = append(probes, jsonjs.O("kind", result.Kind, "model", result.Model, "status", result.Status, "cause", result.Cause, "source", result.Source))
 		if result.Status == "ready" {
