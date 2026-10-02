@@ -75,7 +75,19 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 		if reportNonEmpty(report) {
 			state = "done"
 		} else if core.RosterLine(sd, agent) == "" {
-			state = "unknown-agent"
+			// D11: an agent outside this workspace's roster that Herdr knows —
+			// a local `agent get`, or the reference machine's, succeeds (find
+			// showed it: done or blocked) — is `not-in-roster`, not
+			// `unknown-agent`, which now stays for what Herdr does not know
+			// either (agent_not_found, or a failed agent get). The probe only
+			// runs here, on the not-in-roster branch: roster agents take the
+			// branch below and spend no extra agent get.
+			if st := herdr.AgentState(agent, env, herdr.Timeout, nil); st.State != "gone" && st.State != "unavailable" {
+				state = "not-in-roster"
+				fmt.Fprintf(platform.Stderr, "herdr-soho: status: '%s' is not a worker of this workspace's team; herdr agent get %s shows its state\n", agent, agent)
+			} else {
+				state = "unknown-agent"
+			}
 		} else {
 			fields := strings.Split(core.RosterLine(sd, agent), "\t")
 			pane := field(fields, 1)
