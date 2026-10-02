@@ -528,8 +528,11 @@ up on a long port with four cheap panes:
   - installs no dependency the brief did not ask for: one made it in with
     `pip --user` on a Windows slice (infra, 2026-10-01).
 - The brief for a UI slice lists the async scenarios the slice must cover
-  (pending, cache, refetch); the first delivery of one tested the first
-  token of the stream, not the end (skedly, 2026-10-01).
+  (pending, cache, refetch): a UI slice missed its async state transitions
+  (appliance, 2026-10-01).
+- The brief for a streaming slice names the end of the stream when that is
+  what must not wait: one slice tested the first token, not the end, and its
+  write still held the stream's close (skedly, 2026-10-01).
 - On Windows, the brief asks for a base × current comparison of the tests,
   or the tests run on Linux: a regression hides in a test that already
   failed by platform (infra, 2026-10-01).
