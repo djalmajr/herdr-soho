@@ -218,7 +218,8 @@ func TestSendArrivalBusyClaudeTranscript(t *testing.T) {
 		}
 	})
 	t.Run("a remote claude target: nothing changes, no transcript, no warning", func(t *testing.T) {
-		prompt := newPrompt(t)
+		_ = newPrompt(t) // pins the id
+		prompt := remotePeerHeader(t, id) + "\n\n> hello\n" + peer.PeerEndLine(id)
 		rules := []fakecli.Rule{
 			{Argv: []string{"--machine", "windows", "agent", "get", "w0test:p0a"}, ArgvPrefix: true, Stdout: agentJSONKind("claude", "working", "1")},
 			{Argv: []string{"--machine", "windows", "agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: workingScreen},

@@ -39,7 +39,7 @@ func TestSendArrivalBusyR2ComposerSequence(t *testing.T) {
 		oldReader := rand.Reader
 		rand.Reader = bytes.NewReader([]byte{0x29, 0xa2, 0x58, 0x64})
 		t.Cleanup(func() { rand.Reader = oldReader })
-		return peer.PeerHeader("local/-", "-", "-", "-", id) + "\n\n> hello\n" + peer.PeerEndLine(id)
+		return remotePeerHeader(t, id) + "\n\n> hello\n" + peer.PeerEndLine(id)
 	}
 	promptArgv := func(prompt string) []string {
 		return append([]string{"--machine", "windows", "agent", "prompt", "w0test:p0a", prompt},
