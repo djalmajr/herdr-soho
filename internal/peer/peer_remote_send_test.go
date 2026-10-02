@@ -30,7 +30,10 @@ func TestSendRemoteClaudeTranscriptNotArmed(t *testing.T) {
 	oldReader := rand.Reader
 	rand.Reader = bytes.NewReader([]byte{1, 2, 3, 4})
 	defer func() { rand.Reader = oldReader }()
-	prompt := peer.PeerHeader("local/-", "-", "-", "-", id) + "\n\n> hello\n" + peer.PeerEndLine(id)
+	setSenderHostname(t, "Run2Biz.local")
+	// D7: a remote target cannot resolve "local/-" back to this machine, so
+	// the header names the pane on the sender's hostname.
+	prompt := peer.PeerHeaderRemote("-", "Run2Biz.local", "-", "-", "-", id) + "\n\n> hello\n" + peer.PeerEndLine(id)
 	userLine := `{"type":"user","message":{"content":"` + peer.PeerEndLine(id) + `"}}`
 	preScreen := "❯ \n"
 	rules := []fakecli.Rule{
@@ -80,7 +83,10 @@ func TestSendRemoteClaudeShortTurnSeqProof(t *testing.T) {
 	oldReader := rand.Reader
 	rand.Reader = bytes.NewReader([]byte{1, 2, 3, 4})
 	defer func() { rand.Reader = oldReader }()
-	prompt := peer.PeerHeader("local/-", "-", "-", "-", id) + "\n\n> hello\n" + peer.PeerEndLine(id)
+	setSenderHostname(t, "Run2Biz.local")
+	// D7: a remote target cannot resolve "local/-" back to this machine, so
+	// the header names the pane on the sender's hostname.
+	prompt := peer.PeerHeaderRemote("-", "Run2Biz.local", "-", "-", "-", id) + "\n\n> hello\n" + peer.PeerEndLine(id)
 	preScreen := "❯ \n"
 	// The remote screen right after the turn: the message's end line in the
 	// history and the turn's result, the input box only holds the
