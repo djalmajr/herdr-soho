@@ -125,7 +125,7 @@ func TestSendStalledEnter(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		want := "herdr-soho: send: local/w0test:p0a did not take the message: it sits in its input box after one Enter; read its pane before sending again\n"
+		want := "herdr-soho: send: local/w0test:p0a did not take the message: it sits in its input box after one Enter; read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -181,8 +181,12 @@ func TestSendStalledEnter(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: piSendScreen(history, "")},
 		}
 		f := newFixture(t, rules)
+		// The stalled window repeats the one-shot check of the old code on
+		// every poll: shorten it like the other subtests, and the unreadable
+		// reads of the window fail fast instead of running the default 15s.
+		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		want := "herdr-soho: send: local/w0test:p0a did not take the message (agent_prompt_stalled: stalled); read its pane before sending again\n"
+		want := "herdr-soho: send: local/w0test:p0a did not take the message (agent_prompt_stalled: stalled); read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
