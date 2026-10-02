@@ -1,5 +1,13 @@
 package doctor
-import("os";"path/filepath";"strings";"testing";"github.com/djalmajr/herdr-soho/internal/testutil/fakecli")
+
+import (
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
 func TestInitSubOrchestratorR2RosterOrchestratorPrefix(t *testing.T) {
 	// D12: the caller pane is already a roster row of this project (a
 	// sub-orchestrator the upper orchestrator opened), and its pane has no
@@ -54,7 +62,7 @@ func TestInitSubOrchestratorR2RosterTransientNameRead(t *testing.T) {
 		{Argv: []string{"--version"}, Stdout: "herdr 1.2.3\n"},
 		{Argv: []string{"status", "server"}, Stdout: "server 1.2.3\n"},
 		{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 1, Stdout: `{"result":{"agent":{"name":"cinzel-opus","agent_status":"working"}}}`},
-{Argv: []string{"agent", "get", "w0test:p0a"}, Code: 1, Stderr: "temporary get failure"},
+		{Argv: []string{"agent", "get", "w0test:p0a"}, Code: 1, Stderr: "temporary get failure"},
 		{Argv: []string{"agent", "list"}, Stdout: `{"result":{"agents":[]}}`},
 		{Argv: []string{"pane", "get", "w0test:p0a"}, Stdout: `{"result":{"pane":{"workspace_id":"ws"}}}`},
 	})
