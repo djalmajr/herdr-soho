@@ -14,6 +14,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/dispatch"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
+	"github.com/djalmajr/herdr-soho/internal/kinds"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/provider"
 	"github.com/djalmajr/herdr-soho/internal/spawn"
@@ -102,6 +103,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		core.DieFriction(fmt.Sprintf("unknown role '%s' (run: herdr-soho roles)", role), 3, frictionLogPath, "dispatch")
 	}
 	forAuthors, forUnknown := []string{}, []string{}
+	var forEntries []any
 	if forValue != nil {
 		for _, spec := range strings.Split(*forValue, ",") {
 			spec = strings.TrimSpace(spec)
@@ -114,6 +116,9 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			} else {
 				forUnknown = append(forUnknown, spec)
 			}
+			// The sidecar's "for" array carries the anonymized author (issue
+			// #39, part 2): the metrics line copies it, the name never does.
+			forEntries = append(forEntries, dispatchForAuthor(spec, sd, fam))
 		}
 		if !containsWord(core.ReviewRoles, role) {
 			core.DieFriction("dispatch: --for applies to a reviewer dispatch", 2, frictionLogPath, "dispatch")
@@ -250,7 +255,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		}
 	}
 	sidecar := dispatch.DispatchSidecar(composed)
-	if err := writeDispatchSidecar(sidecar, kind, model, effort, "attempted", "", session); err != nil {
+	if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, "attempted", "", session); err != nil {
 		taskReport := filepath.Join(sd, "reports", strings.TrimSuffix(filepath.Base(report), ".md")+".current.md")
 		return writeDispatchError(agent, role, kind, composed, report, taskReport, "couldn't write the attempt sidecar: "+sanitizeDispatchCause(err.Error()), 4,
 			fmt.Sprintf("could not write the attempt sidecar %s: %s", sidecar, sanitizeDispatchCause(err.Error())))
@@ -391,14 +396,14 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	p := herdr.AgentPrompt(agent, text, env)
 	if !p.Ok {
-		if err := writeDispatchSidecar(sidecar, kind, model, effort, "failed", "", session); err != nil {
+		if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, "failed", "", session); err != nil {
 			core.Warn(fmt.Sprintf("could not record the failed submission in the attempt sidecar %s: %s", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 		}
 		_ = restoreTaskDispatch(sd, agent, lastPath, lastData, priorPointer)
 		return writeDispatchError(agent, role, kind, composed, report, taskReport, p.Raw, 4,
 			"prompt submission failed; inspect with: herdr agent get "+agent+" && herdr agent read "+agent+". Do not resend blindly.")
 	}
-	if err := writeDispatchSidecar(sidecar, kind, model, effort, "accepted", "", session); err != nil {
+	if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, "accepted", "", session); err != nil {
 		core.Warn(fmt.Sprintf("could not record the accepted submission in the attempt sidecar %s: %s; the prompt went out", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 	}
 	status, resent, enterSent := "submitted", false, false
@@ -425,10 +430,10 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 				enterSent = true
 				core.Warn(fmt.Sprintf("prompt to '%s' sat in the input box; sent Enter", agent), frictionLogPath, "dispatch")
 				if !waitDispatchArrival(window, env, arrived) {
-					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, env, wasWorking, "an Enter on the text left in its input box")
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, forEntries, env, wasWorking, "an Enter on the text left in its input box")
 				}
 			} else if staleAuthBlock(agent, env, H0, preSeq, enterSent, resent) {
-				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, env, wasWorking, "its block on a provider auth error")
+				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, forEntries, env, wasWorking, "its block on a provider auth error")
 			} else {
 				core.Warn(fmt.Sprintf("prompt to '%s' did not arrive; sending it once more", agent), frictionLogPath, "dispatch")
 				H0 = strconv.FormatUint(uint64(waitpkg.CksumField(herdr.AgentRead(env, agent, "visible", nil))), 10)
@@ -440,10 +445,10 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 						return (strconv.FormatUint(uint64(waitpkg.CksumField(cur)), 10) != H0 && composedPathSeenOutsideInput(agent, composed, env)) || arrived()
 					}
 					if !waitDispatchArrival(window, env, proof) {
-						return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, env, wasWorking, "one resend")
+						return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, forEntries, env, wasWorking, "one resend")
 					}
 				} else {
-					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, env, wasWorking, "one resend")
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, forEntries, env, wasWorking, "one resend")
 				}
 			}
 		}
@@ -461,12 +466,12 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 					waitDispatchArrival(window, env, arrived)
 			}
 			if !ok {
-				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, env, true, "the working target showed no prompt evidence")
+				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, forEntries, env, true, "the working target showed no prompt evidence")
 			}
 			st := herdr.AgentState(agent, env, herdr.Timeout, nil)
 			if !(nonEmpty(report) || ((st.State == "working" || st.State == "blocked") && preSeq != "" && seqString(st.Seq) != "" && preSeq != seqString(st.Seq))) {
 				status = "queued"
-				if err := writeDispatchSidecar(sidecar, kind, model, effort, "accepted", "queued", session); err != nil {
+				if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, "accepted", "queued", session); err != nil {
 					core.Warn(fmt.Sprintf("could not record the queued arrival in the attempt sidecar %s: %s; the dispatch result stands", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 				}
 				seq := seqString(st.Seq)
@@ -541,6 +546,79 @@ func containsWord(list, word string) bool {
 		}
 	}
 	return false
+}
+
+// writeDispatchSidecar writes the attempt sidecar and, when the dispatch
+// resolved --for authors, adds their anonymized "for" array so the metrics
+// line can carry it (issue #39, part 2). The sidecar is rewritten in place
+// on every submission update, so the array goes on at every write.
+func writeDispatchSidecarFor(entries []any, path, kind, model, effort, submission, arrival, session string) error {
+	if err := writeDispatchSidecar(path, kind, model, effort, submission, arrival, session); err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	return addForToSidecar(path, entries)
+}
+
+// addForToSidecar re-writes the sidecar dispatch.WriteSidecar just wrote with
+// the "for" array set: the wait's metrics line copies it to the review line
+// and the author names stay out of both.
+func addForToSidecar(path string, entries []any) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	value, err := jsonjs.Parse(raw)
+	if err != nil {
+		return err
+	}
+	obj, ok := value.(*jsonjs.Object)
+	if !ok {
+		return fmt.Errorf("the sidecar %s is not a JSON object", path)
+	}
+	obj.Set("for", entries)
+	return platform.AtomicWrite(path, jsonjs.Stringify(obj)+"\n")
+}
+
+// dispatchForAuthor builds the anonymized --for entry for the sidecar
+// (issue #39, part 2): a roster agent carries its kind/model/effort/family
+// columns, only the non-empty ones, in that order; a kind with a fixed
+// family carries kind and family; a family or a released agent carries the
+// family the dispatch resolved for the spec. The author's name never
+// appears.
+func dispatchForAuthor(spec, sd, family string) *jsonjs.Object {
+	if line := core.RosterLine(sd, spec); line != "" {
+		cols := strings.Split(line, "\t")
+		at := func(i int) string {
+			if i < len(cols) {
+				return cols[i]
+			}
+			return ""
+		}
+		entry := jsonjs.O()
+		if v := at(2); v != "" {
+			entry.Set("kind", v)
+		}
+		if v := at(8); v != "" {
+			entry.Set("model", v)
+		}
+		if v := at(14); v != "" {
+			entry.Set("effort", v)
+		}
+		if v := at(4); v != "" {
+			entry.Set("family", v)
+		}
+		return entry
+	}
+	if fam := kinds.KindFamily(spec); fam != "unknown" {
+		return jsonjs.O("kind", spec, "family", fam)
+	}
+	if family != "" && family != "unknown" {
+		return jsonjs.O("family", family)
+	}
+	return jsonjs.O()
 }
 func nonEmpty(path string) bool { st, e := os.Stat(path); return e == nil && st.Size() > 0 }
 func seqString(value any) string {
@@ -696,9 +774,9 @@ func writeDispatchError(agent, role, kind, composed, report, taskReport, raw str
 	core.Warn(warning, frictionLogPath, "dispatch")
 	return code
 }
-func dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session string, env platform.Env, wasWorking bool, why string) int {
+func dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session string, forEntries []any, env platform.Env, wasWorking bool, why string) int {
 	_ = lane
-	if err := writeDispatchSidecar(sidecar, kind, model, effort, "accepted", "not-received", session); err != nil {
+	if err := writeDispatchSidecarFor(forEntries, sidecar, kind, model, effort, "accepted", "not-received", session); err != nil {
 		core.Warn(fmt.Sprintf("could not record the not-received arrival in the attempt sidecar %s: %s; the dispatch result stands", sidecar, dispatchCauseOrUnknown(err)), frictionLogPath, "dispatch")
 	}
 	seq := seqString(herdr.AgentState(agent, env, herdr.Timeout, nil).Seq)
