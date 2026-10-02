@@ -3,6 +3,7 @@ package peer_test
 import (
 	"bytes"
 	"crypto/rand"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -203,11 +204,113 @@ func TestSendArrivalBusyR2QueueDuringWait(t *testing.T) {
 	}
 }
 
+// appendTranscriptLineOnVisibleRead appends the transcript line on a fake
+// event, not a timer: the goroutine polls the fake herdr's call log and
+// appends once the nth counted `agent read ... --source visible` call after
+// the prompt call is logged, where counted excludes the readScreen
+// agent_not_idle fallback (internal/peer/peer.go): a visible read the log
+// shows right after a `recent` read is that fallback, which the proof
+// window's laps do, and it does not count. The window's laps otherwise log
+// no visible read (the target is working, so the moved-sequence shortcut
+// never fires; the count cannot grow before the line lands), so the first
+// counted read after the prompt is the busy wait entry's queue check and
+// the second is the wait's first lap. The line therefore lands inside the
+// busy wait — after the entry's count check, which warns — and is seen by
+// the first or the second lap, independent of machine load. The old 800 ms
+// timer was anchored on the prompt call's log write while the 500 ms window
+// is anchored on the fake prompt process's exit, so on a loaded host the
+// process's own lifetime could push the line inside the window and the
+// send proved in-window without the busy warning.
+func appendTranscriptLineOnVisibleRead(t *testing.T, callsLog, transcriptPath, line string, n int) <-chan bool {
+	t.Helper()
+	done := make(chan bool, 1)
+	go func() {
+		ok := false
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if calls, err := fakecli.ReadCalls(callsLog); err == nil {
+				if nVisibleReadsAfterPrompt(calls, n) {
+					f, werr := os.OpenFile(transcriptPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+					if werr == nil {
+						_, werr = f.WriteString(line + "\n")
+						_ = f.Close()
+						ok = werr == nil
+					}
+				}
+			}
+			if ok {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		done <- ok
+	}()
+	return done
+}
+
+// nVisibleReadsAfterPrompt reports whether at least n counted `agent read
+// … --source visible` calls are logged after the first `agent prompt`
+// call: a visible read whose previous logged call is a `recent` read is
+// readScreen's agent_not_idle fallback and does not count.
+func nVisibleReadsAfterPrompt(calls []fakecli.Call, n int) bool {
+	prompt := -1
+	for i, c := range calls {
+		if len(c.Argv) >= 2 && c.Argv[0] == "agent" && c.Argv[1] == "prompt" {
+			prompt = i
+			break
+		}
+	}
+	if prompt < 0 {
+		return false
+	}
+	reads := 0
+	for i := prompt + 1; i < len(calls); i++ {
+		if !isVisibleRead(calls[i].Argv) {
+			continue
+		}
+		if i > 0 && isRecentRead(calls[i-1].Argv) {
+			continue
+		}
+		reads++
+	}
+	return reads >= n
+}
+
+func isRecentRead(argv []string) bool {
+	if len(argv) < 2 || argv[0] != "agent" || argv[1] != "read" {
+		return false
+	}
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == "--source" && strings.HasPrefix(argv[i+1], "recent") {
+			return true
+		}
+	}
+	return false
+}
+
+func isVisibleRead(argv []string) bool {
+	if len(argv) < 2 || argv[0] != "agent" || argv[1] != "read" {
+		return false
+	}
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == "--source" && argv[i+1] == "visible" {
+			return true
+		}
+	}
+	return false
+}
+
 func TestSendArrivalBusyR2SubsecondWindow(t *testing.T) {
 	// P2: the transcript wait applied only to windows of at least a second.
 	// A sub-second window is a valid configuration: with the transcript
 	// proof armed and the target still working, the user line that lands
 	// after the 500 ms window must prove the arrival before the deadline.
+	// The line is written on the fake's second visible read after the
+	// prompt (the wait's first lap), not on a timer: the old 800 ms timer
+	// raced the fake prompt process's lifetime on a loaded host and could
+	// land inside the window, where the send proves without the busy
+	// warning (the review's "the busy warning goes to stderr exactly once:
+	// \"\"" failure).
 	const id = "01020304"
 	const cwd = "/tmp/claude-work"
 	// The transcript line holds the real peer end line (with the # marker),
@@ -239,7 +342,7 @@ func TestSendArrivalBusyR2SubsecondWindow(t *testing.T) {
 	f := newFixture(t, rules)
 	f.env["CLAUDE_CONFIG_DIR"] = configRoot
 	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "500", "50"
-	done := appendAfterPromptDelayed(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, userLine, 800)
+	done := appendTranscriptLineOnVisibleRead(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, userLine, 2)
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "4000", "hello"})
 	if code != 0 || out != "sent to local/w0test:p0a\n" {
 		t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -248,7 +351,7 @@ func TestSendArrivalBusyR2SubsecondWindow(t *testing.T) {
 		t.Fatalf("the busy warning goes to stderr exactly once: %q", stderr)
 	}
 	if !<-done {
-		t.Fatal("the transcript line was not appended after the prompt call")
+		t.Fatal("the transcript line was not appended after the wait's first lap")
 	}
 	if enters := countSendKeyEnters(t, f); enters != 0 {
 		t.Fatalf("no key is sent in the extended wait: %d enters", enters)
