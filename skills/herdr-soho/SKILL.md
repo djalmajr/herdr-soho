@@ -810,7 +810,7 @@ $S setup [--target FILE] [--no-hooks]      # AGENTS.md block + Claude hooks (ide
 $S setup --detect                          # JSON: installed kinds, summaries, models (incl. custom providers), recommended reviewer; writes nothing
 $S setup --probe [--kind K --model M]      # JSON: ready|no-auth|quota|error per kind/model + own pi/opencode models (≤5 per kind; rest in skipped_custom); no panes
 $S setup --plan …                          # diff -u per file (config files: key before → after) of what setup/--set/--user-set/--session-set would write; writes nothing
-$S session set <key> <value>               # this-session override in <state>/session.conf (above project, below flags/env); also <key>=<value>
+$S session set <key> <value>               # this-session override in <state>/session.conf (above project, below flags/env); also <key>=<value>; a value may begin with hyphens (session set lane.review.args --add-dir /abs/dir), and -- ends option parsing
 $S session show | session clear [key]
 $S roles                                   # roles with the kind, model and effort in effect and where each comes from
 $S role reviewer                           # resolved file + frontmatter
@@ -840,7 +840,7 @@ $S spawn reviewer --tab-label "onda 2"     # place the worker in the herd tab of
 $S layout-plan                             # where the next spawn lands (anchor, direction, overflow reason)
 $S status [a b …]                          # non-blocking completion check; no names = the whole team (all roster agents, in roster order, same output and exit code as naming them)
 $S config                                  # effective configuration and sources (incl. the session layer)
-$S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>
+$S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>; a value may begin with hyphens, and -- makes the rest (--project/--user included) the value
 $S roster                                  # live agents with role/kind/pane/state/report and the current task (TASK, from the pane title; '-' when none, cut to 40 characters)
 $S release impl [--close] [--force]        # forget the agent; --close closes a pane we created, or the recorded orphan's pane (idle or done)
 $S reopen impl [--force]                    # release --close + spawn --fresh with the roster's role, kind, model, effort, cwd and native args; output is the spawn JSON

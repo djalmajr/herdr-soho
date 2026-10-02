@@ -53,9 +53,17 @@ func CmdSession(argv []string, ctx *Config, env platform.Env, cwd string) {
 	}
 }
 
+// parseSessionPair reads <key> <value> or <key>=<value>. A value may begin
+// with hyphens (lane.review.args --add-dir /x): only an argument before the
+// key is an unknown option, and a "--" ends option parsing for what follows.
 func parseSessionPair(argv []string, command string) (key, value string, sawValue bool) {
+	noOptions := false
 	for _, arg := range argv {
-		if strings.HasPrefix(arg, "--") {
+		if !noOptions && arg == "--" {
+			noOptions = true
+			continue
+		}
+		if !noOptions && key == "" && strings.HasPrefix(arg, "--") {
 			platform.Die(fmt.Sprintf("%s: unknown option '%s'", command, arg), 2)
 		}
 		if key == "" {
