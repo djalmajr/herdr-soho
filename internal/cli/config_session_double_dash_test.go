@@ -70,3 +70,17 @@ func TestSetValuesWithDoubleDash(t *testing.T) {
 		}
 	})
 }
+
+// A "--x" after a value that does not begin with a hyphen keeps the old
+// unknown-option diagnostic (the JS goldens record it).
+func TestSetUnknownOptionAfterPlainValue(t *testing.T) {
+	env, cwd := commandFixture(t)
+	code, _, errOut := runIn(t, []string{"config", "set", "max_workers", "5", "--bogus"}, env, cwd)
+	if code != 2 || !strings.Contains(errOut, "config set: unknown option '--bogus'") {
+		t.Fatalf("config code=%d err=%q", code, errOut)
+	}
+	code, _, errOut = runIn(t, []string{"session", "set", "layout", "tab", "--bogus"}, env, cwd)
+	if code != 2 || !strings.Contains(errOut, "session set: unknown option '--bogus'") {
+		t.Fatalf("session code=%d err=%q", code, errOut)
+	}
+}
