@@ -28,22 +28,22 @@ var reviewRoles = map[string]bool{
 	"inspector":         true,
 }
 
-// exportLine is one line of a `metrics export` summary (issue #39, part 3).
+// tableLine is one line of a `metrics export` summary (issue #39, part 3).
 // Every key is optional; pointers distinguish absence from zero.
-type exportLine struct {
+type tableLine struct {
 	Role          *string            `json:"role"`
 	Type          *string            `json:"type"`
 	Kind          *string            `json:"kind"`
 	Model         *string            `json:"model"`
 	Effort        *string            `json:"effort"`
 	DurationS     *float64           `json:"duration_s"`
-	Items         *exportItems       `json:"items"`
+	Items         *tableItems        `json:"items"`
 	FindingsReal  *float64           `json:"findings_real"`
 	FindingsFalse *float64           `json:"findings_false"`
 	Missed        map[string]float64 `json:"missed"`
 }
 
-type exportItems struct {
+type tableItems struct {
 	Done    *float64 `json:"done"`
 	Partial *float64 `json:"partial"`
 	Skipped *float64 `json:"skipped"`
@@ -123,7 +123,7 @@ func parseTableArgs(args []string) (writeTarget string, files []string, ok bool)
 // readExportLines reads every file, line by line. A missing or unreadable
 // file exits 4 with the path; a line that is not a JSON object is counted
 // malformed; blank lines are ignored.
-func readExportLines(files []string, c CommandContext) (lines []exportLine, malformed int) {
+func readExportLines(files []string, c CommandContext) (lines []tableLine, malformed int) {
 	for _, path := range files {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -147,14 +147,14 @@ func readExportLines(files []string, c CommandContext) (lines []exportLine, malf
 
 // parseExportLine accepts only JSON objects; JSON values that are not
 // objects (arrays, scalars, null) and wrong-typed fields are malformed.
-func parseExportLine(line string) (exportLine, bool) {
+func parseExportLine(line string) (tableLine, bool) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(line), &object); err != nil || object == nil {
-		return exportLine{}, false
+		return tableLine{}, false
 	}
-	var l exportLine
+	var l tableLine
 	if err := json.Unmarshal([]byte(line), &l); err != nil {
-		return exportLine{}, false
+		return tableLine{}, false
 	}
 	return l, true
 }
@@ -167,7 +167,7 @@ func fieldOr(v *string) string {
 	return *v
 }
 
-func collectGroups(lines []exportLine) []*tableGroup {
+func collectGroups(lines []tableLine) []*tableGroup {
 	byKey := make(map[groupKey]*tableGroup)
 	var out []*tableGroup
 	for _, l := range lines {
@@ -266,17 +266,19 @@ func medianMinutes(durations []float64) string {
 }
 
 // partialPercent is the rounded integer share of the lines with
-// items.partial > 0 among the lines that have items; "-" when none do.
+// items.partial > 0 among the lines that have items, with a % sign; "-"
+// when none do.
 func partialPercent(seen, partial int) string {
 	if seen == 0 {
 		return "-"
 	}
-	return fmt.Sprintf("%d", int(math.Round(100*float64(partial)/float64(seen))))
+	return fmt.Sprintf("%d%%", int(math.Round(100*float64(partial)/float64(seen))))
 }
 
 // precisionCell is only filled for review roles: the share of labeled
-// findings that turned out real, as a rounded integer percent followed by
-// (k), the total labeled findings; "-" without labels or outside them.
+// findings that turned out real, as a rounded integer percent with a % sign
+// followed by (k), the total labeled findings; "-" without labels or
+// outside them.
 func precisionCell(g *tableGroup) string {
 	if !reviewRoles[g.role] {
 		return "-"
@@ -286,7 +288,7 @@ func precisionCell(g *tableGroup) string {
 		return "-"
 	}
 	percent := int(math.Round(100 * g.findingsReal / labeled))
-	return fmt.Sprintf("%d (%s)", percent, formatCount(labeled))
+	return fmt.Sprintf("%d%% (%s)", percent, formatCount(labeled))
 }
 
 // missedCell is only filled for review roles: the sum of every value of

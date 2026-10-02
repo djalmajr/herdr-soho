@@ -101,13 +101,13 @@ func TestTable_CoreGroupAndColumns(t *testing.T) {
 	if err != "" {
 		t.Fatalf("stderr = %q, want empty", err)
 	}
-	// group A: even median (1200+1800)/2=1500 -> 25.0; Partial 1/3 -> 33;
-	// Precision (3+1)/(4+1) -> 80 (5); Missed 1+2+1=4; n=4 -> low.
-	// group B: odd median 900 -> 15.0; Partial 1/2 -> 50; not a review
+	// group A: even median (1200+1800)/2=1500 -> 25.0; Partial 1/3 -> 33%;
+	// Precision (3+1)/(4+1) -> 80% (5); Missed 1+2+1=4; n=4 -> low.
+	// group B: odd median 900 -> 15.0; Partial 1/2 -> 50%; not a review
 	// role, so Precision and Missed are "-"; n=3 -> low.
 	want := tableHeader +
-		"| implementer | build | fix | beta | low | 3 | 15.0 | 50 | - | - | low |\n" +
-		"| reviewer | review | patch | alpha | high | 4 | 25.0 | 33 | 80 (5) | 4 | low |\n"
+		"| implementer | build | fix | beta | low | 3 | 15.0 | 50% | - | - | low |\n" +
+		"| reviewer | review | patch | alpha | high | 4 | 25.0 | 33% | 80% (5) | 4 | low |\n"
 	if out != want {
 		t.Fatalf("stdout =\n%s\nwant:\n%s", out, want)
 	}
@@ -499,4 +499,37 @@ func TestTable_WriteRealProfiles(t *testing.T) {
 // tableEndMarkerIndex locates the end marker in the write fixture.
 func tableEndMarkerIndex(s string) int {
 	return strings.Index(s, "<!-- herdr-soho:metrics-table:end -->")
+}
+
+// TestTable_EndToEndExportAndTable is the point-to-point check: it builds a
+// state metrics.jsonl with one settled review line and one mark line, runs
+// CmdExport, writes the export to a file, and runs CmdTable over it. The
+// table row's Precision and Missed must come from the mark.
+func TestTable_EndToEndExportAndTable(t *testing.T) {
+	f := newExportFixture(t, map[string]string{
+		"ws1/metrics.jsonl": strings.Join([]string{
+			`{"ts":"2026-09-30T21:00:00Z","report":"rev.md","role":"reviewer","type":"review","kind":"codex","model":"gpt-5","family":"openai","effort":"high","duration_s":1800,"items":{"done":2,"partial":1,"skipped":0},"verdict":"fail","findings":3,"severity":{"P0":0,"P1":1,"P2":2,"P3":0},"verdict_effective":"fail"}`,
+			`{"ts":"2026-09-30T23:00:00Z","label":"mark","report":"rev.md","findings":{"1":"real","2":"real","3":"false"},"missed":{"P2":1}}`,
+		}, "\n") + "\n",
+	})
+	exportOut, exportErr, exportCode, _ := f.run(t)
+	if exportCode != 0 {
+		t.Fatalf("export exit = %d, stderr = %q", exportCode, exportErr)
+	}
+	exportFile := tableWriteFile(t, t.TempDir(), "export.jsonl", exportOut)
+
+	code, out, err := tableRun(t, []string{exportFile})
+	if code != 0 {
+		t.Fatalf("table exit = %d, stderr = %q", code, err)
+	}
+	if err != "" {
+		t.Fatalf("table stderr = %q, want empty", err)
+	}
+	// n=1; median 1800/60=30.0; Partial 1/1=100%; Precision 2/(2+1)=67% (3)
+	// and Missed P2:1 both come from the mark line; n=1 -> low.
+	want := tableHeader +
+		"| reviewer | review | codex | gpt-5 | high | 1 | 30.0 | 100% | 67% (3) | 1 | low |\n"
+	if out != want {
+		t.Fatalf("table stdout =\n%s\nwant:\n%s\nexport was:\n%s", out, want, exportOut)
+	}
 }
