@@ -18,6 +18,14 @@ func TestDispatchHintsR3Paths(t *testing.T) {
 			t.Error("glob directory lost its common subtree src/components/a.ts")
 		}
 	})
+	t.Run("a directory glob does not cross a sibling tree under its prefix (R-R12D3)", func(t *testing.T) {
+		if pathsCross("src/*/components/", "src/foo/tests/") || pathsCross("src/foo/tests/", "src/*/components/") {
+			t.Error("src/*/components/ crossed the sibling tree src/foo/tests/")
+		}
+		if !pathsCross("src/*/components/", "src/") || !pathsCross("src/*/components/", "src/foo/components/x/") {
+			t.Error("the directory glob lost its root or a tree it matches")
+		}
+	})
 	// JS: "dispatch: a character class crosses the star glob that shares a file with it"
 	t.Run("pathsCross: a character class and a star glob cross on their common file", func(t *testing.T) {
 		if !pathsCross("src/[ab].ts", "src/*.ts") || !pathsCross("src/*.ts", "src/[ab].ts") {

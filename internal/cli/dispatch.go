@@ -1385,7 +1385,9 @@ func pathsCross(a, b string) bool {
 		}
 		pre, _, _ := span(g)
 		pre = strings.TrimRight(pre, "/")
-		return pre != "" && inside(d, pre)
+		// One-sided: d contains the root; a d merely under the prefix is a
+		// sibling tree unless an ancestor matched above.
+		return pre != "" && (d == pre || strings.HasPrefix(pre, d+"/"))
 	}
 	switch {
 	case da && db && !ga && !gb:
