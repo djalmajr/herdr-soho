@@ -63,13 +63,36 @@ func ModelsCacheFile(kind string, env platform.Env) string {
 	return filepath.Join(dir, "herdr-soho-models-"+kind+".txt")
 }
 
+// ModelIDs reads the model list of the kind, honoring the 1-hour copy in
+// TMPDIR for the kinds whose source is a CLI. codex never uses the copy:
+// its source is the local ~/.codex/models_cache.json, which is cheap to
+// re-read, and a stale copy could hide a model Codex just added (the doctor
+// then reported "does not resolve" until the copy expired).
 func ModelIDs(kind string, env platform.Env) []string {
+	ids, _ := modelIDs(kind, env, false)
+	return ids
+}
+
+// hasModelSource reports whether the kind's list comes from a source that
+// can change behind the 1-hour copy (the cursor/agy/grok CLI listing). codex
+// reads its source directly (no copy); the other kinds (claude, ...) have no
+// source — a copy, when present, is all the list there is.
+func hasModelSource(kind string) bool {
+	return kind == "cursor" || kind == "agy" || kind == "grok"
+}
+
+// modelIDs reads the model list of the kind from its source. skipCopy
+// ignores the 1-hour copy read (the copy is still rewritten on success);
+// fromCopy reports whether the returned list came from that copy.
+func modelIDs(kind string, env platform.Env, skipCopy bool) ([]string, bool) {
 	file := ModelsCacheFile(kind, env)
 	shortRaw, short := env.Lookup("HERDR_SOHO_MODELS_TIMEOUT")
 	short = short && shortRaw != ""
-	if st, err := os.Stat(file); err == nil && st.Size() > 0 && st.ModTime().After(platform.Now().Add(-time.Hour)) {
-		if data, err := os.ReadFile(file); err == nil {
-			return nonemptyLines(string(data))
+	if kind != "codex" && !skipCopy {
+		if st, err := os.Stat(file); err == nil && st.Size() > 0 && st.ModTime().After(platform.Now().Add(-time.Hour)) {
+			if data, err := os.ReadFile(file); err == nil {
+				return nonemptyLines(string(data)), true
+			}
 		}
 	}
 	seconds := func(fallback float64) (int, bool) {
@@ -122,10 +145,10 @@ func ModelIDs(kind string, env platform.Env) []string {
 			}
 		}
 	}
-	if !short && len(out) > 0 {
+	if kind != "codex" && !short && len(out) > 0 {
 		_ = os.WriteFile(file, []byte(strings.Join(out, "\n")+"\n"), 0600)
 	}
-	return out
+	return out, false
 }
 func nonemptyLines(data string) []string {
 	var out []string
@@ -280,7 +303,7 @@ func ResolveModel(kind, spec, effort string, env platform.Env, warn WarnFunc) (s
 	if warn == nil {
 		warn = DefaultWarn
 	}
-	ids := ModelIDs(kind, env)
+	ids, fromCopy := modelIDs(kind, env, false)
 	if len(ids) == 0 {
 		if kind == "claude" {
 			if m := claudeDottedAliasRE.FindStringSubmatch(spec); m != nil {
@@ -289,6 +312,37 @@ func ResolveModel(kind, spec, effort string, env platform.Env, warn WarnFunc) (s
 		}
 		return spec, nil
 	}
+	if resolved, matched := resolveModelInList(kind, spec, effort, ids); matched {
+		return resolved, nil
+	}
+	// A list that came from the 1-hour copy may be stale (the source gained
+	// a model since the copy was written): re-read the source once, ignoring
+	// the copy (and rewriting it), before declaring the spec unmatched. Only
+	// the kinds with a real source are re-read — the copy of a kind without
+	// one is all the list there is, and a now-empty source passes the spec
+	// through unchanged, as with a cold list.
+	if fromCopy && hasModelSource(kind) {
+		fresh, _ := modelIDs(kind, env, true)
+		if len(fresh) == 0 {
+			return spec, nil
+		}
+		if resolved, matched := resolveModelInList(kind, spec, effort, fresh); matched {
+			return resolved, nil
+		}
+	}
+	if kind == "cursor" {
+		return "", &platform.ExitError{Code: 2, Msg: fmt.Sprintf("no cursor model matches '%s'; cursor-agent rejects model ids absent from --list-models (context overrides are only usable when that model/account exposes them)", spec)}
+	}
+	warn(fmt.Sprintf("no %s model matches '%s'; passing it through unchanged", kind, spec))
+	return spec, nil
+}
+
+// resolveModelInList tries the spec against one concrete list — exact id,
+// dotted alias, or case-insensitive ERE over the ids, with `a|b`
+// alternatives in order — and reports whether it matched. For cursor/agy a
+// matched base with no listed id resolves to "" (the CLI's own default),
+// which also counts as matched.
+func resolveModelInList(kind, spec, effort string, ids []string) (string, bool) {
 	for _, raw := range strings.Split(spec, "|") {
 		alt := strings.TrimSpace(raw)
 		if alt == "" {
@@ -296,7 +350,7 @@ func ResolveModel(kind, spec, effort string, env platform.Env, warn WarnFunc) (s
 		}
 		for _, id := range ids {
 			if id == alt {
-				return alt, nil
+				return alt, true
 			}
 		}
 		if strings.Contains(alt, ".") {
@@ -308,7 +362,7 @@ func ResolveModel(kind, spec, effort string, env platform.Env, warn WarnFunc) (s
 				}
 			}
 			if sorted := VersionSortDesc(candidates); len(sorted) > 0 {
-				return sorted[0], nil
+				return sorted[0], true
 			}
 		}
 		re, ok := ERERegExp(alt)
@@ -341,13 +395,13 @@ func ResolveModel(kind, spec, effort string, env platform.Env, warn WarnFunc) (s
 			if effort != "" {
 				for _, id := range ids {
 					if id == base+"-"+effort {
-						return id, nil
+						return id, true
 					}
 				}
 			}
 			for _, id := range ids {
 				if id == base {
-					return id, nil
+					return id, true
 				}
 			}
 			for _, candidate := range []string{"max", "xhigh", "high", "medium", "low", "minimal"} {
@@ -356,20 +410,20 @@ func ResolveModel(kind, spec, effort string, env platform.Env, warn WarnFunc) (s
 				}
 				for _, id := range ids {
 					if id == base+"-"+candidate {
-						return id, nil
+						return id, true
 					}
 				}
 			}
 			prefix, err := regexp.Compile("^" + base + "-")
 			for _, id := range ids {
 				if err == nil && prefix.MatchString(id) {
-					return id, nil
+					return id, true
 				}
 				if err != nil && strings.HasPrefix(id, base+"-") {
-					return id, nil
+					return id, true
 				}
 			}
-			return "", nil
+			return "", true
 		}
 		if ok {
 			var matched []string
@@ -380,15 +434,11 @@ func ResolveModel(kind, spec, effort string, env platform.Env, warn WarnFunc) (s
 			}
 			sorted := VersionSortDesc(matched)
 			if len(sorted) > 0 {
-				return sorted[0], nil
+				return sorted[0], true
 			}
 		}
 	}
-	if kind == "cursor" {
-		return "", &platform.ExitError{Code: 2, Msg: fmt.Sprintf("no cursor model matches '%s'; cursor-agent rejects model ids absent from --list-models (context overrides are only usable when that model/account exposes them)", spec)}
-	}
-	warn(fmt.Sprintf("no %s model matches '%s'; passing it through unchanged", kind, spec))
-	return spec, nil
+	return "", false
 }
 
 type cachedCodexModel struct {

@@ -161,7 +161,7 @@ func GetProcessAncestors(start int, env platform.Env, goos string) []Process {
 		comm := ""
 		haveParent := false
 		unrepresentableParent := false
-		r := platform.RunCli("ps", []string{"-o", "ppid=,comm=", "-p", strconv.Itoa(curr)}, platform.RunOptions{Env: env, Platform: goos, TimeoutMs: 3000})
+		r := platform.RunCli("ps", []string{"-o", "ppid=,comm=", "-p", strconv.Itoa(curr)}, platform.RunOptions{Env: env, Platform: goos, TimeoutMs: 10000})
 		if r.Status != nil && *r.Status == 0 && r.Stdout != "" {
 			fields := strings.Fields(strings.Split(strings.TrimSpace(r.Stdout), "\n")[0])
 			if len(fields) >= 2 {

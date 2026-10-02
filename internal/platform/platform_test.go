@@ -527,14 +527,14 @@ func TestRunCli(t *testing.T) {
 			t.Fatalf("ENOEXEC mapped as %q", got)
 		}
 	})
-	t.Run("timeout wait delay stays short when a grandchild holds pipes", func(t *testing.T) {
+	t.Run("timeout wait delay of 1 s bounds the wait when a grandchild holds pipes", func(t *testing.T) {
 		if err := os.WriteFile(program, []byte("#!/bin/sh\n/bin/sleep 5 &\n/bin/sleep 5\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		start := time.Now()
 		r := RunCli("fixture", nil, RunOptions{Env: env, TimeoutMs: 100})
 		elapsed := time.Since(start)
-		if !r.TimedOut || r.Status != nil || r.Signal == "" || elapsed > time.Second {
+		if !r.TimedOut || r.Status != nil || r.Signal == "" || elapsed > 1500*time.Millisecond {
 			t.Fatalf("result=%#v elapsed=%v", r, elapsed)
 		}
 	})

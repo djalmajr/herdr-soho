@@ -362,7 +362,7 @@ export function getProcessAncestors(startPid = process.pid, env = process.env, p
     let comm = null;
 
     if (findExecutable('ps', env, platform)) {
-      const res = runCli('ps', ['-o', 'ppid=,comm=', '-p', String(curr)], { env, platform, timeoutMs: 3000 });
+      const res = runCli('ps', ['-o', 'ppid=,comm=', '-p', String(curr)], { env, platform, timeoutMs: 10000 });
       if (res.status === 0 && res.stdout) {
         const line = res.stdout.trim().split('\n')[0]?.trim();
         if (line) {
