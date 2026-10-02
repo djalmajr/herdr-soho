@@ -453,14 +453,16 @@ that will not come.
 (`<state>/briefs/<agent>-<ts>.dispatch.json`) the task it belongs to
 (`task_report`) and the sha256 of the brief file's bytes (`brief_sha256`).
 Dispatching the same brief again to the same agent while its task is open
-(the earlier one accepted and not `not-received`, the task's current report
-still missing; a plain brief matches a plain one, an amendment an
-amendment) sends nothing: `herdr-soho: dispatch: <agent> already has this
+sends nothing. Open means the task's current report is missing or empty,
+and the earlier member with the same bytes was accepted, is not
+`not-received`, and has no non-empty report of its own; a plain brief
+matches a plain one, an amendment an amendment. Then: `herdr-soho: dispatch: <agent> already has this
 brief (<path>); waiting on it without sending again (--resend sends it
 again)`, and the dispatch waits on the task's current report as if it had
 just sent it, with `duplicate_of` in the JSON (`--no-wait` exits 0 with it).
-A task whose current report exists is closed, so the same brief starts a
-new task. `--resend` skips the check.
+A task whose current report is non-empty is closed: the same plain brief
+starts a new task, and the same amendment goes out as one more amendment
+of that task. `--resend` skips the check.
 
 `wait` prints one JSON line per agent (`done`, `blocked`, `question`,
 `settled-no-report`, `gone`, `unavailable`, `quota`, `provider-error`,
@@ -873,8 +875,10 @@ that task's report history (`<state>/task-report-<agent>.json`, the report
 paths in dispatch order) closes every earlier member of the task once a
 later one exists — the worker reports on the last amendment's path,
 covering the amended brief. The sidecars keep that relation for good: a
-brief whose sidecar names the same `task_report` as a later member with a
-report is closed even after the agent moves on to a new task. Sidecars
+brief whose sidecar names the same `task_report` as a later member that was
+accepted (`submission: accepted`, `not-received` included) and has a
+report is closed even after the agent moves on to a new task; a later
+member that failed or was only attempted closes nothing. Sidecars
 written before rc.13 have no `task_report`, and their briefs fall back to
 the current task's history only. Each group
 also has `no_report`, `minutes`,
