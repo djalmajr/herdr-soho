@@ -39,23 +39,25 @@ func TestSetupReadCommands(t *testing.T) {
 		}
 	})
 	t.Run("// JS: \"probeTimeout: invalid values fail before a CLI runs\"", func(t *testing.T) {
+		env := fakeEnv(t, t.TempDir())
 		for _, v := range []string{"0", "-1", "1.5", "abc"} {
+			env["HERDR_SOHO_PROBE_TIMEOUT"] = v
 			func() {
 				defer func() {
 					if recover() == nil {
 						t.Errorf("accepted %q", v)
 					}
 				}()
-				ProbeTimeout(platform.Env{"HERDR_SOHO_PROBE_TIMEOUT": v})
+				CmdProbe(nil, nil, env, t.TempDir())
 			}()
 		}
 	})
-	t.Run("// JS: \"probeTimeout: the env value wins, the default is 20 s\"", func(t *testing.T) {
-		if n, s := ProbeTimeout(platform.Env{}); n != 20 || s != "20" {
-			t.Fatalf("%d %q", n, s)
+	t.Run("// JS: \"probeTimeout: the defaults are 60 s for codex and 20 s for the rest\"", func(t *testing.T) {
+		if n := probeKindDefaultTimeout("claude"); n != 20 {
+			t.Fatalf("claude default=%d, want 20", n)
 		}
-		if n, s := ProbeTimeout(platform.Env{"HERDR_SOHO_PROBE_TIMEOUT": "7"}); n != 7 || s != "7" {
-			t.Fatalf("%d %q", n, s)
+		if n := probeKindDefaultTimeout("codex"); n != 60 {
+			t.Fatalf("codex default=%d, want 60", n)
 		}
 	})
 	t.Run("// JS: \"probeCmd: exact kind argv\"", func(t *testing.T) {
@@ -134,7 +136,7 @@ func TestSetupReadCommands(t *testing.T) {
 		}
 		env := fakeEnv(t, bin)
 		got := probeOne(nil, "pi", "", "configured", 1, env, os.TempDir())
-		if got.Status != "error" || got.Cause != "timeout after 1s" {
+		if got.Status != "error" || got.Cause != "timeout after 1s (a timeout does not prove the assistant is unavailable; retry with --timeout 90)" {
 			t.Fatalf("probe=%+v", got)
 		}
 	})

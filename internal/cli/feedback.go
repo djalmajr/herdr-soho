@@ -95,7 +95,7 @@ func cmdFeedback(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	sd := core.StateDir(ctx, env, cwd)
 	log := filepath.Join(sd, "friction.log")
-	line := fmt.Sprintf("%s\tnote\tfeedback\t%s\n", core.NowISO(now), core.FrictionSafe("feedback sent: "+dest))
+	line := fmt.Sprintf("%s\tnote\tfeedback\t%s\n", core.FrictionISO(now), core.FrictionSafe("feedback sent: "+dest))
 	f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err == nil {
 		_, err = f.WriteString(line)

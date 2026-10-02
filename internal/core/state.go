@@ -20,6 +20,11 @@ func SetFrictionCommand(command string) { currentFrictionCommand = command }
 func NowStamp(t time.Time) string { return t.Format("20060102T150405") }
 func NowISO(t time.Time) string   { return t.Format("2006-01-02T15:04:05") }
 
+// FrictionISO renders a friction.log timestamp in UTC with the Z suffix. The
+// legacy zone-less lines keep meaning local time on read, so a new line must
+// not depend on the host's zone for a --since comparison to be unambiguous.
+func FrictionISO(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05Z") }
+
 func FrictionSafe(value string) string {
 	var out strings.Builder
 	separator := false
@@ -48,7 +53,7 @@ func frictionLog(file, fallbackCommand, level, message string) {
 	if command == "" {
 		command = "?"
 	}
-	line := fmt.Sprintf("%s\t%s\t%s\t%s\n", NowISO(platform.Now()), level, FrictionSafe(command), FrictionSafe(message))
+	line := fmt.Sprintf("%s\t%s\t%s\t%s\n", FrictionISO(platform.Now()), level, FrictionSafe(command), FrictionSafe(message))
 	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666)
 	if err != nil {
 		return
