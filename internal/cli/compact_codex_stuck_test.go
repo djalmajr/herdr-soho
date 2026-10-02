@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/provider"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
@@ -43,16 +44,21 @@ const (
 func TestCompactCodexStuckComposerExits4(t *testing.T) {
 	fakeFastClock(t, 6*time.Second)
 	f := newCompactFixture(t, "codex", []fakecli.Rule{
-		// The pre-send state check and the two confirms' liveness checks.
+		// The pre-send state check (1), the first confirm's liveness check (2),
+		// the re-read before the second Enter (3) and the second confirm's
+		// liveness check (4).
 		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 4, Stdout: compactStateJSON("idle", 1)},
 		// 1: pre-send; 2: the first proof poll, the line still in the box;
-		// 3 and 4: the confirms after each Enter, still stuck.
+		// 3: the first confirm, still stuck; 4: the re-read before the second
+		// Enter, still stuck; 5: the second confirm, still stuck.
 		{Argv: compactReadArgv("worker"), Call: 1, Stdout: codexClearedComposer},
 		{Argv: compactReadArgv("worker"), Call: 2, Stdout: codexStuckComposer},
 		{Argv: compactReadArgv("worker"), Call: 3, Stdout: codexStuckComposer},
 		{Argv: compactReadArgv("worker"), Call: 4, Stdout: codexStuckComposer},
+		{Argv: compactReadArgv("worker"), Call: 5, Stdout: codexStuckComposer},
 		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}}`},
@@ -78,8 +84,8 @@ func TestCompactCodexStuckComposerExits4(t *testing.T) {
 	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 1 {
 		t.Fatalf("ctrl+u calls=%d want 1 (the box is cleared): %#v", n, calls)
 	}
-	if n := countArgv(calls, compactReadArgv("worker")); n != 4 {
-		t.Fatalf("recent reads=%d want 4 (pre-send, first poll, one per confirm): %#v", n, calls)
+	if n := countArgv(calls, compactReadArgv("worker")); n != 5 {
+		t.Fatalf("recent reads=%d want 5 (pre-send, first poll, the re-read before the second Enter, one per confirm): %#v", n, calls)
 	}
 }
 
@@ -148,18 +154,24 @@ func TestDispatchCompactCodexRunsOnSecondEnter(t *testing.T) {
 	fakeFastClock(t, 6*time.Second)
 	extra := []fakecli.Rule{
 		// 1: compact pre-send check, 2: the first confirm's liveness check,
-		// 3: the idle wait after the proof, 4: the dispatch's before-state.
+		// 3: the re-read before the second Enter, 4: the second confirm's
+		// liveness check, 5: the idle wait after the proof, 6: the dispatch's
+		// before-state.
 		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 4, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 5, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 6, Stdout: compactStateJSON("idle", 1)},
 		// 1: pre-send, 2: /compact still in the box on the first proof poll,
-		// 3: still stuck on the first confirm, 4: the box cleared and the
-		// proof on screen after the second Enter.
+		// 3: still stuck on the first confirm, 4: still stuck on the re-read
+		// before the second Enter, 5: the box cleared and the proof on screen
+		// after the second Enter.
 		{Argv: compactReadArgv("worker"), Call: 1, Stdout: codexClearedComposer},
 		{Argv: compactReadArgv("worker"), Call: 2, Stdout: codexStuckComposer},
 		{Argv: compactReadArgv("worker"), Call: 3, Stdout: codexStuckComposer},
-		{Argv: compactReadArgv("worker"), Call: 4, Stdout: codexExecutedComposer},
+		{Argv: compactReadArgv("worker"), Call: 4, Stdout: codexStuckComposer},
+		{Argv: compactReadArgv("worker"), Call: 5, Stdout: codexExecutedComposer},
 		{Argv: []string{"pane", "send-text", "w0test:p0a", "/compact"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "w0test:p0a", "Enter"}, Stdout: `{"result":{}}`},
 	}
@@ -244,18 +256,25 @@ func TestCompactCodexStaleProofStuckComposerExits4(t *testing.T) {
 	// /compact.
 	stuck := stale + "› /compact\n"
 	f := newCompactFixture(t, "codex", []fakecli.Rule{
+		// The pre-send state check (1), the first confirm's liveness check (2),
+		// the re-read before the second Enter (3) and the second confirm's
+		// liveness check (4).
 		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 4, Stdout: compactStateJSON("idle", 1)},
 		// 1: pre-send, the stale screen. 2: the first proof poll, the TUI has
 		// not drawn the new composer line yet (the stale proof still sits
 		// below the last /compact line — the old code's false "compacted"
-		// read; the last › line, the old echo, reads as the composer). 3 and
-		// 4: the confirms, the composer line drawn and still holding /compact.
+		// read; the last › line, the old echo, reads as the composer). 3: the
+		// first confirm, the composer line drawn and still holding /compact.
+		// 4: the re-read before the second Enter, still stuck. 5: the second
+		// confirm, still stuck.
 		{Argv: compactReadArgv("worker"), Call: 1, Stdout: stale},
 		{Argv: compactReadArgv("worker"), Call: 2, Stdout: stale},
 		{Argv: compactReadArgv("worker"), Call: 3, Stdout: stuck},
 		{Argv: compactReadArgv("worker"), Call: 4, Stdout: stuck},
+		{Argv: compactReadArgv("worker"), Call: 5, Stdout: stuck},
 		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}}`},
@@ -277,5 +296,119 @@ func TestCompactCodexStaleProofStuckComposerExits4(t *testing.T) {
 	}
 	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 1 {
 		t.Fatalf("ctrl+u calls=%d want 1: %#v", n, calls)
+	}
+}
+
+// TestCompactCodexDialogBeforeSecondEnter covers the review P2: a worker
+// blocked on a question (a dialog the provider recognizes) while the /compact
+// still sits in the composer must not receive the retry Enter — it would
+// answer the question instead of running /compact. The re-read right before
+// the second Enter sees the dialog, presses nothing, clears nothing and exits
+// 4 with the reason.
+func TestCompactCodexDialogBeforeSecondEnter(t *testing.T) {
+	fakeFastClock(t, 6*time.Second)
+	const screen = "Select an answer\n1. Continue\nenter to submit answer\n› /compact\n"
+	if kind := provider.DialogKind("codex", screen); kind != "question" {
+		t.Fatalf("the fixture screen is not a production-recognized dialog: %q", kind)
+	}
+	f := newCompactFixture(t, "codex", []fakecli.Rule{
+		// 1: pre-send (idle). 2 and 3: the first confirm's liveness check and
+		// the re-read before the second Enter, both blocked on the question.
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("blocked", 2)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("blocked", 2)},
+		// 1: pre-send; 2: the first proof poll, the dialog and /compact in the
+		// box; 3: the first confirm, still stuck; 4: the re-read before the
+		// second Enter, the dialog still on screen.
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: codexClearedComposer},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: screen},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: screen},
+		{Argv: compactReadArgv("worker"), Call: 4, Stdout: screen},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}}`},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 4 {
+		t.Fatalf("code=%d want 4 out=%s stderr=%s", code, out, errText)
+	}
+	if out != "" {
+		t.Fatalf("stdout must be empty on the dialog exit: %s", out)
+	}
+	want := "showing a dialog after /compact; pressed nothing"
+	if !strings.Contains(errText, want) {
+		t.Fatalf("stderr=%q want %q", errText, want)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 1 {
+		t.Fatalf("Enter calls=%d want 1 (the retry Enter must not answer the question): %#v", n, calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 0 {
+		t.Fatalf("ctrl+u calls=%d want 0 (a dialog is not cleared): %#v", n, calls)
+	}
+}
+
+// TestCompactCodexDeliveredHistoryIsCompacted covers the review P2: a codex
+// whose /compact already ran leaves the echo in the history above a busy or
+// empty composer, with the proof below it. The last-› rule would take that
+// echo for the composer and send a stray Enter; the proof of this compaction
+// is checked first, so no second Enter, no clear, and the compact reads as
+// done.
+func TestCompactCodexDeliveredHistoryIsCompacted(t *testing.T) {
+	const screen = "› /compact\nContext compacted\n• Working (1s • esc to interrupt)\n"
+	f := newCompactFixture(t, "codex", []fakecli.Rule{
+		// 1: pre-send (idle). 2: the idle wait after the proof.
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
+		// 1: pre-send (an idle box). 2: the first proof poll, the delivered
+		// echo and the proof on screen, no composer holding /compact.
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: codexClearedComposer},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: screen},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}}`},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
+	if code != 0 || errText != "" {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+	if value := compactJSON(t, out); value["status"] != "compacted" {
+		t.Fatalf("json=%v", value)
+	}
+	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 1 {
+		t.Fatalf("Enter calls=%d want 1 (a delivered /compact takes no second Enter): %#v", n, calls)
+	}
+	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 0 {
+		t.Fatalf("ctrl+u calls=%d want 0 (the box was never stuck): %#v", n, calls)
+	}
+}
+
+// TestCompactCodexUnchangedOldProofIsNotCompacted covers the review's partial
+// finding: a pre-send screen that is unchanged after the send, with the old
+// echo and old proof and an empty composer, must not read as this
+// compaction's proof. The proof line count did not grow and the line was
+// there before the send, so the wait ends at the timeout (9), not in a
+// silent "compacted" (0).
+func TestCompactCodexUnchangedOldProofIsNotCompacted(t *testing.T) {
+	fakeFastClock(t, 6*time.Second)
+	f := newCompactFixture(t, "codex", []fakecli.Rule{
+		// 1: pre-send (idle). 2: the loop's dead check.
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
+		// 1: pre-send, 2: the first proof poll, 3: the final read — all the
+		// same unchanged screen with the old echo, old proof and empty box.
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: codexExecutedComposer},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: codexExecutedComposer},
+		{Argv: compactReadArgv("worker"), Call: 3, Stdout: codexExecutedComposer},
+		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+	})
+	code, out, errText := f.run(t, "compact", "worker", "--timeout", "1000")
+	if code == 0 {
+		t.Fatalf("the unchanged pre-send proof was accepted as the new compact: out=%s stderr=%s", out, errText)
+	}
+	if value := compactJSON(t, out); value["status"] != "timeout" {
+		t.Fatalf("json=%v want the timeout (the old proof is not this compaction's)", value)
 	}
 }
