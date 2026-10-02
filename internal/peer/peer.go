@@ -879,14 +879,22 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// laps and on every lap of it, independent of the count. No key is sent in
 	// the wait, and a target that leaves working without the growth — or the
 	// deadline — follows the path below, today's outcome. The busy warning
-	// announces a real transcript wait, so it goes once only while the
-	// transcript has not shown the message yet: a growth seen in the window
-	// leaves only the queue decision, with nothing to wait for.
+	// announces a real transcript wait: it goes once, at the entry while the
+	// transcript has not shown the message yet, or at the first lap that ends
+	// undecided (a grown count whose screen cannot be read); a growth whose
+	// queue decision is immediate waits for nothing and says nothing.
 	if claudeTranscriptArmed {
 		if busy := agentGet(t.Machine, t.TargetArg, env); busy.OK && busy.Status == "working" {
 			deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
+			warned := false
+			warnBusy := func() {
+				if !warned {
+					warned = true
+					_, _ = fmt.Fprintf(platform.Stderr, "send: %s is busy; waiting for its transcript to show the message (up to %ss)\n", t.RefShown, numberSeconds(timeoutMS))
+				}
+			}
 			if count, ok := herdr.CountClaudeUserMarkerLines(claudeTranscriptPath, "#"+id); !(ok && count > claudeTranscriptPre) {
-				_, _ = fmt.Fprintf(platform.Stderr, "send: %s is busy; waiting for its transcript to show the message (up to %ss)\n", t.RefShown, numberSeconds(timeoutMS))
+				warnBusy()
 			}
 			// The queue line, like the count growth, proves the queued outcome
 			// and is due before the wait's laps and with no key: the same
@@ -925,6 +933,9 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 				if !time.Now().Before(deadline) {
 					break
 				}
+				// A lap that ends undecided is a real wait (a grown count whose
+				// screen cannot be read yet included): say so once.
+				warnBusy()
 				sleepMS(min(pollMS, int(time.Until(deadline).Milliseconds())))
 			}
 		}
