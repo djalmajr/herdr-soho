@@ -263,6 +263,31 @@ func copyRowState(row core.CopyRow, sd string, env platform.Env) string {
 	return "orphan"
 }
 
+// gcProcState classifies one process line for gc: owned (running, the
+// owner is a live roster agent — the copies' rule, never touched), orphan
+// (running, the owner is not live), or gone/reused (any owner: --yes drops
+// the line, and a reused pid is never signalled).
+func gcProcState(row core.ProcRow, sd string, env platform.Env) string {
+	if st := core.ProcRowState(row, env); st != "running" {
+		return st
+	}
+	if row.Owner != "-" && core.RosterLine(sd, row.Owner) != "" && herdr.AgentState(row.Owner, env, herdr.Timeout, nil).State != "gone" {
+		return "owned"
+	}
+	return "orphan"
+}
+
+// gcOrphanProcs is the dry-run list: the running lines gc would stop.
+func gcOrphanProcs(rows []core.ProcRow, sd string, env platform.Env) []core.ProcRow {
+	out := []core.ProcRow{}
+	for _, row := range rows {
+		if gcProcState(row, sd, env) == "orphan" {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // copyAge is how long the copy has existed; an unparseable or future created
 // reads as 0, so gc never treats an unknown age as old.
 func copyAge(row core.CopyRow, now time.Time) time.Duration {
@@ -413,6 +438,10 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	if err != nil {
 		core.DieFriction(fmt.Sprintf("gc: cannot read the copy registry (%v)", err), 4, frictionLogPath, "gc")
 	}
+	procRows, err := core.ReadProcs(sd)
+	if err != nil {
+		core.DieFriction(fmt.Sprintf("gc: cannot read the process registry (%v)", err), 4, frictionLogPath, "gc")
+	}
 	now := platform.Now()
 	threshold := time.Duration(thresholdHours) * time.Hour
 
@@ -436,13 +465,40 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 		total += cand.size
 	}
 	if !yes {
-		for _, cand := range candidates {
-			_, _ = fmt.Fprintf(platform.Stdout, "would remove %s  %s  %s  %s\n", cand.path, humanSize(cand.size), cand.owner, humanAge(cand.age))
+		// Orphan processes: the running lines whose owner is not a live
+		// roster agent (the copies' rule). Gone and reused lines are not
+		// listed; --yes drops them with a note. Processes of live owners
+		// are never candidates.
+		orphan := gcOrphanProcs(procRows, sd, env)
+		// Nothing to remove or stop: only the line itself, no total and no
+		// hint (G1).
+		if len(candidates) == 0 && len(unregistered) == 0 && len(orphan) == 0 {
+			_, _ = fmt.Fprintln(platform.Stdout, "nothing to remove")
+			return 0
 		}
-		_, _ = fmt.Fprintf(platform.Stdout, "total: %s\n", humanSize(total))
-		_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes' to remove them")
+		if len(candidates) > 0 {
+			for _, cand := range candidates {
+				_, _ = fmt.Fprintf(platform.Stdout, "would remove %s  %s  %s  %s\n", cand.path, humanSize(cand.size), cand.owner, humanAge(cand.age))
+			}
+			_, _ = fmt.Fprintf(platform.Stdout, "total: %s\n", humanSize(total))
+			_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes' to remove them")
+		}
 		if len(unregistered) > 0 {
 			gcPrintUnregistered(unregistered, false)
+			if len(candidates) == 0 {
+				// Only unregistered copies: name the flag that actually removes them.
+				_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes --include-unregistered' to remove the unregistered ones")
+			}
+		}
+		if len(orphan) > 0 {
+			now := platform.Now()
+			_, _ = fmt.Fprintln(platform.Stdout, "orphan processes:")
+			for _, row := range orphan {
+				_, _ = fmt.Fprintf(platform.Stdout, "%d  %s  %s  %s\n", row.Pid, row.Name, row.Owner, humanAge(procAge(row, now)))
+			}
+			if len(candidates) == 0 {
+				_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes' to stop them")
+			}
 		}
 		return 0
 	}
@@ -463,10 +519,13 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 
 	removedLines := map[string]bool{}
 	freed := int64(0)
+	removedAny := false
+	procsHandled := 0
 	for _, cand := range candidates {
 		if cand.missing {
 			// Nothing is left on disk: the line only leaves the registry.
 			removedLines[cand.path] = true
+			removedAny = true
 			_, _ = fmt.Fprintf(platform.Stdout, "removed %s  %s\n", cand.path, humanSize(0))
 			continue
 		}
@@ -480,6 +539,7 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 			continue
 		}
 		removedLines[cand.path] = true
+		removedAny = true
 		freed += cand.size
 		_, _ = fmt.Fprintf(platform.Stdout, "removed %s  %s\n", cand.path, humanSize(cand.size))
 	}
@@ -505,6 +565,7 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 					keptCopyError(entry.path, err)
 					continue
 				}
+				removedAny = true
 				freed += entry.size
 				_, _ = fmt.Fprintf(platform.Stdout, "removed %s  %s\n", entry.path, humanSize(entry.size))
 			}
@@ -514,7 +575,51 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 			}
 		}
 	}
-	_, _ = fmt.Fprintf(platform.Stdout, "freed: %s\n", humanSize(freed))
+	// Processes: stop the running orphan lines (no age limit) and drop the
+	// gone/reused ones, whatever their owner. The lock gates the phase: a
+	// held lock exits 4 before any process is stopped (s92); the stops run
+	// outside it, the re-read of the registry under it.
+	if len(procRows) > 0 {
+		cands := procRows
+		if unlock, lockErr := core.LockProcs(sd); lockErr != nil {
+			var locked *core.RegistryLockedError
+			if errors.As(lockErr, &locked) {
+				core.DieFriction(lockErr.Error(), 4, frictionLogPath, "gc")
+			}
+			core.DieFriction(fmt.Sprintf("gc: could not take the process registry lock (%v)", lockErr), 4, frictionLogPath, "gc")
+		} else {
+			if fresh, err := core.ReadProcs(sd); err == nil {
+				cands = fresh
+			}
+			unlock()
+		}
+		for _, row := range cands {
+			if gcProcState(row, sd, env) == "owned" {
+				continue
+			}
+			res := core.StopProcRow(sd, row, env)
+			if res.Line != "" {
+				_, _ = fmt.Fprintln(platform.Stdout, res.Line)
+			}
+			if res.Err != nil {
+				core.Warn(fmt.Sprintf("gc: could not stop process %d (%v); the registry line was kept", row.Pid, res.Err), frictionLogPath, "gc")
+				continue
+			}
+			if res.Dropped {
+				procsHandled++
+			}
+		}
+	}
+	if removedAny {
+		_, _ = fmt.Fprintf(platform.Stdout, "freed: %s\n", humanSize(freed))
+	}
+	if procsHandled > 0 {
+		_, _ = fmt.Fprintf(platform.Stdout, "process lines handled: %d\n", procsHandled)
+	}
+	if !removedAny && procsHandled == 0 {
+		// --yes with nothing removed or stopped: the dry run's closing line.
+		_, _ = fmt.Fprintln(platform.Stdout, "nothing to remove")
+	}
 	return 0
 }
 

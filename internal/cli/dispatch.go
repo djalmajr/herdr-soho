@@ -39,7 +39,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	agent, brief := argv[0], argv[1]
 	role, timeoutRaw := "", ""
-	noWait, allow, amend, compact, resend := false, false, false, false, false
+	noWait, allow, amend, compact, resend, queue := false, false, false, false, false, false
 	var forValue *string
 	for i := 2; i < len(argv); i++ {
 		a := argv[i]
@@ -70,6 +70,8 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			compact = true
 		case "--resend":
 			resend = true
+		case "--queue":
+			queue = true
 		case "--cwd":
 			// dispatch never opens a worker: its cwd is fixed when spawn opens it.
 			core.DieFriction("dispatch: unknown option --cwd (the worker's directory is set when it is opened: spawn <role> --cwd <dir>, then dispatch to it)", 2, frictionLogPath, "dispatch")
@@ -284,6 +286,33 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			return dispatchDuplicateResult(agent, role, kind, dup, noWait, timeoutRaw, sd, ctx, env, cwd)
 		}
 	}
+	// prompt_check_seconds gates the arrival check below; it also decides
+	// whether the dispatch makes its pre-send agent get (a 0 dispatch
+	// sends one prompt and probes nothing, as the ported behavior keeps).
+	checkRaw := core.Cfg(ctx, "prompt_check_seconds", "15", env)
+	checkSecs, checkErr := strconv.Atoi(checkRaw)
+	checkOn := checkErr == nil && checkSecs > 0
+	// D25: a fresh brief typed while the agent is still on an open task
+	// makes its CLI read the brief mid-turn and drop the open task: refuse
+	// (exit 10) before typing anything or writing any task state, naming
+	// the escapes. --amend amends the open task and --queue opts into
+	// typing now (today's queued behavior); a failed agent get
+	// (unavailable) and a closed task (the report exists) keep today's
+	// behavior. The check rides the dispatch's pre-send state read, which
+	// is taken here, before the first sidecar write.
+	var before herdr.AgentStateResult
+	if checkOn {
+		before = herdr.AgentState(agent, env, herdr.Timeout, nil)
+		if !amend && !queue && (before.State == "working" || before.State == "blocked") {
+			if ptr := taskreport.ReadTaskReportPointer(sd, agent); ptr != nil {
+				if cur, ok := ptr.Get("current"); ok {
+					if s, isStr := cur.(string); isStr && s != "" && !nonEmpty(s) {
+						core.DieFriction(fmt.Sprintf("dispatch: '%s' is still working on its open task (no report at %s); wait for it (herdr-soho wait %s), send an amendment (--amend), or pass --queue to type this brief now (its CLI may read it mid-turn and drop the open task)", agent, s, agent), 10, frictionLogPath, "dispatch")
+					}
+				}
+			}
+		}
+	}
 	sidecar := dispatch.DispatchSidecar(composed)
 	// priorPointer and taskReport are read before the first sidecar write: the
 	// sidecar's task_report is the pointer's value after this dispatch
@@ -341,13 +370,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	if amend {
 		text = fmt.Sprintf("Read the file %s in full and execute it. It amends the brief you are working on. When finished, write your report to %s and reply with exactly that path and nothing else.", composed, report)
 	}
-	checkRaw := core.Cfg(ctx, "prompt_check_seconds", "15", env)
-	checkSecs, checkErr := strconv.Atoi(checkRaw)
-	checkOn := checkErr == nil && checkSecs > 0
-	before := herdr.AgentStateResult{}
-	if checkOn {
-		before = herdr.AgentState(agent, env, herdr.Timeout, nil)
-	}
+	// before and checkOn stand from before the first sidecar write (D25).
 	wasWorking := checkOn && before.State == "working"
 	settleSecs := 20
 	rawSettle := core.Cfg(ctx, "prompt_settle_seconds", "20", env)

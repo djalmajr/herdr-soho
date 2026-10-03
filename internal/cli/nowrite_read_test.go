@@ -249,7 +249,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 				cases[6].wantOut = "recent output line\n"
 				cases[6].wantErr = "herdr-soho: warning: no report file yet for 'worker' (expected <none dispatched>); falling back to recent terminal output\n"
 				cases[7].wantOut = ""
-				cases[8].wantOut = nowriteGcNoneLine + "total: 0 B\nrun 'herdr-soho gc --yes' to remove them\n"
+				cases[8].wantOut = nowriteGcNoneLine + "nothing to remove\n"
 				cases[9].wantOut = cases[8].wantOut
 			}
 			for _, c := range cases {
@@ -275,7 +275,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 // command runs (nothing is written).
 func TestNowriteRejectsWritingInvocations(t *testing.T) {
 	nr := newNowriteReads(t, true)
-	const messagePrefix = "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'gc' without --yes; rejected: "
+	const messagePrefix = "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'gc' without --yes; rejected: "
 	const messageTail = " — unset HERDR_SOHO_NOWRITE to write\n"
 	cases := []struct {
 		name     string

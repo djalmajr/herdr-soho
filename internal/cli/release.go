@@ -19,7 +19,7 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 		platform.Die("agent: Parameter not set", 1)
 	}
 	agent := argv[0]
-	closePane, force, keepCopies := false, false, false
+	closePane, force, keepCopies, keepProcs := false, false, false, false
 	for _, arg := range argv[1:] {
 		switch arg {
 		case "--close":
@@ -28,6 +28,8 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 			force = true
 		case "--keep-copies":
 			keepCopies = true
+		case "--keep-procs":
+			keepProcs = true
 		default:
 			core.DieFriction("release: unknown option "+arg, 2, frictionLogPath, "release")
 		}
@@ -80,6 +82,7 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 
 	core.RosterRemove(sd, agent)
 	releaseCopies(sd, agent, keepCopies, env, cwd)
+	releaseProcs(sd, agent, keepProcs, env)
 	_ = os.Remove(core.LastReportPath(sd, agent))
 	_ = os.Remove(filepath.Join(sd, "task-"+agent))
 	waitDir := filepath.Join(sd, "wait")
@@ -187,6 +190,40 @@ func releaseAutoRegrid(ctx *core.Config, env platform.Env, cwd string) {
 type releaseDiscardWriter struct{}
 
 func (releaseDiscardWriter) Write(value []byte) (int, error) { return len(value), nil }
+
+// releaseProcs stops the released agent's registered processes at the same
+// point the roster is cleaned. A held registry lock, a stop error and a
+// registry re-write failure all become warnings and keep the registry
+// line: the release never fails for this (like the copies), and the line
+// stays for gc.
+func releaseProcs(sd, agent string, keepProcs bool, env platform.Env) {
+	if keepProcs {
+		return
+	}
+	rows, err := core.ReadProcs(sd)
+	if err != nil {
+		core.Warn(fmt.Sprintf("release: the processes of '%s' were not stopped (%v)", agent, err), frictionLogPath, "release")
+		return
+	}
+	if unlock, lockErr := core.LockProcs(sd); lockErr != nil {
+		core.Warn(fmt.Sprintf("release: the processes of '%s' were not stopped (%v); run 'herdr-soho gc' later", agent, lockErr), frictionLogPath, "release")
+		return
+	} else {
+		unlock()
+	}
+	for _, row := range rows {
+		if row.Owner != agent {
+			continue
+		}
+		res := core.StopProcRow(sd, row, env)
+		if res.Line != "" {
+			_, _ = fmt.Fprintln(platform.Stdout, res.Line)
+		}
+		if res.Err != nil {
+			core.Warn(fmt.Sprintf("release: could not stop process %d of '%s' (%v); the registry line was kept", row.Pid, agent, res.Err), frictionLogPath, "release")
+		}
+	}
+}
 
 func reportEmpty(report string) bool {
 	if report == "" {

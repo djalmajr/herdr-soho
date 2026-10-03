@@ -194,6 +194,7 @@ plugin's team panel runs its reads with it. Only these invocations run:
 - `friction` with its reading options, but not `friction add`;
 - `collect <agent> [--lines N] [--verify]`;
 - the exact `copies`, but not `copies add`;
+- the exact `procs`, but not `procs add`;
 - `gc` without `--yes`.
 
 The CLI then never writes to the project or the state: no `.gitignore`
