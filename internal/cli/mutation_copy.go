@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
@@ -223,8 +224,61 @@ func runMutationCopy(args []string, env platform.Env) int {
 	if err != nil {
 		return failIO(err.Error())
 	}
+	registerMutationCopy(env, source, dest)
 	_, _ = fmt.Fprintln(platform.Stdout, string(encoded))
 	return 0
+}
+
+// registerMutationCopy records the finished copy in the per-workspace
+// registry so the copies commands know who made it. It never changes the
+// command's stdout or exit code: when the state dir cannot be resolved or
+// the registry cannot be written, the copy stays unregistered, with a
+// stderr warning. A dying config or state resolution is caught the same
+// way: the command must not die over the registration.
+func registerMutationCopy(env platform.Env, source, dest string) {
+	defer func() {
+		if value := recover(); value != nil {
+			if exitErr, ok := value.(*platform.ExitError); ok {
+				mutationCopyNotRegistered(exitErr.Msg)
+				return
+			}
+			panic(value)
+		}
+	}()
+	cwd, err := os.Getwd()
+	if err != nil {
+		mutationCopyNotRegistered(err.Error())
+		return
+	}
+	ctx := core.LoadConfig(env, cwd)
+	sd, err := core.StateDirResolved(&ctx, env, cwd)
+	if err != nil {
+		mutationCopyNotRegistered(err.Error())
+		return
+	}
+	pane := env.Get("HERDR_PANE_ID")
+	owner := rosterAgentForPane(sd, pane)
+	if pane == "" {
+		pane = "-"
+	}
+	if owner == "" {
+		owner = "-"
+	}
+	row := core.CopyRow{
+		Path:    dest,
+		Owner:   owner,
+		Pane:    pane,
+		Created: core.FrictionISO(platform.Now()),
+		Source:  source,
+		Origin:  "mutation-copy",
+	}
+	if err := core.UpsertCopies(sd, row); err != nil {
+		mutationCopyNotRegistered(err.Error())
+	}
+}
+
+func mutationCopyNotRegistered(cause string) {
+	_, _ = fmt.Fprintf(platform.Stderr, "mutation-copy: copy not registered (%s); remove it yourself when done\n", cause)
 }
 
 type mutationCopyArgs struct {

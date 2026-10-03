@@ -18,13 +18,15 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 		platform.Die("agent: Parameter not set", 1)
 	}
 	agent := argv[0]
-	closePane, force := false, false
+	closePane, force, keepCopies := false, false, false
 	for _, arg := range argv[1:] {
 		switch arg {
 		case "--close":
 			closePane = true
 		case "--force":
 			force = true
+		case "--keep-copies":
+			keepCopies = true
 		default:
 			core.DieFriction("release: unknown option "+arg, 2, frictionLogPath, "release")
 		}
@@ -76,6 +78,7 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 	}
 
 	core.RosterRemove(sd, agent)
+	releaseCopies(sd, agent, keepCopies, env, cwd)
 	_ = os.Remove(core.LastReportPath(sd, agent))
 	_ = os.Remove(filepath.Join(sd, "task-"+agent))
 	waitDir := filepath.Join(sd, "wait")
@@ -190,4 +193,55 @@ func reportEmpty(report string) bool {
 	}
 	info, err := os.Stat(report)
 	return err != nil || info.Size() == 0
+}
+
+// releaseCopies removes the released agent's registered copies at the same
+// point the roster is cleaned. A copy that fails the decision-7 check or
+// that cannot be removed keeps its registry line, with a warning; the
+// release's messages, order and exit code never change. With keepCopies it
+// leaves every line: the copies become orphans for gc.
+func releaseCopies(sd, agent string, keepCopies bool, env platform.Env, cwd string) {
+	if keepCopies {
+		return
+	}
+	rows, err := core.ReadCopies(sd)
+	if err != nil {
+		_, _ = fmt.Fprintf(platform.Stderr, "release: kept copies registry (%v)\n", err)
+		return
+	}
+	removed := []string{}
+	for _, row := range rows {
+		if row.Owner != agent {
+			continue
+		}
+		if cause := copyRefusal(row.Path, env, cwd); cause != "" {
+			_, _ = fmt.Fprintf(platform.Stderr, "release: kept copy %s (%s)\n", row.Path, cause)
+			continue
+		}
+		if err := os.RemoveAll(row.Path); err != nil {
+			_, _ = fmt.Fprintf(platform.Stderr, "release: kept copy %s (%v)\n", row.Path, err)
+			continue
+		}
+		removed = append(removed, row.Path)
+		_, _ = fmt.Fprintf(platform.Stdout, "removed copy %s\n", row.Path)
+	}
+	if len(removed) == 0 {
+		return
+	}
+	out := make([]core.CopyRow, 0, len(rows))
+	for _, row := range rows {
+		kept := false
+		for _, path := range removed {
+			if row.Path == path {
+				kept = true
+				break
+			}
+		}
+		if !kept {
+			out = append(out, row)
+		}
+	}
+	if err := core.WriteCopies(sd, out); err != nil {
+		_, _ = fmt.Fprintf(platform.Stderr, "release: could not update the copy registry (%v)\n", err)
+	}
 }
