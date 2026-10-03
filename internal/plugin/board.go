@@ -40,6 +40,8 @@ type BoardState struct {
 	CSIPending   bool
 	UpdatedAt    string
 	selectedRef  string
+	refreshing   bool
+	refreshOld   []PickerEntry
 }
 
 func NewBoardState() *BoardState {
@@ -127,8 +129,9 @@ func boardMarker(entry PickerEntry) string {
 }
 
 // BoardEntryLine renders one agent row: name, kind, status and the title,
-// cut at the width the way the picker cuts its rows (the last column takes
-// the remaining budget, ellipsized, then a hard cut at the width).
+// cut at the width in terminal columns (wide characters count as two,
+// combining marks as zero); the last column takes the remaining budget,
+// ellipsized, and the total never passes the width.
 func BoardEntryLine(entry PickerEntry, width int) string {
 	display := func(v any) string {
 		s := StripPickerControls(pickerString(v))
@@ -139,21 +142,17 @@ func BoardEntryLine(entry PickerEntry, width int) string {
 	}
 	cols := []string{display(entry["name"]), display(entry["kind"]), display(entry["status"]), display(BoardTitle(entry["title"]))}
 	lead := strings.Join(cols[:len(cols)-1], " ")
-	budget := width - jsLength(lead) - 1
+	budget := width - displayWidth(lead) - 1
 	if budget < 0 {
 		budget = 0
 	}
 	last := cols[len(cols)-1]
-	if jsLength(last) > budget {
-		if budget > 0 {
-			last = jsSlice(last, budget-1) + "…"
-		} else {
-			last = ""
-		}
+	if displayWidth(last) > budget {
+		last = displaySlice(last, budget)
 	}
 	line := lead + " " + last
-	if jsLength(line) > width {
-		line = jsSlice(line, width)
+	if displayWidth(line) > width {
+		line = displaySlice(line, width)
 	}
 	return line
 }
@@ -256,11 +255,13 @@ func (s *BoardState) ApplyKey(key string) string {
 	case "up":
 		if len(s.visible()) > 0 && s.Selected > 0 {
 			s.Selected--
+			s.selectedRef = pickerString(s.visible()[s.Selected]["ref"])
 		}
 		return ""
 	case "down":
 		if len(s.visible()) > 1 && s.Selected < len(s.visible())-1 {
 			s.Selected++
+			s.selectedRef = pickerString(s.visible()[s.Selected]["ref"])
 		}
 		return ""
 	case "update":
@@ -348,6 +349,7 @@ func cloneBoardState(source *BoardState) *BoardState {
 	clone := *source
 	clone.Entries = append([]PickerEntry(nil), source.Entries...)
 	clone.Failures = append([]PickerFailure(nil), source.Failures...)
+	clone.refreshOld = append([]PickerEntry(nil), source.refreshOld...)
 	return &clone
 }
 
@@ -394,27 +396,81 @@ func loadBoardEntries(ctx contextpkg.Context, state *BoardState, exe string, env
 	})
 }
 
-// applyBoardUpdate replaces the board's live state with a fresh load,
-// keeping the query and the selection pinned to the same ref when it
-// still exists.
+// applyBoardUpdate merges one publication of the load generation into the
+// live state. The previous list stays on screen until the new load's
+// machines re-arrive: per machine, the new load's rows when that machine
+// has results, the previous rows otherwise. The selected ref is pinned
+// across the whole generation and falls to the first row only once the
+// load is complete and the ref is gone.
 func applyBoardUpdate(state, update *BoardState) {
 	query, exit, copied, lastEntry, escPending, csiPending := state.Query, state.Exit, state.Copied, state.LastEntry, state.EscPending, state.CSIPending
-	list := state.visible()
-	keepRef := ""
-	if state.Selected < len(list) {
-		keepRef = pickerString(list[state.Selected]["ref"])
+	if !state.refreshing {
+		// First publication of the generation: keep the previous list and
+		// the selected ref before anything is replaced.
+		state.refreshing = true
+		state.refreshOld = state.Entries
+		if list := state.visible(); state.Selected < len(list) {
+			state.selectedRef = pickerString(list[state.Selected]["ref"])
+		}
 	}
-	*state = *update
-	state.Query, state.Exit, state.Copied, state.LastEntry, state.EscPending, state.CSIPending = query, exit, copied, lastEntry, escPending, csiPending
-	if keepRef != "" {
+	state.Entries = mergeBoardEntries(state.refreshOld, update.Entries)
+	state.Failures = update.Failures
+	state.Loading = update.Loading
+	state.LoadingLocal = update.LoadingLocal
+	if ref := state.selectedRef; ref != "" {
 		for i, entry := range state.visible() {
-			if pickerString(entry["ref"]) == keepRef {
+			if pickerString(entry["ref"]) == ref {
 				state.Selected = i
 				break
 			}
 		}
+		// If the ref is not there yet, the selection stays where it is.
 	}
+	state.Query, state.Exit, state.Copied, state.LastEntry, state.EscPending, state.CSIPending = query, exit, copied, lastEntry, escPending, csiPending
 	state.clamp()
+	if update.UpdatedAt == "" {
+		return
+	}
+	// The whole load is complete: swap the bookkeeping and only now drop
+	// the selection to the first row if the ref truly disappeared.
+	state.UpdatedAt = update.UpdatedAt
+	state.refreshing = false
+	state.refreshOld = nil
+	if state.selectedRef != "" {
+		stillThere := false
+		for _, entry := range state.visible() {
+			if pickerString(entry["ref"]) == state.selectedRef {
+				stillThere = true
+				break
+			}
+		}
+		if !stillThere {
+			state.Selected = 0
+		}
+	}
+	state.selectedRef = ""
+	state.clamp()
+}
+
+// mergeBoardEntries keeps the previous list's rows for the machines that
+// have not re-arrived yet and the new load's rows for the ones that did
+// (new order first, then the old-only machines in the old order).
+func mergeBoardEntries(old, fresh []PickerEntry) []PickerEntry {
+	out := append([]PickerEntry(nil), fresh...)
+	freshMachines := map[string]bool{}
+	for _, entry := range fresh {
+		freshMachines[pickerString(entry["machine"])] = true
+	}
+	oldMachines := map[string]bool{}
+	for _, entry := range old {
+		m := pickerString(entry["machine"])
+		if freshMachines[m] || oldMachines[m] {
+			continue
+		}
+		oldMachines[m] = true
+		out = append(out, entry)
+	}
+	return out
 }
 
 // requestBoardUpdate queues one refresh on the loader. The loader runs

@@ -3,12 +3,14 @@ package plugin
 import (
 	contextpkg "context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/testutil"
@@ -265,21 +267,30 @@ func TestBoardUpdateKeepsSelectionByRef(t *testing.T) {
 	if selected != "local/a2" {
 		t.Fatalf("selection after update=%q want local/a2 (visible=%#v)", selected, live.visible())
 	}
-	// The ref disappears: the selection falls back to the top, without panics.
+	// The ref disappears mid-generation: the selection stays where it is -
+	// only the complete load may fall back to the top.
 	update2 := NewBoardState()
 	update2.Entries = []PickerEntry{
 		boardEntry("local/a1", "local", "ws-a", "alpha", "orchestrator-1", "claude", "working", "one"),
 		boardEntry("local/a4", "local", "ws-a", "alpha", "worker-9", "codex", "idle", "four"),
 	}
 	applyBoardUpdate(live, update2)
+	if live.Selected != 1 {
+		t.Fatalf("selection mid-generation after the ref disappeared=%d want 1 (the load is not complete yet)", live.Selected)
+	}
+	// Only the complete load (UpdatedAt set) drops the selection to the top.
+	update3 := NewBoardState()
+	update3.UpdatedAt = "12:00:00"
+	update3.Entries = append([]PickerEntry(nil), update2.Entries...)
+	applyBoardUpdate(live, update3)
 	if live.Selected != 0 {
-		t.Fatalf("selection after the ref disappeared=%d want 0", live.Selected)
+		t.Fatalf("selection after the ref disappeared at the end of the load=%d want 0", live.Selected)
 	}
 	// The query is kept across updates.
 	live.Query = "two"
-	update3 := NewBoardState()
-	update3.Entries = []PickerEntry{boardEntry("local/a2", "local", "ws-a", "alpha", "implementer-1", "codex", "idle", "two")}
-	applyBoardUpdate(live, update3)
+	update4 := NewBoardState()
+	update4.Entries = []PickerEntry{boardEntry("local/a2", "local", "ws-a", "alpha", "implementer-1", "codex", "idle", "two")}
+	applyBoardUpdate(live, update4)
 	if live.Query != "two" {
 		t.Fatalf("query after update=%q want two", live.Query)
 	}
@@ -469,5 +480,271 @@ func TestBridgeUnknownActionListsBoard(t *testing.T) {
 	}
 	if !strings.Contains(bridgeErr.Message, "(use 'doctor', 'roster', 'board' or 'pick')") {
 		t.Fatalf("unknown action message=%q", bridgeErr.Message)
+	}
+}
+
+// boardStreamFixture installs two fake herdr-soho CLIs (one per load
+// generation, "a" and "b") plus the fake herdr machine list. Each remote
+// find of a generation blocks on its own release file (a WaitFile gate named
+// after the generation and the machine), so the test - not the wall clock -
+// fixes each load's arrival order. Load b's middle row uses the ref and name
+// given by the test.
+func boardStreamFixture(t *testing.T, middleBRef, middleBName string) (platform.Env, string, string, func(string, string) error) {
+	t.Helper()
+	dir := t.TempDir()
+	gates := filepath.Join(dir, "gates")
+	if err := os.MkdirAll(gates, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	local := `{"ref":"local/w1:p1","machine":"local","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","name":"local","kind":"codex","status":"idle"}` + "\n"
+	mkRules := func(load string) []fakecli.Rule {
+		rules := []fakecli.Rule{{Argv: []string{"find", "--json"}, Stdout: local}}
+		for _, machine := range []string{"slow", "fast", "middle"} {
+			ref, name := machine+"/w1:p1", machine
+			if machine == "middle" && load == "b" {
+				ref, name = middleBRef, middleBName
+			}
+			row := fmt.Sprintf(`{"ref":"%s","machine":"%s","workspace_id":"w1","tab_id":"w1:t1","pane_id":"%s","name":"%s","kind":"codex","status":"idle"}`+"\n", ref, machine, ref, name)
+			rules = append(rules, fakecli.Rule{Argv: []string{"find", "--json", "--machine", machine}, WaitFile: filepath.Join(gates, load+"-"+machine), Stdout: row})
+		}
+		return rules
+	}
+	exeA, err := fakecli.Install(t, dir, "herdr-soho-a", mkRules("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exeB, err := fakecli.Install(t, dir, "herdr-soho-b", mkRules("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"slow","enabled":true},{"label":"fast","enabled":true},{"label":"middle","enabled":true}]`}}); err != nil {
+		t.Fatal(err)
+	}
+	env := platform.Env{}
+	for _, item := range fakecli.Env(testutil.CleanEnv(t), dir, fakecli.EnvOptions{IncludeBasePath: true}) {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	env["HERDR_BIN_PATH"] = filepath.Join(dir, "herdr")
+	release := func(load, machine string) error {
+		return os.WriteFile(filepath.Join(gates, load+"-"+machine), []byte("go"), 0o644)
+	}
+	t.Cleanup(func() {
+		// Unblock finds still waiting after the test (a failed wait) so the
+		// fakes exit instead of polling their release file forever.
+		for _, load := range []string{"a", "b"} {
+			for _, machine := range []string{"slow", "fast", "middle"} {
+				_ = os.WriteFile(filepath.Join(gates, load+"-"+machine), []byte("go"), 0o644)
+			}
+		}
+	})
+	return env, exeA, exeB, release
+}
+
+// boardRemoteGate returns the publish closure that starts the load's gate
+// releases once the loader reaches the remote finds (the publication with
+// the remote loading count set). It waits 150 ms first so every find is
+// already spawned and polling (the parent starts them back to back), then
+// releases the gates 250 ms apart: the fakes poll their release file every
+// 20 ms, so the arrival order is exactly `order`.
+func boardRemoteGate(t *testing.T, release func(string, string) error, load string, order []string, loaded *BoardState) func() {
+	t.Helper()
+	started := false
+	return func() {
+		if started || loaded.LoadingLocal || loaded.Loading != 3 || len(loaded.Entries) == 0 {
+			return
+		}
+		started = true
+		stop := make(chan struct{})
+		t.Cleanup(func() { close(stop) })
+		go func() {
+			time.Sleep(150 * time.Millisecond)
+			for i, machine := range order {
+				if i > 0 {
+					select {
+					case <-stop:
+						return
+					case <-time.After(250 * time.Millisecond):
+					}
+				}
+				if err := release(load, machine); err != nil {
+					select {
+					case <-stop:
+						return
+					default:
+						t.Error(err)
+					}
+					return
+				}
+			}
+		}()
+	}
+}
+
+func boardRefs(list []PickerEntry) []string {
+	refs := make([]string, len(list))
+	for i, entry := range list {
+		refs[i] = pickerString(entry["ref"])
+	}
+	return refs
+}
+
+// TestBoardStreamingSelectionKeepsSelectedRef is the review's selection
+// probe as a test: two real loads through the fakes, every publication of the
+// second applied by the production consumer. The selection follows the ref -
+// not a row index, load b re-arriving the machines in another order - across
+// the whole refresh, and Enter still copies it.
+func TestBoardStreamingSelectionKeepsSelectedRef(t *testing.T) {
+	env, exeA, exeB, release := boardStreamFixture(t, "middle/w1:p1", "middle")
+	// Load 1 (open): arrival fast, middle, slow.
+	live := NewBoardState()
+	gateA := boardRemoteGate(t, release, "a", []string{"fast", "middle", "slow"}, live)
+	loadBoardEntries(contextpkg.Background(), live, exeA, env, platform.Current(), gateA)
+	list := live.visible()
+	middle := -1
+	for i, entry := range list {
+		if pickerString(entry["ref"]) == "middle/w1:p1" {
+			middle = i
+		}
+	}
+	if middle < 0 {
+		t.Fatalf("the first load has no middle/w1:p1 row: %#v", list)
+	}
+	live.Selected = middle
+	before := pickerString(list[live.Selected]["ref"])
+	// Load 2 (refresh): arrival slow, fast, middle - middle re-arrives last
+	// (the old row must stay on screen until then) and ends up on another
+	// row than in load 1.
+	loaded := NewBoardState()
+	pubs := 0
+	gateB := boardRemoteGate(t, release, "b", []string{"slow", "fast", "middle"}, loaded)
+	loadBoardEntries(contextpkg.Background(), loaded, exeB, env, platform.Current(), func() {
+		pubs++
+		gateB()
+		applyBoardUpdate(live, cloneBoardState(loaded))
+		list := live.visible()
+		if len(list) == 0 {
+			t.Fatalf("publication %d left the board empty", pubs)
+		}
+		if ref := pickerString(list[live.Selected]["ref"]); ref != "middle/w1:p1" {
+			t.Fatalf("publication %d: the selection left middle/w1:p1 (ref=%q entries=%#v)", pubs, ref, live.Entries)
+		}
+	})
+	// The loader stamps the clock and publishes the final state (like the
+	// production loop does after loadBoardEntries returns).
+	loaded.UpdatedAt = boardNow().Format("15:04:05")
+	applyBoardUpdate(live, cloneBoardState(loaded))
+	wantIdx := -1
+	for i, entry := range live.visible() {
+		if pickerString(entry["ref"]) == "middle/w1:p1" {
+			wantIdx = i
+		}
+	}
+	if wantIdx < 0 {
+		t.Fatalf("the second load lost middle/w1:p1: %#v", live.visible())
+	}
+	if wantIdx == middle {
+		t.Fatalf("the fixture must move the middle row (load 1=%d, load 2=%d); the test would be vacuous", middle, wantIdx)
+	}
+	if live.Selected != wantIdx {
+		t.Fatalf("selection=%d want %d (the ref moved across rows; the selection must follow the ref)", live.Selected, wantIdx)
+	}
+	live.ApplyKey("enter")
+	after := pickerString(live.LastEntry["ref"])
+	if before != "middle/w1:p1" || after != "middle/w1:p1" {
+		t.Fatalf("Enter copied %q want middle/w1:p1 (before=%q)", after, before)
+	}
+}
+
+// TestBoardSelectionFallsToTopOnlyWhenTheLoadIsComplete: the selected ref
+// disappears mid-load (the middle machine now returns a different agent). The
+// selection must not jump to the top while the load is incomplete; only the
+// complete load may do it.
+func TestBoardSelectionFallsToTopOnlyWhenTheLoadIsComplete(t *testing.T) {
+	env, exeA, exeB, release := boardStreamFixture(t, "middle/w2:p2", "middle-2")
+	live := NewBoardState()
+	gateA := boardRemoteGate(t, release, "a", []string{"fast", "middle", "slow"}, live)
+	loadBoardEntries(contextpkg.Background(), live, exeA, env, platform.Current(), gateA)
+	list := live.visible()
+	middle := -1
+	for i, entry := range list {
+		if pickerString(entry["ref"]) == "middle/w1:p1" {
+			middle = i
+		}
+	}
+	if middle <= 0 {
+		t.Fatalf("the first load must have middle/w1:p1 on a non-top row: %#v", list)
+	}
+	live.Selected = middle
+	loaded := NewBoardState()
+	pubs := 0
+	goneAt := -1
+	gateB := boardRemoteGate(t, release, "b", []string{"slow", "fast", "middle"}, loaded)
+	loadBoardEntries(contextpkg.Background(), loaded, exeB, env, platform.Current(), func() {
+		pubs++
+		gateB()
+		applyBoardUpdate(live, cloneBoardState(loaded))
+		list := live.visible()
+		if len(list) == 0 {
+			t.Fatalf("publication %d left the board empty", pubs)
+		}
+		present := false
+		for _, entry := range list {
+			if pickerString(entry["ref"]) == "middle/w1:p1" {
+				present = true
+				break
+			}
+		}
+		if present {
+			if ref := pickerString(list[live.Selected]["ref"]); ref != "middle/w1:p1" {
+				t.Fatalf("publication %d: the selection left middle/w1:p1 (ref=%q)", pubs, ref)
+			}
+			return
+		}
+		if goneAt < 0 {
+			goneAt = pubs
+		}
+		if live.Selected == 0 {
+			t.Fatalf("publication %d: the selection fell to the top before the load completed (gone at %d)", pubs, goneAt)
+		}
+	})
+	// The loader stamps the clock and publishes the final state: only now may
+	// the selection fall to the top (the ref is gone).
+	loaded.UpdatedAt = boardNow().Format("15:04:05")
+	applyBoardUpdate(live, cloneBoardState(loaded))
+	if goneAt <= 0 {
+		t.Fatalf("the fixture never showed the ref disappearing mid-load (publications=%d); the test would be vacuous", pubs)
+	}
+	if live.Selected != 0 {
+		t.Fatalf("selection=%d after the complete load want 0 (the ref is gone)", live.Selected)
+	}
+}
+
+// TestBoardCutMeasuresDisplayColumns: titles with CJK characters (two
+// columns each), an emoji (the U+1F300-U+1FAFF block, two columns) and
+// combining marks (zero columns) must never make the agent row pass the
+// requested width - measured in display columns - and the cut must never
+// split a rune.
+func TestBoardCutMeasuresDisplayColumns(t *testing.T) {
+	titles := []string{
+		strings.Repeat("界", 30),                          // CJK: two columns per character
+		"task " + "\U0001F600" + strings.Repeat("x", 40), // emoji: two columns
+		strings.Repeat("a\u0300", 25),                    // combining mark: zero columns
+	}
+	for _, title := range titles {
+		for _, width := range []int{10, 20, 30} {
+			s := NewBoardState()
+			s.Entries = []PickerEntry{boardEntry("local/p", "local", "ws", "alpha", "agent", "codex", "idle", title)}
+			lines := strings.Split(strings.TrimSuffix(RenderBoard(s, width), "\n"), "\n")
+			row := lines[3] // totals, query, header, agent row
+			if w := displayWidth(row); w > width {
+				t.Fatalf("width %d, title %q: row %q has display width %d", width, title, row, w)
+			}
+			if !utf8.ValidString(row) {
+				t.Fatalf("width %d, title %q: the cut split a rune: %q", width, title, row)
+			}
+		}
 	}
 }
