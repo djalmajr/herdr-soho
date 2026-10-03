@@ -57,7 +57,7 @@ to a file.
 5. **State never under `.agents/` or `.codex/`** (Codex sandbox denies them).
 6. **Nested orchestrators must not be sandboxed Codex**: its sandbox blocks
    the Herdr socket. Use `claude` (or Codex with its sandbox disabled).
-7. **Read `$S friction` at the end of every run** and file what the skill
+7. **Read `$S friction` and run `$S gc` at the end of every run** and file what the skill
    caused as an issue (see "Improving this skill").
 
 ## Preconditions
@@ -803,6 +803,13 @@ with (roster column 14), so after a change to these keys an idle worker
 started with other args is not reused: `lanes=off` opens a new one, and a
 lane answers `kind-mismatch` (exit 13) until you release its worker.
 
+**Resource pressure.** `spawn`, `wait` and `status` print one stderr line,
+`herdr-soho: resource pressure: …`, when the disk of the state dir has less
+than `pressure_disk_free_percent` free (default 15) or the swap use passes
+`pressure_swap_percent` (default 80); `0` turns each one off. `spawn` warns
+every time, `wait` and `status` at most once every 10 minutes. It is a
+warning only: nothing is refused. Windows measures the disk, not the swap.
+
 ## Commands
 
 All mechanics go through `scripts/herdr-soho` (needs `herdr` and either the
@@ -840,7 +847,7 @@ $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before
 $S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
                                              # peer message to another agent (any kind, local or another machine): ref local/w12:p1 or a name on the local server; waits for a busy target to settle by default
 $S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation copy that shares source or build output (exit 1)
-$S mutation-copy [--source <dir>] [--dest <dir>] [--link <relpath>=<target>]…  # build the throwaway mutation copy from the worktree's repository files, guarded (exit 1 guard, 2 refused, 4 copy error)
+$S mutation-copy [--source <dir>] [--dest <dir>] [--link <relpath>=<target>]…  # build the throwaway mutation copy from the worktree's repository files, guarded (exit 1 guard, 2 refused, 4 copy error); the copy is registered to the calling agent, so its release deletes it
 $S find [words] [--machine <label>]… [--all] [--json]   # live panes with a paste-ready reference (<machine>/<ws>:<pane>), filtered by the words
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
 $S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to; a failed notice exits 0 with the file saved (it warns and prints the filed JSON)
@@ -853,9 +860,14 @@ $S status [a b …]                          # non-blocking completion check; no
 $S config                                  # effective configuration and sources (incl. the session layer)
 $S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>; a value may begin with hyphens, and -- makes the rest (--project/--user included) the value
 $S roster                                  # live agents with role/kind/pane/state/report and the current task (TASK, from the pane title; '-' when none, cut to 40 characters)
-$S release impl [--close] [--force]        # forget the agent; --close closes a pane we created, or the recorded orphan's pane (idle or done)
+$S release impl [--close] [--force] [--keep-copies]
+                                           # forget the agent and delete the throwaway copies registered to it; --close closes a pane we created, or the recorded orphan's pane (idle or done); --keep-copies leaves the copies for gc
 $S reopen impl [--force]                    # release --close + spawn --fresh with the roster's role, kind, model, effort, cwd and native args; output is the spawn JSON
 $S clean [--older-than 7]                  # drop gone agents, delete old briefs/reports
+$S copies                                  # registered throwaway copies: path, owner, age, owned|orphan|missing (reads only)
+$S copies add <path> [--agent <name>]      # register a copy made by hand (a review copy, a frozen package) so release and gc remove it; the repository, a worktree, HOME, a symlink or a path with .git are refused (exit 2)
+$S gc [--yes] [--older-than <hours>] [--include-unregistered]
+                                           # orphan copies (owner released or gone) older than 2 h, with sizes; without --yes it only lists; unregistered herdr-soho-mutation-* dirs in TMPDIR are listed apart and removed only with --include-unregistered --yes
 $S kinds                                   # kind → executable, family, effort ceiling
 $S spawn implementer --effort xhigh --approvals full      # normalized effort + no prompts
 $S spawn scouter --kind cursor --model gpt-5.3-codex --effort high --approvals full
@@ -1529,6 +1541,13 @@ family>`.
    their report file exists** (`release --close` kills a worker mid-task);
    close only panes this skill created and only when the user did not ask
    to keep them.
+9. **Free what the run used.** `release` deletes the copies registered to
+   the worker (`mutation-copy` registers its own; a copy made any other way
+   is registered with `$S copies add <path>`). At the end of each wave and
+   of the run, run `$S gc`, read the list, then `$S gc --yes`; do it next
+   to the `$S friction` reading. A `resource pressure` warning at `spawn`,
+   `wait` or `status` means the disk or the swap is near its limit: run
+   `gc`, close idle panes, and open fewer workers until it clears.
 
 When a wait returns `blocked` or `question`, inspect `herdr agent read
 <name>` (the JSON `question` already holds the question's screen) and ask
@@ -1621,6 +1640,15 @@ proof. When the section is there, the lint (dispatch and `lint`) names the
 missing markers: `brief <path> failure matrix is missing: [clock] — a clock
 that goes backwards is not covered` (a warning in `warn` and `strict`).
 Any other slice leaves the section out and gets no matrix.
+
+**Copies, probes and long commands.** A brief that has the worker copy the
+project (a mutation copy, a frozen package, a review copy) says where the
+copy goes, and the report lists every copy the worker made and whether it
+was deleted. Prefer `mutation-copy --link` to the dependency directory
+(`node_modules`, a virtualenv) over a fresh install in each copy when the
+slice does not change dependencies. Every probe, dev server or long
+command the brief asks for carries a timeout in the brief, so nothing
+outlives the slice.
 
 **Stop after the gates.** The edit roles stop proving once every check the
 brief lists passes: a failure outside their files or caused by an external
