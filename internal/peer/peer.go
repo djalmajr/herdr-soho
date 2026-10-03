@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -323,6 +324,60 @@ func resolveTarget(target string, env platform.Env) resolvedTarget {
 	}
 	return resolvedTarget{RefShown: shown, Machine: machine, OK: true, TargetArg: targetArg,
 		Status: a.Status, Cwd: a.Cwd, Workspace: a.WorkspaceID, Kind: a.Kind, Seq: a.Seq}
+}
+
+// noAgentHint builds the same-workspace suggestion for the agent_not_found 4
+// of a [machine/]<workspace>:<pane> reference: the live agents of the same
+// workspace on the same machine, listed the way find does (the same snapshot
+// agent list, with --machine for a remote machine). At most 5, preferring the
+// names that begin with "orchestrator". A failed or empty listing — and a
+// target that is not such a reference (a name) — returns "": today's message
+// stands, the exit code stays 4 and nothing is sent.
+func noAgentHint(target, machine string, env platform.Env) string {
+	ref := sessionref.ParseRef(target)
+	if ref == nil {
+		return ""
+	}
+	workspace, _, cut := strings.Cut(ref.PaneID, ":")
+	if !cut || workspace == "" {
+		return ""
+	}
+	result := FetchSessions([]string{machine}, SnapshotOptions{Env: env})
+	if len(result.Failures) > 0 {
+		return ""
+	}
+	candidates := []SessionEntry{}
+	for _, e := range result.Entries {
+		// A live agent of the same workspace on the same machine: a pane with
+		// no agent status holds nothing to suggest, and another workspace's
+		// agents are not candidates.
+		if e.Machine != machine || valueString(e.Status) == "" {
+			continue
+		}
+		if ws, _, ok := strings.Cut(e.PaneID, ":"); ok && ws == workspace {
+			candidates = append(candidates, e)
+		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	prefers := func(e SessionEntry) bool { return strings.HasPrefix(valueString(e.Name), "orchestrator") }
+	sort.SliceStable(candidates, func(i, j int) bool { return prefers(candidates[i]) && !prefers(candidates[j]) })
+	if len(candidates) > 5 {
+		candidates = candidates[:5]
+	}
+	parts := make([]string, 0, len(candidates))
+	for _, e := range candidates {
+		name, kind := valueString(e.Name), valueString(e.Kind)
+		if name == "" {
+			name = "-"
+		}
+		if kind == "" {
+			kind = "-"
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s, %s)", e.Ref, name, kind))
+	}
+	return "; agents in " + workspace + ": " + strings.Join(parts, ", ")
 }
 
 func structuredError(stdout, stderr, what, rcLabel string) (string, string) {
@@ -723,7 +778,11 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		}
 		log(SenderRefOf(env), t.RefShown, result)
 		if t.Code == "agent_not_found" {
-			platform.Die("send: no agent in "+t.RefShown, 4)
+			msg := "send: no agent in " + t.RefShown
+			if hint := noAgentHint(target, t.Machine, env); hint != "" {
+				msg += hint
+			}
+			platform.Die(msg, 4)
 		}
 		platform.Die(fmt.Sprintf("send: %s unavailable: %s", t.RefShown, t.Cause), 4)
 	}
@@ -791,20 +850,27 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	}
 	currentStatus = screenGet.Status
 	if isDialogScreen(vScreen, t.Kind, currentStatus) {
-		deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
-		for time.Now().Before(deadline) && isDialogScreen(vScreen, t.Kind, currentStatus) {
-			sleepMS(min(arrivalPollMS(env), int(time.Until(deadline).Milliseconds())))
-			vScreen, cause = readScreen(t.Machine, t.TargetArg, "visible", 0, env, HerdrCallTimeoutMS, noteVisibleScreen)
-			if cause != "" {
-				log(senderRef, t.RefShown, "unreadable")
-				platform.Die(fmt.Sprintf("send: could not read %s's screen (%s); nothing was sent", t.RefShown, cause), 4)
+		// --now does not wait for the dialog to clear: the wait would follow
+		// the --timeout budget (the rc.14 --now send stalled over 5 minutes on
+		// the 600 s default while the dialog stayed on screen). The dialog
+		// check below exits 17 at once, with no key; without --now the loop
+		// waits until --timeout, as before.
+		if !now {
+			deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
+			for time.Now().Before(deadline) && isDialogScreen(vScreen, t.Kind, currentStatus) {
+				sleepMS(min(arrivalPollMS(env), int(time.Until(deadline).Milliseconds())))
+				vScreen, cause = readScreen(t.Machine, t.TargetArg, "visible", 0, env, HerdrCallTimeoutMS, noteVisibleScreen)
+				if cause != "" {
+					log(senderRef, t.RefShown, "unreadable")
+					platform.Die(fmt.Sprintf("send: could not read %s's screen (%s); nothing was sent", t.RefShown, cause), 4)
+				}
+				g := agentGet(t.Machine, t.TargetArg, env, HerdrCallTimeoutMS)
+				if !g.OK {
+					log(senderRef, t.RefShown, "error")
+					platform.Die(fmt.Sprintf("send: %s unavailable: %s", t.RefShown, g.Cause), 4)
+				}
+				currentStatus = g.Status
 			}
-			g := agentGet(t.Machine, t.TargetArg, env, HerdrCallTimeoutMS)
-			if !g.OK {
-				log(senderRef, t.RefShown, "error")
-				platform.Die(fmt.Sprintf("send: %s unavailable: %s", t.RefShown, g.Cause), 4)
-			}
-			currentStatus = g.Status
 		}
 		if isDialogScreen(vScreen, t.Kind, currentStatus) {
 			log(senderRef, t.RefShown, "dialog")

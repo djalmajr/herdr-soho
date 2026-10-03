@@ -268,8 +268,15 @@ func TestSend(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if code != 4 || len(calls) != 1 || strings.Join(calls[0].Argv, " ") != "--machine remote agent get w0test:p0a" {
+		// The not-found path may list the workspace for candidates (F7): every
+		// call still goes to the remote machine, --machine first.
+		if code != 4 || len(calls) == 0 || strings.Join(calls[0].Argv, " ") != "--machine remote agent get w0test:p0a" {
 			t.Fatalf("code=%d calls=%+v", code, calls)
+		}
+		for _, call := range calls {
+			if len(call.Argv) < 2 || call.Argv[0] != "--machine" || call.Argv[1] != "remote" {
+				t.Fatalf("a call without --machine remote first: %+v", calls)
+			}
 		}
 	})
 	t.Run("guard: send with real herdr, isolated socket and impossible target sends nothing and exits 4", func(t *testing.T) { // JS: "guard: send with real herdr, isolated socket and impossible target sends nothing and exits 4"
