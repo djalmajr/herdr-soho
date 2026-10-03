@@ -429,6 +429,167 @@ func TestBoardFailedMachineSwapsOldRowsForFailureLine(t *testing.T) {
 	}
 }
 
+// boardPinnedMissingFixture puts the board in the pinned-missing state:
+// middle/b is selected, a refresh publication has local and middle finished
+// (middle without the selected ref) and slow is still pending - the numeric
+// index now points at slow/c.
+func boardPinnedMissingFixture(t *testing.T) *BoardState {
+	t.Helper()
+	s := NewBoardState()
+	s.Entries = []PickerEntry{
+		boardEntry("local/a", "local", "w", "w", "a", "codex", "idle", "a"),
+		boardEntry("middle/b", "middle", "w", "w", "b", "codex", "idle", "b"),
+		boardEntry("slow/c", "slow", "w", "w", "c", "codex", "idle", "c"),
+	}
+	s.Selected = 1 // middle/b
+	u := NewBoardState()
+	u.Loading = 1
+	u.Entries = []PickerEntry{s.Entries[0]}
+	u.FinishedMachines = []string{"local", "middle"}
+	applyBoardUpdate(s, u)
+	if !s.pinnedMissing() {
+		t.Fatal("the fixture must leave the board in the pinned-missing state")
+	}
+	return s
+}
+
+// boardCursorLines counts the agent rows carrying the cursor (every line
+// starting with "> " except the query line, which is line 1).
+func boardCursorLines(render string) int {
+	n := 0
+	for i, line := range strings.Split(strings.TrimSuffix(render, "\n"), "\n") {
+		if i == 1 {
+			continue
+		}
+		if strings.HasPrefix(line, "> ") {
+			n++
+		}
+	}
+	return n
+}
+
+// TestBoardEnterDoesNotCopyDifferentSessionWhileSelectedRefGone is the
+// review's probe: with middle/b selected, middle's find finishes without it
+// and slow is still pending, so the numeric index points at slow/c; Enter
+// must not copy that other session and the board stays open.
+func TestBoardEnterDoesNotCopyDifferentSessionWhileSelectedRefGone(t *testing.T) {
+	s := boardPinnedMissingFixture(t)
+	action := s.ApplyKey("enter")
+	if action == "copy" {
+		t.Fatalf("Enter copied %q while the pinned ref middle/b is gone (action=%s)", pickerString(s.LastEntry["ref"]), action)
+	}
+	if s.Copied != nil || s.Exit != "" {
+		t.Fatalf("the board copied (Copied!=nil) or closed (exit=%q) although Enter must do nothing here", s.Exit)
+	}
+	if got := boardRefs(s.Entries); len(got) != 2 || got[0] != "local/a" || got[1] != "slow/c" {
+		t.Fatalf("merged rows=%v want local/a + slow/c (middle finished without middle/b)", got)
+	}
+}
+
+// TestBoardPinnedMissingShowsNoCursorAndFooter: in the pinned-missing state
+// no row shows the cursor and the last line is the footer message; before
+// the publication the cursor was on the selected row.
+func TestBoardPinnedMissingShowsNoCursorAndFooter(t *testing.T) {
+	s := NewBoardState()
+	s.Entries = []PickerEntry{
+		boardEntry("local/a", "local", "w", "w", "a", "codex", "idle", "a"),
+		boardEntry("middle/b", "middle", "w", "w", "b", "codex", "idle", "b"),
+		boardEntry("slow/c", "slow", "w", "w", "c", "codex", "idle", "c"),
+	}
+	s.Selected = 1
+	if got := boardCursorLines(RenderBoard(s, 80)); got != 1 {
+		t.Fatalf("before the refresh the render must show exactly one cursor row, got %d", got)
+	}
+	u := NewBoardState()
+	u.Loading = 1
+	u.Entries = []PickerEntry{s.Entries[0]}
+	u.FinishedMachines = []string{"local", "middle"}
+	applyBoardUpdate(s, u)
+	render := RenderBoard(s, 80)
+	if got := boardCursorLines(render); got != 0 {
+		t.Fatalf("the pinned-missing render has %d cursor rows, want none:\n%s", got, render)
+	}
+	want := "a sessão selecionada saiu desta carga; escolha outra com ↑/↓"
+	lines := strings.Split(strings.TrimSuffix(render, "\n"), "\n")
+	if lines[len(lines)-1] != want {
+		t.Fatalf("last line=%q want %q", lines[len(lines)-1], want)
+	}
+}
+
+// TestBoardPinnedMissingArrowRepinsAndEnterCopies: ↑/↓ in the
+// pinned-missing state pick a visible row (↑ the first, ↓ the last) and it
+// becomes the new pinned ref; Enter then copies that row, resolved by ref.
+func TestBoardPinnedMissingArrowRepinsAndEnterCopies(t *testing.T) {
+	s := boardPinnedMissingFixture(t)
+	// visible = [local/a, slow/c]; ↓ picks the last row (slow/c), which is
+	// the first-and-only candidate from the cursor's point of view... and
+	// on a single visible row it is the first row too:
+	s2 := NewBoardState()
+	s2.Entries = []PickerEntry{
+		boardEntry("local/a", "local", "w", "w", "a", "codex", "idle", "a"),
+		boardEntry("middle/b", "middle", "w", "w", "b", "codex", "idle", "b"),
+	}
+	s2.Selected = 1
+	u2 := NewBoardState()
+	u2.Loading = 0
+	u2.Entries = []PickerEntry{s2.Entries[0]}
+	u2.FinishedMachines = []string{"local", "middle"}
+	applyBoardUpdate(s2, u2)
+	if !s2.pinnedMissing() {
+		t.Fatal("the single-row fixture must be in the pinned-missing state")
+	}
+	if action := s2.ApplyKey("down"); action != "" {
+		t.Fatalf("down returned %q want nothing", action)
+	}
+	if got := pickerString(s2.visible()[s2.Selected]["ref"]); got != "local/a" {
+		t.Fatalf("down picked %q want the first visible row local/a", got)
+	}
+	if action := s2.ApplyKey("enter"); action != "copy" {
+		t.Fatalf("Enter after re-pinning returned %q want copy", action)
+	}
+	if got := pickerString(s2.LastEntry["ref"]); got != "local/a" {
+		t.Fatalf("Enter copied %q want local/a (the row picked by ↓)", got)
+	}
+	// On the two-row fixture: ↑ picks the first row, ↓ picks the last.
+	if action := s.ApplyKey("up"); action != "" {
+		t.Fatalf("up returned %q want nothing", action)
+	}
+	if got := pickerString(s.visible()[s.Selected]["ref"]); got != "local/a" {
+		t.Fatalf("up picked %q want the first visible row local/a", got)
+	}
+	if action := s.ApplyKey("enter"); action != "copy" || pickerString(s.LastEntry["ref"]) != "local/a" {
+		t.Fatalf("Enter after ↑ returned %q/%q want copy local/a", action, pickerString(s.LastEntry["ref"]))
+	}
+}
+
+// TestBoardPinnedMissingFallsToTopWhenTheLoadCompletes: the pinned-missing
+// state ends with the load - the complete publication publishes only the
+// new result, the selection falls to the top, the pin is cleared and the
+// footer message goes away.
+func TestBoardPinnedMissingFallsToTopWhenTheLoadCompletes(t *testing.T) {
+	s := boardPinnedMissingFixture(t)
+	final := NewBoardState()
+	final.UpdatedAt = boardNow().Format("15:04:05")
+	final.Entries = []PickerEntry{
+		boardEntry("local/a", "local", "w", "w", "a", "codex", "idle", "a"),
+		boardEntry("slow/c", "slow", "w", "w", "c", "codex", "idle", "c"),
+	}
+	final.FinishedMachines = []string{"local", "middle", "slow"}
+	applyBoardUpdate(s, final)
+	if s.Selected != 0 {
+		t.Fatalf("selection after the load completed=%d want 0 (the ref is gone)", s.Selected)
+	}
+	if s.selectedRef != "" || s.refreshing {
+		t.Fatalf("the pin survived the complete load (ref=%q refreshing=%v)", s.selectedRef, s.refreshing)
+	}
+	if lines := strings.Split(strings.TrimSuffix(RenderBoard(s, 80), "\n"), "\n"); lines[len(lines)-1] == "a sessão selecionada saiu desta carga; escolha outra com ↑/↓" {
+		t.Fatal("the footer message survived the complete load")
+	}
+	if got := boardCursorLines(RenderBoard(s, 80)); got != 1 {
+		t.Fatalf("the cursor must be back on the top row, got %d cursor rows", got)
+	}
+}
+
 func TestBoardRefreshKeyRules(t *testing.T) {
 	state := NewBoardState()
 	state.Entries = []PickerEntry{boardEntry("local/a1", "local", "ws-a", "alpha", "orchestrator-1", "claude", "working", "one")}
