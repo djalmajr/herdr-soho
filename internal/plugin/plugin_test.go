@@ -51,6 +51,7 @@ func installBridgeFakes(t *testing.T, paneJSON string, paneCode int, cliCode int
 	herdr, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{
 		{Argv: []string{"pane", "get", "pane-a"}, Stdout: paneJSON, Code: paneCode},
 		{Argv: plugin.PickerArguments(), Stdout: "opened\n"},
+		{Argv: []string{"plugin", "pane", "open"}, ArgvPrefix: true, Stdout: "opened\n"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -70,60 +71,57 @@ func installBridgeFakes(t *testing.T, paneJSON string, paneCode int, cliCode int
 }
 
 func TestBridgeReadOnlyAndFocusedTarget(t *testing.T) {
-	// JS: "doctor: valid context invokes the CLI in the pane cwd with the context ids"
-	// Mutation captured: removing NOWRITE or using the shell cwd changes the captured child invocation.
-	env, cliBin, cwd, _ := installBridgeFakes(t, "__default__", 0, 0, "doctor-ok\n", "")
-	cwdMarker := filepath.Join(filepath.Dir(cliBin), "child-cwd.txt")
-	env["HERDR_SOHO_PLUGIN_CWD_MARKER"] = cwdMarker
-	r, err := plugin.Bridge("doctor", env, platform.Current(), cliBin)
-	if err != nil || r.Code != 0 || !strings.Contains(r.Out, "target workspace=ws-a pane=pane-a cwd="+cwd) || !strings.Contains(r.Out, "doctor-ok") {
-		t.Fatalf("bridge: result=%+v err=%v", r, err)
+	// The read-only actions now open the team panel: the bridge validates the
+	// focused target (context + `herdr pane get`) and then runs `plugin pane
+	// open` - it no longer runs the CLI with its output going to the log.
+	env, cliBin, _, _ := installBridgeFakes(t, "__default__", 0, 0, "unused\n", "")
+	for _, action := range []string{"team", "roster", "doctor"} {
+		r, err := plugin.Bridge(action, env, platform.Current(), cliBin)
+		if err != nil || r.Code != 0 || !strings.Contains(r.Out, "target workspace=ws-a pane=pane-a") || !strings.Contains(r.Out, "opened") {
+			t.Fatalf("bridge %s: result=%+v err=%v", action, r, err)
+		}
 	}
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(cliBin), "cli.json"))
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("CLI calls=%#v err=%v", calls, err)
-	}
-	if calls[0].Env["HERDR_SOHO_NOWRITE"] != "1" || calls[0].Env["HERDR_WORKSPACE_ID"] != "ws-a" || calls[0].Env["HERDR_PANE_ID"] != "pane-a" || calls[0].Env["HERDR_TAB_ID"] != "tab-a" {
-		t.Fatalf("child env=%#v", calls[0].Env)
-	}
-	if !strings.HasPrefix(calls[0].Env["PATH"], filepath.Dir(env.Get("HERDR_BIN_PATH"))+string(os.PathListSeparator)) {
-		t.Fatalf("child PATH does not start with the Herdr directory: %q", calls[0].Env["PATH"])
-	}
-	childCwd, err := os.ReadFile(cwdMarker)
-	resolvedCwd, _ := filepath.EvalSymlinks(cwd)
-	if err != nil || string(childCwd) != resolvedCwd {
-		t.Fatalf("child cwd=%q want %q err=%v", childCwd, cwd, err)
+	// The old path is gone: the CLI fake was never invoked for any of them.
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(cliBin), "cli.calls.jsonl")); !os.IsNotExist(statErr) {
+		t.Fatalf("CLI invoked for a read-only action: %v", statErr)
 	}
 	herdrCalls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(cliBin), "herdr.json"))
-	if err != nil || len(herdrCalls) != 1 || !reflect.DeepEqual(herdrCalls[0].Argv, []string{"pane", "get", "pane-a"}) {
+	if err != nil || len(herdrCalls) != 6 {
 		t.Fatalf("Herdr calls=%#v err=%v", herdrCalls, err)
+	}
+	for i, action := range []string{"team", "roster", "doctor"} {
+		if !reflect.DeepEqual(herdrCalls[i*2].Argv, []string{"pane", "get", "pane-a"}) {
+			t.Fatalf("%s pane get argv=%#v", action, herdrCalls[i*2].Argv)
+		}
+		want := plugin.TeamArguments()
+		if action == "doctor" {
+			want = plugin.TeamDoctorArguments()
+		}
+		if !reflect.DeepEqual(herdrCalls[i*2+1].Argv, want) {
+			t.Fatalf("%s pane open argv=%#v want %#v", action, herdrCalls[i*2+1].Argv, want)
+		}
 	}
 }
 
-func TestBridgeRunsHerdrAndSkillExecutablesOutsidePath(t *testing.T) {
-	// Mutation captured: replacing either exact-path call with PATH resolution can select the decoy.
-	env, cliBin, _, _ := installBridgeFakes(t, "__default__", 0, 0, "exact-skill\n", "")
+func TestBridgePaneOpenUsesExactHerdrBinary(t *testing.T) {
+	// Mutation captured: resolving the herdr binary through PATH instead of
+	// HERDR_BIN_PATH selects the decoy instead of the exact fake.
+	env, _, _, _ := installBridgeFakes(t, "__default__", 0, 0, "", "")
 	pathDir := t.TempDir()
-	for _, name := range []string{"herdr", filepath.Base(cliBin)} {
-		if _, err := fakecli.Install(t, pathDir, name, []fakecli.Rule{{AnyArgs: true, Stdout: "decoy\n"}}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := fakecli.Install(t, pathDir, "herdr", []fakecli.Rule{{AnyArgs: true, Stdout: "decoy\n"}}); err != nil {
+		t.Fatal(err)
 	}
 	env["PATH"] = pathDir
-	result, err := plugin.Bridge("doctor", env, platform.Current(), cliBin)
-	if err != nil || result.Code != 0 || !strings.Contains(result.Out, "exact-skill\n") || strings.Contains(result.Out, "decoy\n") {
-		t.Fatalf("bridge exact path result=%+v err=%v", result, err)
+	result, err := plugin.Bridge("roster", env, platform.Current(), "")
+	if err != nil || result.Code != 0 || strings.Contains(result.Out, "decoy\n") {
+		t.Fatalf("bridge pane open result=%+v err=%v", result, err)
 	}
 	herdrCalls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(env.Get("HERDR_BIN_PATH")), "herdr.json"))
-	if err != nil || len(herdrCalls) != 1 || !reflect.DeepEqual(herdrCalls[0].Argv, []string{"pane", "get", "pane-a"}) {
+	if err != nil || len(herdrCalls) != 2 || !reflect.DeepEqual(herdrCalls[1].Argv, plugin.TeamArguments()) {
 		t.Fatalf("HERDR_BIN_PATH call log=%#v err=%v", herdrCalls, err)
 	}
-	cliCalls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(cliBin), "cli.json"))
-	if err != nil || len(cliCalls) != 1 || !reflect.DeepEqual(cliCalls[0].Argv, []string{"doctor"}) {
-		t.Fatalf("exact skill call log=%#v err=%v", cliCalls, err)
-	}
-	if !filepath.IsAbs(env.Get("HERDR_BIN_PATH")) || !filepath.IsAbs(cliBin) || strings.HasPrefix(env.Get("HERDR_BIN_PATH"), pathDir) || strings.HasPrefix(cliBin, pathDir) {
-		t.Fatalf("fixtures are not separate from PATH: Herdr=%q CLI=%q PATH=%q", env.Get("HERDR_BIN_PATH"), cliBin, pathDir)
+	if !filepath.IsAbs(env.Get("HERDR_BIN_PATH")) || strings.HasPrefix(env.Get("HERDR_BIN_PATH"), pathDir) {
+		t.Fatalf("fixture is not separate from PATH: Herdr=%q PATH=%q", env.Get("HERDR_BIN_PATH"), pathDir)
 	}
 }
 

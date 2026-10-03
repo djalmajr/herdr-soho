@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -14,18 +13,23 @@ const (
 	ExitInvalidTarget = 2
 	ExitHerdrFailure  = 4
 	herdrTimeoutMs    = 30_000
-	cliTimeoutMs      = 300_000
 )
-
-var actions = map[string]bool{"doctor": true, "roster": true}
 
 var pickOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "picker", "--placement", "overlay", "--focus"}
 
 var boardOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "board", "--placement", "overlay", "--focus"}
 
+var teamOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "team", "--placement", "overlay", "--focus"}
+
+var teamDoctorOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "team-doctor", "--placement", "overlay", "--focus"}
+
 func PickerArguments() []string { return append([]string(nil), pickOpenArgs...) }
 
 func BoardArguments() []string { return append([]string(nil), boardOpenArgs...) }
+
+func TeamArguments() []string { return append([]string(nil), teamOpenArgs...) }
+
+func TeamDoctorArguments() []string { return append([]string(nil), teamDoctorOpenArgs...) }
 
 type BridgeError struct {
 	Code    int
@@ -51,7 +55,10 @@ type Result struct {
 	Err  string
 }
 
-// Bridge runs one plugin action using the Herdr-focused pane as its target.
+// Bridge runs one plugin action using the Herdr-focused pane as its
+// target. Every action opens one of the plugin panes (pick, board, team or
+// team-doctor); the bridge no longer runs the CLI with its output going to
+// the Herdr log.
 func Bridge(action string, env platform.Env, platformName, executable string) (Result, error) {
 	if action == "pick" {
 		return bridgePaneOpen(env, platformName, pickOpenArgs)
@@ -59,67 +66,13 @@ func Bridge(action string, env platform.Env, platformName, executable string) (R
 	if action == "board" {
 		return bridgePaneOpen(env, platformName, boardOpenArgs)
 	}
-	if !actions[action] {
-		return Result{}, &BridgeError{Code: ExitInvalidTarget, Message: "unknown subcommand '" + action + "' (use 'doctor', 'roster', 'board' or 'pick')"}
+	if action == "team" || action == "roster" {
+		return bridgePaneOpen(env, platformName, teamOpenArgs)
 	}
-	ctx, err := parseContext(env)
-	if err != nil {
-		return Result{}, err
+	if action == "doctor" {
+		return bridgePaneOpen(env, platformName, teamDoctorOpenArgs)
 	}
-	herdrBin := env.Get("HERDR_BIN_PATH")
-	if herdrBin == "" {
-		return Result{}, &BridgeError{Code: ExitInvalidTarget, Message: "HERDR_BIN_PATH missing; the action must run inside Herdr"}
-	}
-	focused, err := getPane(herdrBin, ctx.PaneID, env, platformName)
-	if err != nil {
-		return Result{}, err
-	}
-	if focused.WorkspaceID != ctx.WorkspaceID {
-		return Result{}, &BridgeError{Code: ExitInvalidTarget, Message: fmt.Sprintf("workspace divergence: the context points to '%s' and pane %s belongs to '%s'; target rejected", ctx.WorkspaceID, ctx.PaneID, focused.WorkspaceID)}
-	}
-	info, statErr := os.Stat(focused.Cwd)
-	if statErr != nil {
-		return Result{}, &BridgeError{Code: ExitInvalidTarget, Message: "pane cwd does not exist: " + focused.Cwd}
-	}
-	if !info.IsDir() {
-		return Result{}, &BridgeError{Code: ExitInvalidTarget, Message: "pane cwd is not a directory: " + focused.Cwd}
-	}
-	childEnv := env.Clone()
-	childEnv["HERDR_WORKSPACE_ID"] = ctx.WorkspaceID
-	childEnv["HERDR_PANE_ID"] = ctx.PaneID
-	childEnv["HERDR_SOHO_NOWRITE"] = "1"
-	if ctx.TabID != "" {
-		childEnv["HERDR_TAB_ID"] = ctx.TabID
-	} else {
-		delete(childEnv, "HERDR_TAB_ID")
-	}
-	pathKey := "PATH"
-	if _, ok := childEnv["Path"]; ok && platformName == "win32" {
-		pathKey = "Path"
-	}
-	separator := string(os.PathListSeparator)
-	if platformName == "win32" {
-		separator = ";"
-	}
-	childEnv[pathKey] = filepath.Dir(herdrBin) + separator + childEnv[pathKey]
-	intro := fmt.Sprintf("herdr-soho plugin: target workspace=%s pane=%s cwd=%s\n", ctx.WorkspaceID, ctx.PaneID, focused.Cwd)
-	childEnv = withPathTail(childEnv, filepath.Dir(executable), platformName)
-	run := platform.RunExecutable(executable, []string{action}, platform.RunOptions{Env: childEnv, Platform: platformName, Cwd: focused.Cwd, TimeoutMs: cliTimeoutMs})
-	if run.Error == "ETIMEDOUT" || run.TimedOut {
-		return Result{Code: ExitHerdrFailure, Out: intro, Err: fmt.Sprintf("herdr-soho plugin: CLI %s timed out after 300s\n", action)}, nil
-	}
-	if run.Error != "" || run.NotFound {
-		cause := run.Error
-		if run.NotFound {
-			cause = "ENOENT"
-		}
-		return Result{}, &BridgeError{Code: ExitHerdrFailure, Message: fmt.Sprintf("CLI not executable (%s): %s", executable, cause)}
-	}
-	code := 1
-	if run.Status != nil {
-		code = *run.Status
-	}
-	return Result{Code: code, Out: intro + run.Stdout, Err: run.Stderr}, nil
+	return Result{}, &BridgeError{Code: ExitInvalidTarget, Message: "unknown subcommand '" + action + "' (use 'doctor', 'roster', 'board' or 'pick'); the 'team' action opens the team panel"}
 }
 
 // bridgePaneOpen validates the focused target like the read-only actions
@@ -231,25 +184,6 @@ func getPane(herdrBin, paneID string, env platform.Env, platformName string) (pa
 		return pane{}, &BridgeError{Code: ExitHerdrFailure, Message: "malformed herdr output (pane without cwd)"}
 	}
 	return pane{WorkspaceID: workspaceID, Cwd: cwd}, nil
-}
-
-func withPathTail(env platform.Env, dir, platformName string) platform.Env {
-	key := "PATH"
-	if platformName == "win32" {
-		if _, ok := env["Path"]; ok && env["PATH"] == "" {
-			key = "Path"
-		}
-	}
-	separator := string(os.PathListSeparator)
-	if platformName == "win32" {
-		separator = ";"
-	}
-	if env.Get(key) == "" {
-		env[key] = dir
-	} else {
-		env[key] += separator + dir
-	}
-	return env
 }
 
 func withPath(env platform.Env, dir, platformName string) platform.Env {

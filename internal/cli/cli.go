@@ -148,7 +148,7 @@ func Run(args []string, env platform.Env) (code int) {
 		return 0
 	}
 	if command == "plugin" {
-		if len(args) < 2 || (args[1] != "bridge" && args[1] != "board" && args[1] != "clipboard" && args[1] != "picker") {
+		if len(args) < 2 || (args[1] != "bridge" && args[1] != "board" && args[1] != "clipboard" && args[1] != "picker" && args[1] != "team") {
 			return pluginpkg.PluginCommand(args[1:], env, platform.Current(), "", "")
 		}
 		input := ""
@@ -161,7 +161,7 @@ func Run(args []string, env platform.Env) (code int) {
 			input = string(data)
 		}
 		executable, err := os.Executable()
-		if err != nil && (args[1] == "bridge" || args[1] == "picker" || args[1] == "board") {
+		if err != nil && (args[1] == "bridge" || args[1] == "picker" || args[1] == "board" || args[1] == "team") {
 			fmt.Fprintf(platform.Stderr, "herdr-soho plugin: cannot resolve executable: %s\n", err)
 			return 4
 		}

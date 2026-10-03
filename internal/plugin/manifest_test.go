@@ -24,8 +24,8 @@ func TestManifestCommandsUseTheGoCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pluginSubcommands := map[string]bool{"board": true, "bridge": true, "clipboard": true, "picker": true}
-	bridgeActions := map[string]bool{"board": true, "doctor": true, "roster": true, "pick": true}
+	pluginSubcommands := map[string]bool{"board": true, "bridge": true, "clipboard": true, "picker": true, "team": true}
+	bridgeActions := map[string]bool{"board": true, "doctor": true, "roster": true, "team": true, "pick": true}
 	commands := 0
 	for _, raw := range strings.Split(string(data), "\n") {
 		line := strings.TrimSpace(raw)

@@ -14,11 +14,13 @@ The repository contains:
 - [`skills/herdr-soho/`](skills/herdr-soho/) — the agent skill, roles,
   templates, dependency-free Node/Bun CLI, and tests.
 - [`plugin/`](plugin/) — an optional local Herdr plugin that exposes
-  workspace-scoped, read-only actions (`doctor`, `roster`) through the same
-  CLI, plus a session picker (`pick`) that copies a session reference to
-  the clipboard. Its actions inspect the focused project and never write
-  to it (they run the CLI with `HERDR_SOHO_NOWRITE=1`: no `.gitignore`
-  entry, no state directory).
+  workspace-scoped actions (`doctor`, `roster`, `team`) through the same
+  CLI, a session picker (`pick`) that copies a session reference to the
+  clipboard, and a team board (`board`). The read-only actions open the
+  team panel, which inspects the focused project with the CLI running in
+  `HERDR_SOHO_NOWRITE=1`; only the panel's `x` and `g` confirmations run a
+  write (a release or `gc --yes`), never without the on-screen
+  confirmation.
 - [`docs/guide.md`](docs/guide.md) — usage and configuration guide.
 
 ## Install the skill
@@ -132,11 +134,14 @@ A checkout linked before the rename is registered as
 `djalmajr.herdr-agents`; unlink it and link the checkout again so Herdr
 loads `djalmajr.herdr-soho`.
 
-The `doctor` and `roster` actions inspect the workspace currently focused
-in Herdr, which can differ from the invoking shell's `HERDR_*` variables.
-Their output names the resolved workspace and pane. To inspect action
-results from the CLI, run `herdr plugin log list`; a `herdr-soho` that is
-not on the Herdr server's `PATH` shows up there as a failure.
+The `team`, `roster` and `doctor` actions open the team panel on the
+workspace currently focused in Herdr (which can differ from the invoking
+shell's `HERDR_*` variables): `team` and `roster` start on the team
+view, `doctor` starts on the doctor view. The panel names the resolved
+workspace and pane on its first line, and never refreshes by itself
+(`r` reloads). Its only writes are `x` (release the selected worker) and
+`g` (`gc --yes`), and only after their on-screen confirmation; every other
+CLI call runs with `HERDR_SOHO_NOWRITE=1`.
 
 ### Finding a session
 
@@ -202,6 +207,34 @@ key = "prefix+t" # any key
 type = "plugin_action"
 command = "djalmajr.herdr-soho.board"
 ```
+
+### Team panel
+
+The `team`, `roster` and `doctor` actions open the same panel over the
+focused pane: `herdr-soho plugin team` (and `--view doctor` for the
+doctor view). The first line is always `herdr-soho · <workspace> ·
+<cwd>`; `1`–`4` (or `Tab`) switch the views, each reloads on demand
+(no auto-refresh) and shows the CLI's exit code and stderr when a call
+fails:
+
+1. **team** — what the team is doing (`explain`, wrapped) and its
+   workers: the first roster table, one line per worker, `↑`/`↓` select
+   (orchestrator first as the roster gives it). `Enter` opens a
+   scrollable report of the selected worker (`collect <agent> --lines
+   60`, `↑`/`↓` and `PgUp`/`PgDn` scroll). `x` confirms on the panel
+   (`release --close <agent> in <workspace> (<cwd>)? y/N`) and, with
+   `y`, releases that worker (`--close`) and reloads the view.
+2. **doctor** — the output of `herdr-soho doctor` for the focused
+   workspace.
+3. **recursos** — the `gc` dry-run (pressure). `g` confirms (`gc --yes
+   in <cwd>? y/N`) and, with `y`, runs `gc --yes` and reloads.
+4. **friction** — `herdr-soho friction --summary`.
+
+`Esc`, `q` or `Ctrl-C` close the panel (in a subview or confirmation,
+`Esc` backs out one level); every read call runs in the target's cwd
+with the target's `HERDR_*` ids and `HERDR_SOHO_NOWRITE=1`. A focused
+pane from another workspace, or whose cwd does not exist, shows the
+cause on one line instead of the panel, and closes with `Esc`.
 
 ## Develop locally
 

@@ -1,36 +1,43 @@
-# herdr-soho optional plugin — read-only actions, the session picker and the team board.
+# herdr-soho optional plugin — read-only actions, the session picker, the team board and the team panel.
 # Manifest contract: https://herdr.dev/docs/plugins/
 # Every command runs the `herdr-soho` binary (the Go CLI), which must be
-# on the Herdr server's PATH. The doctor/roster actions call
-# `herdr-soho plugin bridge <subcommand>`; the bridge resolves the
+# on the Herdr server's PATH. The read-only actions (team, roster, doctor)
+# call `herdr-soho plugin bridge <subcommand>`; the bridge resolves the
 # focused target from HERDR_PLUGIN_CONTEXT_JSON, validates the pane with
-# HERDR_BIN_PATH, and runs the CLI in the pane's cwd with
-# HERDR_SOHO_NOWRITE=1. The `pick` action opens the picker pane
-# (`herdr-soho plugin picker`), an overlay that lists the panes (local
-# server and the enabled machines, via the CLI `find --json`) and copies
-# the selected session reference to the clipboard. Nothing the plugin
-# does writes to the focused project (no .gitignore entry, no state
+# HERDR_BIN_PATH, and opens the team panel over the focused pane (`plugin
+# pane open`). The panel itself runs the herdr-soho reads (explain, roster,
+# doctor, friction, gc) with HERDR_SOHO_NOWRITE=1; only `x` and `g`, after
+# their confirmation, run a release or `gc --yes`. The `pick` and `board`
+# actions open their own panes. Nothing the plugin does writes to the
+# focused project without a confirmation (no .gitignore entry, no state
 # directory).
 id = "djalmajr.herdr-soho"
 name = "herdr-soho"
 version = "0.3.0"
 min_herdr_version = "0.9.1"
-description = "Read-only actions (doctor, roster) to diagnose and list the agents of the focused workspace, plus a session picker (pick) that copies a session reference to the clipboard. The actions run the herdr-soho binary in read-only mode — it must be on the Herdr server's PATH — and never write to the focused project (no .gitignore entry, no state directory)."
+description = "Read-only actions (team, roster, doctor) around the focused workspace — the team panel shows who is running, what it does, the doctor, the resources and the friction — plus a session picker (pick) and a team board (board). The actions run the herdr-soho binary in read-only mode — it must be on the Herdr server's PATH — and only write after the panel's explicit confirmations (x, g)."
 platforms = ["linux", "macos", "windows"]
 
 [[actions]]
 id = "doctor"
-title = "Doctor: diagnose the focused workspace"
-description = "Read-only: shows the target (workspace and cwd) and the result of the CLI `herdr-soho doctor` in the focused pane's cwd, without writing to the project."
+title = "Doctor: open the team panel on the doctor view"
+description = "Read-only: opens the team panel on the focused workspace, starting at the doctor view (config, hooks, memory, dispatch state, panes and the Herdr/CLI versions). Only the panel's `x` and `g` confirmations write."
 contexts = ["workspace"]
 command = ["herdr-soho", "plugin", "bridge", "doctor"]
 
 [[actions]]
 id = "roster"
-title = "Roster: agents of the focused workspace"
-description = "Read-only: shows the target (workspace and cwd) and the result of the CLI `herdr-soho roster` in the focused pane's cwd, without writing to the project."
+title = "Roster: open the team panel"
+description = "Read-only: opens the team panel on the focused workspace (who is running, what it does, and the roster, orchestrator first). Only the panel's `x` and `g` confirmations write."
 contexts = ["workspace"]
 command = ["herdr-soho", "plugin", "bridge", "roster"]
+
+[[actions]]
+id = "team"
+title = "Team: open the team panel"
+description = "Read-only: opens the team panel on the focused workspace: the team explanation, the workers (release with x, after confirmation), the doctor, the resources (gc, with g, after confirmation) and the friction. Reload with r."
+contexts = ["workspace"]
+command = ["herdr-soho", "plugin", "bridge", "team"]
 
 [[panes]]
 id = "picker"
@@ -45,6 +52,20 @@ title = "herdr-soho: teams"
 placement = "overlay"
 platforms = ["linux", "macos", "windows"]
 command = ["herdr-soho", "plugin", "board"]
+
+[[panes]]
+id = "team"
+title = "herdr-soho: team"
+placement = "overlay"
+platforms = ["linux", "macos", "windows"]
+command = ["herdr-soho", "plugin", "team"]
+
+[[panes]]
+id = "team-doctor"
+title = "herdr-soho: doctor"
+placement = "overlay"
+platforms = ["linux", "macos", "windows"]
+command = ["herdr-soho", "plugin", "team", "--view", "doctor"]
 
 [[actions]]
 id = "pick"
