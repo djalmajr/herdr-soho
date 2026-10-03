@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,7 @@ type Rule struct {
 	StderrBytes []byte   `json:"stderr_bytes,omitempty"`
 	Code        int      `json:"code,omitempty"`
 	Delay       int      `json:"delay_ms,omitempty"`
+	WaitFile    string   `json:"wait_file,omitempty"`
 	Signal      string   `json:"signal,omitempty"`
 }
 
@@ -57,6 +59,38 @@ type EnvOptions struct {
 var preparedBinary string
 var prepareOnce sync.Once
 var prepareErr error
+
+// waitFileTimeoutEnv carries a shorter cap than the 60 s default into the
+// re-executed fake, so tests do not wait for the timeout. The variable would
+// not cross the re-execution, hence the environment.
+const waitFileTimeoutEnv = "FAKECLI_WAIT_FILE_TIMEOUT_MS"
+
+const waitFileDefaultTimeout = 60 * time.Second
+
+// waitFileTimeout returns the WaitFile cap: the injected value in
+// milliseconds when valid, else the 60 s default.
+func waitFileTimeout() time.Duration {
+	if raw := os.Getenv(waitFileTimeoutEnv); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return waitFileDefaultTimeout
+}
+
+// waitForFile polls every 20 ms until the file exists or the timeout passes.
+func waitForFile(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("wait_file %s never appeared", path)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
 
 // RunTests handles fake CLI re-execution, runs the package tests, and cleans up
 // a lazily prepared Windows binary after the package finishes.
@@ -278,6 +312,12 @@ func Main() {
 	for _, rule := range cfg.Rules {
 		if !matches(argv, rule) || (rule.Call != 0 && rule.Call != callNumber) {
 			continue
+		}
+		if rule.WaitFile != "" {
+			if err := waitForFile(rule.WaitFile, waitFileTimeout()); err != nil {
+				fmt.Fprintf(os.Stderr, "fakecli: %v\n", err)
+				os.Exit(124)
+			}
 		}
 		if rule.Delay > 0 {
 			time.Sleep(time.Duration(rule.Delay) * time.Millisecond)

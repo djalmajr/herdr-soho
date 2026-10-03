@@ -31,20 +31,61 @@ func (r *pickerPIDRecorder) snapshot() []int {
 	return append([]int(nil), r.pids...)
 }
 
-func pickerParallelFixture(t *testing.T, delays map[string]int) (platform.Env, string) {
+// pickerParallelFixture installs the picker's fake CLIs. The machine list is
+// always slow, fast, middle. In gated mode each fake remote find blocks until
+// its own release file appears before answering (the returned release function
+// unblocks one), so the test - not the wall clock - imposes the completion
+// order; in delay mode (gated=false) the fakes sleep delays[machine] ms as
+// before.
+func pickerParallelFixture(t *testing.T, delays map[string]int, gated bool) (platform.Env, string, func(string)) {
 	t.Helper()
 	dir := t.TempDir()
+	var releaseDir string
+	if gated {
+		releaseDir = filepath.Join(dir, "release")
+		if err := os.MkdirAll(releaseDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	local := `{"ref":"local/w1:p1","machine":"local","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","name":"local","kind":"codex","status":"idle"}` + "\n"
 	rules := []fakecli.Rule{{Argv: []string{"find", "--json"}, Stdout: local}}
 	for _, machine := range []string{"slow", "fast", "middle"} {
 		row := fmt.Sprintf(`{"ref":"%s/w1:p1","machine":"%s","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","name":"%s","kind":"codex","status":"idle"}`+"\n", machine, machine, machine)
-		rules = append(rules, fakecli.Rule{Argv: []string{"find", "--json", "--machine", machine}, Stdout: row, Delay: delays[machine]})
+		rule := fakecli.Rule{Argv: []string{"find", "--json", "--machine", machine}, Stdout: row, Delay: delays[machine]}
+		if gated {
+			rule.WaitFile = filepath.Join(releaseDir, "release-"+machine)
+		}
+		rules = append(rules, rule)
 	}
 	cliPath, err := fakecli.Install(t, dir, "herdr-soho", rules)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"slow","enabled":true},{"label":"fast","enabled":true},{"label":"middle","enabled":true}]`}})
+	env := pickerParallelEnv(t, dir)
+	release := func(string) {}
+	if gated {
+		release = func(machine string) {
+			if err := os.WriteFile(filepath.Join(releaseDir, "release-"+machine), []byte("go"), 0o644); err != nil {
+				t.Fatalf("release %s: %v", machine, err)
+			}
+		}
+		t.Cleanup(func() {
+			// Unblock finds still waiting after the test (a failed wait) so
+			// the fakes exit instead of polling for their release file
+			// forever.
+			for _, machine := range []string{"slow", "fast", "middle"} {
+				_ = os.WriteFile(filepath.Join(releaseDir, "release-"+machine), []byte("go"), 0o644)
+			}
+		})
+	}
+	return env, cliPath, release
+}
+
+// pickerParallelEnv installs the fake herdr (machine list) and builds the
+// picker's environment for the fixture directory.
+func pickerParallelEnv(t *testing.T, dir string) platform.Env {
+	t.Helper()
+	_, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"slow","enabled":true},{"label":"fast","enabled":true},{"label":"middle","enabled":true}]`}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +97,7 @@ func pickerParallelFixture(t *testing.T, delays map[string]int) (platform.Env, s
 		}
 	}
 	env["HERDR_BIN_PATH"] = filepath.Join(dir, "herdr")
-	return env, cliPath
+	return env
 }
 
 func pickerStartWithPipes(t *testing.T, env platform.Env, cliPath string) (*os.File, *os.File, *os.File, <-chan int) {
@@ -82,35 +123,52 @@ func pickerStartWithPipes(t *testing.T, env platform.Env, cliPath string) (*os.F
 	return writer, output, input, finished
 }
 
-func waitForPicker(t *testing.T, output *os.File, finished <-chan int, condition func(string) bool) string {
+// waitForPickerRow waits (30 s) for the row to appear in the accumulated
+// screen. The failure messages name the serial-execution hypothesis: with
+// the release gates a run that searches the machines one by one in
+// machine-list order (slow, fast, middle) blocks on the first, still
+// unreleased machine and never shows the waited row; the find timeout (60 s)
+// is longer than the deadline, so it cannot unmask the block in time.
+func waitForPickerRow(t *testing.T, output *os.File, finished <-chan int, row string) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second) // returns as soon as the condition holds; Windows process starts can take seconds
+	deadline := time.Now().Add(30 * time.Second) // returns as soon as the row shows; Windows process starts can take seconds
 	for time.Now().Before(deadline) {
 		data, _ := os.ReadFile(output.Name())
-		screen := string(data)
-		if condition(screen) {
-			return screen
+		if strings.Contains(string(data), row) {
+			return
 		}
 		select {
 		case code := <-finished:
-			t.Fatalf("picker exited before screen condition, code=%d, output=%q", code, screen)
+			t.Fatalf("picker exited before the row %q appeared (serial remote finds?), code=%d, output=%q", row, code, string(data))
 		default:
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	data, _ := os.ReadFile(output.Name())
-	t.Fatalf("timed out waiting for picker screen condition, output=%q", data)
-	return ""
+	t.Fatalf("after 30 s the row %q never appeared: a serial run in machine-list order blocks on an unreleased machine and hides it, output=%q", row, string(data))
 }
 
 func TestPickerRemoteFindsAppendInCompletionOrder(t *testing.T) {
 	// JS: "loads enabled machines in parallel and appends each result as it completes"
-	// Mutation captured: making remote searches serial preserves machine-list order and fails this assertion.
-	env, cliPath := pickerParallelFixture(t, map[string]int{"slow": 350, "fast": 60, "middle": 180})
+	// The completion order is imposed by release gates, not by wall-clock
+	// sleeps: each fake remote find blocks on its own release file, and the
+	// machine list (slow, fast, middle) is in a different order than the
+	// releases (fast, middle, slow), so appending is checked against the
+	// order the test set.
+	// Mutation captured: making remote searches serial starts "slow" first
+	// (machine-list order) and blocks there, so "fast" never appears and the
+	// first wait times out.
+	env, cliPath, release := pickerParallelFixture(t, nil, true)
 	writer, output, _, finished := pickerStartWithPipes(t, env, cliPath)
-	screen := waitForPicker(t, output, finished, func(screen string) bool {
-		return strings.Contains(screen, "slow/w1:p1") && strings.Contains(screen, "fast/w1:p1") && strings.Contains(screen, "middle/w1:p1")
-	})
+	for _, machine := range []string{"fast", "middle", "slow"} {
+		release(machine)
+		waitForPickerRow(t, output, finished, machine+"/w1:p1")
+	}
+	data, err := os.ReadFile(output.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	screen := string(data)
 	fast := strings.Index(screen, "fast/w1:p1")
 	middle := strings.Index(screen, "middle/w1:p1")
 	slow := strings.Index(screen, "slow/w1:p1")
@@ -134,7 +192,7 @@ func TestPickerRemoteFindsAppendInCompletionOrder(t *testing.T) {
 func TestPickerCloseCancelsEveryRemoteFindPID(t *testing.T) {
 	// JS: "Esc during a slow remote load exits without copying and kills the loads"
 	// Mutation captured: omitting cancellation leaves recorded remote child PIDs running after close.
-	env, cliPath := pickerParallelFixture(t, map[string]int{"slow": 8000, "fast": 8000, "middle": 8000})
+	env, cliPath, _ := pickerParallelFixture(t, map[string]int{"slow": 8000, "fast": 8000, "middle": 8000}, false)
 	recorder := &pickerPIDRecorder{}
 	oldObserver := pickerProcessStarted
 	pickerProcessStarted = recorder.add
@@ -174,7 +232,7 @@ func TestPickerCloseCancelsEveryRemoteFindPID(t *testing.T) {
 
 func TestPickerShutdownSignalCancelsEveryRemoteFindPID(t *testing.T) {
 	// Mutation captured: removing the shutdown-signal select case leaves the picker running and its find children alive.
-	env, cliPath := pickerParallelFixture(t, map[string]int{"slow": 8000, "fast": 8000, "middle": 8000})
+	env, cliPath, _ := pickerParallelFixture(t, map[string]int{"slow": 8000, "fast": 8000, "middle": 8000}, false)
 	recorder := &pickerPIDRecorder{}
 	oldObserver := pickerProcessStarted
 	pickerProcessStarted = recorder.add
