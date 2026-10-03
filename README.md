@@ -108,13 +108,24 @@ project configuration or state is lost:
 
 ## Optional Herdr plugin
 
-The plugin supports Herdr 0.9.1+ on Linux, macOS and Windows (it runs the
-CLI with the `node` on the Herdr host's `PATH`). From a local checkout of
-this repository, link it once:
+The plugin supports Herdr 0.9.1+ on Linux, macOS and Windows. Its
+actions and picker run the `herdr-soho` binary (the Go CLI), which must
+be on the Herdr server's `PATH` — install it with `install.sh` or
+`install.ps1`. If the binary was installed after the server started,
+restart the server in a shell that sees it.
+
+From a checkout of this repository, link it once:
 
 ```sh
 herdr plugin link "$PWD/plugin"
 herdr plugin action list
+```
+
+Or install it from GitHub, for example with the tag of the installed
+release:
+
+```sh
+herdr plugin install djalmajr/herdr-soho/plugin --ref <tag>
 ```
 
 A checkout linked before the rename is registered as
@@ -124,7 +135,8 @@ loads `djalmajr.herdr-soho`.
 The `doctor` and `roster` actions inspect the workspace currently focused
 in Herdr, which can differ from the invoking shell's `HERDR_*` variables.
 Their output names the resolved workspace and pane. To inspect action
-results from the CLI, run `herdr plugin log list`.
+results from the CLI, run `herdr plugin log list`; a `herdr-soho` that is
+not on the Herdr server's `PATH` shows up there as a failure.
 
 ### Finding a session
 

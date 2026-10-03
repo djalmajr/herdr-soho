@@ -1,19 +1,21 @@
 # herdr-soho optional plugin — read-only actions and the session picker.
 # Manifest contract: https://herdr.dev/docs/plugins/
-# The doctor/roster actions run `node bridge.mjs <subcommand>` from the
-# plugin directory; the bridge resolves the focused target from
-# HERDR_PLUGIN_CONTEXT_JSON, validates the pane with HERDR_BIN_PATH, and
-# runs the skill CLI in the pane's cwd with HERDR_SOHO_NOWRITE=1.
-# The `pick` action opens the picker pane (`node picker.mjs`), an overlay
-# that lists the panes (local server and the enabled machines, via the
-# CLI `find --json`) and copies the selected session reference to the
-# clipboard. Nothing the plugin does writes to the focused project (no
-# .gitignore entry, no state directory).
+# Every command runs the `herdr-soho` binary (the Go CLI), which must be
+# on the Herdr server's PATH. The doctor/roster actions call
+# `herdr-soho plugin bridge <subcommand>`; the bridge resolves the
+# focused target from HERDR_PLUGIN_CONTEXT_JSON, validates the pane with
+# HERDR_BIN_PATH, and runs the CLI in the pane's cwd with
+# HERDR_SOHO_NOWRITE=1. The `pick` action opens the picker pane
+# (`herdr-soho plugin picker`), an overlay that lists the panes (local
+# server and the enabled machines, via the CLI `find --json`) and copies
+# the selected session reference to the clipboard. Nothing the plugin
+# does writes to the focused project (no .gitignore entry, no state
+# directory).
 id = "djalmajr.herdr-soho"
 name = "herdr-soho"
-version = "0.2.0"
+version = "0.3.0"
 min_herdr_version = "0.9.1"
-description = "Read-only actions (doctor, roster) to diagnose and list the agents of the focused workspace, plus a session picker (pick) that copies a session reference to the clipboard. The actions run the CLI in read-only mode: they inspect the focused project and never write to it (no .gitignore entry, no state directory)."
+description = "Read-only actions (doctor, roster) to diagnose and list the agents of the focused workspace, plus a session picker (pick) that copies a session reference to the clipboard. The actions run the herdr-soho binary in read-only mode — it must be on the Herdr server's PATH — and never write to the focused project (no .gitignore entry, no state directory)."
 platforms = ["linux", "macos", "windows"]
 
 [[actions]]
@@ -21,25 +23,25 @@ id = "doctor"
 title = "Doctor: diagnose the focused workspace"
 description = "Read-only: shows the target (workspace and cwd) and the result of the CLI `herdr-soho doctor` in the focused pane's cwd, without writing to the project."
 contexts = ["workspace"]
-command = ["node", "bridge.mjs", "doctor"]
+command = ["herdr-soho", "plugin", "bridge", "doctor"]
 
 [[actions]]
 id = "roster"
 title = "Roster: agents of the focused workspace"
 description = "Read-only: shows the target (workspace and cwd) and the result of the CLI `herdr-soho roster` in the focused pane's cwd, without writing to the project."
 contexts = ["workspace"]
-command = ["node", "bridge.mjs", "roster"]
+command = ["herdr-soho", "plugin", "bridge", "roster"]
 
 [[panes]]
 id = "picker"
 title = "herdr-soho: find a session"
 placement = "overlay"
 platforms = ["linux", "macos", "windows"]
-command = ["node", "picker.mjs"]
+command = ["herdr-soho", "plugin", "picker"]
 
 [[actions]]
 id = "pick"
 title = "Find a session and copy its reference"
 description = "Opens the session picker over the focused pane: type to filter the panes of the local server and of the enabled machines (CLI `find --json`), Enter copies the selected reference to the clipboard and closes, Esc or Ctrl-C close without copying."
 contexts = ["workspace"]
-command = ["node", "bridge.mjs", "pick"]
+command = ["herdr-soho", "plugin", "bridge", "pick"]
