@@ -53,6 +53,8 @@ func TestWaitMirroringEmptyExitErrorRecordsFriction(t *testing.T) { // JS: "DieE
 	env["HERDR_ENV"] = "1"
 	env["HERDR_SOHO_DIR"] = stateRoot
 	env["HERDR_SOHO_SKILL_DIR"] = testSkillDir(t)
+	env["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "0"
+	env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "0"
 	env["TMPDIR"] = tmp
 	env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
 	delete(env, "HERDR_WORKSPACE_ID")
