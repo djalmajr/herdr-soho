@@ -572,6 +572,17 @@ func gcFixture(t *testing.T) (*copiesFixture, gcLayout) {
 	t.Helper()
 	f := newCopiesFixture(t, []fakecli.Rule{{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON}})
 	f.writeRoster(t, copiesRosterRow("worker", "p-worker"))
+	// gc prints the s85 pressure line first, always; fake the measurements
+	// so the goldens stay hermetic (a real machine could print a warning
+	// line instead of the "none" one).
+	oldDisk, oldSwap := platform.DiskFree, platform.SwapUsage
+	platform.DiskFree = func(string) (int64, int64, bool) {
+		return int64(60) * 1024 * 1024 * 1024, int64(100) * 1024 * 1024 * 1024, true
+	}
+	platform.SwapUsage = func(platform.Env) (int64, int64, bool) {
+		return int64(30) * 1024 * 1024 * 1024, int64(100) * 1024 * 1024 * 1024, true
+	}
+	t.Cleanup(func() { platform.DiskFree, platform.SwapUsage = oldDisk, oldSwap })
 	layout := gcLayout{
 		oldOrphan:   filepath.Join(f.tmp, "old-orphan"),
 		youngOrphan: filepath.Join(f.tmp, "young-orphan"),
@@ -622,6 +633,7 @@ func TestGc(t *testing.T) {
 			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 		}
 		want := strings.Join([]string{
+			"resource pressure: none (disk 60% free, swap 30% used)",
 			"would remove " + l.oldOrphan + "  25 B  ghost  3h",
 			"would remove " + l.missing + "  0 B  worker  3h",
 			"total: 25 B",
@@ -650,6 +662,7 @@ func TestGc(t *testing.T) {
 			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 		}
 		want := strings.Join([]string{
+			"resource pressure: none (disk 60% free, swap 30% used)",
 			"removed " + l.oldOrphan + "  25 B",
 			"removed " + l.missing + "  0 B",
 			gcUnregisteredHeader,
@@ -707,6 +720,7 @@ func TestGc(t *testing.T) {
 			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 		}
 		want := strings.Join([]string{
+			"resource pressure: none (disk 60% free, swap 30% used)",
 			gcUnregisteredHeader,
 			"removed " + l.unreg + "  40 B",
 			"kept " + link + " (is a symlink)",
@@ -861,6 +875,37 @@ func TestCopiesCommandsGiveUpOnALiveRegistryLock(t *testing.T) {
 		}
 		if rows := f.copiesRows(t); len(rows) != 0 {
 			t.Fatalf("rows=%#v; want nothing registered", rows)
+		}
+	})
+	t.Run("release still releases, keeps the copies and warns", func(t *testing.T) {
+		f := newCopiesFixture(t, []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON},
+			{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+			{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
+		})
+		f.writeRoster(t, copiesRosterRow("worker", "p-worker"))
+		copy := filepath.Join(f.tmp, "copy-worker")
+		if err := os.MkdirAll(copy, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: copy, Owner: "worker", Pane: "p-worker", Created: core.FrictionISO(platform.Now()), Source: "-", Origin: "mutation-copy"}})
+		addReleaseReport(t, filepath.Join(f.state, "ws"), "worker", false)
+		_ = heldLock(t, f)
+		code, out, stderr := f.run(t, f.env, "release", "worker")
+		if code != 0 {
+			t.Fatalf("code=%d out=%q stderr=%q; want 0", code, out, stderr)
+		}
+		if !strings.Contains(out, "released worker\n") || !strings.Contains(stderr, "the copies of 'worker' were not removed") {
+			t.Fatalf("out=%q stderr=%q; want released and the warning", out, stderr)
+		}
+		if core.RosterLine(filepath.Join(f.state, "ws"), "worker") != "" {
+			t.Fatalf("the roster still lists worker")
+		}
+		if _, err := os.Stat(copy); err != nil {
+			t.Fatalf("the copy was removed despite the lock: %v", err)
+		}
+		if rows := f.copiesRows(t); len(rows) != 1 || rows[0].Owner != "worker" {
+			t.Fatalf("rows=%#v; want the line kept for gc", rows)
 		}
 	})
 	t.Run("gc --yes exits 4 and removes nothing", func(t *testing.T) {

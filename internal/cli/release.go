@@ -201,8 +201,10 @@ func reportEmpty(report string) bool {
 // that cannot be removed keeps its registry line, with a warning; the
 // release's messages, order and exit code never change. With keepCopies it
 // leaves every line: the copies become orphans for gc. The lock gates the
-// destructive phase (exit 4 before deleting anything when another herdr-soho
-// holds it) and covers the registry re-read and re-write, not the removals.
+// destructive phase and covers the registry re-read and re-write, not the
+// removals. The roster is already cleaned when this runs, so a registry held
+// by another herdr-soho never fails the release: the copies stay registered,
+// with a warning, and become orphans for gc.
 func releaseCopies(sd, agent string, keepCopies bool, env platform.Env, cwd string) {
 	if keepCopies {
 		return
@@ -213,11 +215,8 @@ func releaseCopies(sd, agent string, keepCopies bool, env platform.Env, cwd stri
 		return
 	}
 	if unlock, lockErr := core.LockCopies(sd); lockErr != nil {
-		var locked *core.CopiesLockedError
-		if errors.As(lockErr, &locked) {
-			core.DieFriction(lockErr.Error(), 4, frictionLogPath, "release")
-		}
-		core.DieFriction(fmt.Sprintf("release: could not take the copy registry lock (%v)", lockErr), 4, frictionLogPath, "release")
+		core.Warn(fmt.Sprintf("release: the copies of '%s' were not removed (%v); run 'herdr-soho gc' later", agent, lockErr), frictionLogPath, "release")
+		return
 	} else {
 		unlock()
 	}
@@ -246,10 +245,7 @@ func releaseCopies(sd, agent string, keepCopies bool, env platform.Env, cwd stri
 		return
 	}
 	if err := core.DropCopiesLines(sd, removed); err != nil {
-		var locked *core.CopiesLockedError
-		if errors.As(err, &locked) {
-			core.DieFriction(err.Error(), 4, frictionLogPath, "release")
-		}
-		_, _ = fmt.Fprintf(platform.Stderr, "release: could not update the copy registry (%v)\n", err)
+		// The removed copies' lines read as missing and gc drops them.
+		_, _ = fmt.Fprintf(platform.Stderr, "release: could not update the copy registry (%v); 'herdr-soho gc' drops the removed lines\n", err)
 	}
 }
