@@ -112,6 +112,11 @@ func TestDiskFreeMeasuresExistingAndWalksUp(t *testing.T) {
 	if !ok || total <= 0 || free < 0 {
 		t.Fatalf("DiskFree(%s): ok=%v free=%d total=%d", tmp, ok, free, total)
 	}
+	// A real volume holds data, so the free space is below the total. With
+	// the Windows outputs out of the API order both read as free space.
+	if free >= total {
+		t.Fatalf("DiskFree(%s): free=%d is not below total=%d", tmp, free, total)
+	}
 	// A state dir that does not exist yet still measures through its
 	// existing ancestor.
 	missing := filepath.Join(tmp, "state", "ws")
