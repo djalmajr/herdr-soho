@@ -872,3 +872,27 @@ func TestTeamQuietWindowRestartsAfterEveryOtherBlock(t *testing.T) {
 		t.Fatal("a y after a quiet window did not confirm")
 	}
 }
+
+// A lone `y` that an unfinished escape sequence takes as its last byte does
+// not confirm, and it restarts the quiet window like any block that did not
+// confirm (r89d).
+func TestTeamYTakenByAnEscapeSequenceRestartsTheWindow(t *testing.T) {
+	now := time.Unix(2000, 0)
+	oldNow := teamNow
+	teamNow = func() time.Time { return now }
+	t.Cleanup(func() { teamNow = oldNow })
+	s := NewTeamState(teamViewTeam)
+	s.workers = []string{"worker-1 codex working task"}
+	s.FeedChunk("x")
+	s.FeedChunk("\x1b[1")
+	now = now.Add(teamConfirmQuiet + 100*time.Millisecond)
+	s.FeedChunk("y")
+	now = now.Add(time.Millisecond)
+	if s.FeedChunk("y"); s.pendingLoad().doRelease {
+		t.Fatal("a y 1 ms after a y taken by an escape sequence confirmed")
+	}
+	now = now.Add(teamConfirmQuiet + time.Millisecond)
+	if s.FeedChunk("y"); !s.pendingLoad().doRelease {
+		t.Fatal("a y after a quiet window did not confirm")
+	}
+}

@@ -655,7 +655,21 @@ var (
 // `gy` (the key that opened it in the same block) and `yy`/`y\r` never
 // confirm - the confirmation is a deliberate keypress on its own.
 func (s *TeamState) FeedChunk(chunk string) string {
-	soloY := chunk == "y"
+	confirming := s.subview == "confirm-release" || s.subview == "confirm-gc"
+	action := s.feedChunk(chunk)
+	if confirming && (s.subview == "confirm-release" || s.subview == "confirm-gc") {
+		// The block reached the confirmation and did not confirm, for any
+		// reason (a key, a paste, a `y` taken by an escape sequence): it
+		// restarts the quiet window.
+		s.confirmArmAt = teamNow().Add(teamConfirmQuiet)
+	}
+	return action
+}
+
+func (s *TeamState) feedChunk(chunk string) string {
+	// A lone `y` confirms only when the parser is not inside an escape
+	// sequence or a paste, which would take it as their own byte.
+	soloY := chunk == "y" && !s.CSIPending && !s.EscPending && !s.inPaste
 	// Without bracketed paste a long paste reaches us as several read
 	// blocks, and its last block can be a lone `y`. So a confirmation also
 	// needs a quiet window: a block that arrives before teamConfirmQuiet has
@@ -666,13 +680,6 @@ func (s *TeamState) FeedChunk(chunk string) string {
 		now := teamNow()
 		if now.Before(s.confirmArmAt) {
 			soloY = false
-		}
-		if !soloY {
-			// Every block that cannot confirm restarts the window, also
-			// after it has expired: the first block of a paste into an
-			// armed confirmation renews it, and its lone `y` tail cannot
-			// confirm.
-			s.confirmArmAt = now.Add(teamConfirmQuiet)
 		}
 	}
 	for _, r := range chunk {
