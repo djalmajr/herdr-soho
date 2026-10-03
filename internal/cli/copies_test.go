@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -758,6 +759,198 @@ func TestGc(t *testing.T) {
 			if code != 2 || !strings.Contains(errOut, c.cause) {
 				t.Fatalf("args=%v: code=%d out=%q err=%q; want the refusal", c.args, code, out, errOut)
 			}
+		}
+	})
+}
+
+// The review case: a case variant of a protected directory is the same
+// directory on the current macOS volume. Each subtest skips on a file
+// system that distinguishes case.
+func TestCopiesRefuseTheCaseVariantOfTheProtectedDirs(t *testing.T) {
+	old := time.Now().Add(-3 * time.Hour)
+	t.Run("a case variant of the HOME is kept by gc", func(t *testing.T) {
+		f := newCopiesFixture(t, nil)
+		upper := strings.ToUpper(f.home)
+		if _, err := os.Stat(upper); err != nil {
+			t.Skip("case sensitive volume")
+		}
+		if err := os.WriteFile(filepath.Join(f.home, "sentinel"), []byte("protected"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: upper, Owner: "-", Created: core.FrictionISO(old)}})
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if _, err := os.Stat(filepath.Join(f.home, "sentinel")); err != nil {
+			t.Fatalf("the fake HOME was touched: %v (code=%d out=%q stderr=%q)", err, code, out, stderr)
+		}
+		if code != 0 || !strings.Contains(out, "kept "+upper+" (is HOME or above it)") {
+			t.Fatalf("code=%d out=%q; want kept with the HOME refusal", code, out)
+		}
+		if rows := f.copiesRows(t); len(rows) != 1 {
+			t.Fatalf("the line left the registry: %#v", rows)
+		}
+	})
+	t.Run("a case variant of the project root is kept by gc", func(t *testing.T) {
+		f := newCopiesFixture(t, nil)
+		upper := strings.ToUpper(f.repo)
+		if _, err := os.Stat(upper); err != nil {
+			t.Skip("case sensitive volume")
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: upper, Owner: "-", Created: core.FrictionISO(old)}})
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if _, err := os.Stat(filepath.Join(f.repo, ".git")); err != nil {
+			t.Fatalf("the project root was touched: %v (code=%d out=%q stderr=%q)", err, code, out, stderr)
+		}
+		if code != 0 || !strings.Contains(out, "kept "+upper+" (is the project root or inside it)") {
+			t.Fatalf("code=%d out=%q; want kept with the project root refusal", code, out)
+		}
+	})
+	t.Run("a case variant of a path inside the project is kept by gc", func(t *testing.T) {
+		f := newCopiesFixture(t, nil)
+		sub := filepath.Join(f.repo, "sub")
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, "sentinel"), []byte("protected"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		upper := strings.ToUpper(sub)
+		if _, err := os.Stat(upper); err != nil {
+			t.Skip("case sensitive volume")
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: upper, Owner: "-", Created: core.FrictionISO(old)}})
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if _, err := os.Stat(filepath.Join(sub, "sentinel")); err != nil {
+			t.Fatalf("the path inside the project was touched: %v (code=%d out=%q stderr=%q)", err, code, out, stderr)
+		}
+		if code != 0 || !strings.Contains(out, "kept "+upper+" (is the project root or inside it)") {
+			t.Fatalf("code=%d out=%q; want kept with the project root refusal", code, out)
+		}
+	})
+}
+
+// A live lock held for more than the (shortened) timeout: the commands exit
+// 4 with the exact message and remove nothing.
+func TestCopiesCommandsGiveUpOnALiveRegistryLock(t *testing.T) {
+	lockPath := func(f *copiesFixture) string { return filepath.Join(f.state, "ws", "copies.tsv.lock") }
+	heldLock := func(t *testing.T, f *copiesFixture) string {
+		t.Helper()
+		lock := lockPath(f)
+		if err := os.WriteFile(lock, []byte(fmt.Sprintf("%d %s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339))), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := core.CopiesLockTimeout
+		core.CopiesLockTimeout = 300 * time.Millisecond
+		t.Cleanup(func() { core.CopiesLockTimeout = old })
+		return lock
+	}
+	t.Run("copies add exits 4 without registering", func(t *testing.T) {
+		f := newCopiesFixture(t, nil)
+		_ = f.stateDir(t)
+		lock := heldLock(t, f)
+		dest := filepath.Join(f.tmp, "copy-locked")
+		if err := os.MkdirAll(dest, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		code, out, stderr := f.run(t, f.env, "copies", "add", dest)
+		if code != 4 {
+			t.Fatalf("code=%d out=%q stderr=%q; want 4", code, out, stderr)
+		}
+		want := "herdr-soho: copies: registry is locked by another herdr-soho (" + lock + ")\n"
+		if stderr != want {
+			t.Fatalf("stderr=%q; want %q", stderr, want)
+		}
+		if rows := f.copiesRows(t); len(rows) != 0 {
+			t.Fatalf("rows=%#v; want nothing registered", rows)
+		}
+	})
+	t.Run("gc --yes exits 4 and removes nothing", func(t *testing.T) {
+		f := newCopiesFixture(t, nil)
+		copy := filepath.Join(f.tmp, "copy-orphan")
+		if err := os.MkdirAll(copy, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: copy, Owner: "-", Created: core.FrictionISO(time.Now().Add(-3 * time.Hour))}})
+		lock := heldLock(t, f)
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if code != 4 {
+			t.Fatalf("code=%d out=%q stderr=%q; want 4", code, out, stderr)
+		}
+		want := "herdr-soho: copies: registry is locked by another herdr-soho (" + lock + ")\n"
+		if stderr != want {
+			t.Fatalf("stderr=%q; want %q", stderr, want)
+		}
+		if _, err := os.Stat(copy); err != nil {
+			t.Fatalf("the copy was removed despite the lock: %v", err)
+		}
+		if rows := f.copiesRows(t); len(rows) != 1 {
+			t.Fatalf("rows=%#v; want the line to remain", rows)
+		}
+	})
+}
+
+// The removal stays bound to the directory the check validated: a parent
+// swapped for a protected tree between the check and the removal is refused
+// (the copy stays "changed after the check"), and without the swap the
+// removal works.
+func TestGcRemovalStaysBoundToTheValidatedParent(t *testing.T) {
+	newCase := func(t *testing.T) (*copiesFixture, string) {
+		t.Helper()
+		f := newCopiesFixture(t, nil)
+		copy := filepath.Join(f.tmp, "copy")
+		if err := os.MkdirAll(copy, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		protect := filepath.Join(f.root, "protected")
+		if err := os.MkdirAll(filepath.Join(protect, "copy"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(protect, "copy", "sentinel"), []byte("protected"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: copy, Owner: "-", Created: core.FrictionISO(time.Now().Add(-3 * time.Hour))}})
+		return f, copy
+	}
+	t.Run("a parent swapped after the check keeps the target intact", func(t *testing.T) {
+		f, copy := newCase(t)
+		tmpHidden := filepath.Join(f.root, "tmp-hidden")
+		protect := filepath.Join(f.root, "protected")
+		t.Cleanup(func() { removeCopyHook = nil })
+		// The hook runs between the decision-7 check and the removal: the
+		// parent is swapped for the protected tree, which holds a "copy"
+		// directory of its own.
+		removeCopyHook = func(path string) {
+			if err := os.Rename(f.tmp, tmpHidden); err != nil {
+				t.Error(err)
+			}
+			if err := os.Rename(protect, f.tmp); err != nil {
+				t.Error(err)
+			}
+		}
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if _, err := os.Stat(filepath.Join(f.tmp, "copy", "sentinel")); err != nil {
+			t.Fatalf("the protected tree was touched: %v (code=%d out=%q stderr=%q)", err, code, out, stderr)
+		}
+		if _, err := os.Stat(filepath.Join(tmpHidden, "copy")); err != nil {
+			t.Fatalf("the original copy was touched: %v", err)
+		}
+		if code != 0 || !strings.Contains(out, "kept "+copy+" (changed after the check)") {
+			t.Fatalf("code=%d out=%q; want kept (changed after the check)", code, out)
+		}
+		if rows := f.copiesRows(t); len(rows) != 1 {
+			t.Fatalf("rows=%#v; want the line to remain", rows)
+		}
+	})
+	t.Run("without the swap the removal works", func(t *testing.T) {
+		f, copy := newCase(t)
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if code != 0 || !strings.Contains(out, "removed "+copy) {
+			t.Fatalf("code=%d out=%q stderr=%q; want removed", code, out, stderr)
+		}
+		if _, err := os.Stat(copy); !os.IsNotExist(err) {
+			t.Fatalf("the copy still exists (stat err=%v)", err)
+		}
+		if rows := f.copiesRows(t); len(rows) != 0 {
+			t.Fatalf("rows=%#v; want the line gone", rows)
 		}
 	})
 }

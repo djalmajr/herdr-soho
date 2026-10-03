@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -31,29 +32,157 @@ const (
 // copies add run before removing or registering a copy path. It returns the
 // refusal cause, or "" when the path passes.
 func copyRefusal(path string, env platform.Env, cwd string) string {
+	_, cause := checkCopyPath(path, env, cwd)
+	return cause
+}
+
+// checkCopyPath is copyRefusal with the resolved path on success. The
+// identity comparison runs before the textual checks, which stay as the
+// second barrier.
+func checkCopyPath(path string, env platform.Env, cwd string) (string, string) {
 	if !filepath.IsAbs(path) {
-		return "not an absolute path"
+		return "", "not an absolute path"
 	}
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return "does not exist"
+		return "", "does not exist"
 	}
 	if info, lstatErr := os.Lstat(path); lstatErr == nil && info.Mode()&os.ModeSymlink != 0 {
-		return "is a symlink"
+		return "", "is a symlink"
 	}
 	if isFilesystemRoot(resolved) {
-		return "is the filesystem root"
+		return "", "is the filesystem root"
+	}
+	if cause := protectedIdentityRefusal(resolved, env, cwd); cause != "" {
+		return "", cause
 	}
 	if home := mutationCopyHome(env); home != "" && (resolved == home || inside(resolved, home)) {
-		return "is HOME or above it"
+		return "", "is HOME or above it"
 	}
 	if root := platform.StateProjectRoot(env, cwd); root != "" && (inside(root, resolved) || inside(resolved, root)) {
-		return "is the project root or inside it"
+		return "", "is the project root or inside it"
 	}
 	if _, gitErr := os.Lstat(filepath.Join(resolved, ".git")); gitErr == nil {
-		return "contains a .git (another repository or a worktree)"
+		return "", "contains a .git (another repository or a worktree)"
+	}
+	return resolved, ""
+}
+
+// protectedIdentityRefusal compares the identity of the protected
+// directories (os.SameFile), not their text: EvalSymlinks does not normalize
+// the case of the components on the current macOS volume, so a textual path
+// can be the same directory as the HOME or the project root. It refuses
+// when the path is the same file as the HOME or any of the HOME's ancestors
+// (up to the root), or as the project root, one of its ancestors, or an
+// ancestor of the path (it is inside it). A HOME or a root that cannot be
+// read with Stat refuses: when in doubt, nothing is deleted.
+func protectedIdentityRefusal(resolved string, env platform.Env, cwd string) string {
+	resolvedInfo, err := os.Stat(resolved)
+	if err != nil {
+		return "cannot verify the copy path"
+	}
+	home := mutationCopyHome(env)
+	if home != "" {
+		found, verified := sameDirChain(home, resolvedInfo)
+		if !verified {
+			return "cannot verify HOME"
+		}
+		if found {
+			return "is HOME or above it"
+		}
+	}
+	if root := platform.StateProjectRoot(env, cwd); root != "" {
+		rootInfo, err := os.Stat(root)
+		if err != nil {
+			return "cannot verify the project root"
+		}
+		atOrAbove, verifiedAbove := sameDirChain(root, resolvedInfo)
+		inside, verifiedInside := sameDirChain(resolved, rootInfo)
+		if !verifiedAbove || !verifiedInside {
+			return "cannot verify the project root"
+		}
+		if atOrAbove || inside {
+			return "is the project root or inside it"
+		}
 	}
 	return ""
+}
+
+// sameDirChain reports whether dir or one of its textual ancestors up to
+// the root is the same file (os.SameFile) as target. The second result is
+// false when a directory along the chain cannot be read, so the caller
+// refuses when in doubt.
+func sameDirChain(dir string, target fs.FileInfo) (found bool, verified bool) {
+	for {
+		info, err := os.Stat(dir)
+		if err != nil {
+			return false, false
+		}
+		if os.SameFile(info, target) {
+			return true, true
+		}
+		if dir == filepath.Dir(dir) {
+			return false, true
+		}
+		dir = filepath.Dir(dir)
+	}
+}
+
+// checkedCopy runs the decision-7 check and, when the path passes, also
+// captures the identity of the resolved path's parent. The removal helper
+// proves the directory it opens is still that parent, so the removal stays
+// bound to the validated directory.
+func checkedCopy(path string, env platform.Env, cwd string) (resolved string, parentInfo fs.FileInfo, cause string) {
+	resolved, cause = checkCopyPath(path, env, cwd)
+	if cause != "" {
+		return "", nil, cause
+	}
+	parentInfo, err := os.Stat(filepath.Dir(resolved))
+	if err != nil {
+		return "", nil, "cannot verify the copy path"
+	}
+	return resolved, parentInfo, ""
+}
+
+var errCopyChanged = errors.New("changed after the check")
+
+// removeCopyHook runs between the decision-7 check and the removal; tests
+// swap the copy's parent there to prove the removal stays bound to the
+// validated directory.
+var removeCopyHook func(path string)
+
+// removeCopy runs the (test-only) hook and the descriptor-bound removal.
+func removeCopy(resolved string, parentInfo fs.FileInfo) error {
+	if removeCopyHook != nil {
+		removeCopyHook(resolved)
+	}
+	return removeVerifiedCopy(resolved, parentInfo)
+}
+
+// removeVerifiedCopy deletes the copy directory relative to a descriptor of
+// its parent (os.OpenRoot + Root.RemoveAll), which a parent swapped for a
+// symlink cannot redirect. Before the removal it proves the opened parent
+// is the same file (os.SameFile) as the parent the check validated and the
+// entry inside it is a directory, not a symlink; a failed proof removes
+// nothing and returns errCopyChanged (the copy stays, reported as
+// "changed after the check").
+func removeVerifiedCopy(resolved string, parentInfo fs.FileInfo) error {
+	parent := filepath.Dir(resolved)
+	base := filepath.Base(resolved)
+	root, err := os.OpenRoot(parent)
+	if err != nil {
+		return errCopyChanged
+	}
+	defer root.Close()
+	opened, err := root.Stat(".")
+	if err != nil || !os.SameFile(opened, parentInfo) {
+		return errCopyChanged
+	}
+	entry, err := root.Lstat(base)
+	if err != nil || entry.Mode()&fs.ModeSymlink != 0 || !entry.IsDir() {
+		return errCopyChanged
+	}
+	return root.RemoveAll(base)
 }
 
 // rosterAgentForPane returns the roster name whose pane is pane, or "".
@@ -185,6 +314,10 @@ func copiesAdd(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 	}
 	row := core.CopyRow{Path: resolved, Owner: owner, Pane: pane, Created: core.FrictionISO(platform.Now()), Source: "-", Origin: "add"}
 	if err := core.UpsertCopies(sd, row); err != nil {
+		var locked *core.CopiesLockedError
+		if errors.As(err, &locked) {
+			core.DieFriction(err.Error(), 4, frictionLogPath, "copies")
+		}
 		core.DieFriction(fmt.Sprintf("copies add: could not register '%s' (%v)", path, err), 4, frictionLogPath, "copies")
 	}
 	return 0
@@ -286,6 +419,20 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 		return 0
 	}
 
+	// The lock gates the destructive phase: without it within the timeout
+	// the command exits 4 before deleting anything. The removals then run
+	// outside the lock; it is taken again around the re-read and the
+	// re-write (DropCopiesLines).
+	if unlock, lockErr := core.LockCopies(sd); lockErr != nil {
+		var locked *core.CopiesLockedError
+		if errors.As(lockErr, &locked) {
+			core.DieFriction(lockErr.Error(), 4, frictionLogPath, "gc")
+		}
+		core.DieFriction(fmt.Sprintf("gc: could not take the copy registry lock (%v)", lockErr), 4, frictionLogPath, "gc")
+	} else {
+		unlock()
+	}
+
 	removedLines := map[string]bool{}
 	freed := int64(0)
 	for _, cand := range candidates {
@@ -295,12 +442,13 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 			_, _ = fmt.Fprintf(platform.Stdout, "removed %s  %s\n", cand.path, humanSize(0))
 			continue
 		}
-		if cause := copyRefusal(cand.path, env, cwd); cause != "" {
+		resolved, parentInfo, cause := checkedCopy(cand.path, env, cwd)
+		if cause != "" {
 			_, _ = fmt.Fprintf(platform.Stdout, "kept %s (%s)\n", cand.path, cause)
 			continue
 		}
-		if err := os.RemoveAll(cand.path); err != nil {
-			_, _ = fmt.Fprintf(platform.Stdout, "kept %s (%v)\n", cand.path, err)
+		if err := removeCopy(resolved, parentInfo); err != nil {
+			keptCopyError(cand.path, err)
 			continue
 		}
 		removedLines[cand.path] = true
@@ -308,13 +456,11 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 		_, _ = fmt.Fprintf(platform.Stdout, "removed %s  %s\n", cand.path, humanSize(cand.size))
 	}
 	if len(removedLines) > 0 {
-		out := make([]core.CopyRow, 0, len(rows))
-		for _, row := range rows {
-			if !removedLines[row.Path] {
-				out = append(out, row)
+		if err := core.DropCopiesLines(sd, removedLines); err != nil {
+			var locked *core.CopiesLockedError
+			if errors.As(err, &locked) {
+				core.DieFriction(err.Error(), 4, frictionLogPath, "gc")
 			}
-		}
-		if err := core.WriteCopies(sd, out); err != nil {
 			core.DieFriction(fmt.Sprintf("gc: cannot update the copy registry (%v)", err), 4, frictionLogPath, "gc")
 		}
 	}
@@ -322,12 +468,13 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 		_, _ = fmt.Fprintln(platform.Stdout, gcUnregisteredHeader)
 		if includeUnregistered {
 			for _, entry := range unregistered {
-				if cause := copyRefusal(entry.path, env, cwd); cause != "" {
+				resolved, parentInfo, cause := checkedCopy(entry.path, env, cwd)
+				if cause != "" {
 					_, _ = fmt.Fprintf(platform.Stdout, "kept %s (%s)\n", entry.path, cause)
 					continue
 				}
-				if err := os.RemoveAll(entry.path); err != nil {
-					_, _ = fmt.Fprintf(platform.Stdout, "kept %s (%v)\n", entry.path, err)
+				if err := removeCopy(resolved, parentInfo); err != nil {
+					keptCopyError(entry.path, err)
 					continue
 				}
 				freed += entry.size
@@ -398,6 +545,17 @@ func gcUnregistered(env platform.Env, rows []core.CopyRow, now time.Time, thresh
 func gcUsageError() int {
 	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", gcUsage)
 	return 2
+}
+
+// keptCopyError prints the kept line for a failed removal: the
+// "changed after the check" cause when the removal proved the directory
+// moved since the check, the error otherwise.
+func keptCopyError(path string, err error) {
+	if errors.Is(err, errCopyChanged) {
+		_, _ = fmt.Fprintf(platform.Stdout, "kept %s (changed after the check)\n", path)
+		return
+	}
+	_, _ = fmt.Fprintf(platform.Stdout, "kept %s (%v)\n", path, err)
 }
 
 func parseGcHours(value string) (int64, error) {

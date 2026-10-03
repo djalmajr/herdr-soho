@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -14,6 +15,66 @@ import (
 // copiesHeader is the first line of the per-workspace copy registry,
 // copies.tsv.
 const copiesHeader = "path\towner\tpane\tcreated\tsource\torigin"
+
+const (
+	// copiesLockName sits next to the registry: the exclusive creation of
+	// this file is the inter-process lock of the registry transactions.
+	copiesLockName = "copies.tsv.lock"
+	// New lock attempts every 50 ms, for at most CopiesLockTimeout.
+	copiesLockPoll = 50 * time.Millisecond
+	// A lock older than 60 s by mtime is taken as abandoned and removed.
+	copiesLockStale = 60 * time.Second
+)
+
+// CopiesLockTimeout is how long a caller waits for the registry lock before
+// giving up. Tests shorten it so they never wait the real 10 s.
+var CopiesLockTimeout = 10 * time.Second
+
+// CopiesLockedError is the registry lock timeout error; its message is the
+// exact text the commands print with exit 4.
+type CopiesLockedError struct {
+	Path string
+}
+
+func (e *CopiesLockedError) Error() string {
+	return fmt.Sprintf("copies: registry is locked by another herdr-soho (%s)", e.Path)
+}
+
+// LockCopies takes the inter-process copies.tsv lock: the exclusive
+// creation (O_CREATE|O_EXCL) of copies.tsv.lock next to the registry, with
+// the PID and the time inside. It retries every 50 ms until the timeout; a
+// lock older than 60 s by mtime is abandoned and taken. It returns the
+// unlock function (defer it, it removes the lock) or a *CopiesLockedError.
+func LockCopies(stateDir string) (func(), error) {
+	lockPath := filepath.Join(stateDir, copiesLockName)
+	deadline := time.Now().Add(CopiesLockTimeout)
+	for {
+		err := takeCopiesLock(lockPath)
+		if err == nil {
+			return func() { _ = os.Remove(lockPath) }, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		if held, statErr := os.Stat(lockPath); statErr == nil && time.Since(held.ModTime()) > copiesLockStale {
+			_ = os.Remove(lockPath)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return nil, &CopiesLockedError{Path: lockPath}
+		}
+		time.Sleep(copiesLockPoll)
+	}
+}
+
+func takeCopiesLock(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(f, "%d %s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339))
+	return f.Close()
+}
 
 // CopyRow is one line of copies.tsv: a copy directory and who made it.
 type CopyRow struct {
@@ -67,8 +128,15 @@ func WriteCopies(stateDir string, rows []CopyRow) error {
 }
 
 // UpsertCopies records row, replacing the line with the same path when it
-// exists, so re-registering a path never duplicates it.
+// exists, so re-registering a path never duplicates it. The whole
+// read-modify-write runs under the inter-process registry lock, so two
+// concurrent registrations never lose a line.
 func UpsertCopies(stateDir string, row CopyRow) error {
+	unlock, err := LockCopies(stateDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	rows, err := ReadCopies(stateDir)
 	if err != nil {
 		return err
@@ -80,6 +148,29 @@ func UpsertCopies(stateDir string, row CopyRow) error {
 		}
 	}
 	return WriteCopies(stateDir, append(rows, row))
+}
+
+// DropCopiesLines re-reads the registry under the inter-process lock and
+// rewrites it without the lines whose path is in removed, keeping every
+// other line, including lines added meanwhile. The slow removals happen
+// outside the lock, by the caller.
+func DropCopiesLines(stateDir string, removed map[string]bool) error {
+	unlock, err := LockCopies(stateDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	rows, err := ReadCopies(stateDir)
+	if err != nil {
+		return err
+	}
+	out := make([]CopyRow, 0, len(rows))
+	for _, row := range rows {
+		if !removed[row.Path] {
+			out = append(out, row)
+		}
+	}
+	return WriteCopies(stateDir, out)
 }
 
 // WorkspaceIDOrError is the non-dying variant of WorkspaceID for callers
