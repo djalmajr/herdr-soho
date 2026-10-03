@@ -138,7 +138,7 @@ The `team`, `roster` and `doctor` actions open the team panel on the
 workspace currently focused in Herdr (which can differ from the invoking
 shell's `HERDR_*` variables): `team` and `roster` start on the team
 view, `doctor` starts on the doctor view. The panel names the resolved
-workspace and pane on its first line, and never refreshes by itself
+workspace and cwd on its first line, and never refreshes by itself
 (`r` reloads). Its only writes are `x` (release the selected worker) and
 `g` (`gc --yes`), and only after their on-screen confirmation; every other
 CLI call runs with `HERDR_SOHO_NOWRITE=1`.
@@ -235,8 +235,9 @@ prompt has been on screen for 0.4 s with no other input: a paste (the
 panel turns on the terminal's bracketed paste and drops pasted text) or
 a key typed along with the one that opened it never confirms.
 
-`Esc`, `q` or `Ctrl-C` close the panel (in a subview or confirmation,
-`Esc` backs out one level); every read call runs in the target's cwd
+`q` closes the panel from a main view and `Ctrl-C` from any view; `Esc`
+backs out of a report or a confirmation and closes a main view. Every
+read call runs in the target's cwd
 with the target's `HERDR_*` ids and `HERDR_SOHO_NOWRITE=1`. A focused
 pane from another workspace, or whose cwd does not exist, shows the
 cause on one line instead of the panel, and closes with `Esc`.

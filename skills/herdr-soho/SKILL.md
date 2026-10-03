@@ -847,7 +847,7 @@ $S lint <brief.md> [--role <role>]       # the dispatch's brief warnings, before
 $S send <ref|name> <message…> [--now] [--timeout MS] | --file <path>
                                              # peer message to another agent (any kind, local or another machine): ref local/w12:p1 or a name on the local server; waits for a busy target to settle by default
 $S mutation-guard <copy> [--source <dir>] [--env NAME]…  # refuse a mutation copy that shares source or build output (exit 1)
-$S mutation-copy [--source <dir>] [--dest <dir>] [--link <relpath>=<target>]…  # build the throwaway mutation copy from the worktree's repository files, guarded (exit 1 guard, 2 refused, 4 copy error); the copy is registered to the calling agent, so its release deletes it
+$S mutation-copy [--source <dir>] [--dest <dir>] [--link <relpath>=<target>]…  # build the throwaway mutation copy from the worktree's repository files, guarded (exit 1 guard, 2 refused, 4 copy error); it tries to register the copy in <state>/copies.tsv under the roster agent of the calling pane (owner `-` when the pane is not in the roster); a failed registration still exits 0 with a `copy not registered` warning on stderr, and that copy is yours to remove or to register with copies add
 $S find [words] [--machine <label>]… [--all] [--json]   # live panes with a paste-ready reference (<machine>/<ws>:<pane>), filtered by the words
 $S friction add "<text>" [--brief <path>]  # record one friction note (level note, command friction; --brief appends ` (brief: <path>)`)
 $S feedback send <report.md> "<summary>"   # feedback=local: save the report in feedback_dir as from-<project>-<date>.md (never overwrites) and send one line to feedback_to; a failed notice exits 0 with the file saved (it warns and prints the filed JSON)
@@ -861,7 +861,7 @@ $S config                                  # effective configuration and sources
 $S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>; a value may begin with hyphens, and -- makes the rest (--project/--user included) the value
 $S roster                                  # live agents with role/kind/pane/state/report and the current task (TASK, from the pane title; '-' when none, cut to 40 characters)
 $S release impl [--close] [--force] [--keep-copies]
-                                           # forget the agent and delete the throwaway copies registered to it; --close closes a pane we created, or the recorded orphan's pane (idle or done); --keep-copies leaves the copies for gc
+                                           # forget the agent and try to delete the copies registered to it; a locked or unreadable registry, a path the safety check refuses or a failed removal keeps the copy with a warning and still releases the agent (exit 0), so run gc later; --close closes a pane we created, or the recorded orphan's pane (idle or done); --keep-copies leaves the copies for gc
 $S reopen impl [--force]                    # release --close + spawn --fresh with the roster's role, kind, model, effort, cwd and native args; output is the spawn JSON
 $S clean [--older-than 7]                  # drop gone agents, delete old briefs/reports
 $S copies                                  # registered throwaway copies: path, owner, age, owned|orphan|missing (reads only)
@@ -1541,9 +1541,11 @@ family>`.
    their report file exists** (`release --close` kills a worker mid-task);
    close only panes this skill created and only when the user did not ask
    to keep them.
-9. **Free what the run used.** `release` deletes the copies registered to
-   the worker (`mutation-copy` registers its own; a copy made any other way
-   is registered with `$S copies add <path>`). At the end of each wave and
+9. **Free what the run used.** `release` tries to delete the copies
+   registered to the worker (`mutation-copy` registers its own when it
+   can; a copy made any other way is registered with `$S copies add
+   <path>`). A copy it could not delete stays registered, with a warning,
+   and becomes an orphan for `gc`. At the end of each wave and
    of the run, run `$S gc`, read the list, then `$S gc --yes`; do it next
    to the `$S friction` reading. A `resource pressure` warning at `spawn`,
    `wait` or `status` means the disk or the swap is near its limit: run
