@@ -110,6 +110,18 @@ func (s *BoardState) clamp() {
 
 // pinnedIndex is the visible index of the pinned ref while a generation is
 // running; -1 when there is no pin or the ref is not in the visible list.
+// syncSelectedToPin makes the navigation start from the row the cursor is
+// drawn on: during a refresh the cursor follows the pinned ref, while a
+// filter change can leave Selected on another index.
+func (s *BoardState) syncSelectedToPin() {
+	if !s.refreshing || s.selectedRef == "" {
+		return
+	}
+	if idx := s.pinnedIndex(); idx >= 0 {
+		s.Selected = idx
+	}
+}
+
 func (s *BoardState) pinnedIndex() int {
 	if !s.refreshing || s.selectedRef == "" {
 		return -1
@@ -303,6 +315,7 @@ func (s *BoardState) ApplyKey(key string) string {
 		s.clamp()
 		return ""
 	case "up":
+		s.syncSelectedToPin()
 		if s.pinnedMissing() {
 			// The cursor is gone: ↑ picks the first visible row and makes it
 			// the new pinned ref.
@@ -318,6 +331,7 @@ func (s *BoardState) ApplyKey(key string) string {
 		}
 		return ""
 	case "down":
+		s.syncSelectedToPin()
 		if s.pinnedMissing() {
 			// The cursor is gone: ↓ picks the last visible row and makes it
 			// the new pinned ref.

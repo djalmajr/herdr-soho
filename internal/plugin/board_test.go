@@ -1042,3 +1042,59 @@ func TestBoardCutMeasuresDisplayColumns(t *testing.T) {
 		}
 	}
 }
+
+// During a refresh the cursor follows the pinned ref, so after a filter is
+// typed and erased the arrows must start from the row the cursor is drawn
+// on, not from the index the filter clamped (r87d).
+func TestBoardArrowsStartFromThePinnedCursorAfterAFilter(t *testing.T) {
+	cursorRef := func(s *BoardState) string {
+		for _, line := range strings.Split(RenderBoard(s, 80), "\n") {
+			if !strings.HasPrefix(line, ">") {
+				continue
+			}
+			fields := strings.Fields(line[1:])
+			for _, entry := range s.visible() {
+				// The row is "<marker> <name> <kind> …"; a blank marker leaves
+				// the name first.
+				if len(fields) > 0 && (pickerString(entry["name"]) == fields[0] || len(fields) > 1 && pickerString(entry["name"]) == fields[1]) {
+					return pickerString(entry["ref"])
+				}
+			}
+		}
+		return ""
+	}
+	filtered := func() *BoardState {
+		s := NewBoardState()
+		s.Entries = []PickerEntry{
+			boardEntry("local/a", "local", "w", "w", "a", "codex", "idle", "a"),
+			boardEntry("local/b", "local", "w", "w", "b", "codex", "idle", "b"),
+			boardEntry("local/c", "local", "w", "w", "c", "codex", "idle", "z"),
+		}
+		s.Selected = 2
+		loading := NewBoardState()
+		loading.Loading = 1
+		loading.LoadingLocal = true
+		applyBoardUpdate(s, loading)
+		s.FeedChunk("z")
+		s.FeedChunk("\x7f")
+		return s
+	}
+	for _, tc := range []struct {
+		name, seq, want string
+	}{{"up", "\x1b[A", "local/b"}, {"down", "\x1b[B", "local/c"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := filtered()
+			if got := cursorRef(s); got != "local/c" {
+				t.Fatalf("cursor before the arrow on %q, want local/c", got)
+			}
+			s.FeedChunk(tc.seq)
+			if got := cursorRef(s); got != tc.want {
+				t.Fatalf("cursor after %s on %q, want %q", tc.name, got, tc.want)
+			}
+			s.FeedChunk("\r")
+			if got := pickerString(s.LastEntry["ref"]); got != tc.want {
+				t.Fatalf("Enter copied %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
