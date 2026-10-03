@@ -637,6 +637,27 @@ func gcFixture(t *testing.T) (*copiesFixture, gcLayout) {
 	return f, layout
 }
 
+// gcEmptyFixture is the copies fixture with an empty registry and no
+// unregistered copies below its TMPDIR, with the s85 measurements faked
+// the same way gcFixture fakes them.
+func gcEmptyFixture(t *testing.T) *copiesFixture {
+	t.Helper()
+	f := newCopiesFixture(t, []fakecli.Rule{{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON}})
+	f.stateDir(t)
+	if err := core.WriteCopies(f.stateDir(t), []core.CopyRow{}); err != nil {
+		t.Fatal(err)
+	}
+	oldDisk, oldSwap := platform.DiskFree, platform.SwapUsage
+	platform.DiskFree = func(string) (int64, int64, bool) {
+		return int64(60) * 1024 * 1024 * 1024, int64(100) * 1024 * 1024 * 1024, true
+	}
+	platform.SwapUsage = func(platform.Env) (int64, int64, bool) {
+		return int64(30) * 1024 * 1024 * 1024, int64(100) * 1024 * 1024 * 1024, true
+	}
+	t.Cleanup(func() { platform.DiskFree, platform.SwapUsage = oldDisk, oldSwap })
+	return f
+}
+
 func TestGc(t *testing.T) {
 	t.Run("dry-run lists the candidates and changes nothing", func(t *testing.T) {
 		f, l := gcFixture(t)
@@ -789,6 +810,60 @@ func TestGc(t *testing.T) {
 			if code != 2 || !strings.Contains(errOut, c.cause) {
 				t.Fatalf("args=%v: code=%d out=%q err=%q; want the refusal", c.args, code, out, errOut)
 			}
+		}
+	})
+
+	t.Run("dry run with nothing to remove prints only the line", func(t *testing.T) {
+		f := gcEmptyFixture(t)
+		code, out, errOut := f.run(t, f.env, "gc")
+		if code != 0 || errOut != "" {
+			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+		}
+		want := "resource pressure: none (disk 60% free, swap 30% used)\nnothing to remove\n"
+		if out != want {
+			t.Fatalf("stdout=%q; want %q", out, want)
+		}
+	})
+
+	t.Run("dry run with only unregistered copies names the include flag", func(t *testing.T) {
+		f := gcEmptyFixture(t)
+		unreg := filepath.Join(f.tmp, "herdr-soho-mutation-zeta")
+		if err := os.MkdirAll(unreg, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(unreg, "f.txt"), bytes.Repeat([]byte("0"), 40), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := platform.Now().Add(-3 * time.Hour)
+		if err := os.Chtimes(unreg, old, old); err != nil {
+			t.Fatal(err)
+		}
+		code, out, errOut := f.run(t, f.env, "gc")
+		if code != 0 || errOut != "" {
+			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+		}
+		want := "resource pressure: none (disk 60% free, swap 30% used)\n" +
+			gcUnregisteredHeader + "\n" +
+			unreg + "  40 B  3h\n" +
+			"run 'herdr-soho gc --yes --include-unregistered' to remove the unregistered ones\n"
+		if out != want {
+			t.Fatalf("stdout=%q; want\n%s", out, want)
+		}
+		// The dry run touches nothing.
+		if _, err := os.Stat(filepath.Join(unreg, "f.txt")); err != nil {
+			t.Fatalf("the dry-run touched the unregistered copy: %v", err)
+		}
+	})
+
+	t.Run("--yes with nothing removed prints nothing to remove", func(t *testing.T) {
+		f := gcEmptyFixture(t)
+		code, out, errOut := f.run(t, f.env, "gc", "--yes")
+		if code != 0 || errOut != "" {
+			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+		}
+		want := "resource pressure: none (disk 60% free, swap 30% used)\nnothing to remove\n"
+		if out != want {
+			t.Fatalf("stdout=%q; want %q", out, want)
 		}
 	})
 }

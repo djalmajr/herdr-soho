@@ -436,13 +436,24 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 		total += cand.size
 	}
 	if !yes {
-		for _, cand := range candidates {
-			_, _ = fmt.Fprintf(platform.Stdout, "would remove %s  %s  %s  %s\n", cand.path, humanSize(cand.size), cand.owner, humanAge(cand.age))
+		// Nothing at all: only the line itself, no total and no hint (G1).
+		if len(candidates) == 0 && len(unregistered) == 0 {
+			_, _ = fmt.Fprintln(platform.Stdout, "nothing to remove")
+			return 0
 		}
-		_, _ = fmt.Fprintf(platform.Stdout, "total: %s\n", humanSize(total))
-		_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes' to remove them")
+		if len(candidates) > 0 {
+			for _, cand := range candidates {
+				_, _ = fmt.Fprintf(platform.Stdout, "would remove %s  %s  %s  %s\n", cand.path, humanSize(cand.size), cand.owner, humanAge(cand.age))
+			}
+			_, _ = fmt.Fprintf(platform.Stdout, "total: %s\n", humanSize(total))
+			_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes' to remove them")
+		}
 		if len(unregistered) > 0 {
 			gcPrintUnregistered(unregistered, false)
+			if len(candidates) == 0 {
+				// Only unregistered copies: name the flag that actually removes them.
+				_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes --include-unregistered' to remove the unregistered ones")
+			}
 		}
 		return 0
 	}
@@ -463,10 +474,12 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 
 	removedLines := map[string]bool{}
 	freed := int64(0)
+	removedAny := false
 	for _, cand := range candidates {
 		if cand.missing {
 			// Nothing is left on disk: the line only leaves the registry.
 			removedLines[cand.path] = true
+			removedAny = true
 			_, _ = fmt.Fprintf(platform.Stdout, "removed %s  %s\n", cand.path, humanSize(0))
 			continue
 		}
@@ -480,6 +493,7 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 			continue
 		}
 		removedLines[cand.path] = true
+		removedAny = true
 		freed += cand.size
 		_, _ = fmt.Fprintf(platform.Stdout, "removed %s  %s\n", cand.path, humanSize(cand.size))
 	}
@@ -505,6 +519,7 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 					keptCopyError(entry.path, err)
 					continue
 				}
+				removedAny = true
 				freed += entry.size
 				_, _ = fmt.Fprintf(platform.Stdout, "removed %s  %s\n", entry.path, humanSize(entry.size))
 			}
@@ -514,7 +529,12 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 			}
 		}
 	}
-	_, _ = fmt.Fprintf(platform.Stdout, "freed: %s\n", humanSize(freed))
+	if removedAny {
+		_, _ = fmt.Fprintf(platform.Stdout, "freed: %s\n", humanSize(freed))
+	} else {
+		// --yes with nothing removed: the same closing line as the dry run.
+		_, _ = fmt.Fprintln(platform.Stdout, "nothing to remove")
+	}
 	return 0
 }
 

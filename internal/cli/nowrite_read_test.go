@@ -249,7 +249,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 				cases[6].wantOut = "recent output line\n"
 				cases[6].wantErr = "herdr-soho: warning: no report file yet for 'worker' (expected <none dispatched>); falling back to recent terminal output\n"
 				cases[7].wantOut = ""
-				cases[8].wantOut = nowriteGcNoneLine + "total: 0 B\nrun 'herdr-soho gc --yes' to remove them\n"
+				cases[8].wantOut = nowriteGcNoneLine + "nothing to remove\n"
 				cases[9].wantOut = cases[8].wantOut
 			}
 			for _, c := range cases {
