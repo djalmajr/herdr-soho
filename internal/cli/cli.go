@@ -34,6 +34,7 @@ var knownCommands = map[string]bool{
 	"roster": true, "friction": true, "feedback": true, "tab-label": true,
 	"layout-plan": true, "env": true, "mutation-guard": true, "mutation-copy": true,
 	"reopen": true, "compact": true, "metrics": true, "copies": true, "gc": true,
+	"procs": true,
 }
 
 var frictionLogPath string
@@ -141,7 +142,7 @@ func Run(args []string, env platform.Env) (code int) {
 			}
 			extra = fmt.Sprintf(" (%d extra %s not allowed)", count, noun)
 		}
-		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'gc' without --yes; rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
+		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'gc' without --yes; rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
 	}
 	if command == "help" || command == "-h" || command == "--help" || command == "" {
 		_, _ = io.WriteString(platform.Stdout, usage)
@@ -177,7 +178,7 @@ func Run(args []string, env platform.Env) (code int) {
 		_, _ = io.WriteString(platform.Stdout, commandHelp(command))
 		return 0
 	}
-	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "reopen" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" || command == "compact" || command == "copies" || command == "gc" {
+	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "reopen" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" || command == "compact" || command == "copies" || command == "gc" || command == "procs" {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		commandConfig = &ctx
 		herdr.RequireEnv(decisionEnv, platform.Current(), os.Getpid(), nil)
@@ -258,6 +259,8 @@ func Run(args []string, env platform.Env) (code int) {
 		return 0
 	case "copies":
 		return cmdCopies(args[1:], ctx, decisionEnv, commandCwd)
+	case "procs":
+		return cmdProcs(args[1:], ctx, decisionEnv, commandCwd)
 	case "gc":
 		return cmdGc(args[1:], ctx, decisionEnv, commandCwd)
 	case "release":
@@ -323,7 +326,7 @@ func nowriteReadInvocation(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "doctor", "roster", "explain", "copies":
+	case "doctor", "roster", "explain", "copies", "procs":
 		return len(args) == 1
 	case "friction":
 		return nowriteFlagOnly(args[1:], []string{"--since", "--level", "--command", "--agent"}, []string{"--summary"})

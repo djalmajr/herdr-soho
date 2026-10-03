@@ -21,24 +21,30 @@ const (
 	// this file is the inter-process lock of the registry transactions.
 	copiesLockName = "copies.tsv.lock"
 	// New lock attempts every 50 ms, for at most CopiesLockTimeout.
-	copiesLockPoll = 50 * time.Millisecond
+	registryLockPoll = 50 * time.Millisecond
 	// A lock older than 60 s by mtime is taken as abandoned and removed.
-	copiesLockStale = 60 * time.Second
+	registryLockStale = 60 * time.Second
 )
 
 // CopiesLockTimeout is how long a caller waits for the registry lock before
-// giving up. Tests shorten it so they never wait the real 10 s.
+// giving up (copy and process registries alike). Tests shorten it so they
+// never wait the real 10 s.
 var CopiesLockTimeout = 10 * time.Second
 
-// CopiesLockedError is the registry lock timeout error; its message is the
-// exact text the commands print with exit 4.
-type CopiesLockedError struct {
+// RegistryLockedError is the registry lock timeout error; its message is
+// the exact text the commands print with exit 4, with the registry name in
+// front.
+type RegistryLockedError struct {
+	Kind string
 	Path string
 }
 
-func (e *CopiesLockedError) Error() string {
-	return fmt.Sprintf("copies: registry is locked by another herdr-soho (%s)", e.Path)
+func (e *RegistryLockedError) Error() string {
+	return fmt.Sprintf("%s: registry is locked by another herdr-soho (%s)", e.Kind, e.Path)
 }
+
+// CopiesLockedError is the copies flavor of the registry lock error.
+type CopiesLockedError = RegistryLockedError
 
 // LockCopies takes the inter-process copies.tsv lock: the exclusive
 // creation (O_CREATE|O_EXCL) of copies.tsv.lock next to the registry, with
@@ -46,28 +52,35 @@ func (e *CopiesLockedError) Error() string {
 // lock older than 60 s by mtime is abandoned and taken. It returns the
 // unlock function (defer it, it removes the lock) or a *CopiesLockedError.
 func LockCopies(stateDir string) (func(), error) {
-	lockPath := filepath.Join(stateDir, copiesLockName)
+	return lockRegistry(stateDir, copiesLockName, "copies")
+}
+
+// lockRegistry is the shared inter-process registry lock (copies and
+// procs): the exclusive file creation next to the registry, with the same
+// retry, stale and timeout rules.
+func lockRegistry(stateDir, lockName, kind string) (func(), error) {
+	lockPath := filepath.Join(stateDir, lockName)
 	deadline := time.Now().Add(CopiesLockTimeout)
 	for {
-		err := takeCopiesLock(lockPath)
+		err := takeRegistryLock(lockPath)
 		if err == nil {
 			return func() { _ = os.Remove(lockPath) }, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return nil, err
 		}
-		if held, statErr := os.Stat(lockPath); statErr == nil && time.Since(held.ModTime()) > copiesLockStale {
+		if held, statErr := os.Stat(lockPath); statErr == nil && time.Since(held.ModTime()) > registryLockStale {
 			_ = os.Remove(lockPath)
 			continue
 		}
 		if time.Now().After(deadline) {
-			return nil, &CopiesLockedError{Path: lockPath}
+			return nil, &RegistryLockedError{Kind: kind, Path: lockPath}
 		}
-		time.Sleep(copiesLockPoll)
+		time.Sleep(registryLockPoll)
 	}
 }
 
-func takeCopiesLock(path string) error {
+func takeRegistryLock(path string) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
