@@ -17,7 +17,32 @@ const (
 	windowsProcessTerminate               = 0x0001
 	windowsTH32CS_SNAPPROCESS             = 0x00000002
 	windowsErrorInsufficientBuffer        = 122
+	windowsErrorInvalidParameter          = 87
 )
+
+// ProcLiveness is the outcome of one by-pid liveness read:
+//
+//	ProcRunning the pid is running; the start time (the creation ticks)
+//	            comes with it
+//	ProcGone    the absence is proven: an OpenProcess failure with
+//	            ERROR_INVALID_PARAMETER, or an opened process that is not
+//	            STILL_ACTIVE
+//	ProcUnknown the read failed; nothing is known. Unknown is not an
+//	            absence: a registry line is never dropped or stopped on it.
+type ProcLiveness int
+
+const (
+	ProcRunning ProcLiveness = iota
+	ProcGone
+	ProcUnknown
+)
+
+// SameStarted reports whether two start-time readings denote the same
+// process start, comparing after collapsing internal whitespace (the
+// windows readings are decimal ticks: no padding to collapse).
+func SameStarted(a, b string) bool {
+	return strings.Join(strings.Fields(a), " ") == strings.Join(strings.Fields(b), " ")
+}
 
 // windowsInvalidHandleValue is the handle Windows returns for a failed
 // OpenProcess/CreateToolhelp32Snapshot; a successful handle is never zero
@@ -34,11 +59,10 @@ func (f windowsFileTime) ticks() int64 { return int64(f.High)<<32 | int64(f.Low)
 
 // procIdentity is one process's identity read by pid: its creation time
 // in raw FILETIME ticks (100 ns, decimal; see windowsCreationIdentity)
-// and whether the handle could be opened. The windows parentage comes
-// from the Toolhelp32 snapshot, not from this read.
+// and its liveness as the three-way result. The windows parentage comes
+// from the Toolhelp32 snapshots, not from this read.
 type procIdentity struct {
 	started string
-	running bool
 }
 
 // Test hooks; the zero values keep the production behavior.
@@ -46,10 +70,14 @@ type procIdentity struct {
 // identity reads; procReadIdentity replaces the by-pid identity read
 // (the collection pass and every pre-signal re-read); procSendTerm
 // replaces the per-pid TERM (taskkill /PID, without /T).
+// procParentSnapshotFunc is the Toolhelp32 snapshot read the stop path
+// consults twice (the collection snapshot and the revalidation
+// snapshot); the admission unit test injects the fake tables.
 var (
-	procStopAfterSnapshot func(root int, env Env)
-	procReadIdentity      = procReadIdentityReal
-	procSendTerm          = windowsTaskkill
+	procStopAfterSnapshot  func(root int, env Env)
+	procReadIdentity       = procReadIdentityReal
+	procSendTerm           = windowsTaskkill
+	procParentSnapshotFunc = windowsParentSnapshot
 )
 
 var (
@@ -133,17 +161,15 @@ func windowsBaseName(value string) string {
 // GetProcessTimes, QueryFullProcessImageNameW). The creation time is the
 // raw FILETIME as decimal ticks of 100 ns: the full precision the API
 // offers, so two reads of the same process compare equal and two distinct
-// creations within one second do not. ok is false when the pid is not
-// openable.
+// creations within one second do not. ok is true only for a running pid:
+// a proven absence and an unreadable read both read as not running (the
+// three-way result is ReadProc).
 func ProcInfo(pid int, env Env) (string, string, bool) {
-	handle, err := windowsOpenProcess(windowsProcessQueryLimitedInformation, pid)
-	if err != nil {
+	handle, live := windowsOpenProc(pid)
+	if live != ProcRunning {
 		return "", "", false
 	}
 	defer windowsProcCloseHandle.Call(handle)
-	if !windowsStillActive(handle) {
-		return "", "", false
-	}
 	ticks, err := windowsCreationTicks(handle)
 	if err != nil {
 		return "", "", false
@@ -153,6 +179,57 @@ func ProcInfo(pid int, env Env) (string, string, bool) {
 		return "", "", false
 	}
 	return strconv.FormatInt(ticks, 10), windowsBaseName(name), true
+}
+
+// windowsGoneOpen reports whether a failed OpenProcess proves the pid's
+// absence: ERROR_INVALID_PARAMETER (87) does; any other code — or no code
+// at all — leaves the outcome unknown.
+func windowsGoneOpen(err error) bool {
+	e, ok := err.(syscall.Errno)
+	return ok && int(e) == windowsErrorInvalidParameter
+}
+
+// windowsOpenProc opens the pid with a limited-information handle and
+// reports the three-way liveness: an open failure with
+// ERROR_INVALID_PARAMETER is the proven absence; any other open failure
+// is unknown; an open process that is not STILL_ACTIVE is gone (an exited
+// process stays openable while a handle to it is open, so the exit code
+// decides, not the open).
+func windowsOpenProc(pid int) (uintptr, ProcLiveness) {
+	handle, err := windowsOpenProcess(windowsProcessQueryLimitedInformation, pid)
+	if err != nil {
+		if windowsGoneOpen(err) {
+			return 0, ProcGone
+		}
+		return 0, ProcUnknown
+	}
+	if !windowsStillActive(handle) {
+		windowsProcCloseHandle.Call(handle)
+		return 0, ProcGone
+	}
+	return handle, ProcRunning
+}
+
+// windowsProcStarted reads one pid's creation time (raw FILETIME ticks of
+// 100 ns, decimal) and its liveness as the three-way result; a failed
+// GetProcessTimes on an open, active process is unknown.
+func windowsProcStarted(pid int) (string, ProcLiveness) {
+	handle, live := windowsOpenProc(pid)
+	if live != ProcRunning {
+		return "", live
+	}
+	defer windowsProcCloseHandle.Call(handle)
+	ticks, err := windowsCreationTicks(handle)
+	if err != nil {
+		return "", ProcUnknown
+	}
+	return strconv.FormatInt(ticks, 10), ProcRunning
+}
+
+// ReadProc reads one pid's start time and liveness as the three-way
+// result the registry and stop paths need (windows: the creation ticks).
+func ReadProc(pid int, env Env) (string, ProcLiveness) {
+	return windowsProcStarted(pid)
 }
 
 // windowsParentSnapshot returns, from one Toolhelp32 process snapshot,
@@ -227,19 +304,12 @@ func procDescendants(pid int, env Env) ([]int, error) {
 }
 
 // procReadIdentityReal reads one pid's creation time with a
-// limited-information handle; the read succeeds only when the handle
-// opens (a stopped process's entry is gone).
-func procReadIdentityReal(pid int, env Env) (procIdentity, bool) {
-	handle, err := windowsOpenProcess(windowsProcessQueryLimitedInformation, pid)
-	if err != nil {
-		return procIdentity{}, false
-	}
-	defer windowsProcCloseHandle.Call(handle)
-	ticks, err := windowsCreationTicks(handle)
-	if err != nil {
-		return procIdentity{}, false
-	}
-	return procIdentity{started: strconv.FormatInt(ticks, 10), running: windowsStillActive(handle)}, true
+// limited-information handle, three-way: an OpenProcess failure with
+// ERROR_INVALID_PARAMETER is the proven absence; any other failure is
+// unknown; an open process that is not STILL_ACTIVE is gone.
+func procReadIdentityReal(pid int, env Env) (procIdentity, ProcLiveness) {
+	started, live := windowsProcStarted(pid)
+	return procIdentity{started: started}, live
 }
 
 // windowsStillActiveCode is GetExitCodeProcess's STILL_ACTIVE (259).
@@ -279,24 +349,33 @@ func procAliveStates(pids []int, env Env) map[int]bool {
 }
 
 // StopProcessTree stops the windows process tree rooted at pid in three
-// phases, mirroring the unix helper.
+// phases, mirroring the unix helper. expectedStarted is the creation time
+// (FILETIME ticks) the caller registered for the root: the root is
+// admitted only when its captured creation time is the same start
+// (SameStarted), and a divergence stops the whole call with `process
+// <pid> changed after the check`, no signal sent.
 //
 // Collection: a Toolhelp32 pid/ppid snapshot, then — for every
-// candidate, by pid — the creation time (OpenProcess and
-// GetProcessTimes). Only the root verified by its creation time and the
-// pids still children of an already-verified pid are kept; a pid that
-// reparented or vanished leaves the list and is never signalled.
+// candidate, by pid — the creation time (OpenProcess, GetProcessTimes,
+// the STILL_ACTIVE exit code), read three-way. A second Toolhelp32
+// snapshot is taken once the creation times are captured, and a
+// descendant is admitted only when its current parent (the second
+// snapshot) is the first snapshot's parent and its creation ticks are not
+// older than its parent's captured ticks: a pid reused by a process older
+// than the parent is left out and never signalled. An unreadable read of
+// the root stops the call with an error: the stop is not claimed.
 //
 // TERM: from the deepest descendant to the root, the root last, a
 // taskkill /PID <pid> (without /T, so only the verified pid is reached)
-// after the pre-signal re-read of the creation time.
+// after the pre-signal re-read of the creation time; an unreadable read
+// of a verified target stops the call with an error.
 //
 // KILL: after up to 3 s, the survivors only, through
 // OpenProcess(PROCESS_TERMINATE|PROCESS_QUERY_LIMITED_INFORMATION),
 // re-reading the creation time through the same handle and calling
 // TerminateProcess only when it still matches.
-func StopProcessTree(pid int, env Env) error {
-	parentOf, err := windowsParentSnapshot()
+func StopProcessTree(pid int, expectedStarted string, env Env) error {
+	parentOf, err := procParentSnapshotFunc()
 	if err != nil {
 		return err
 	}
@@ -305,19 +384,54 @@ func StopProcessTree(pid int, env Env) error {
 	}
 	members, depths := windowsTreeMembers(pid, parentOf)
 	captured := map[int]string{}
-	verified := map[int]bool{}
+	created := map[int]int64{}
+	live := map[int]bool{}
 	for _, member := range members { // root first, shallow to deep
-		id, ok := procReadIdentity(member, env)
-		if !ok || !id.running {
+		id, liveRead := procReadIdentity(member, env)
+		switch liveRead {
+		case ProcGone:
+			continue
+		case ProcUnknown:
+			if member == pid {
+				return fmt.Errorf("process %d is unreadable; not stopped", pid)
+			}
 			continue
 		}
-		if member != pid {
-			parent := parentOf[member]
-			if !verified[parent] {
-				continue
-			}
-		}
 		captured[member] = id.started
+		if ticks, parseErr := strconv.ParseInt(id.started, 10, 64); parseErr == nil {
+			created[member] = ticks
+			live[member] = true
+		}
+	}
+	if !live[pid] {
+		// The root is gone (or unreadable as ticks): nothing verified is a
+		// clean no-op.
+		return nil
+	}
+	if !SameStarted(captured[pid], expectedStarted) {
+		return fmt.Errorf("process %d changed after the check", pid)
+	}
+	// The revalidation snapshot: the current parent of every candidate,
+	// taken after the creation-time capture.
+	parentOf2, err := procParentSnapshotFunc()
+	if err != nil {
+		return err
+	}
+	verified := map[int]bool{pid: true}
+	for _, member := range members {
+		if member == pid || !live[member] {
+			continue
+		}
+		parent := parentOf[member]
+		if !verified[parent] {
+			continue
+		}
+		if parentOf2[member] != parent {
+			continue // the current parent is not the snapshot's parent
+		}
+		if created[member] < created[parent] {
+			continue // older than its parent: the pid was reused
+		}
 		verified[member] = true
 	}
 	targets := windowsVerifiedTargets(members, depths, verified)
@@ -325,8 +439,14 @@ func StopProcessTree(pid int, env Env) error {
 		return nil
 	}
 	for _, target := range targets {
-		id, ok := procReadIdentity(target, env)
-		if !ok || !id.running || id.started != captured[target] {
+		id, liveRead := procReadIdentity(target, env)
+		switch liveRead {
+		case ProcGone:
+			continue
+		case ProcUnknown:
+			return fmt.Errorf("process %d is unreadable; not stopped", target)
+		}
+		if !SameStarted(id.started, captured[target]) {
 			continue
 		}
 		if err := procSendTerm(target, env); err != nil {
@@ -336,9 +456,15 @@ func StopProcessTree(pid int, env Env) error {
 	if windowsWaitGone(targets, 3*time.Second) {
 		return nil
 	}
-	for _, target := range windowsStillRunning(targets) {
-		id, ok := procReadIdentity(target, env)
-		if !ok || !id.running || id.started != captured[target] {
+	for _, target := range targets {
+		id, liveRead := procReadIdentity(target, env)
+		switch liveRead {
+		case ProcGone:
+			continue
+		case ProcUnknown:
+			return fmt.Errorf("process %d is unreadable; not stopped", target)
+		}
+		if !SameStarted(id.started, captured[target]) {
 			continue
 		}
 		if err := windowsTerminate(target, captured[target]); err != nil {

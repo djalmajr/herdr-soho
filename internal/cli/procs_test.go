@@ -344,6 +344,29 @@ func TestProcsListStates(t *testing.T) {
 	}
 }
 
+// A ps that fails every identity query must never read as gone: the
+// state column shows the unknown read, and nothing is dropped.
+func TestProcsListUnknownState(t *testing.T) {
+	f := newProcsFixture(t)
+	pid := f.sleeper(t)
+	f.writeProcs(t, core.ProcRow{Pid: pid, Started: "Sat Oct  3 00:00:00 2026", Name: "sleep", Owner: "worker", Pane: "p-worker", Created: core.FrictionISO(platform.Now())})
+	// The fake ps fails every query: the fixture's PATH puts the fake dir
+	// first, so the registry helpers resolve it before the system ps.
+	if err := os.WriteFile(filepath.Join(f.fakeDir, "ps"), []byte("#!/bin/sh\nexit 9\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := f.run(t, "procs")
+	if code != 0 || errOut != "" {
+		t.Fatalf("procs: code=%d err=%q", code, errOut)
+	}
+	if !strings.HasPrefix(out, strconv.Itoa(pid)+"  sleep  worker  0m  unknown") {
+		t.Fatalf("line = %q; want the unknown state (a failed read is not gone)", out)
+	}
+	if rows := f.procsRows(t); len(rows) != 1 {
+		t.Fatalf("registry rows = %v; nothing is dropped on an unknown read", rows)
+	}
+}
+
 func TestReleaseStopsTheAgentTreeAndKeepsTheOthers(t *testing.T) {
 	f := newProcsFixture(t)
 	parent, child := f.treeProc(t)

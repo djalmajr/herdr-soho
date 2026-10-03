@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
@@ -122,7 +123,20 @@ func TestStopProcessTreeWindows(t *testing.T) {
 		}
 	})
 	started := time.Now()
-	if err := StopProcessTree(parent, Env{}); err != nil {
+	readStarted := ""
+	readDeadline := time.Now().Add(5 * time.Second)
+	for {
+		s, _, ok := ProcInfo(parent, Env{})
+		if ok {
+			readStarted = s
+			break
+		}
+		if time.Now().After(readDeadline) {
+			t.Fatalf("ProcInfo(%d) never became ok", parent)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err := StopProcessTree(parent, readStarted, Env{}); err != nil {
 		t.Fatalf("StopProcessTree(%d): %v", parent, err)
 	}
 	for _, pid := range []int{parent, child} {
@@ -139,5 +153,137 @@ func TestStopProcessTreeWindows(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 4*time.Second {
 		t.Fatalf("the TERM round took %s; a waiting process must not need the KILL round", elapsed)
+	}
+}
+
+// TestWindowsAdmissionRevalidatesTheCurrentParent: unit test of the
+// collection admission with the fake Toolhelp32 tables and the fake
+// creation ticks injected: after the creation-time capture a second
+// snapshot is taken, and a descendant is admitted only when its current
+// parent is the first snapshot's parent and its creation ticks are not
+// older than its parent's captured ticks. The TERM is recorded, never
+// sent (the candidate pids are not real processes of this test).
+func TestWindowsAdmissionRevalidatesTheCurrentParent(t *testing.T) {
+	const (
+		root   = 200000 // the registered root (ticks 100)
+		inTree = 200001 // admitted: the current parent is the root, newer than the root
+		moved  = 200002 // rejected: the second snapshot has another parent
+		older  = 200003 // rejected: older than its parent (a reused pid)
+		grand  = 200004 // admitted: under the admitted child
+	)
+	ticks := map[int]string{root: "100", inTree: "250", moved: "150", older: "50", grand: "300"}
+	first := map[int]int{root: 1, inTree: root, moved: root, older: root, grand: inTree}
+	second := map[int]int{root: 1, inTree: root, moved: 999999, older: root, grand: inTree}
+	reads := 0
+	snapshots := 0
+	oldSnap, oldRead, oldTerm := procParentSnapshotFunc, procReadIdentity, procSendTerm
+	procParentSnapshotFunc = func() (map[int]int, error) {
+		snapshots++
+		if snapshots == 1 {
+			return first, nil
+		}
+		return second, nil
+	}
+	procReadIdentity = func(pid int, env Env) (procIdentity, ProcLiveness) {
+		reads++
+		// The collection (5 reads) and the TERM re-reads (3) see the
+		// ticks; anything after that (a KILL round, if ever reached) sees
+		// unreadable pids and must not terminate anything.
+		if reads > 8 {
+			return procIdentity{}, ProcUnknown
+		}
+		s, seen := ticks[pid]
+		if !seen {
+			return procIdentity{}, ProcGone
+		}
+		return procIdentity{started: s}, ProcRunning
+	}
+	var term []int
+	procSendTerm = func(pid int, env Env) error {
+		term = append(term, pid)
+		return nil
+	}
+	t.Cleanup(func() {
+		procParentSnapshotFunc, procReadIdentity, procSendTerm = oldSnap, oldRead, oldTerm
+	})
+	err := StopProcessTree(root, "100", Env{})
+	t.Logf("StopProcessTree error=%v reads=%d", err, reads)
+	if snapshots != 2 {
+		t.Fatalf("snapshots = %d; want the collection and the revalidation snapshot", snapshots)
+	}
+	// The admitted set is the root, inTree and grand (deepest first, the
+	// root last): moved lost its parent in the second snapshot, older is
+	// older than its parent.
+	if len(term) != 3 || term[0] != grand || term[1] != inTree || term[2] != root {
+		t.Fatalf("TERM order = %v; want [%d %d %d]: only the revalidated candidates, deepest first", term, grand, inTree, root)
+	}
+}
+
+// TestWindowsAdmissionRootStartChanged: the unit twin of the unix root
+// check: the root's captured creation time diverging from the registered
+// one stops the call with the changed-after-the-check error and no
+// signal.
+func TestWindowsAdmissionRootStartChanged(t *testing.T) {
+	const (
+		root = 300000
+		kid  = 300001
+	)
+	reads := 0
+	oldSnap, oldRead, oldTerm := procParentSnapshotFunc, procReadIdentity, procSendTerm
+	procParentSnapshotFunc = func() (map[int]int, error) {
+		return map[int]int{root: 1, kid: root}, nil
+	}
+	procReadIdentity = func(pid int, env Env) (procIdentity, ProcLiveness) {
+		reads++
+		if pid == root {
+			// The registered start is 100; the captured ticks are 200:
+			// the pid changed after the check.
+			return procIdentity{started: "200"}, ProcRunning
+		}
+		return procIdentity{started: "250"}, ProcRunning
+	}
+	var term []int
+	procSendTerm = func(pid int, env Env) error {
+		term = append(term, pid)
+		return nil
+	}
+	t.Cleanup(func() {
+		procParentSnapshotFunc, procReadIdentity, procSendTerm = oldSnap, oldRead, oldTerm
+	})
+	err := StopProcessTree(root, "100", Env{})
+	if err == nil || err.Error() != fmt.Sprintf("process %d changed after the check", root) {
+		t.Fatalf("StopProcessTree = %v; want the changed-after-the-check error", err)
+	}
+	if len(term) != 0 {
+		t.Fatalf("TERM order = %v; want no signal on a divergent root", term)
+	}
+}
+
+// TestWindowsAdmissionUnreadableRoot: an unreadable root identity read
+// stops the call with an error and no signal (a read failure is not an
+// absence).
+func TestWindowsAdmissionUnreadableRoot(t *testing.T) {
+	const root = 400000
+	oldSnap, oldRead, oldTerm := procParentSnapshotFunc, procReadIdentity, procSendTerm
+	procParentSnapshotFunc = func() (map[int]int, error) {
+		return map[int]int{root: 1}, nil
+	}
+	procReadIdentity = func(pid int, env Env) (procIdentity, ProcLiveness) {
+		return procIdentity{}, ProcUnknown
+	}
+	var term []int
+	procSendTerm = func(pid int, env Env) error {
+		term = append(term, pid)
+		return nil
+	}
+	t.Cleanup(func() {
+		procParentSnapshotFunc, procReadIdentity, procSendTerm = oldSnap, oldRead, oldTerm
+	})
+	err := StopProcessTree(root, "100", Env{})
+	if err == nil || err.Error() != fmt.Sprintf("process %d is unreadable; not stopped", root) {
+		t.Fatalf("StopProcessTree = %v; want the unreadable-root error", err)
+	}
+	if len(term) != 0 {
+		t.Fatalf("TERM order = %v; want no signal on an unreadable root", term)
 	}
 }

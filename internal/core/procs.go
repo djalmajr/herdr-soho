@@ -136,14 +136,19 @@ func DropProcsLines(stateDir string, removed map[string]bool) error {
 }
 
 // ProcRowState is the state of a registry line at the last moment: running
-// when the pid exists with the same start time, gone when the pid is not
-// there, reused when the pid exists with another start time.
+// when the pid exists with the same start time, gone when the absence is
+// proven, reused when the pid exists with another start time, unknown
+// when the read failed (the line must not be dropped or stopped on an
+// unknown read: a failed read is not an absence).
 func ProcRowState(row ProcRow, env platform.Env) string {
-	started, _, ok := platform.ProcInfo(row.Pid, env)
-	if !ok {
+	started, live := platform.ReadProc(row.Pid, env)
+	switch live {
+	case platform.ProcGone:
 		return "gone"
+	case platform.ProcUnknown:
+		return "unknown"
 	}
-	if started == row.Started {
+	if platform.SameStarted(started, row.Started) {
 		return "running"
 	}
 	return "reused"
@@ -159,10 +164,13 @@ type StopProcResult struct {
 }
 
 // StopProcRow acts on one registry line at the last moment. A running line
-// (the start time re-checked now) has its process tree stopped; a gone or
-// reused line is dropped without any signal — a reused pid is never
-// signalled, so the process behind it is never touched. The registry line
-// is dropped under the registry lock; the stop itself runs outside it.
+// (the start time re-checked now) has its process tree stopped, with the
+// registered start time as the root's expected identity; a gone or reused
+// line is dropped without any signal — a reused pid is never signalled, so
+// the process behind it is never touched; an unknown line (the read
+// failed) is kept, with an error: the stop is not claimed. The registry
+// line is dropped under the registry lock; the stop itself runs outside
+// it.
 func StopProcRow(stateDir string, row ProcRow, env platform.Env) StopProcResult {
 	line := ""
 	switch ProcRowState(row, env) {
@@ -170,8 +178,11 @@ func StopProcRow(stateDir string, row ProcRow, env platform.Env) StopProcResult 
 		line = fmt.Sprintf("process %d already gone", row.Pid)
 	case "reused":
 		line = fmt.Sprintf("process %d was reused; not stopped", row.Pid)
+	case "unknown":
+		// The read failed: neither a stop nor a drop is claimed.
+		return StopProcResult{Err: fmt.Errorf("process %d is unreadable; not stopped", row.Pid)}
 	case "running":
-		if err := platform.StopProcessTree(row.Pid, env); err != nil {
+		if err := platform.StopProcessTree(row.Pid, row.Started, env); err != nil {
 			return StopProcResult{Err: err}
 		}
 		line = fmt.Sprintf("stopped process %d (%s)", row.Pid, row.Name)

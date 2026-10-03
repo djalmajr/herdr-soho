@@ -137,7 +137,11 @@ func TestStopProcessTreeCases(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 		}
 		started := time.Now()
-		if err := StopProcessTree(parent, env); err != nil {
+		readStarted, _, ok := ProcInfo(parent, env)
+		if !ok {
+			t.Fatalf("the sh %d is not readable", parent)
+		}
+		if err := StopProcessTree(parent, readStarted, env); err != nil {
 			t.Fatalf("StopProcessTree(%d): %v", parent, err)
 		}
 		procGone(t, env, parent, 5*time.Second)
@@ -155,7 +159,7 @@ func TestStopProcessTreeCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = cmd.Wait() // reap: the entry leaves the table; the kill error is expected
-		if err := StopProcessTree(pid, env); err != nil {
+		if err := StopProcessTree(pid, "", env); err != nil {
 			t.Fatalf("StopProcessTree(dead %d): %v", pid, err)
 		}
 	})
@@ -170,7 +174,11 @@ func TestStopProcessTreeCases(t *testing.T) {
 			_ = shell.Wait()
 		}
 		t.Cleanup(shellCleanup)
-		if err := StopProcessTree(shell.Process.Pid, env); err != nil {
+		readStarted, _, ok := ProcInfo(shell.Process.Pid, env)
+		if !ok {
+			t.Fatal("the sh is not readable")
+		}
+		if err := StopProcessTree(shell.Process.Pid, readStarted, env); err != nil {
 			t.Fatal(err)
 		}
 		if !procAliveStates([]int{other.Process.Pid}, env)[other.Process.Pid] {
@@ -219,6 +227,10 @@ func TestStopRejectsAChildReparentedAfterTheSnapshot(t *testing.T) {
 	}
 	env := procTestEnv(t)
 	parent, child := oneShellChildTree(t, env)
+	readStarted, _, ok := ProcInfo(parent, env)
+	if !ok {
+		t.Fatalf("the sh %d is not readable", parent)
+	}
 	procStopAfterSnapshot = func(root int, env Env) {
 		// Reparent the child before the identity pass: TERM the parent
 		// and let the reparenting settle (os.Process.Signal compiles on
@@ -229,7 +241,7 @@ func TestStopRejectsAChildReparentedAfterTheSnapshot(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Cleanup(func() { procStopAfterSnapshot = nil })
-	if err := StopProcessTree(parent, env); err != nil {
+	if err := StopProcessTree(parent, readStarted, env); err != nil {
 		t.Fatalf("StopProcessTree(%d): %v; nothing verified is a clean no-op", parent, err)
 	}
 	if !procAliveStates([]int{child}, env)[child] {
@@ -262,11 +274,15 @@ func TestStopSkipsAKillWhenTheStartTimeChanged(t *testing.T) {
 		_ = cmd.Wait()
 	})
 	pid := cmd.Process.Pid
+	readStarted, _, ok := ProcInfo(pid, env)
+	if !ok {
+		t.Fatalf("the python %d is not readable", pid)
+	}
 	real := procReadIdentity
 	reads := map[int]int{}
-	procReadIdentity = func(pid int, env Env) (procIdentity, bool) {
-		id, ok := real(pid, env)
-		if ok {
+	procReadIdentity = func(pid int, env Env) (procIdentity, ProcLiveness) {
+		id, live := real(pid, env)
+		if live == ProcRunning {
 			reads[pid]++
 			// The collection read and the pre-TERM re-read pass through;
 			// from the pre-KILL re-read on the start time is adulterated.
@@ -274,10 +290,10 @@ func TestStopSkipsAKillWhenTheStartTimeChanged(t *testing.T) {
 				id.started = "adulterated start time"
 			}
 		}
-		return id, ok
+		return id, live
 	}
 	t.Cleanup(func() { procReadIdentity = real })
-	if err := StopProcessTree(pid, env); err == nil {
+	if err := StopProcessTree(pid, readStarted, env); err == nil {
 		t.Fatal("StopProcessTree succeeded although the process survived; the skipped KILL is a failure to report")
 	}
 	if !procAliveStates([]int{pid}, env)[pid] {
@@ -319,6 +335,10 @@ func TestStopTermsTheDeepestDescendantFirst(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	readStarted, _, ok := ProcInfo(parent.Process.Pid, env)
+	if !ok {
+		t.Fatalf("the python %d is not readable", parent.Process.Pid)
+	}
 	real := procSendTerm
 	var order []int
 	procSendTerm = func(pid int, env Env) error {
@@ -326,7 +346,7 @@ func TestStopTermsTheDeepestDescendantFirst(t *testing.T) {
 		return real(pid, env)
 	}
 	t.Cleanup(func() { procSendTerm = real })
-	if err := StopProcessTree(parent.Process.Pid, env); err != nil {
+	if err := StopProcessTree(parent.Process.Pid, readStarted, env); err != nil {
 		t.Fatalf("StopProcessTree(%d): %v", parent.Process.Pid, err)
 	}
 	if len(order) != 2 || order[0] != child || order[1] != parent.Process.Pid {
@@ -334,11 +354,15 @@ func TestStopTermsTheDeepestDescendantFirst(t *testing.T) {
 	}
 }
 
-// TestReview92RejectReparentedSnapshot (review probe, now durable): a
-// fake ps whose -A table still lists the child under the parent while the
-// child reparented (the parent was TERMed inside the snapshot) must not
-// lead the stop to signal the child: the identity pass drops it and it
-// stays alive.
+// TestReview92RejectReparentedSnapshot (review probe, now durable, with
+// the full lstart/ppid/state responses): a fake ps whose -A table still
+// lists the child under the parent while the child reparented (the parent
+// was TERMed inside the snapshot) must not lead the stop to signal the
+// child: the root verifies against the registered start time, the child's
+// current parent (the identity pass) diverges from the snapshot's parent
+// and it is dropped, and it stays alive. Removing the
+// `id.ppid != parent` comparison makes this test fail (the child gets
+// the TERM).
 func TestReview92RejectReparentedSnapshot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the unix TERM/KILL round; the windows round exercises the same contract")
@@ -388,6 +412,7 @@ else:
 		t.Fatalf("initial parent invalid: %q", b)
 	}
 	t.Logf("owned parent=%d child=%d initial-ppid=%s", root.Process.Pid, kid, fields[0])
+	const fakeRootStart = "Sat Oct  3 00:00:00 2026"
 	script := fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "-A" ]; then
  kill -TERM %d
@@ -396,17 +421,38 @@ if [ "$1" = "-A" ]; then
  printf '%%s %%s\n' '%d' '%d' '%d' '%d'
  exit 0
 fi
-# Only the two owned fixture PIDs are present in the simulated table.
-for p in %d %d; do
- if kill -0 "$p" 2>/dev/null; then printf '%%s S\n' "$p"; fi
-done
-`, root.Process.Pid, beat, filepath.Join(dir, "reparented"), root.Process.Pid, os.Getpid(), kid, root.Process.Pid, root.Process.Pid, kid)
+case "$2" in
+ lstart=,ppid=,state=)
+  # Full responses, one per queried pid ($3): the table has no pid field,
+  # so the reader takes the printed line as the answer. The root keeps
+  # the registered start (the -A handler signalled it; its real entry is
+  # dead or reaped and the stop must not signal it again). The child
+  # carries its real current parent, from its heartbeat: after the -A's
+  # TERM it is no longer the root.
+  case "$4" in
+   %d) printf 'Sat Oct  3 00:00:00 2026 %%s S\n' '%d' ;;
+   %d)
+    set -- $(cat '%s' 2>/dev/null)
+    if [ -n "$1" ]; then printf 'Sat Oct  3 00:00:01 2026 %%s S\n' "$1"; fi
+    ;;
+  esac
+  exit 0
+  ;;
+ pid=,state=)
+  : # the fixture reports no running pids to the liveness probe
+  ;;
+esac
+exit 0
+`, root.Process.Pid, beat, filepath.Join(dir, "reparented"), root.Process.Pid, os.Getpid(), kid, root.Process.Pid, root.Process.Pid, os.Getpid(), kid, beat)
 	if err := os.WriteFile(filepath.Join(dir, "ps"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	env["PATH"] = dir + ":" + env.Get("PATH")
-	err := StopProcessTree(root.Process.Pid, env)
+	err := StopProcessTree(root.Process.Pid, fakeRootStart, env)
 	t.Logf("StopProcessTree error=%v", err)
+	if err != nil {
+		t.Fatalf("StopProcessTree: %v; the divergent candidate is dropped without a signal", err)
+	}
 	b, e := os.ReadFile(filepath.Join(dir, "reparented"))
 	if e != nil {
 		t.Fatal(e)
@@ -428,9 +474,10 @@ done
 	}
 }
 
-// TestReview92StopsOwnedChild (review probe control, now durable): the
-// same fixture with the parent remaining in the tree — the child stays
-// verified and the stop reaches it.
+// TestReview92StopsOwnedChild (review probe control, now durable, with
+// the full lstart/ppid/state responses): the same fixture with the parent
+// remaining in the tree — the child's current parent is still the
+// snapshot's parent, it stays verified and the stop reaches it.
 func TestReview92StopsOwnedChild(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the unix TERM/KILL round; the windows round exercises the same contract")
@@ -480,6 +527,7 @@ else:
 		t.Fatalf("initial parent invalid: %q", b)
 	}
 	t.Logf("owned parent=%d child=%d initial-ppid=%s", root.Process.Pid, kid, fields[0])
+	const fakeRootStart = "Sat Oct  3 00:00:00 2026"
 	script := fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "-A" ]; then
  : # parent %d remains in tree
@@ -488,17 +536,36 @@ if [ "$1" = "-A" ]; then
  printf '%%s %%s\n' '%d' '%d' '%d' '%d'
  exit 0
 fi
-# Only the two owned fixture PIDs are present in the simulated table.
-for p in %d %d; do
- if kill -0 "$p" 2>/dev/null; then printf '%%s S\n' "$p"; fi
-done
-`, root.Process.Pid, beat, filepath.Join(dir, "reparented"), root.Process.Pid, os.Getpid(), kid, root.Process.Pid, root.Process.Pid, kid)
+case "$2" in
+ lstart=,ppid=,state=)
+  # Full responses, one per queried pid ($3): the table has no pid field,
+  # so the reader takes the printed line as the answer. The child carries
+  # its real current parent, from its heartbeat: the parent remains in
+  # the tree, so it is still the root.
+  case "$4" in
+   %d) printf 'Sat Oct  3 00:00:00 2026 %%s S\n' '%d' ;;
+   %d)
+    set -- $(cat '%s' 2>/dev/null)
+    if [ -n "$1" ]; then printf 'Sat Oct  3 00:00:01 2026 %%s S\n' "$1"; fi
+    ;;
+  esac
+  exit 0
+  ;;
+ pid=,state=)
+  : # the fixture reports no running pids to the liveness probe
+  ;;
+esac
+exit 0
+`, root.Process.Pid, beat, filepath.Join(dir, "reparented"), root.Process.Pid, os.Getpid(), kid, root.Process.Pid, root.Process.Pid, os.Getpid(), kid, beat)
 	if err := os.WriteFile(filepath.Join(dir, "ps"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	env["PATH"] = dir + ":" + env.Get("PATH")
-	err := StopProcessTree(root.Process.Pid, env)
+	err := StopProcessTree(root.Process.Pid, fakeRootStart, env)
 	t.Logf("StopProcessTree error=%v", err)
+	if err != nil {
+		t.Fatalf("StopProcessTree: %v; the owned tree is verified and stopped", err)
+	}
 	b, e := os.ReadFile(filepath.Join(dir, "reparented"))
 	if e != nil {
 		t.Fatal(e)

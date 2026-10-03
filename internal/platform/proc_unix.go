@@ -29,23 +29,79 @@ func procLocale(env Env) Env {
 	return out
 }
 
-// ProcInfo reads the start time and the command base name of one pid with
-// `ps -o lstart=,state=,comm= -p <pid>` (LC_ALL=C, a 5 s ceiling): only
-// that pid, never a command-line listing (it may carry credentials).
-// started is the start time exactly as the system prints it, name the base
-// name of the command. ok is false when the pid is not running — a zombie
-// (a dead process left unreaped by its parent) is not running —, when ps
-// is missing or times out, or when the line does not parse.
-func ProcInfo(pid int, env Env) (string, string, bool) {
+// ProcLiveness is the outcome of one by-pid liveness read:
+//
+//	ProcRunning the pid is running; the start time comes with it
+//	ProcGone    the absence is proven: the pid does not exist, or it is a
+//	            zombie left unreaped (a dead process is not running)
+//	ProcUnknown the read failed; nothing is known. Unknown is not an
+//	            absence: a registry line is never dropped or stopped on it.
+type ProcLiveness int
+
+const (
+	ProcRunning ProcLiveness = iota
+	ProcGone
+	ProcUnknown
+)
+
+// SameStarted reports whether two start-time readings denote the same
+// process start, comparing after collapsing internal whitespace: the unix
+// lstart pads the day field with spaces, so a raw reading (the registry
+// copy) and a field-rejoined reading (the stop pass) of the same process
+// differ in padding only.
+func SameStarted(a, b string) bool {
+	return strings.Join(strings.Fields(a), " ") == strings.Join(strings.Fields(b), " ")
+}
+
+// procInfoFull reads the start time, the command base name and the
+// liveness of one pid with `ps -o lstart=,state=,comm= -p <pid>`
+// (LC_ALL=C, a 5 s ceiling): only that pid, never a command-line listing
+// (it may carry credentials). started is the start time exactly as the
+// system prints it, name the base name of the command. The liveness is
+// the three-way read: when ps exits non-zero, is missing or times out, or
+// the line does not parse, the absence is confirmed with kill(pid, 0) —
+// ESRCH is the proven absence, any other result (nil or EPERM among them)
+// is unknown. A zombie (a dead process left unreaped by its parent) is
+// not running.
+func procInfoFull(pid int, env Env) (string, string, ProcLiveness) {
 	r := RunCli("ps", []string{"-o", "lstart=,state=,comm=", "-p", strconv.Itoa(pid)}, RunOptions{Env: procLocale(env), TimeoutMs: 5000})
 	if r.NotFound || r.TimedOut || r.Error != "" || r.Status == nil || *r.Status != 0 {
-		return "", "", false
+		return "", "", procKernelGone(pid)
 	}
 	m := procStartRe.FindStringSubmatch(strings.TrimSpace(r.Stdout))
-	if m == nil || m[2] == "Z" {
-		return "", "", false
+	if m == nil {
+		return "", "", procKernelGone(pid)
 	}
-	return m[1], basePath(m[3]), true
+	if m[2] == "Z" {
+		return "", "", ProcGone
+	}
+	return m[1], basePath(m[3]), ProcRunning
+}
+
+// procKernelGone confirms a failed ps read against the kernel: kill(pid,
+// 0). ESRCH is the proven absence; any other result — nil (the pid
+// exists) or EPERM (it exists, owned by another user) — is unknown: a
+// failed read is not an absence.
+func procKernelGone(pid int) ProcLiveness {
+	if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+		return ProcGone
+	}
+	return ProcUnknown
+}
+
+// ProcInfo reads the start time and the command base name of one pid.
+// ok is true only for a running pid: a proven absence and an unreadable
+// read both read as not running (the three-way result is ReadProc).
+func ProcInfo(pid int, env Env) (string, string, bool) {
+	started, name, live := procInfoFull(pid, env)
+	return started, name, live == ProcRunning
+}
+
+// ReadProc reads one pid's start time and liveness as the three-way
+// result the registry and stop paths need.
+func ReadProc(pid int, env Env) (string, ProcLiveness) {
+	started, _, live := procInfoFull(pid, env)
+	return started, live
 }
 
 // basePath is filepath.Base without importing path/filepath in the hot
@@ -64,13 +120,13 @@ func basePath(value string) string {
 func ParentPID() int { return os.Getppid() }
 
 // procIdentity is one process's identity read by pid: its start time
-// (empty when the table does not print one), the current parent pid when
-// the line carries it, and whether it is running (a zombie is not).
+// (empty when the table does not print one) and the current parent pid
+// when the line carries it. The liveness comes with the read as the
+// three-way result.
 type procIdentity struct {
 	started   string
 	ppid      int
 	ppidKnown bool
-	running   bool
 }
 
 // Test hooks; the zero values keep the production behavior.
@@ -89,13 +145,16 @@ var (
 // ceiling): only those fields, never a command line. The lstart is
 // re-joined with single spaces, a normalization that is stable for the
 // life of the process, so two reads of the same process compare equal.
-// ok is false when the pid is not in the table or the line does not parse;
-// a pid whose line does not print a start time or a parent (a reduced
-// table) reads both as unknown and keeps only the state.
-func procReadIdentityReal(pid int, env Env) (procIdentity, bool) {
+// The read is three-way: a parsed line says running or gone (a zombie is
+// not running); when ps exits non-zero, is missing, times out, or the
+// table carries no line for this pid, the absence is confirmed with
+// kill(pid, 0) — ESRCH is gone, anything else is unknown. A pid whose
+// line does not print a start time or a parent (a reduced table) reads
+// both as unknown and keeps only the state.
+func procReadIdentityReal(pid int, env Env) (procIdentity, ProcLiveness) {
 	r := RunCli("ps", []string{"-o", "lstart=,ppid=,state=", "-p", strconv.Itoa(pid)}, RunOptions{Env: procLocale(env), TimeoutMs: 5000})
-	if r.NotFound || r.TimedOut || r.Error != "" {
-		return procIdentity{}, false
+	if r.NotFound || r.TimedOut || r.Error != "" || r.Status == nil || *r.Status != 0 {
+		return procIdentity{}, procKernelGone(pid)
 	}
 	for _, line := range strings.Split(strings.TrimSpace(r.Stdout), "\n") {
 		fields := strings.Fields(line)
@@ -110,20 +169,26 @@ func procReadIdentityReal(pid int, env Env) (procIdentity, bool) {
 			if linePid, err := strconv.Atoi(fields[0]); err != nil || linePid != pid {
 				continue
 			}
-			return procIdentity{running: state != "Z"}, true
+			if state == "Z" {
+				return procIdentity{}, ProcGone
+			}
+			return procIdentity{}, ProcRunning
 		}
 		ppid, err := strconv.Atoi(fields[len(fields)-2])
 		if err != nil {
 			continue
 		}
-		return procIdentity{
+		id := procIdentity{
 			started:   strings.Join(fields[:len(fields)-2], " "),
 			ppid:      ppid,
 			ppidKnown: true,
-			running:   state != "Z",
-		}, true
+		}
+		if state == "Z" {
+			return id, ProcGone
+		}
+		return id, ProcRunning
 	}
-	return procIdentity{}, false
+	return procIdentity{}, procKernelGone(pid)
 }
 
 func isAllDigit(value string) bool {
@@ -204,27 +269,35 @@ func statusText(r RunResult) string {
 }
 
 // StopProcessTree stops the unix process tree rooted at pid in three
-// phases.
+// phases. expectedStarted is the start time the caller registered for the
+// root: the root is admitted only when its collected start time is the
+// same start (SameStarted), and a divergence stops the whole call with
+// `process <pid> changed after the check`, no signal sent.
 //
 // Collection: a pid/ppid snapshot, then — for every candidate, by pid —
-// the start time and the current parent. Only the root verified by its
-// start time and the pids still children of an already-verified pid are
-// kept; a pid that reparented or vanished leaves the list and is never
-// signalled.
+// the start time and the current parent, read three-way (running with the
+// start time, a proven absence, an unreadable read). Only the root
+// verified against expectedStarted and the pids still children of an
+// already-verified pid are kept; a pid that reparented or vanished leaves
+// the list and is never signalled. An unreadable read of the root stops
+// the call with an error: the stop is not claimed.
 //
 // TERM: from the deepest descendant to the root, the root last.
 // Immediately before each signal the pid's start time is read again and
-// the signal goes only when it still matches the collected one.
+// the signal goes only when it still matches the collected one; an
+// unreadable read of a verified target stops the call with an error.
 //
 // KILL: after up to 3 s, the survivors only, with the same re-read before
 // each signal. A pid that lost its parent because the parent got the TERM
 // is still the same process by its start time and is escalated.
 //
-// An error is returned when the snapshot fails or anything of the tree
-// survives the kill. The unix lstart has second precision: in practice a
-// pid is not recycled within the same second, and the re-read before each
-// signal shrinks the window a recycled pid could hide behind.
-func StopProcessTree(pid int, env Env) error {
+// An error is returned when the snapshot fails, when the root diverges
+// from its registered start or goes unreadable, when a verified target
+// goes unreadable, or when anything of the tree survives the kill. The
+// unix lstart has second precision: in practice a pid is not recycled
+// within the same second, and the re-read before each signal shrinks the
+// window a recycled pid could hide behind.
+func StopProcessTree(pid int, expectedStarted string, env Env) error {
 	parentOf, err := procParentSnapshot(env)
 	if err != nil {
 		return err
@@ -236,11 +309,21 @@ func StopProcessTree(pid int, env Env) error {
 	captured := map[int]string{}
 	verified := map[int]bool{}
 	for _, member := range members { // root first, shallow to deep
-		id, ok := procReadIdentity(member, env)
-		if !ok || !id.running {
+		id, live := procReadIdentity(member, env)
+		switch live {
+		case ProcGone:
+			continue
+		case ProcUnknown:
+			if member == pid {
+				return fmt.Errorf("process %d is unreadable; not stopped", pid)
+			}
 			continue
 		}
-		if member != pid {
+		if member == pid {
+			if !SameStarted(id.started, expectedStarted) {
+				return fmt.Errorf("process %d changed after the check", pid)
+			}
+		} else {
 			parent := parentOf[member]
 			if !verified[parent] {
 				continue
@@ -257,8 +340,14 @@ func StopProcessTree(pid int, env Env) error {
 		return nil
 	}
 	for _, target := range targets {
-		id, ok := procReadIdentity(target, env)
-		if !ok || !id.running || id.started != captured[target] {
+		id, live := procReadIdentity(target, env)
+		switch live {
+		case ProcGone:
+			continue
+		case ProcUnknown:
+			return fmt.Errorf("process %d is unreadable; not stopped", target)
+		}
+		if !SameStarted(id.started, captured[target]) {
 			continue
 		}
 		if err := procSendTerm(target, env); err != nil && !errors.Is(err, syscall.ESRCH) {
@@ -268,9 +357,15 @@ func StopProcessTree(pid int, env Env) error {
 	if waitTreeGone(targets, 3*time.Second, env) {
 		return nil
 	}
-	for _, target := range procStillRunning(targets, env) {
-		id, ok := procReadIdentity(target, env)
-		if !ok || !id.running || id.started != captured[target] {
+	for _, target := range targets {
+		id, live := procReadIdentity(target, env)
+		switch live {
+		case ProcGone:
+			continue
+		case ProcUnknown:
+			return fmt.Errorf("process %d is unreadable; not stopped", target)
+		}
+		if !SameStarted(id.started, captured[target]) {
 			continue
 		}
 		_ = syscall.Kill(target, syscall.SIGKILL)
@@ -322,11 +417,11 @@ func procVerifiedTargets(members []int, depths map[int]int, verified map[int]boo
 }
 
 // procStillRunning lists, one by-pid read at a time, the pids still
-// running (a zombie is not running).
+// running (a zombie is not running; an unreadable read does not count).
 func procStillRunning(pids []int, env Env) []int {
 	out := []int{}
 	for _, pid := range pids {
-		if id, ok := procReadIdentity(pid, env); ok && id.running {
+		if _, live := procReadIdentity(pid, env); live == ProcRunning {
 			out = append(out, pid)
 		}
 	}
