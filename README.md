@@ -226,9 +226,14 @@ fails:
    `y`, releases that worker (`--close`) and reloads the view.
 2. **doctor** — the output of `herdr-soho doctor` for the focused
    workspace.
-3. **recursos** — the `gc` dry-run (pressure). `g` confirms (`gc --yes
+3. **resources** — the `gc` dry-run (pressure). `g` confirms (`gc --yes
    in <cwd>? y/N`) and, with `y`, runs `gc --yes` and reloads.
 4. **friction** — `herdr-soho friction --summary`.
+
+A confirmation runs its write only on a `y` pressed on its own after the
+prompt has been on screen for 0.4 s with no other input: a paste (the
+panel turns on the terminal's bracketed paste and drops pasted text) or
+a key typed along with the one that opened it never confirms.
 
 `Esc`, `q` or `Ctrl-C` close the panel (in a subview or confirmation,
 `Esc` backs out one level); every read call runs in the target's cwd

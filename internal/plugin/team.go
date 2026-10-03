@@ -125,6 +125,9 @@ type TeamState struct {
 	// pending confirmed actions, consumed by the next load of the view
 	pendingRelease string
 	pendingGCYes   bool
+	// confirmArmAt: a write confirmation accepts its `y` only after a quiet
+	// window with no input since it opened (see FeedChunk).
+	confirmArmAt time.Time
 
 	Exit       string
 	EscPending bool
@@ -436,7 +439,10 @@ func teamHardPiece(word string, width int) (string, int) {
 	for i, r := range word {
 		w := displayRuneWidth(r)
 		if used+w > width {
-			consumed := utf8.RuneLen(r)
+			// Zero-width runes before r (combining marks) add no width, so
+			// used can still be 0 here with i > 0: the step consumes them
+			// and r whole, never a byte inside r.
+			consumed := i + utf8.RuneLen(r)
 			if used == 0 {
 				// The first rune does not fit: the ellipsis (one column,
 				// when it fits) takes its place and the rune is consumed.
@@ -634,6 +640,13 @@ func scrollLines(lines []string, offset int) []string {
 	return lines[offset:]
 }
 
+// teamConfirmQuiet is the quiet window a write confirmation waits before it
+// accepts a `y`; teamNow is the clock (both replaceable in tests).
+var (
+	teamConfirmQuiet = 400 * time.Millisecond
+	teamNow          = time.Now
+)
+
 // FeedChunk consumes one stdin read block and returns an action for the
 // loop: "close" (the panel is exiting) or "load" (a load must be
 // requested); "" means redraw only. Bracketed paste (ESC[200~ … ESC[201~)
@@ -643,6 +656,19 @@ func scrollLines(lines []string, offset int) []string {
 // confirm - the confirmation is a deliberate keypress on its own.
 func (s *TeamState) FeedChunk(chunk string) string {
 	soloY := chunk == "y"
+	// Without bracketed paste a long paste reaches us as several read
+	// blocks, and its last block can be a lone `y`. So a confirmation also
+	// needs a quiet window: any block that arrives before teamConfirmQuiet
+	// has passed since it opened (or since the previous such block) cannot
+	// confirm, and it restarts the window. A paste arrives in one burst and
+	// never confirms; a `y` typed after reading the confirmation does.
+	if s.subview == "confirm-release" || s.subview == "confirm-gc" {
+		now := teamNow()
+		if now.Before(s.confirmArmAt) {
+			soloY = false
+			s.confirmArmAt = now.Add(teamConfirmQuiet)
+		}
+	}
 	for _, r := range chunk {
 		ch := string(r)
 		if s.CSIPending {
@@ -854,12 +880,14 @@ func (s *TeamState) ApplyKey(key string) string {
 			if agent := teamAgent(s.workers[s.selected]); agent != "" {
 				s.subview = "confirm-release"
 				s.confirmAgent = agent
+				s.confirmArmAt = teamNow().Add(teamConfirmQuiet)
 			}
 		}
 		return ""
 	case "g":
 		if s.subview == "" && s.view == teamViewResources {
 			s.subview = "confirm-gc"
+			s.confirmArmAt = teamNow().Add(teamConfirmQuiet)
 		}
 		return ""
 	case "y":
