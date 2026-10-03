@@ -108,7 +108,7 @@ func TestPiSendScreenMarkers(t *testing.T) {
 		// marker in the history above the top border is taken, not held, so
 		// it does not block the proof — the whole-screen expectation no
 		// longer applies to it.
-		if messageStillInScreen("claude", screen(""), endLine, id) {
+		if messageStillInScreen("claude", screen("❯"), endLine, id) {
 			t.Fatal("a claude marker above the box borders must not block the proof")
 		}
 		// The marker is on screen but above the last 15 lines: no Enter.
