@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	contextpkg "context"
 
@@ -130,6 +130,9 @@ type TeamState struct {
 	EscPending bool
 	CSIPending bool
 	csiBuf     string
+	// inPaste is true between the bracketed-paste markers (ESC[200~ and
+	// ESC[201~): every key in between is discarded, in every view.
+	inPaste bool
 }
 
 // NewTeamState builds the panel state on the given initial view.
@@ -374,7 +377,8 @@ func teamAgent(line string) string {
 
 // teamWrap wraps text into lines of at most width display columns without
 // splitting a rune: words break on spaces when possible, and a word wider
-// than the width is hard-cut to it.
+// than the width is hard-cut into pieces that always consume at least one
+// character, so the loop cannot stall on a wide rune.
 func teamWrap(text string, width int) []string {
 	var out []string
 	for _, raw := range strings.Split(text, "\n") {
@@ -407,10 +411,12 @@ func teamWrap(text string, width int) []string {
 				line = word
 				continue
 			}
-			// A word wider than the width: hard-cut it into width-sized pieces.
+			// A word wider than the width: hard-cut it, one piece per loop;
+			// each piece consumes at least one rune, so the loop advances.
 			for displayWidth(word) > width {
-				out = append(out, teamCut(word, width))
-				word = word[runePrefixOfWidth(word, width):]
+				piece, consumed := teamHardPiece(word, width)
+				out = append(out, piece)
+				word = word[consumed:]
 			}
 			line = word
 		}
@@ -421,9 +427,34 @@ func teamWrap(text string, width int) []string {
 	return out
 }
 
+// teamHardPiece returns one hard-cut line of `word` at `width` display
+// columns and how many bytes of `word` it consumed. A rune wider than the
+// width becomes the ellipsis (one column); the step always consumes at
+// least one rune, so the wrap loop advances even when nothing fits.
+func teamHardPiece(word string, width int) (string, int) {
+	used := 0
+	for i, r := range word {
+		w := displayRuneWidth(r)
+		if used+w > width {
+			consumed := utf8.RuneLen(r)
+			if used == 0 {
+				// The first rune does not fit: the ellipsis (one column,
+				// when it fits) takes its place and the rune is consumed.
+				if width >= 1 {
+					return "…", consumed
+				}
+				return "", consumed
+			}
+			return word[:i], i
+		}
+		used += w
+	}
+	return word, len(word)
+}
+
 // teamCut cuts text to at most width display columns, without splitting a
-// rune and without an ellipsis (used inside wrapped text, where the text
-// continues on the next line).
+// rune. When the first rune does not fit, the result is the ellipsis (one
+// column), so a wide character is never left unrepresented.
 func teamCut(text string, width int) string {
 	if width <= 0 {
 		return ""
@@ -433,27 +464,15 @@ func teamCut(text string, width int) string {
 	for _, r := range text {
 		w := displayRuneWidth(r)
 		if used+w > width {
+			if used == 0 {
+				return "…"
+			}
 			break
 		}
 		b.WriteRune(r)
 		used += w
 	}
 	return b.String()
-}
-
-// runePrefixOfWidth returns the byte length of the whole-rune prefix of
-// text that occupies exactly width display columns (less if the text ends
-// before then).
-func runePrefixOfWidth(text string, width int) int {
-	used := 0
-	for i, r := range text {
-		w := displayRuneWidth(r)
-		if used+w > width {
-			return i
-		}
-		used += w
-	}
-	return len(text)
 }
 
 func teamViewBar(s *TeamState) string {
@@ -493,7 +512,7 @@ func (s *TeamState) renderContent(width int) ([]string, string) {
 		title := "report: " + s.collectAgent + " (collect " + s.collectAgent + " --lines 60)"
 		content = append(content, displaySlice(StripPickerControls(title), width))
 		if !s.collectLoaded {
-			content = append(content, "carregando…")
+			content = append(content, displaySlice("carregando…", width))
 		} else if s.collectFailure != "" {
 			content = append(content, displaySlice(StripPickerControls(s.collectFailure), width))
 		} else {
@@ -512,7 +531,7 @@ func (s *TeamState) renderContent(width int) ([]string, string) {
 	case teamViewTeam:
 		var content []string
 		if !s.viewLoaded[teamViewTeam-1] {
-			content = append(content, "carregando…")
+			content = append(content, displaySlice("carregando…", width))
 		} else {
 			if s.explainFailure != "" {
 				content = append(content, displaySlice(StripPickerControls(s.explainFailure), width))
@@ -523,18 +542,14 @@ func (s *TeamState) renderContent(width int) ([]string, string) {
 			if s.rosterFailure != "" {
 				content = append(content, displaySlice(StripPickerControls(s.rosterFailure), width))
 			} else if len(s.workers) == 0 {
-				content = append(content, "sem workers")
+				content = append(content, displaySlice("sem workers", width))
 			} else {
-				rowWidth := width - 2
-				if rowWidth < 2 {
-					rowWidth = 2
-				}
 				for i, worker := range s.workers {
 					cursor := " "
 					if i == s.selected {
 						cursor = ">"
 					}
-					content = append(content, cursor+" "+displaySlice(StripPickerControls(worker), rowWidth))
+					content = append(content, displaySlice(cursor+" "+StripPickerControls(worker), width))
 				}
 			}
 			if s.releaseAgent != "" {
@@ -555,7 +570,7 @@ func (s *TeamState) renderContent(width int) ([]string, string) {
 	case teamViewResources:
 		var content []string
 		if !s.viewLoaded[teamViewResources-1] {
-			content = append(content, "carregando…")
+			content = append(content, displaySlice("carregando…", width))
 		} else {
 			if s.gcFailure != "" {
 				content = append(content, displaySlice(StripPickerControls(s.gcFailure), width))
@@ -583,7 +598,7 @@ func (s *TeamState) renderContent(width int) ([]string, string) {
 
 func teamViewText(loaded [4]bool, view int, failure string, lines []string, width int, scroll *int) []string {
 	if !loaded[view-1] {
-		return []string{"carregando…"}
+		return []string{displaySlice("carregando…", width)}
 	}
 	var content []string
 	if failure != "" {
@@ -598,7 +613,7 @@ func teamViewText(loaded [4]bool, view int, failure string, lines []string, widt
 // empty output shows a placeholder.
 func teamTextBlock(lines []string, width int) []string {
 	if len(lines) == 0 {
-		return []string{"(sem saída)"}
+		return []string{displaySlice("(sem saída)", width)}
 	}
 	var out []string
 	for _, line := range lines {
@@ -619,10 +634,15 @@ func scrollLines(lines []string, offset int) []string {
 	return lines[offset:]
 }
 
-// FeedChunk consumes one stdin chunk and returns an action for the loop:
-// "close" (the panel is exiting) or "load" (a load must be requested); ""
-// means redraw only.
+// FeedChunk consumes one stdin read block and returns an action for the
+// loop: "close" (the panel is exiting) or "load" (a load must be
+// requested); "" means redraw only. Bracketed paste (ESC[200~ … ESC[201~)
+// is discarded as a whole: no key inside it becomes an action in any view.
+// A write confirmation accepts only a `y` that is the whole block: `xy` or
+// `gy` (the key that opened it in the same block) and `yy`/`y\r` never
+// confirm - the confirmation is a deliberate keypress on its own.
 func (s *TeamState) FeedChunk(chunk string) string {
+	soloY := chunk == "y"
 	for _, r := range chunk {
 		ch := string(r)
 		if s.CSIPending {
@@ -630,15 +650,22 @@ func (s *TeamState) FeedChunk(chunk string) string {
 				seq := s.csiBuf + ch
 				s.CSIPending = false
 				s.csiBuf = ""
-				switch seq {
-				case "A":
-					s.ApplyKey("up")
-				case "B":
-					s.ApplyKey("down")
-				case "5~":
-					s.ApplyKey("pgup")
-				case "6~":
-					s.ApplyKey("pgdn")
+				switch {
+				case !s.inPaste && seq == "200~":
+					s.inPaste = true
+				case s.inPaste && seq == "201~":
+					s.inPaste = false
+				case !s.inPaste:
+					switch seq {
+					case "A":
+						s.ApplyKey("up")
+					case "B":
+						s.ApplyKey("down")
+					case "5~":
+						s.ApplyKey("pgup")
+					case "6~":
+						s.ApplyKey("pgdn")
+					}
 				}
 			} else {
 				s.csiBuf += ch
@@ -654,11 +681,20 @@ func (s *TeamState) FeedChunk(chunk string) string {
 				s.CSIPending = true
 				continue
 			}
-			if action := s.ApplyKey("esc"); action != "" {
-				return action
+			if !s.inPaste {
+				if action := s.ApplyKey("esc"); action != "" {
+					return action
+				}
 			}
 			if s.Exit != "" {
 				return s.Exit
+			}
+			continue
+		}
+		if s.inPaste {
+			// Paste content: discarded; only the end marker is watched.
+			if r == 0x1b {
+				s.EscPending = true
 			}
 			continue
 		}
@@ -678,6 +714,14 @@ func (s *TeamState) FeedChunk(chunk string) string {
 		case 0x09:
 			if action := s.ApplyKey("tab"); action != "" {
 				return action
+			}
+		case 'y':
+			// A confirmation executes only on a `y` that is the whole read
+			// block (see the FeedChunk doc).
+			if soloY && (s.subview == "confirm-release" || s.subview == "confirm-gc") {
+				if action := s.ApplyKey("y"); action != "" {
+					return action
+				}
 			}
 		default:
 			if r >= 0x20 && r <= 0x7e {
@@ -878,6 +922,10 @@ func runTeamLoop(env platform.Env, platformName, cliExe string, initialView int,
 }
 
 func runTeamLoopWithSignals(env platform.Env, platformName, cliExe string, initialView int, stdin, stdout *os.File, isTTY bool, shutdownSignals <-chan os.Signal) int {
+	// Bracketed paste is on while the panel is open and off on every exit
+	// path: the first output is the enable, the last the disable.
+	_, _ = fmt.Fprint(stdout, "\x1b[?2004h")
+	defer func() { _, _ = fmt.Fprint(stdout, "\x1b[?2004l") }()
 	state := NewTeamState(initialView)
 	target, cause := resolveTeamTarget(env, platformName)
 	if cause != "" {
@@ -924,18 +972,18 @@ func runTeamLoopWithSignals(env platform.Env, platformName, cliExe string, initi
 		<-loadDone
 	}()
 	type inputResult struct {
-		value string
+		chunk string
 		err   error
 	}
 	doneInput := make(chan struct{})
 	defer close(doneInput)
 	input := make(chan inputResult)
 	go func() {
-		reader := bufio.NewReader(stdin)
+		buf := make([]byte, 4096)
 		for {
-			r, _, err := reader.ReadRune()
+			n, err := stdin.Read(buf)
 			select {
-			case input <- inputResult{value: string(r), err: err}:
+			case input <- inputResult{chunk: string(buf[:n]), err: err}:
 			case <-doneInput:
 				return
 			}
@@ -957,26 +1005,27 @@ func runTeamLoopWithSignals(env platform.Env, platformName, cliExe string, initi
 			applyTeamLoad(state, res)
 			redrawTeam(stdout, state, width)
 		case item := <-input:
+			if len(item.chunk) > 0 {
+				if state.FeedChunk(item.chunk) == "load" {
+					requestTeamLoad(loads, state.pendingLoad())
+				}
+				if state.EscPending {
+					escTimer = time.After(50 * time.Millisecond)
+				} else {
+					escTimer = nil
+				}
+				redrawTeam(stdout, state, width)
+			}
 			if item.err != nil {
 				if item.err == io.EOF {
-					if state.EscPending {
-						state.FlushEsc()
-					} else {
-						state.ApplyKey("esc")
-					}
+					// End of input closes the panel for good, from any view,
+					// subview or confirmation; the children are ended like a
+					// normal close.
+					state.Exit = "close"
 					break
 				}
 				return 1
 			}
-			if state.FeedChunk(item.value) == "load" {
-				requestTeamLoad(loads, state.pendingLoad())
-			}
-			if state.EscPending {
-				escTimer = time.After(50 * time.Millisecond)
-			} else {
-				escTimer = nil
-			}
-			redrawTeam(stdout, state, width)
 		case <-escTimer:
 			if state.FlushEsc() != "" {
 				break
@@ -1016,21 +1065,22 @@ func redrawTeam(w io.Writer, state *TeamState, width int) {
 }
 
 // teamWaitForClose keeps the invalid-target panel open until Esc (or end of
-// input); arrow sequences are ignored.
+// input); arrow sequences are ignored and bracketed paste is discarded
+// like in the views.
 func teamWaitForClose(stdin *os.File) int {
 	type inputResult struct {
-		value string
+		chunk string
 		err   error
 	}
 	input := make(chan inputResult)
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
-		reader := bufio.NewReader(stdin)
+		buf := make([]byte, 4096)
 		for {
-			r, _, err := reader.ReadRune()
+			n, err := stdin.Read(buf)
 			select {
-			case input <- inputResult{value: string(r), err: err}:
+			case input <- inputResult{chunk: string(buf[:n]), err: err}:
 			case <-done:
 				return
 			}
@@ -1041,17 +1091,22 @@ func teamWaitForClose(stdin *os.File) int {
 	}()
 	escPending := false
 	csiPending := false
+	csiBuf := ""
+	inPaste := false
 	for item := range input {
-		if item.err != nil {
-			if item.err == io.EOF {
-				return 0
-			}
-			return 1
-		}
-		for _, r := range item.value {
+		for _, r := range item.chunk {
 			if csiPending {
 				if r >= 0x40 && r <= 0x7e {
+					seq := csiBuf + string(r)
 					csiPending = false
+					csiBuf = ""
+					if !inPaste && seq == "200~" {
+						inPaste = true
+					} else if inPaste && seq == "201~" {
+						inPaste = false
+					}
+				} else {
+					csiBuf += string(r)
 				}
 				continue
 			}
@@ -1061,11 +1116,26 @@ func teamWaitForClose(stdin *os.File) int {
 					csiPending = true
 					continue
 				}
-				return 0 // Esc (plus anything) closes
+				if !inPaste {
+					return 0 // Esc (plus anything) closes
+				}
+				continue
+			}
+			if inPaste {
+				if r == 0x1b {
+					escPending = true
+				}
+				continue
 			}
 			if r == 0x1b {
 				escPending = true
 			}
+		}
+		if item.err != nil {
+			if item.err == io.EOF {
+				return 0
+			}
+			return 1
 		}
 	}
 	return 0
