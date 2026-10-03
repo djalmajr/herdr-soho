@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -102,7 +103,13 @@ func newBusyDispatchFixture(t *testing.T) *busyDispatchFixture {
 func (f *busyDispatchFixture) openPointer(t *testing.T) {
 	t.Helper()
 	stable := filepath.Join(f.stateDir, "reports", "worker-20261003T100000.current.md")
-	pointer := `{"version":1,"task_report":"` + stable + `","current":"` + f.openReport + `","history":[]}`
+	// json.Marshal escapes the Windows backslashes a concatenated string
+	// would leave raw (invalid JSON there).
+	raw, err := json.Marshal(map[string]any{"version": 1, "task_report": stable, "current": f.openReport, "history": []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pointer := string(raw)
 	if err := os.WriteFile(taskreport.TaskReportPointerPath(f.stateDir, "worker"), []byte(pointer+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

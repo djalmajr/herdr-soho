@@ -63,6 +63,7 @@ var (
 	windowsProcProcess32Next             = windowsKernel32.NewProc("Process32NextW")
 	windowsProcCloseHandle               = windowsKernel32.NewProc("CloseHandle")
 	windowsProcTerminateProcess          = windowsKernel32.NewProc("TerminateProcess")
+	windowsProcGetExitCodeProcess        = windowsKernel32.NewProc("GetExitCodeProcess")
 )
 
 // Every kernel32 call decides success by the return value, never by the
@@ -140,6 +141,9 @@ func ProcInfo(pid int, env Env) (string, string, bool) {
 		return "", "", false
 	}
 	defer windowsProcCloseHandle.Call(handle)
+	if !windowsStillActive(handle) {
+		return "", "", false
+	}
 	ticks, err := windowsCreationTicks(handle)
 	if err != nil {
 		return "", "", false
@@ -235,17 +239,32 @@ func procReadIdentityReal(pid int, env Env) (procIdentity, bool) {
 	if err != nil {
 		return procIdentity{}, false
 	}
-	return procIdentity{started: strconv.FormatInt(ticks, 10), running: true}, true
+	return procIdentity{started: strconv.FormatInt(ticks, 10), running: windowsStillActive(handle)}, true
 }
 
-// procExists probes the pid with a limited-information handle.
+// windowsStillActiveCode is GetExitCodeProcess's STILL_ACTIVE (259).
+const windowsStillActiveCode = 259
+
+// windowsStillActive reports whether the process behind handle is still
+// running. An exited process stays openable while any handle to it is
+// open (its parent's, for one), so OpenProcess alone does not prove it
+// runs: only the STILL_ACTIVE exit code does. A failed query reads as
+// not running.
+func windowsStillActive(handle uintptr) bool {
+	var code uint32
+	ok, _, _ := windowsProcGetExitCodeProcess.Call(handle, uintptr(unsafe.Pointer(&code)))
+	return ok != 0 && code == windowsStillActiveCode
+}
+
+// procExists probes the pid with a limited-information handle and its
+// exit code.
 func procExists(pid int) bool {
 	handle, err := windowsOpenProcess(windowsProcessQueryLimitedInformation, pid)
 	if err != nil {
 		return false
 	}
-	windowsProcCloseHandle.Call(handle)
-	return true
+	defer windowsProcCloseHandle.Call(handle)
+	return windowsStillActive(handle)
 }
 
 // procAliveStates reports which of the pids is still openable: one
