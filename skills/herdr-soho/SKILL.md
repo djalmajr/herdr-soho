@@ -986,14 +986,20 @@ remote machine that fails prints a stderr line and the rest is still
 listed.
 
 `scripts/herdr-soho` is a POSIX `sh` launcher: it prefers the installed
-`herdr-soho` Go binary (or the path in `HERDR_SOHO_BIN`), then falls back to
-`scripts/herdr-soho.mjs` with `node` (20+) or `bun`. Set `HERDR_SOHO_JS=1` to
-force the JavaScript fallback. This file describes the Go binary: the
+`herdr-soho` Go binary (or the path in `HERDR_SOHO_BIN`) on `PATH`, then
+the install directory — `$HERDR_SOHO_INSTALL_DIR` (`herdr-soho` or
+`herdr-soho.exe`), `~/.local/bin/herdr-soho`, and under Git Bash
+`$LOCALAPPDATA/Programs/herdr-soho/herdr-soho.exe` — because a shell opened
+before the install keeps a `PATH` without it; only then does it fall back
+to `scripts/herdr-soho.mjs` with `node` (20+) or `bun`, with one stderr
+warning (`the herdr-soho binary was not found (PATH or the install
+directory); running the JavaScript fallback, which lags the binary; …`).
+Set `HERDR_SOHO_JS=1` to force the JavaScript fallback, with no warning. This file describes the Go binary: the
 fallback stopped following new features at the Go port (it got only a few
 fixes since), so a behavior added later may be missing from it. Install the binary with `install.sh` (POSIX)
 or `install.ps1` (Windows) from the GitHub releases. If no binary or JS
 runtime is available it exits 2 with an installation message.
-`scripts/herdr-soho.cmd` follows the same order for Windows. The `setup`
+`scripts/herdr-soho.cmd` follows the same order for Windows (`%HERDR_SOHO_INSTALL_DIR%\herdr-soho.exe`, then `%LOCALAPPDATA%\Programs\herdr-soho\herdr-soho.exe`). `cmd.exe` cuts an argument at its first line break, so on Windows send a message of several lines with `send --file <path>`. The `setup`
 SessionStart hook checks these locations in order: project
 `.agents/skills`, project `.claude/skills`, `$HOME/.agents/skills`, then
 `$HOME/.claude/skills`. It invokes the first launcher with
