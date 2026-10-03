@@ -658,14 +658,20 @@ func (s *TeamState) FeedChunk(chunk string) string {
 	soloY := chunk == "y"
 	// Without bracketed paste a long paste reaches us as several read
 	// blocks, and its last block can be a lone `y`. So a confirmation also
-	// needs a quiet window: any block that arrives before teamConfirmQuiet
-	// has passed since it opened (or since the previous such block) cannot
-	// confirm, and it restarts the window. A paste arrives in one burst and
+	// needs a quiet window: a block that arrives before teamConfirmQuiet has
+	// passed since it opened, or since the last block that could not
+	// confirm, cannot confirm. A paste arrives in one burst and
 	// never confirms; a `y` typed after reading the confirmation does.
 	if s.subview == "confirm-release" || s.subview == "confirm-gc" {
 		now := teamNow()
 		if now.Before(s.confirmArmAt) {
 			soloY = false
+		}
+		if !soloY {
+			// Every block that cannot confirm restarts the window, also
+			// after it has expired: the first block of a paste into an
+			// armed confirmation renews it, and its lone `y` tail cannot
+			// confirm.
 			s.confirmArmAt = now.Add(teamConfirmQuiet)
 		}
 	}
