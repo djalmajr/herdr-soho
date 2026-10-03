@@ -129,7 +129,7 @@ func Run(args []string, env platform.Env) (code int) {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		commandConfig = &ctx
 	}
-	if decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && !(len(args) == 1 && (command == "doctor" || command == "roster")) {
+	if decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && !nowriteReadInvocation(args) {
 		shown, extra := command, ""
 		if command == "" {
 			shown = "(none)"
@@ -141,7 +141,7 @@ func Run(args []string, env platform.Env) (code int) {
 			}
 			extra = fmt.Sprintf(" (%d extra %s not allowed)", count, noun)
 		}
-		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only the exact 'doctor' and 'roster' invocations run (the plugin's actions); rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
+		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'gc' without --yes; rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
 	}
 	if command == "help" || command == "-h" || command == "--help" || command == "" {
 		_, _ = io.WriteString(platform.Stdout, usage)
@@ -310,6 +310,75 @@ func Run(args []string, env platform.Env) (code int) {
 		return cmdLint(args[1:], ctx, decisionEnv, commandCwd)
 	}
 	return runJS(command, args, env)
+}
+
+// nowriteReadInvocation decides, from the shape of the invocation alone, what
+// runs under HERDR_SOHO_NOWRITE=1: the exact doctor/roster (the plugin's
+// actions, unchanged), the exact explain and copies, friction with only the
+// read options, collect <agent> with its options, and gc without --yes.
+// Every other shape is rejected before any command runs, so a rejected
+// invocation writes nothing (not even a friction line).
+func nowriteReadInvocation(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "doctor", "roster", "explain", "copies":
+		return len(args) == 1
+	case "friction":
+		return nowriteFlagOnly(args[1:], []string{"--since", "--level", "--command", "--agent"}, []string{"--summary"})
+	case "collect":
+		return nowriteCollectRead(args[1:])
+	case "gc":
+		return nowriteFlagOnly(args[1:], []string{"--older-than"}, []string{"--include-unregistered"})
+	}
+	return false
+}
+
+// nowriteFlagOnly accepts a flag-only invocation: every token is one of the
+// valued flags (consuming the following token, which must not look like a
+// flag) or one of the bare flags; anything else is refused.
+func nowriteFlagOnly(argv []string, valued, bare []string) bool {
+	has := func(list []string, flag string) bool {
+		for _, f := range list {
+			if f == flag {
+				return true
+			}
+		}
+		return false
+	}
+	for i := 0; i < len(argv); i++ {
+		a := argv[i]
+		if has(valued, a) {
+			if i+1 >= len(argv) || strings.HasPrefix(argv[i+1], "--") {
+				return false
+			}
+			i++
+		} else if !has(bare, a) {
+			return false
+		}
+	}
+	return true
+}
+
+// nowriteCollectRead accepts 'collect <agent> [--lines N] [--verify]'.
+func nowriteCollectRead(argv []string) bool {
+	if len(argv) == 0 || strings.HasPrefix(argv[0], "--") {
+		return false
+	}
+	for i := 1; i < len(argv); i++ {
+		switch argv[i] {
+		case "--lines":
+			if i+1 >= len(argv) || strings.HasPrefix(argv[i+1], "--") {
+				return false
+			}
+			i++
+		case "--verify":
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func withoutArg(args []string, target string) []string {

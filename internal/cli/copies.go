@@ -6,7 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -381,6 +383,12 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 		return 2
 	}
 	sd := core.StateDir(ctx, env, cwd)
+	// The pressure line goes out first, on every run (stdout): the s85
+	// warning text when the disk or the swap passed the configured limits
+	// (same keys, defaults and strictness), or a "none" line with the
+	// measured values; a metric that could not be measured shows as
+	// "<metric> not measured". No throttle, no stamp.
+	_, _ = fmt.Fprintln(platform.Stdout, gcPressureLine(ctx, env, sd))
 	rows, err := core.ReadCopies(sd)
 	if err != nil {
 		core.DieFriction(fmt.Sprintf("gc: cannot read the copy registry (%v)", err), 4, frictionLogPath, "gc")
@@ -488,6 +496,92 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	}
 	_, _ = fmt.Fprintf(platform.Stdout, "freed: %s\n", humanSize(freed))
 	return 0
+}
+
+// gcPressure*Key/Default are the s85 limits (internal/core/pressure.go):
+// same keys and defaults, read the same way; only the presentation differs
+// (stdout, printed on every run, no throttle, no stamp).
+const (
+	gcPressureDiskKey     = "pressure_disk_free_percent"
+	gcPressureSwapKey     = "pressure_swap_percent"
+	gcPressureDiskDefault = 15
+	gcPressureSwapDefault = 80
+)
+
+// gcPressureDecimalRE mirrors the s85 validity check (core's decimalRE): a
+// non-negative decimal integer is the only accepted shape.
+var gcPressureDecimalRE = regexp.MustCompile(`^[0-9]+$`)
+
+// gcPressureLine renders the gc pressure line from the s85 measurements
+// (platform.DiskFree/platform.SwapUsage). A metric contributes the s85
+// warning part when its configured limit passed (0 disables it), shows its
+// measured value on the "none" line, and shows as "<metric> not measured"
+// when it could not be measured.
+func gcPressureLine(ctx *core.Config, env platform.Env, stateDir string) string {
+	diskLimit := gcPressureThreshold(ctx, gcPressureDiskKey, gcPressureDiskDefault, env)
+	swapLimit := gcPressureThreshold(ctx, gcPressureSwapKey, gcPressureSwapDefault, env)
+
+	diskMeasured := false
+	diskPct := int64(0)
+	diskPart := ""
+	if free, total, ok := platform.DiskFree(stateDir); ok && total > 0 {
+		diskMeasured = true
+		diskPct = free * 100 / total
+		if diskLimit > 0 && diskPct < int64(diskLimit) {
+			diskPart = fmt.Sprintf("disk %s has %d%% free (%s of %s)", stateDir, diskPct, platform.HumanSize(free), platform.HumanSize(total))
+		}
+	}
+	swapMeasured := false
+	swapPct := int64(0)
+	swapPart := ""
+	if used, total, ok := platform.SwapUsage(env); ok && total > 0 {
+		swapMeasured = true
+		swapPct = used * 100 / total
+		if swapLimit > 0 && swapPct > int64(swapLimit) {
+			swapPart = fmt.Sprintf("swap %d%% used (%s of %s)", swapPct, platform.HumanSize(used), platform.HumanSize(total))
+		}
+	}
+
+	if diskPart != "" || swapPart != "" {
+		// The s85 warning line; a metric that could not be measured is
+		// named as "<metric> not measured" (a measured metric that is not
+		// under pressure, or one whose limit is 0, stays out of the line).
+		parts := []string{}
+		if diskPart != "" {
+			parts = append(parts, diskPart)
+		} else if !diskMeasured {
+			parts = append(parts, "disk not measured")
+		}
+		if swapPart != "" {
+			parts = append(parts, swapPart)
+		} else if !swapMeasured {
+			parts = append(parts, "swap not measured")
+		}
+		return "resource pressure: " + strings.Join(parts, "; ") + "; run 'herdr-soho gc' and close idle panes before opening more"
+	}
+	diskText, swapText := "disk not measured", "swap not measured"
+	if diskMeasured {
+		diskText = fmt.Sprintf("disk %d%% free", diskPct)
+	}
+	if swapMeasured {
+		swapText = fmt.Sprintf("swap %d%% used", swapPct)
+	}
+	return fmt.Sprintf("resource pressure: none (%s, %s)", diskText, swapText)
+}
+
+// gcPressureThreshold reads the key through the usual layers (env override
+// included), exactly like the s85 pressureThreshold: only a non-negative
+// decimal integer is valid, anything else falls back to the default with
+// the s85 warning line, so only 0 turns a metric off.
+func gcPressureThreshold(ctx *core.Config, key string, limit int, env platform.Env) int {
+	raw := core.Cfg(ctx, key, strconv.Itoa(limit), env)
+	if gcPressureDecimalRE.MatchString(raw) {
+		if value, err := strconv.Atoi(raw); err == nil {
+			return value
+		}
+	}
+	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: invalid value '%s' for %s; using the default %d\n", raw, key, limit)
+	return limit
 }
 
 // gcPrintUnregistered lists unregistered copies in their own block without
