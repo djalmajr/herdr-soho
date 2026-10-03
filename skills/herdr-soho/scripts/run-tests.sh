@@ -268,12 +268,14 @@ run_one() {
     v=$((v + 1))
   done
   SECONDS=0
+  # These suites test the JavaScript entry: HERDR_SOHO_JS=1 keeps the
+  # launcher from running a Go binary it finds on the inherited PATH.
   if [ "$envname" = outside ]; then
-    env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_WORKSPACE_ID \
+    env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_WORKSPACE_ID HERDR_SOHO_JS=1 \
       HOME="$home" XDG_CONFIG_HOME="$conf" TMPDIR="$tmp" \
       "$bashpath" "$path" >"$log" 2>&1
   else
-    env HERDR_ENV=1 HERDR_PANE_ID=test-pane HERDR_WORKSPACE_ID=test-ws \
+    env HERDR_ENV=1 HERDR_PANE_ID=test-pane HERDR_WORKSPACE_ID=test-ws HERDR_SOHO_JS=1 \
       HOME="$home" XDG_CONFIG_HOME="$conf" TMPDIR="$tmp" \
       "$bashpath" "$path" >"$log" 2>&1
   fi
