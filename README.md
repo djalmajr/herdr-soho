@@ -217,7 +217,7 @@ doctor view). The first line is always `herdr-soho · <workspace> ·
 (no auto-refresh) and shows the CLI's exit code and stderr when a call
 fails:
 
-1. **team** — what the team is doing (`explain`, wrapped) and its
+1. **team** (`equipe` on screen) — what the team is doing (`explain`, wrapped) and its
    workers: the first roster table, one line per worker, `↑`/`↓` select
    (orchestrator first as the roster gives it). `Enter` opens a
    scrollable report of the selected worker (`collect <agent> --lines
@@ -226,7 +226,7 @@ fails:
    `y`, releases that worker (`--close`) and reloads the view.
 2. **doctor** — the output of `herdr-soho doctor` for the focused
    workspace.
-3. **resources** — the `gc` dry-run (pressure). `g` confirms (`gc --yes
+3. **resources** (`recursos` on screen) — the `gc` dry-run (pressure). `g` confirms (`gc --yes
    in <cwd>? y/N`) and, with `y`, runs `gc --yes` and reloads.
 4. **friction** — `herdr-soho friction --summary`.
 
