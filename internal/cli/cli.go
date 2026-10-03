@@ -301,8 +301,10 @@ func Run(args []string, env platform.Env) (code int) {
 	case "collect":
 		return stats.CmdCollect(args[1:], stats.CommandContext{Config: ctx, Env: decisionEnv, Cwd: commandCwd, FrictionLog: frictionLogPath})
 	case "wait":
+		core.PressureWarnThrottled(ctx, decisionEnv, commandCwd)
 		return waitpkg.CmdWait(args[1:], ctx, decisionEnv, commandCwd)
 	case "status":
+		core.PressureWarnThrottled(ctx, decisionEnv, commandCwd)
 		return waitpkg.CmdStatus(args[1:], ctx, decisionEnv, commandCwd)
 	case "lint":
 		return cmdLint(args[1:], ctx, decisionEnv, commandCwd)

@@ -361,6 +361,8 @@ func newTM11SpawnFixture(t *testing.T, herdrRules []fakecli.Rule) *tm11SpawnFixt
 	clean["HERDR_ENV"] = "1"
 	clean["HERDR_SOHO_DIR"] = state
 	clean["HERDR_WORKSPACE_ID"] = "ws"
+	clean["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "0"
+	clean["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "0"
 	clean["HERDR_SOHO_LAYOUT"] = "tab"
 	clean["HERDR_SOHO_REGRID"] = "off"
 	clean["HERDR_SOHO_WAIT_POLL_MS"] = "1"
