@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
@@ -412,6 +413,7 @@ func TestTeamPanelXConfirmsReleaseWithoutNowriteAndReloads(t *testing.T) {
 	teamWaitForOutput(t, output, "> worker-2")
 	_, _ = writer.Write([]byte("x"))
 	teamWaitForOutput(t, output, "release --close worker-2 in ws-a ("+cwd[:40])
+	time.Sleep(teamConfirmQuiet + 100*time.Millisecond) // the confirmation's quiet window
 	_, _ = writer.Write([]byte("y"))
 	teamWaitForOutput(t, output, "released two") // the release output block
 	calls := teamCalls(t, cli)
@@ -458,6 +460,7 @@ func TestTeamPanelGConfirmsGCYes(t *testing.T) {
 	// The prompt marker is cumulative: its second occurrence proves the new
 	// confirmation is on screen before the separate y block is written.
 	teamWaitForOccurrences(t, output, "gc --yes in "+cwd[:40], 2, "the second gc confirmation prompt")
+	time.Sleep(teamConfirmQuiet + 100*time.Millisecond) // the confirmation's quiet window
 	_, _ = writer.Write([]byte("y"))
 	teamWaitForOutput(t, output, "gc done")
 	calls := teamCalls(t, cli)
@@ -657,6 +660,7 @@ func TestTeamConfirmationYOnlyFromItsOwnBlock(t *testing.T) {
 		t.Fatalf("the xy block executed the release: %d calls", got)
 	}
 	// A y in its own block executes the release.
+	time.Sleep(teamConfirmQuiet + 100*time.Millisecond) // the confirmation's quiet window
 	_, _ = writer.Write([]byte("y"))
 	teamWaitForOutput(t, output, "released one")
 	if got := countReleases(); got != 1 {
@@ -768,4 +772,49 @@ func TestTeamEOFInConfirmationAndCollectCloses(t *testing.T) {
 	teamWaitForOutput(t, output2, "report one line")
 	_ = writer2.Close() // EOF inside the collect subview
 	teamWaitExit(t, finished2, 0)
+}
+
+// A paste without bracketed paste that is longer than one read block reaches
+// the panel as several blocks; its last block can be a lone `y`. Arriving
+// inside the confirmation's quiet window, it never confirms (r89b).
+func TestTeamUnbracketedPasteAcrossReadBlocksNeverConfirms(t *testing.T) {
+	for _, mode := range []string{"release", "gc"} {
+		t.Run(mode, func(t *testing.T) {
+			env, cli, _ := teamPanelFixture(t)
+			writer, output, finished := teamStartWithPipes(t, env, cli, nil)
+			teamWaitForOutput(t, output, "worker-1")
+			key, prompt := "x", "release --close worker-1"
+			if mode == "gc" {
+				_, _ = writer.Write([]byte("3"))
+				teamWaitForOutput(t, output, "pressure")
+				key, prompt = "g", "gc --yes in"
+			}
+			_, _ = writer.Write([]byte(strings.Repeat(key, 4096) + "y"))
+			teamWaitForOutput(t, output, prompt)
+			time.Sleep(teamConfirmQuiet + 200*time.Millisecond)
+			_, _ = writer.Write([]byte("q"))
+			_ = writer.Close()
+			teamWaitExit(t, finished, 0)
+			for _, call := range teamCalls(t, cli) {
+				if call.Argv[0] == "release" || (len(call.Argv) == 2 && call.Argv[0] == "gc" && call.Argv[1] == "--yes") {
+					t.Fatalf("a pasted payload split across reads ran %q", call.Argv)
+				}
+			}
+		})
+	}
+}
+
+// Zero-width marks before a rune that does not fit are consumed with it:
+// the hard cut never splits a rune's bytes (r89b).
+func TestTeamHardCutKeepsUTF8AfterCombiningMarks(t *testing.T) {
+	s := NewTeamState(teamViewTeam)
+	s.viewLoaded[0] = true
+	for _, text := range []string{"̀界", "̀́界x", "à😀b"} {
+		s.explainLines = []string{text}
+		for _, width := range []int{1, 2, 3} {
+			if out := RenderTeam(s, width); !utf8.ValidString(out) {
+				t.Fatalf("RenderTeam(%q, %d) emitted invalid UTF-8: %q", text, width, out)
+			}
+		}
+	}
 }
