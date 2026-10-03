@@ -85,9 +85,16 @@ func newCopiesFixture(t *testing.T, agentRules []fakecli.Rule) *copiesFixture {
 	if _, err := fakecli.Install(t, fakeDir, "herdr", agentRules); err != nil {
 		t.Fatal(err)
 	}
-	gitBin := t.TempDir()
-	if err := os.Symlink(gitPath, filepath.Join(gitBin, "git")); err != nil {
-		t.Fatal(err)
+	// A PATH with git and without the herdr CLI. On Windows a link named
+	// "git" without .exe is not an executable, and git's own directory holds
+	// no herdr; elsewhere git's directory may hold herdr (Homebrew), so a
+	// link in a directory of its own is used.
+	gitBin := filepath.Dir(gitPath)
+	if runtime.GOOS != "windows" {
+		gitBin = t.TempDir()
+		if err := os.Symlink(gitPath, filepath.Join(gitBin, "git")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	env := platform.Env{
 		"HOME":                      home,
@@ -248,9 +255,16 @@ func TestMutationCopyOutsideHerdrKeepsTodayOutput(t *testing.T) {
 	if err != nil {
 		t.Skip("git is not available on PATH")
 	}
-	gitBin := t.TempDir()
-	if err := os.Symlink(gitPath, filepath.Join(gitBin, "git")); err != nil {
-		t.Fatal(err)
+	// A PATH with git and without the herdr CLI. On Windows a link named
+	// "git" without .exe is not an executable, and git's own directory holds
+	// no herdr; elsewhere git's directory may hold herdr (Homebrew), so a
+	// link in a directory of its own is used.
+	gitBin := filepath.Dir(gitPath)
+	if runtime.GOOS != "windows" {
+		gitBin = t.TempDir()
+		if err := os.Symlink(gitPath, filepath.Join(gitBin, "git")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	state := filepath.Join(f.root, "state")
 	skill := filepath.Join(f.root, "skill")
@@ -358,7 +372,9 @@ func TestCopiesAdd(t *testing.T) {
 		if err := os.WriteFile(file, []byte("x\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		rootPath := filepath.VolumeName(".") + string(filepath.Separator)
+		// The volume of a real path: on Windows "." has none, and a bare
+		// "\\" is not absolute there.
+		rootPath := filepath.VolumeName(f.tmp) + string(filepath.Separator)
 		cases := []struct{ path, wantCause string }{
 			{f.repo, "is the project root or inside it"},
 			{inner, "is the project root or inside it"},

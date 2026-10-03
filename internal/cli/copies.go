@@ -139,11 +139,25 @@ func checkedCopy(path string, env platform.Env, cwd string) (resolved string, pa
 	if cause != "" {
 		return "", nil, cause
 	}
-	parentInfo, err := os.Stat(filepath.Dir(resolved))
+	parentInfo, err := statByHandle(filepath.Dir(resolved))
 	if err != nil {
 		return "", nil, "cannot verify the copy path"
 	}
 	return resolved, parentInfo, ""
+}
+
+// statByHandle stats an open handle of path, not the path. On Windows a
+// FileInfo from os.Stat loads its file id lazily, by path, when os.SameFile
+// first compares it: a parent swapped after the check would then compare as
+// the same file. A handle's Stat carries the id of the directory that was
+// opened.
+func statByHandle(path string) (fs.FileInfo, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Stat()
 }
 
 var errCopyChanged = errors.New("changed after the check")
@@ -176,7 +190,13 @@ func removeVerifiedCopy(resolved string, parentInfo fs.FileInfo) error {
 		return errCopyChanged
 	}
 	defer root.Close()
-	opened, err := root.Stat(".")
+	// The opened parent's identity comes from a handle too (see statByHandle).
+	dir, err := root.Open(".")
+	if err != nil {
+		return errCopyChanged
+	}
+	opened, err := dir.Stat()
+	_ = dir.Close()
 	if err != nil || !os.SameFile(opened, parentInfo) {
 		return errCopyChanged
 	}
