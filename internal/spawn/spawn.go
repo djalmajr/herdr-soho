@@ -265,7 +265,9 @@ func EmitReuse(name, role, kind string, ctx *core.Config, env platform.Env, cwd 
 		line = core.RosterLine(sd, name)
 		f = strings.Split(line, "\t")
 	}
-	out := jsonjs.O("name", name, "pane_id", fieldAt(f, 1), "kind", kind, "role", role, "family", fieldAt(f, 4), "reused", true, "previous_role", prev, "status", "ready")
+	// model, effort and agent_args are the roster columns the spawn recorded
+	// (8, 14, 13); a missing value comes out as "".
+	out := jsonjs.O("name", name, "pane_id", fieldAt(f, 1), "kind", kind, "role", role, "family", fieldAt(f, 4), "reused", true, "previous_role", prev, "effort", fieldAt(f, 14), "model", fieldAt(f, 8), "agent_args", fieldAt(f, 13), "status", "ready")
 	_, _ = fmt.Fprintln(platform.Stdout, jsonjs.StringifyIndent(out, 2))
 	return true
 }
@@ -709,6 +711,13 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	}
 	if o.pane == "" {
 		if lane != "" {
+			// The M1 idle-other-kind scan and the released-orphan scan share
+			// the live read the name check just made; a named spawn (o.name
+			// set) fetches it here once instead of per warning.
+			if orphanLive == nil {
+				orphanLive = liveAgents(env)
+			}
+			warnLaneIdleOtherKind(sd, lane, kind, env, orphanLive)
 			// An idle pane released by this project without --close is not
 			// re-adopted: the spawn only names it (from the released-panes
 			// registry) before opening another pane. It reuses the live read
@@ -901,6 +910,35 @@ func warnLaneOrphans(ctx *core.Config, env platform.Env, cwd string, live []any)
 	for _, orphan := range core.OrphansOf(ctx, env, cwd, live) {
 		if orphan.State == "idle" || orphan.State == "done" {
 			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: spawn: '%s' is idle outside the roster (%s); close it with: herdr-soho release %s --close\n", orphan.Name, orphan.Pane, orphan.Name)
+		}
+	}
+}
+
+// warnLaneIdleOtherKind notices the old workers a lane-kind change left
+// behind: when this spawn opens a new worker on the lane, each lane worker
+// that Herdr reports idle or done and whose roster kind is not the lane's
+// effective kind is named once, with the release --close remedy. It only
+// warns — the spawn proceeds, nothing is closed, nothing is waited on and
+// the exit code is unchanged — and a worker that is not live (or is
+// working, blocked, or of the lane's own kind) is not named. It reads the
+// live list the name check just made (passed in) and fetches it at most once
+// for a named spawn, so the check spends no per-worker agent get.
+func warnLaneIdleOtherKind(sd, lane, kind string, env platform.Env, live []any) {
+	if live == nil {
+		live = liveAgents(env)
+	}
+	statusByName := map[string]string{}
+	for _, a := range live {
+		statusByName[fieldString(a, "name")] = fieldString(a, "agent_status")
+	}
+	for _, row := range core.LaneWorkers(sd, lane) {
+		f := strings.Split(row, "\t")
+		name, wk := fieldAt(f, 0), fieldAt(f, 2)
+		if name == "" || wk == "" || wk == kind {
+			continue
+		}
+		if st := statusByName[name]; st == "idle" || st == "done" {
+			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: lane '%s' still holds idle '%s' (%s), not the lane's kind '%s'; release it with: herdr-soho release %s --close\n", lane, name, wk, kind, name)
 		}
 	}
 }

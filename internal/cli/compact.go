@@ -11,6 +11,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/provider"
 	"github.com/djalmajr/herdr-soho/internal/spawn"
 	"github.com/djalmajr/herdr-soho/internal/text"
 )
@@ -18,6 +19,15 @@ import (
 const compactDefaultTimeoutMS = 300000
 
 const compactPollInterval = 2 * time.Second
+
+// compactComposerWindow is how long the composer confirm waits, after each
+// Enter, for the /compact line to leave the codex composer, one poll per
+// second, before a second Enter is tried.
+const compactComposerWindow = 5 * time.Second
+
+// compactComposerPoll is the pause between the composer re-reads while
+// waiting for the /compact line to leave the codex composer.
+const compactComposerPoll = time.Second
 
 const compactScreenLines = 40
 
@@ -173,7 +183,13 @@ func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 // before the Enter: only /compact on the first menu line runs it; a menu
 // without /compact (an empty session) clears the box and reports
 // nothing-to-compact (0), and /compact not on top or a missing menu clears
-// the box and exits 4. When the deadline runs out without proof or ending,
+// the box and exits 4. A codex gets its composer checked right after the
+// Enter, on the first proof poll (up to five seconds, one poll per second):
+// a /compact that sits in the box means the Enter did not submit it (it can
+// land before the TUI draws /compact and its command popup), so before any
+// proof is trusted the line must leave the box; a second Enter gets the same
+// check, and a line that stays in the box after both is cleared with ctrl+u
+// and exits 4 (nothing was compacted). When the deadline runs out without proof or ending,
 // one last read runs the same proofs (/compact is never sent again) and a
 // claude timeout JSON carries a transcript field (counted, missing or
 // unreadable) saying what the session transcript gave. It never uses `agent
@@ -297,6 +313,23 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 		for {
 			if !compacted && endStatus == "" {
 				screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
+				if kind == "codex" && compactCodexComposerStuck(screen) && !proofNew(screen) {
+					// A /compact on the composer line means the command never ran:
+					// an Enter that lands before the TUI draws /compact and its
+					// command popup does not submit the box, and no proof can then
+					// appear (codex has no endings), so without this check the wait
+					// only ends at the full deadline. The check runs only when no
+					// proof of this compaction is already on screen: a delivered
+					// /compact leaves its echo in the history above a now-empty or
+					// busy composer, and the proof below it is the compaction's own.
+					// Confirm the line left the box (five seconds, one poll per
+					// second) before any proof is trusted (a stale proof below an
+					// older /compact echo would otherwise read as this one's); one
+					// more Enter gets the same confirm, and a line that stays in the
+					// box after both is cleared and reported (4, nothing was
+					// compacted).
+					screen = compactCodexComposerRetry(agent, pane, kind, env)
+				}
 				if proofNew(screen) || transcriptRisen() {
 					compacted = compactWaitIdle(agent, env, deadline)
 				} else {
@@ -470,6 +503,108 @@ func compactWaitIdle(agent string, env platform.Env, deadline time.Time) bool {
 		}
 		time.Sleep(compactPollInterval)
 	}
+}
+
+// compactCodexComposerLine returns the codex composer line and whether it
+// was found, with the peer composer region rule: the last line (scanned from
+// the end) whose left-trimmed text is or starts with '› ', within the last
+// eight non-empty lines. A /compact the box still holds sits on that line;
+// an executed command leaves the box (the echo goes to the history, above
+// the now-empty composer).
+func compactCodexComposerLine(screen string) (string, bool) {
+	lines := compactLines(screen)
+	nonEmpty := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
+		}
+		nonEmpty++
+		head := strings.TrimLeft(lines[i], " \t")
+		if head == "›" || strings.HasPrefix(head, "› ") {
+			return lines[i], nonEmpty <= 8
+		}
+		if nonEmpty >= 8 {
+			break
+		}
+	}
+	return "", false
+}
+
+// compactCodexComposerStuck reports whether the /compact still sits in the
+// codex composer: the composer line is the sent command itself. A screen
+// without a composer line (a read before the TUI drew the box, or a frozen
+// worker) is not stuck: the proof wait and its liveness checks take over.
+func compactCodexComposerStuck(screen string) bool {
+	line, ok := compactCodexComposerLine(screen)
+	if !ok {
+		return false
+	}
+	return compactCommandLine(line)
+}
+
+// compactComposerCleared waits, up to compactComposerWindow with one poll
+// per second, for the /compact line to leave the codex composer after an
+// Enter; a worker that dies in the meantime stops the wait at once (6, 4),
+// like the proof wait. It returns the first screen whose composer no longer
+// holds /compact, or "" when the line is still there at the end of the
+// window.
+func compactComposerCleared(agent string, env platform.Env) string {
+	deadline := platform.Now().Add(compactComposerWindow)
+	for {
+		screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
+		if !compactCodexComposerStuck(screen) {
+			return screen
+		}
+		compactDieOnDeadWorker(agent, herdr.AgentState(agent, env, herdr.Timeout, nil))
+		if !platform.Now().Before(deadline) {
+			return ""
+		}
+		time.Sleep(compactComposerPoll)
+	}
+}
+
+// compactCodexComposerRetry is the stuck-composer protocol after the first
+// Enter (already sent by the caller): it confirms the line left the box
+// (five seconds, one poll per second), then — right before a second Enter —
+// re-reads the state and the screen so the extra key is never sent to a
+// worker that is blocked on a question (a dialog) or that is no longer
+// idle/done (it would answer the question instead of running /compact). It
+// sends one more Enter with the same confirm, and a line that stays in the
+// box after both is cleared with ctrl+u and reported (4, nothing was
+// compacted). It returns the first screen whose composer no longer holds
+// /compact, so the proof check runs on a screen past the stuck state.
+func compactCodexComposerRetry(agent, pane, kind string, env platform.Env) string {
+	if screen := compactComposerCleared(agent, env); screen != "" {
+		return screen
+	}
+	// Right before the second Enter: re-read the state and the screen. A
+	// worker that is blocked on a question (a dialog the provider recognizes)
+	// must not get an extra Enter — it would answer the question, not run
+	// /compact. A worker that is neither idle nor done (dialog or not) is
+	// also not pressed: in both branches no key is sent, not even the clear.
+	state := herdr.AgentState(agent, env, herdr.Timeout, nil)
+	compactDieOnDeadWorker(agent, state)
+	screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
+	if provider.DialogKind(kind, screen) == "question" {
+		core.DieFriction(fmt.Sprintf("compact: '/compact' stayed in the composer of '%s' after the first Enter; showing a dialog after /compact; pressed nothing, nothing was compacted", agent), 4, frictionLogPath, "compact")
+	}
+	if state.State != "idle" && state.State != "done" {
+		core.DieFriction(fmt.Sprintf("compact: '/compact' stayed in the composer of '%s' after the first Enter and the worker is %s; pressed nothing, nothing was compacted", agent, state.State), 4, frictionLogPath, "compact")
+	}
+	// The box can have changed since the confirm gave up (/compact ran late,
+	// or another command is in it now): the second Enter goes only to a
+	// composer that still holds /compact; any other screen goes back to the
+	// proof check with no key.
+	if !compactCodexComposerStuck(screen) {
+		return screen
+	}
+	herdr.PaneSendKeys(pane, "Enter", env)
+	if screen := compactComposerCleared(agent, env); screen != "" {
+		return screen
+	}
+	herdr.PaneSendKeys(pane, "ctrl+u", env)
+	core.DieFriction(fmt.Sprintf("compact: '/compact' stayed in the composer of '%s' after two Enters; cleared it, nothing was compacted", agent), 4, frictionLogPath, "compact")
+	return ""
 }
 
 // compactCommandLine reports whether the line is the sent /compact command

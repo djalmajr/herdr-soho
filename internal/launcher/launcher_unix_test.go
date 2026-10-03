@@ -56,16 +56,21 @@ func TestPOSIXLauncherChoosesBinaryAndPreservesArguments(t *testing.T) {
 	args := []string{"value with spaces", `say"hello`, "percent%"}
 
 	tests := []struct {
-		name        string
-		env         map[string]string
-		want        string
-		status      int
-		stderr      string
-		ownLauncher bool
-		shebang     bool
-		noRuntime   bool
+		name         string
+		env          map[string]string
+		want         string
+		status       int
+		stderr       string
+		wantStderr   string
+		notStderr    string
+		ownLauncher  bool
+		shebang      bool
+		noRuntime    bool
+		noPathBinary bool
+		homeDir      string
+		installDir   string
 	}{
-		{name: "force JS overrides PATH binary", env: map[string]string{"HERDR_SOHO_JS": "1", "HERDR_SOHO_HELPER": "go"}, want: wantOutput("js", args), status: 23},
+		{name: "force JS overrides PATH binary", env: map[string]string{"HERDR_SOHO_JS": "1", "HERDR_SOHO_HELPER": "go"}, want: wantOutput("js", args), status: 23, notStderr: "warning"},
 		{name: "explicit binary", env: map[string]string{"HERDR_SOHO_BIN": goBin, "HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23},
 		{name: "invalid override fails without fallback", env: map[string]string{"HERDR_SOHO_BIN": filepath.Join(fixture.root, "missing"), "HERDR_SOHO_HELPER": "js"}, status: 2, stderr: "HERDR_SOHO_BIN is missing or not an executable binary"},
 		{name: "non-executable override fails without fallback", env: map[string]string{"HERDR_SOHO_BIN": nonExecutable, "HERDR_SOHO_HELPER": "js"}, status: 2, stderr: "HERDR_SOHO_BIN is missing or not an executable binary"},
@@ -73,6 +78,17 @@ func TestPOSIXLauncherChoosesBinaryAndPreservesArguments(t *testing.T) {
 		{name: "own launcher path falls back", env: map[string]string{"HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23, ownLauncher: true},
 		{name: "shebang script falls back", env: map[string]string{"HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23, shebang: true},
 		{name: "no binary or runtime", env: map[string]string{}, status: 2, stderr: "install the herdr-soho binary", noRuntime: true},
+		// Install-dir lookup: a shell opened before the install keeps a PATH
+		// without the binary; the shim must find where install.sh /
+		// install.ps1 put it. PATH has node (the JS fallback stays reachable)
+		// and no herdr-soho; HOME / HERDR_SOHO_INSTALL_DIR / LOCALAPPDATA are
+		// the fake fixture values below (never the host's).
+		{name: "HOME install dir binary, PATH without it", env: map[string]string{"HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23, noPathBinary: true, homeDir: "binary"},
+		{name: "custom install dir beats HOME", env: map[string]string{"HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23, noPathBinary: true, homeDir: "junk", installDir: "binary"},
+		{name: "custom install dir with the install.ps1 name (herdr-soho.exe)", env: map[string]string{"HERDR_SOHO_HELPER": "go"}, want: wantOutput("go-bin", args), status: 23, noPathBinary: true, installDir: "exe"},
+		{name: "install dir holding the shim falls back to JS with the warning", env: map[string]string{"HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23, noPathBinary: true, homeDir: "shim", wantStderr: "the herdr-soho binary was not found (PATH or the install directory)"},
+		{name: "no binary: JS with the warning", env: map[string]string{"HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23, noPathBinary: true, wantStderr: "the herdr-soho binary was not found (PATH or the install directory)"},
+		{name: "forced JS without any binary: no warning", env: map[string]string{"HERDR_SOHO_JS": "1", "HERDR_SOHO_HELPER": "js"}, want: wantOutput("js", args), status: 23, noPathBinary: true, notStderr: "warning"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -80,6 +96,13 @@ func TestPOSIXLauncherChoosesBinaryAndPreservesArguments(t *testing.T) {
 			if test.noRuntime {
 				pathDir = t.TempDir()
 				fixture.addSystemTools(t, pathDir)
+			}
+			if test.noPathBinary {
+				pathDir = t.TempDir()
+				fixture.addSystemTools(t, pathDir)
+				if _, err := fixture.writeNodeIn(t, pathDir); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if test.ownLauncher {
 				pathDir = t.TempDir()
@@ -110,6 +133,47 @@ func TestPOSIXLauncherChoosesBinaryAndPreservesArguments(t *testing.T) {
 				}
 			}
 
+			// Fake install directories, built before the env is assembled so
+			// the shim's $HOME / $HERDR_SOHO_INSTALL_DIR lookups are hermetic.
+			if test.homeDir != "" {
+				home := t.TempDir()
+				bin := filepath.Join(home, ".local", "bin", "herdr-soho")
+				if err := os.MkdirAll(filepath.Dir(bin), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				switch test.homeDir {
+				case "binary":
+					fixture.copyTestBinary(t, bin)
+				case "shim":
+					data, err := os.ReadFile(fixture.launcher)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(bin, data, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				case "junk":
+					// Passes is_binary (executable, no shebang) but the kernel
+					// refuses to exec it: it discriminates the candidate order
+					// (HOME tried before the custom dir would die here, 126).
+					if err := os.WriteFile(bin, []byte("not a valid executable"), 0o700); err != nil {
+						t.Fatal(err)
+					}
+				default:
+					t.Fatalf("unknown homeDir %q", test.homeDir)
+				}
+				test.env["HOME"] = home
+			}
+			if test.installDir != "" {
+				dir := t.TempDir()
+				name := "herdr-soho"
+				if test.installDir == "exe" {
+					name = "herdr-soho.exe"
+				}
+				fixture.copyTestBinary(t, filepath.Join(dir, name))
+				test.env["HERDR_SOHO_INSTALL_DIR"] = dir
+			}
+
 			launcher := fixture.launcher
 			if path, ok := test.env["HERDR_SOHO_LAUNCH_PATH"]; ok {
 				launcher = path
@@ -132,6 +196,17 @@ func TestPOSIXLauncherChoosesBinaryAndPreservesArguments(t *testing.T) {
 			}
 			if string(output) != test.want {
 				t.Fatalf("output=%q want=%q", output, test.want)
+			}
+			if test.wantStderr != "" {
+				exitErr, ok := err.(*exec.ExitError)
+				if !ok || !strings.Contains(string(exitErr.Stderr), test.wantStderr) {
+					t.Fatalf("stderr=%q want substring %q", stderrOf(err), test.wantStderr)
+				}
+			}
+			if test.notStderr != "" {
+				if strings.Contains(stderrOf(err), test.notStderr) {
+					t.Fatalf("stderr=%q must not contain %q", stderrOf(err), test.notStderr)
+				}
 			}
 		})
 	}
@@ -241,7 +316,7 @@ func (f launcherFixture) env(pathDir string, overrides map[string]string) []stri
 	env := make([]string, 0, len(os.Environ())+len(overrides))
 	for _, entry := range os.Environ() {
 		key := strings.SplitN(entry, "=", 2)[0]
-		if key == "PATH" || key == "HERDR_SOHO_JS" || key == "HERDR_SOHO_BIN" || key == "HERDR_SOHO_HELPER" || key == "HERDR_SOHO_HELPER_EXIT" || key == "HERDR_SOHO_LAUNCH_PATH" || key == "HERDR_SOHO_SKILL_DIR" {
+		if key == "PATH" || key == "HERDR_SOHO_JS" || key == "HERDR_SOHO_BIN" || key == "HERDR_SOHO_HELPER" || key == "HERDR_SOHO_HELPER_EXIT" || key == "HERDR_SOHO_LAUNCH_PATH" || key == "HERDR_SOHO_SKILL_DIR" || key == "HOME" || key == "HERDR_SOHO_INSTALL_DIR" || key == "LOCALAPPDATA" {
 			continue
 		}
 		env = append(env, entry)

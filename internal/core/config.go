@@ -678,12 +678,21 @@ func SplitPairArg(key, value string, sawValue bool, cmd string) (string, string,
 
 func CmdConfigSet(argv []string, ctx *Config, env platform.Env, cwd string) {
 	key, value, where, sawValue := "", "", "project", false
+	// A value may begin with hyphens (lane.review.args --add-dir /x): only an
+	// argument before the key, or after a value that does not begin with a
+	// hyphen, is an unknown option, and a "--" ends option parsing (--project
+	// and --user included) for what follows.
+	noOptions := false
 	for _, arg := range argv {
-		if arg == "--project" || arg == "--user" {
+		if !noOptions && arg == "--" {
+			noOptions = true
+			continue
+		}
+		if !noOptions && (arg == "--project" || arg == "--user") {
 			where = strings.TrimPrefix(arg, "--")
 			continue
 		}
-		if strings.HasPrefix(arg, "--") {
+		if !noOptions && strings.HasPrefix(arg, "--") && (key == "" || (sawValue && !strings.HasPrefix(value, "-"))) {
 			platform.Die("config set: unknown option '"+arg+"'", 2)
 		}
 		if key == "" {

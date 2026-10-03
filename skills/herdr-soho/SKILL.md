@@ -229,7 +229,10 @@ resolved model id — `grok-4.7-xhigh` is xai); a reviewer must come from a
 dispatch a reviewer whose family matches a live edit agent unless
 `--allow-same-family` is passed. Pass `--for <author>` to compare only with
 whoever wrote the slice: an agent in the roster, a kind with a fixed family
-(`codex`, `claude`, …) or a family. Use it when another family's editor is
+(`codex`, `claude`, …), a family, or — when none of those matches — a model
+name or id whose family the skill recognizes (`qwen` or `qwen3.8-27b` is
+alibaba, `gpt-6.1-sol` openai, `grok-4.7` xai; a bare `opus` is not
+recognized: pass `--for anthropic`). Use it when another family's editor is
 alive, such as a cursor designer while a cursor reviewer checks codex code,
 and for code the orchestrator wrote itself (`--for anthropic` when it runs
 on claude).
@@ -425,7 +428,7 @@ $S dispatch a brief-a.md --no-wait   # fan out…
 $S dispatch b brief-b.md --no-wait
 $S wait a b                          # …then block until every report exists
 $S wait a b --any                    # or until the first one lands
-$S status [a b]                      # non-blocking (no names = the whole team): done | working | blocked | question | no-report-yet | gone | unavailable | quota | provider-error | capacity | not-received
+$S status [a b]                      # non-blocking (no names = the whole team): done | working | blocked | question | no-report-yet | gone | unavailable | quota | provider-error | capacity | not-received; a name outside the roster is not-in-roster when Herdr knows it (a remote ref is asked on its machine; stderr names the `herdr agent get` that reads it), else unknown-agent
 ```
 
 **Amending a brief in flight.** To change a worker's brief — while it is
@@ -765,7 +768,13 @@ worker of the same role, kind and cwd whose last report exists instead of
 opening a pane, and a reuse never counts against `max_workers`; `--reuse`/`--fresh`
 override per call; a reused worker keeps earlier briefs in context: compact
 or clear its session before an unrelated slice instead of opening another
-pane — see "One agent, one growing session"), `multi_role` (default `on`; one
+pane — see "One agent, one growing session"; the reuse JSON carries the
+worker's `model`, `effort` and `agent_args` like a new spawn's; two `spawn`
+calls in a row with no dispatch between them return the same idle worker,
+so dispatch to the first before spawning again; `--fresh` opens another
+worker only when there is room under `max_workers` and in the lane — or,
+with `pane_mode=flex`, a temporary flex slot for that role; a full strict
+lane exits 10 (busy), so release a worker or raise the lane's capacity first), `multi_role` (default `on`; one
 idle agent may take another role — see "Setup: guided configuration"), `feedback` +
 `feedback_repo` (see "Improving this skill"), `approvals`
 (default for roles without one), `auto_approve` + `max_auto_approvals`
@@ -810,12 +819,12 @@ $S setup [--target FILE] [--no-hooks]      # AGENTS.md block + Claude hooks (ide
 $S setup --detect                          # JSON: installed kinds, summaries, models (incl. custom providers), recommended reviewer; writes nothing
 $S setup --probe [--kind K --model M]      # JSON: ready|no-auth|quota|error per kind/model + own pi/opencode models (≤5 per kind; rest in skipped_custom); no panes
 $S setup --plan …                          # diff -u per file (config files: key before → after) of what setup/--set/--user-set/--session-set would write; writes nothing
-$S session set <key> <value>               # this-session override in <state>/session.conf (above project, below flags/env); also <key>=<value>
+$S session set <key> <value>               # this-session override in <state>/session.conf (above project, below flags/env); also <key>=<value>; a value may begin with hyphens (session set lane.review.args --add-dir /abs/dir), and -- ends option parsing
 $S session show | session clear [key]
 $S roles                                   # roles with the kind, model and effort in effect and where each comes from
 $S role reviewer                           # resolved file + frontmatter
 $S spawn implementer [--name impl] [--kind codex] [--direction right|down]
-$S dispatch impl <brief.md> [--timeout 900000] [--amend] [--resend] [--compact]   # role prompt + brief → agent, waits; --amend amends the agent's current brief; --resend sends a brief the agent already has open (see "One send per open brief"); --compact compacts an idle worker (claude, codex, pi, opencode) before the brief and keeps it unsent on a timeout (9) or a busy worker (10)
+$S dispatch impl <brief.md> [--timeout 900000] [--amend] [--resend] [--compact]   # role prompt + brief → agent, waits; --amend amends the agent's current brief; --resend sends a brief the agent already has open (see "One send per open brief"); --compact compacts an idle worker (claude, codex, pi, opencode) before the brief and keeps it unsent on a timeout (9) or a busy worker (10); the compaction blocks the dispatch until it ends (up to 300 s; a pi compacting a long context can take minutes), --no-wait included, and a dispatch killed meanwhile sent no brief: run it in the background when your tool's timeout is shorter
 $S compact impl [--timeout 900000]    # compact an idle worker (claude, codex, pi, opencode): sends /compact once and waits for the CLI's proof plus its return to idle; a kind without a verified command exits 2, a timeout 9 (a claude timeout JSON carries a `transcript` field: `counted` when the session transcript was found and counted, `missing` without an id session or the file, `unreadable` when the file could not be read); a claude, pi or opencode with nothing to compact exits 0 with `nothing-to-compact`, and a failed compaction exits 9 with `failed` and a warning that cites the failing screen line (claude's `Error compacting conversation`, pi's `Compaction failed: …`); for pi the thinking goes to `off` during the compaction and comes back to the level it had, and a level that does not come back is warned; a pi timeout while "Compacting context" is still on screen adds `still_compacting: true` and a warning: wait and read the screen, do not send /compact again; for claude the proof can also come from the session transcript (a new `compact_boundary` line), because the Claude Code screen does not show the confirmation; for opencode the proof is the `▣ Compaction · <model> · <duration>` line (the line without the duration is not proof), and the command menu is checked before the Enter: only /compact on the first menu item gets the Enter, a menu without /compact (an empty session) clears the box with ctrl+u and exits 0, and /compact not on top or a menu that never appears clears the box and exits 4
 $S collect impl [--lines N] [--verify]      # prints the report file (or recent output); an agent still working or blocked with no report gets a short stderr line and exit 4 (no terminal dump) unless --lines is passed; --verify re-checks the report's sha256 lines, one `<sha256>  <path>` per file as `sha256sum` prints it (a trailing `# note` after the path is dropped when the path without it exists; exit 16 on changed/missing or when the report has none, 4 when the report cannot be read)
 $S run scouter <brief.md>                    # spawn + dispatch + collect in one call
@@ -840,7 +849,7 @@ $S spawn reviewer --tab-label "onda 2"     # place the worker in the herd tab of
 $S layout-plan                             # where the next spawn lands (anchor, direction, overflow reason)
 $S status [a b …]                          # non-blocking completion check; no names = the whole team (all roster agents, in roster order, same output and exit code as naming them)
 $S config                                  # effective configuration and sources (incl. the session layer)
-$S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>
+$S config set <key> <value> [--project|--user]   # write one key (default: the project file); also <key>=<value>; a value may begin with hyphens, and -- makes the rest (--project/--user included) the value
 $S roster                                  # live agents with role/kind/pane/state/report and the current task (TASK, from the pane title; '-' when none, cut to 40 characters)
 $S release impl [--close] [--force]        # forget the agent; --close closes a pane we created, or the recorded orphan's pane (idle or done)
 $S reopen impl [--force]                    # release --close + spawn --fresh with the roster's role, kind, model, effort, cwd and native args; output is the spawn JSON
@@ -977,14 +986,20 @@ remote machine that fails prints a stderr line and the rest is still
 listed.
 
 `scripts/herdr-soho` is a POSIX `sh` launcher: it prefers the installed
-`herdr-soho` Go binary (or the path in `HERDR_SOHO_BIN`), then falls back to
-`scripts/herdr-soho.mjs` with `node` (20+) or `bun`. Set `HERDR_SOHO_JS=1` to
-force the JavaScript fallback. This file describes the Go binary: the
+`herdr-soho` Go binary (or the path in `HERDR_SOHO_BIN`) on `PATH`, then
+the install directory — `$HERDR_SOHO_INSTALL_DIR` (`herdr-soho` or
+`herdr-soho.exe`), `~/.local/bin/herdr-soho`, and under Git Bash
+`$LOCALAPPDATA/Programs/herdr-soho/herdr-soho.exe` — because a shell opened
+before the install keeps a `PATH` without it; only then does it fall back
+to `scripts/herdr-soho.mjs` with `node` (20+) or `bun`, with one stderr
+warning (`the herdr-soho binary was not found (PATH or the install
+directory); running the JavaScript fallback, which lags the binary; …`).
+Set `HERDR_SOHO_JS=1` to force the JavaScript fallback, with no warning. This file describes the Go binary: the
 fallback stopped following new features at the Go port (it got only a few
 fixes since), so a behavior added later may be missing from it. Install the binary with `install.sh` (POSIX)
 or `install.ps1` (Windows) from the GitHub releases. If no binary or JS
 runtime is available it exits 2 with an installation message.
-`scripts/herdr-soho.cmd` follows the same order for Windows. The `setup`
+`scripts/herdr-soho.cmd` follows the same order for Windows (`%HERDR_SOHO_INSTALL_DIR%\herdr-soho.exe`, then `%LOCALAPPDATA%\Programs\herdr-soho\herdr-soho.exe`). `cmd.exe` cuts an argument at its first line break, so on Windows send a message of several lines with `send --file <path>`. The `setup`
 SessionStart hook checks these locations in order: project
 `.agents/skills`, project `.claude/skills`, `$HOME/.agents/skills`, then
 `$HOME/.claude/skills`. It invokes the first launcher with
@@ -1147,8 +1162,8 @@ logging `dialog` without typing into the dialog.
 The dialog check pairs each visible-screen read with a fresh `agent get` status, including after a wait settles; a question detector that appears while the target is blocked still prevents sending.
 Right before sending the prompt, `send` reads `state_change_seq` (preSeq), status (preStatus), and the visible screen (preScreen).
 Delivery prompts once via `agent prompt --wait --until working --until blocked --until idle --until done --timeout 15000` (it never automatically re-prompts).
-Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof). For a pi target whose screen carries its two input-box borders (lines of `─`, or the working border `── ⠴ Working ──…` while it works), the closing line and the id count only inside its input box (the region between those lines), so a message already in its chat history is delivered, a message in its `Steering:` queue is queued, and the Enter goes only when the id is in that box. For a codex target whose screen holds a composer line (the last line that, without its left spaces, is `›` alone or begins with `› `, and sits within the last 8 non-empty lines), the closing line and the id count only inside its composer region (from that line to the bottom of the screen), so a message already in its history above the composer is delivered; a `↳` line holding the id above the composer is its follow-up queue — the result is `queued`, with no Enter sent. A Claude Code queue is recognized the same way: when the visible screen holds the message's id and the line `Press up to edit queued messages`, the result is `queued`, with no Enter sent. A local claude or pi target whose session file resolves (claude: its transcript; pi: the file Herdr reports as its `agent_session`) also proves delivery in the window when the count of its user-message lines holding `#<id>` rises (for pi only a line whose top-level `type` is `message` and `message.role` is `user`; a pi `Steering:` line holding the id on screen keeps it `queued`); a remote target never reads a local file.
-When `agent prompt` reports `agent_prompt_stalled` — the prompt may be typed with its Enter missing — `send` reads the target's visible screen and, when `#<id>` sits in its input box (for pi between the box borders, for codex the composer region, for every other kind the last 15 non-empty lines) and no dialog is on screen, presses one Enter and runs the arrival window; a dialog on screen would take the Enter as its answer, so nothing is pressed and it exits 17 (`send: <ref> is showing a dialog after the message was typed; press nothing and read its pane`). Still unproven after the Enter, it exits 15 (`send: <ref> did not take the message: it sits in its input box after one Enter; read its pane before sending again`). Without the id in the box a single arrival check proves the taking once with the window's own rules (no key, no resend): proven taken is `sent`, not proven keeps the plain stalled exit 15. One Enter at most, no resend.
+Delivery is verified in a 15-second arrival window if either (a) `state_change_seq` is non-empty and changes from preSeq, preStatus was `idle` or `done`, the new status is `working` or `blocked`, and the current visible screen is not a dialog; or (b) `#<id>` appears in recent unwrapped output (`--lines <message lines + 60>`), the visible screen differs from preScreen, the normalized closing line (`[herdr-soho:peer] #<id> end of message`) is absent from the entire normalized visible screen, and the id itself is no longer visible (so a clipped viewport is not proof). For a pi target whose screen carries its two input-box borders (lines of `─`, or the working border `── ⠴ Working ──…` while it works), the closing line and the id count only inside its input box (the region between those lines), so a message already in its chat history is delivered, a message in its `Steering:` queue is queued, and the Enter goes only when the id is in that box. For a codex target whose screen holds a composer line (the last line that, without its left spaces, is `›` alone or begins with `› `, and sits within the last 8 non-empty lines), the closing line and the id count only inside its composer region (from that line to the bottom of the screen), so a message already in its history above the composer is delivered; a `↳` line holding the id above the composer is its follow-up queue — the result is `queued`, with no Enter sent. A codex message whose header line (`[herdr-soho:peer] #<id>`), closing line and a turn line after it (one beginning with `•`, such as `• Working` or the reply) are all on screen is delivered even when no composer line is visible — its history line also begins with `› ` and would otherwise read as the input box — unless a line below the closing line that begins with `›` still holds the full header `[herdr-soho:peer] #<id>`. A Claude Code queue is recognized the same way: when the visible screen holds the message's id and the line `Press up to edit queued messages`, the result is `queued`, with no Enter sent. A local claude or pi target whose session file resolves (claude: its transcript; pi: the file Herdr reports as its `agent_session`) also proves delivery in the window when the count of its user-message lines holding `#<id>` rises (for pi only a line whose top-level `type` is `message` and `message.role` is `user`; a pi `Steering:` line holding the id on screen keeps it `queued`); a remote target never reads a local file.
+When `agent prompt` reports `agent_prompt_stalled` — the prompt may be typed with its Enter missing — `send` reads the target's visible screen and, when `#<id>` sits in its input box (for pi between the box borders, for codex the composer region, for every other kind the last 15 non-empty lines) and no dialog is on screen, presses one Enter and runs the arrival window; a dialog on screen would take the Enter as its answer, so nothing is pressed and it exits 17 (`send: <ref> is showing a dialog after the message was typed; press nothing and read its pane`). Still unproven after the Enter, it exits 15 (`send: <ref> did not take the message: it sits in its input box after one Enter; read its pane before sending again`). Without the id in the box (or with an unreadable screen) the taking is checked again every poll until the arrival window ends, with the window's own rules and no key — a codex can take seconds to redraw after the stall — and each read in that wait is bounded by the window's remaining time, with a floor of one second (a check that starts near the end can overrun the window by up to that): proven taken is `sent`, not proven keeps the plain stalled exit 15. Every exit 15 of the stalled path tries to save the last visible screen it read to `<state>/wait/send-<id>.screen` (local and Git-ignored; never with `HERDR_SOHO_NOWRITE`) and, only when the save succeeds, adds `; screen saved to <path>` to its message, so the pane can be diagnosed later; with no screen read or a failed save the message stays as before. One Enter at most, no resend.
 If not verified by the end of the window: a local claude that is still `working` and whose session transcript was resolved keeps the transcript in evidence until the command's `--timeout` (the same value as the busy-target wait) — the transcript showing the message's `#<id>` line with no queue line on the visible screen is `sent`, and a visible queue line is `queued` (`queued for <ref>: it takes the message when its current turn ends`), due before the wait's laps and on every lap of it, independent of the count; no key is sent in the wait, and the warning `send: <ref> is busy; waiting for its transcript to show the message (up to <s>s)` goes once. Then, if all recent reads failed, it exits 15 (`unverified`) without sending keys; otherwise it re-reads the visible screen and status. A dialog exits 17 without a key; an Enter is sent only if the normalized `#<id>` occurs in the last 15 non-empty visible lines, then a second proof window runs.
 If still not verified, it logs `lost` and exits 15 (`<ref> did not take the message (no sign of it in its state or screen)`).
 The target project decides acceptance: the `inbound`
@@ -1255,7 +1270,12 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   `[partial]` and run by the orchestrator. A role or lane that needs
   network: `args.codex=-c sandbox_workspace_write.network_access=true`
   (every codex worker), or `role.<role>.args`/`lane.<name>.args` with the
-  same flag when that role or lane is configured with kind codex. They are flags of one CLI: they reach a worker only when the spawn runs the kind the configuration resolves for that role or lane (a `--kind` flag to another kind drops them, with a warning), because a codex `-c <key>=<value>` is `--continue` to claude, which resumes the orchestrator's conversation in the same cwd, and `--cloud` to cursor. `spawn` also refuses a resume flag for claude or cursor (`-c`, `--continue`, `-r`, `--resume`, `--cloud`) from any source, before a pane opens. The Herdr control socket is blocked
+  same flag when that role or lane is configured with kind codex. A codex
+  reviewer that must also write in a sibling repository the brief names
+  (its tests create files there) gets that directory with `--add-dir`:
+  `herdr-soho session set lane.review.args --add-dir /abs/path/to/sibling`
+  (an absolute path; join it with any other flags of that lane in one
+  value), then `release <name> --close` and spawn the reviewer again. They are flags of one CLI: they reach a worker only when the spawn runs the kind the configuration resolves for that role or lane (a `--kind` flag to another kind drops them, with a warning), because a codex `-c <key>=<value>` is `--continue` to claude, which resumes the orchestrator's conversation in the same cwd, and `--cloud` to cursor. `spawn` also refuses a resume flag for claude or cursor (`-c`, `--continue`, `-r`, `--resume`, `--cloud`) from any source, before a pane opens. The Herdr control socket is blocked
   the same way, so a nested orchestrator must not be a sandboxed codex.
 - **`release` without `--close` leaves the agent running.** `--close` ends
   it by closing the pane. Panes passed with `--pane` are never closed.
@@ -1279,7 +1299,12 @@ unavailable or unreadable screen, 15 not received / lost / unverified, 17 still 
   a new pane (it only warns; the spawn proceeds). A `spawn --pane` that
   re-rosters a recorded pane retires its row, and a row whose pane is gone
   from Herdr (`pane_not_found`) leaves on the next registry write (a pane
-  `get` that fails for any other reason keeps its row).
+  `get` that fails for any other reason keeps its row). When it opens a
+  worker in a lane, `spawn` also warns once per roster worker of that lane
+  that is `idle` or `done` and runs another kind than the lane's (left over
+  from a kind change): `herdr-soho: warning: lane '<lane>' still holds idle
+  '<name>' (<kind>), not the lane's kind '<lane kind>'; release it with:
+  herdr-soho release <name> --close` (it only warns; `--pane` skips it).
 - **Worktrees are yours to create.** `git worktree add .worktrees/<slug>`
   (or `herdr worktree create`) and pass the path with `--cwd`. The roster
   stays in the main repo; linked worktrees share the main checkout's state.

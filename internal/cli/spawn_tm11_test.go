@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/testutil"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
@@ -457,7 +458,7 @@ func (f *tm11SpawnFixture) runStepsPrepared(t *testing.T, golden tm11SpawnGolden
 			t.Fatal(err)
 		}
 		code, out, stderr := f.runStep(t, want.Args)
-		actualOut := strings.ReplaceAll(out, filepath.Dir(f.cwd), "<ROOT>")
+		actualOut := strings.ReplaceAll(tm11NormalizeReuseSpawn(out, want.Out), filepath.Dir(f.cwd), "<ROOT>")
 		actualErr := strings.ReplaceAll(normalizeParityError(stderr), filepath.Dir(f.cwd), "<ROOT>")
 		callLog, err := f.herdrCallLog()
 		if err != nil {
@@ -487,6 +488,45 @@ func (f *tm11SpawnFixture) runStepsPrepared(t *testing.T, golden tm11SpawnGolden
 			t.Fatalf("%s=%q want=%q", name, value, *want)
 		}
 	}
+}
+
+// tm11SpawnReuseGoKeys: keys the Go spawn-reuse JSON gained after the JS
+// parity golden was frozen — the Go side carries more information, the
+// frozen JS reference does not.
+var tm11SpawnReuseGoKeys = []string{"model", "effort", "agent_args"}
+
+// tm11NormalizeReuseSpawn drops those keys from the Go stdout before the
+// byte comparison with the frozen golden: only for a spawn-reuse JSON (the
+// only spawn JSON that carries "reused": true) and only the keys the
+// golden does not carry. Every other step, and every other key, compares
+// byte for byte.
+func tm11NormalizeReuseSpawn(out, want string) string {
+	v, err := jsonjs.Parse([]byte(out))
+	if err != nil {
+		return out
+	}
+	obj, ok := v.(*jsonjs.Object)
+	if !ok {
+		return out
+	}
+	if reused, _ := obj.Get("reused"); reused != true {
+		return out
+	}
+	gv, err := jsonjs.Parse([]byte(want))
+	if err != nil {
+		return out
+	}
+	gobj, ok := gv.(*jsonjs.Object)
+	if !ok {
+		return out
+	}
+	for _, key := range tm11SpawnReuseGoKeys {
+		if _, present := gobj.Get(key); present {
+			continue
+		}
+		obj.Delete(key)
+	}
+	return jsonjs.StringifyIndent(obj, 2) + "\n"
 }
 
 func (f *tm11SpawnFixture) runStep(t *testing.T, args []string) (int, string, string) {

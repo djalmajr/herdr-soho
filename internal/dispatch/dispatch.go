@@ -123,7 +123,12 @@ func ForSpecFamily(spec, sd string, env platform.Env, cwd string, ctx *core.Conf
 		counts[fam]++
 	}
 	if len(counts) == 0 {
-		return "", fmt.Errorf("dispatch: --for '%s': not an agent in the roster, a family (anthropic|openai|xai|google|alibaba), a kind with a fixed family, or an agent with an accepted dispatch recorded in this workspace", spec)
+		// Nothing above matched: last, the spec as a model name or id, with
+		// the same family rule the spawn check records for pi/opencode/cursor.
+		if fam := kinds.AgentFamily("", spec); fam != "unknown" {
+			return fam, nil
+		}
+		return "", fmt.Errorf("dispatch: --for '%s': not an agent in the roster, a family (anthropic|openai|xai|google|alibaba), a kind with a fixed family, or an agent with an accepted dispatch recorded in this workspace; pass a family (for example --for alibaba for a Qwen model) or the worker's name", spec)
 	}
 	if len(counts) == 1 {
 		for fam := range counts {
