@@ -171,6 +171,19 @@ func TestPressureWarnsWithThePartsThatPassedTheirLimits(t *testing.T) {
 	})
 }
 
+func TestPressureNegativeThresholdUsesTheDefault(t *testing.T) {
+	ctx, env, stateDir := pressureFixture(t)
+	env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "-1"
+	gb := int64(1024 * 1024 * 1024)
+	fakeMachine(t, 50*gb, 100*gb, true, 96*gb, 100*gb, true)
+	stderr := captureStderr(t, func() { core.PressureWarn(ctx, env, "") })
+	want := "herdr-soho: warning: invalid value '-1' for pressure_swap_percent; using the default 80\n" +
+		pressureLine(stateDir, "swap 96% used (96 GB of 100 GB)")
+	if stderr != want {
+		t.Fatalf("stderr=%q, want %q (a negative value must not turn the warning off)", stderr, want)
+	}
+}
+
 func sprintfPart(stateDir string) string {
 	return "disk " + stateDir + " has 9% free (9 GB of 100 GB)"
 }

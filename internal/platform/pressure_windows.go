@@ -7,8 +7,9 @@ import (
 	"unsafe"
 )
 
-// statfsFree measures one existing path with GetDiskFreeSpaceExW; the
-// third result (available to the caller) is the user-free space.
+// statfsFree measures one existing path with GetDiskFreeSpaceExW. The API
+// writes, in order: the bytes available to the caller (the user-free space,
+// quotas included), the volume's total bytes and the volume's free bytes.
 func statfsFree(path string) (free, total int64, ok bool) {
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	proc := kernel32.NewProc("GetDiskFreeSpaceExW")
@@ -16,12 +17,12 @@ func statfsFree(path string) (free, total int64, ok bool) {
 	if err != nil {
 		return 0, 0, false
 	}
-	var totalBytes, freeBytes, freeToCaller uint64
+	var freeToCaller, totalBytes, freeBytes uint64
 	ret, _, _ := proc.Call(
 		uintptr(unsafe.Pointer(&wpath[0])),
+		uintptr(unsafe.Pointer(&freeToCaller)),
 		uintptr(unsafe.Pointer(&totalBytes)),
-		uintptr(unsafe.Pointer(&freeBytes)),
-		uintptr(unsafe.Pointer(&freeToCaller)))
+		uintptr(unsafe.Pointer(&freeBytes)))
 	if ret == 0 {
 		return 0, 0, false
 	}

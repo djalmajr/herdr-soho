@@ -104,12 +104,15 @@ func pressureParts(ctx *Config, env platform.Env, stateDir string) []string {
 }
 
 // pressureThreshold reads the key through the usual layers (env override
-// included). An invalid value falls back to the default with the project's
-// warning line.
+// included). Only a non-negative decimal integer is valid, the domain that
+// config set accepts; anything else (a negative value included) falls back
+// to the default with the project's warning line, so only 0 turns it off.
 func pressureThreshold(ctx *Config, key string, limit int, env platform.Env) int {
 	raw := Cfg(ctx, key, strconv.Itoa(limit), env)
-	if value, err := strconv.Atoi(raw); err == nil {
-		return value
+	if decimalRE.MatchString(raw) {
+		if value, err := strconv.Atoi(raw); err == nil {
+			return value
+		}
 	}
 	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: invalid value '%s' for %s; using the default %d\n", raw, key, limit)
 	return limit
