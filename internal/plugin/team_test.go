@@ -188,6 +188,24 @@ func teamWaitForLastFrame(t *testing.T, output *os.File, cond func(frame string)
 	}
 }
 
+// teamWaitForOccurrences waits until the marker appears at least n times in
+// the cumulative output (20 s deadline). The output is never cleared, so a
+// marker that was already drawn once is a real round-trip barrier only at
+// its second (or later) occurrence.
+func teamWaitForOccurrences(t *testing.T, output *os.File, marker string, n int, why string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if strings.Count(teamReadOutput(output), marker) >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for %s (marker %q x%d)", why, marker, n)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // TestTeamPanelShowsFirstLineAndTeamView: a valid context renders the
 // first line, the explain text and the team's workers - the `# other live
 // agents` section stays out of the view.
@@ -437,7 +455,9 @@ func TestTeamPanelGConfirmsGCYes(t *testing.T) {
 	_, _ = writer.Write([]byte("n"))
 	teamWaitForLastFrame(t, output, func(frame string) bool { return !strings.Contains(frame, "y executa") }, "the confirmation to disappear after n")
 	_, _ = writer.Write([]byte("g"))
-	teamWaitForOutput(t, output, "gc --yes in "+cwd[:40])
+	// The prompt marker is cumulative: its second occurrence proves the new
+	// confirmation is on screen before the separate y block is written.
+	teamWaitForOccurrences(t, output, "gc --yes in "+cwd[:40], 2, "the second gc confirmation prompt")
 	_, _ = writer.Write([]byte("y"))
 	teamWaitForOutput(t, output, "gc done")
 	calls := teamCalls(t, cli)
@@ -558,4 +578,194 @@ func TestTeamRenderNeverPassesWidth(t *testing.T) {
 	check("collect", "worker-1")
 	check("confirm-release", "worker-1")
 	check("confirm-gc", "")
+}
+
+// TestTeamBracketedPasteNeverExecutesWrites: the paste markers delimit
+// content that is discarded as a whole - a pasted x/y in the equipe view
+// and a pasted g/y in the recursos view never invoke release or gc --yes.
+func TestTeamBracketedPasteNeverExecutesWrites(t *testing.T) {
+	env, cli, _ := teamPanelFixture(t)
+	writer, output, finished := teamStartWithPipes(t, env, cli, nil)
+	teamWaitForOutput(t, output, "worker-1")
+	// equipe: one paste containing x and y.
+	_, _ = writer.Write([]byte("\x1b[200~xy\x1b[201~"))
+	// recursos: one paste containing g and y.
+	_, _ = writer.Write([]byte("3"))
+	teamWaitForOutput(t, output, "pressure 12%")
+	_, _ = writer.Write([]byte("\x1b[200~gy\x1b[201~"))
+	_, _ = writer.Write([]byte("q"))
+	_ = writer.Close()
+	teamWaitExit(t, finished, 0)
+	data := teamReadOutput(output)
+	if strings.Contains(data, "released one") || strings.Contains(data, "gc done") {
+		t.Fatalf("bracketed paste content reached the panel output:\n%s", data)
+	}
+	for _, call := range teamCalls(t, cli) {
+		if len(call.Argv) > 0 && call.Argv[0] == "release" {
+			t.Fatalf("bracketed paste invoked a write argv=%#v NOWRITE=%q", call.Argv, call.Env["HERDR_SOHO_NOWRITE"])
+		}
+		if reflect.DeepEqual(call.Argv, []string{"gc", "--yes"}) {
+			t.Fatalf("bracketed paste invoked gc --yes: %#v", call)
+		}
+	}
+}
+
+// TestTeamBracketedPasteNeverBecomesAnAction: paste content is not an
+// action in any view - a pasted view switch and a pasted q do nothing, and
+// the panel stays open on the equipe view (its bar keeps >1 equipe).
+func TestTeamBracketedPasteNeverBecomesAnAction(t *testing.T) {
+	env, cli, _ := teamPanelFixture(t)
+	writer, output, finished := teamStartWithPipes(t, env, cli, nil)
+	teamWaitForOutput(t, output, "worker-1")
+	_, _ = writer.Write([]byte("\x1b[200~2q\x1b[201~"))
+	// The panel is still open on the equipe view; close it normally.
+	_, _ = writer.Write([]byte("q"))
+	_ = writer.Close()
+	teamWaitExit(t, finished, 0)
+	data := teamReadOutput(output)
+	if strings.Contains(data, ">2 doctor") {
+		t.Fatalf("a pasted view switch became an action:\n%s", data)
+	}
+	for _, call := range teamCalls(t, cli) {
+		if reflect.DeepEqual(call.Argv, []string{"doctor"}) {
+			t.Fatalf("a pasted key invoked the doctor read: %#v", call)
+		}
+	}
+}
+
+// TestTeamConfirmationYOnlyFromItsOwnBlock: a y in the same read block as
+// the key that opened the confirmation (xy) opens it but does not execute;
+// neither does a block with more than the y (yy, y\r). A y in its own
+// block executes.
+func TestTeamConfirmationYOnlyFromItsOwnBlock(t *testing.T) {
+	env, cli, cwd := teamPanelFixture(t)
+	writer, output, finished := teamStartWithPipes(t, env, cli, nil)
+	teamWaitForOutput(t, output, "worker-1")
+	countReleases := func() int {
+		got := 0
+		for _, call := range teamCalls(t, cli) {
+			if len(call.Argv) > 0 && call.Argv[0] == "release" {
+				got++
+			}
+		}
+		return got
+	}
+	// One block with x and y: opens the confirmation, does not execute.
+	_, _ = writer.Write([]byte("xy"))
+	teamWaitForOutput(t, output, "release --close worker-1 in ws-a ("+cwd[:40])
+	if got := countReleases(); got != 0 {
+		t.Fatalf("the xy block executed the release: %d calls", got)
+	}
+	// A y in its own block executes the release.
+	_, _ = writer.Write([]byte("y"))
+	teamWaitForOutput(t, output, "released one")
+	if got := countReleases(); got != 1 {
+		t.Fatalf("release calls=%d want 1 (only the separate y)", got)
+	}
+	// yy in one block does not execute.
+	_, _ = writer.Write([]byte("x"))
+	teamWaitForOccurrences(t, output, "release --close worker-1 in ws-a ("+cwd[:40], 2, "the second release confirmation prompt")
+	_, _ = writer.Write([]byte("yy"))
+	_, _ = writer.Write([]byte("n")) // cancel
+	teamWaitForLastFrame(t, output, func(frame string) bool { return !strings.Contains(frame, "y executa") }, "the confirmation to disappear after n")
+	// y\r in one block does not execute.
+	_, _ = writer.Write([]byte("x"))
+	teamWaitForOccurrences(t, output, "release --close worker-1 in ws-a ("+cwd[:40], 3, "the third release confirmation prompt")
+	_, _ = writer.Write([]byte("y\r"))
+	_, _ = writer.Write([]byte("n")) // cancel
+	teamWaitForLastFrame(t, output, func(frame string) bool { return !strings.Contains(frame, "y executa") }, "the confirmation to disappear after n")
+	_, _ = writer.Write([]byte("q"))
+	_ = writer.Close()
+	teamWaitExit(t, finished, 0)
+	if got := countReleases(); got != 1 {
+		t.Fatalf("release calls=%d want 1 (yy and y\\r must not confirm)", got)
+	}
+}
+
+// TestTeamPanelEnablesAndDisablesBracketedPaste: the panel output starts
+// with ESC[?2004h and the normal close ends with ESC[?2004l.
+func TestTeamPanelEnablesAndDisablesBracketedPaste(t *testing.T) {
+	env, cli, _ := teamPanelFixture(t)
+	writer, output, finished := teamStartWithPipes(t, env, cli, nil)
+	teamWaitForOutput(t, output, "worker-1")
+	_, _ = writer.Write([]byte("q"))
+	_ = writer.Close()
+	teamWaitExit(t, finished, 0)
+	data := teamReadOutput(output)
+	if !strings.HasPrefix(data, "\x1b[?2004h") {
+		t.Fatalf("output does not start with the bracketed-paste enable: %q", data[:24])
+	}
+	if !strings.HasSuffix(data, "\x1b[?2004l") {
+		t.Fatalf("output does not end with the bracketed-paste disable: %q", data[len(data)-24:])
+	}
+}
+
+// TestTeamRenderWideRuneAtOneTwoThreeColumns: RenderTeam with CJK and
+// emoji content at widths 1, 2 and 3 finishes (the wrap always consumes at
+// least one character) and no rendered line passes the width.
+func TestTeamRenderWideRuneAtOneTwoThreeColumns(t *testing.T) {
+	state := NewTeamState(teamViewTeam)
+	state.target = teamTarget{WorkspaceID: "ws-界", PaneID: "p", TabID: "t", Cwd: "/cwd/界/\U0001F600"}
+	state.viewLoaded = [4]bool{true, true, true, true}
+	state.explainLines = []string{"界", "\U0001F600", strings.Repeat("界", 10) + " fim " + strings.Repeat("\U0001F600", 5)}
+	state.workers = []string{"界 codex working 界", "\U0001F600 idle task"}
+	state.doctorLines = []string{"界 doctor 界"}
+	state.gcLines = []string{"gc 界 --yes \U0001F600"}
+	state.frictionLines = []string{"friction \U0001F600 界"}
+	state.releaseAgent = "worker-界"
+	state.releaseOut = []string{strings.Repeat("released 界 ", 10)}
+	state.gcYesOut = []string{strings.Repeat("gc done \U0001F600 ", 10)}
+	check := func(subview string) {
+		state.subview = subview
+		state.confirmAgent = "worker-界"
+		state.collectAgent = "worker-界"
+		state.collectLoaded = true
+		state.collectLines = []string{strings.Repeat("report 界 ", 10)}
+		for _, width := range []int{1, 2, 3} {
+			done := make(chan string, 1)
+			go func() {
+				done <- RenderTeam(state, width)
+			}()
+			select {
+			case render := <-done:
+				for i, line := range strings.Split(strings.TrimSuffix(render, "\n"), "\n") {
+					if w := displayWidth(line); w > width {
+						t.Fatalf("view %d subview %q width %d: line %d %q has display width %d", state.view, subview, width, i, line, w)
+					}
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("RenderTeam view %d subview %q width did not finish (the wrap loop stalled)", state.view, subview)
+			}
+		}
+	}
+	for view := teamViewTeam; view <= teamViewFriction; view++ {
+		state.view = view
+		check("")
+	}
+	state.view = teamViewTeam
+	check("confirm-release")
+	state.view = teamViewResources
+	check("confirm-gc")
+	check("collect")
+}
+
+// TestTeamEOFInConfirmationAndCollectCloses: end of input closes the panel
+// for good - from the confirmation subview and from the collect subview -
+// and ends the children like a normal close.
+func TestTeamEOFInConfirmationAndCollectCloses(t *testing.T) {
+	env, cli, _ := teamPanelFixture(t)
+	writer, output, finished := teamStartWithPipes(t, env, cli, nil)
+	teamWaitForOutput(t, output, "worker-1")
+	_, _ = writer.Write([]byte("x"))
+	teamWaitForOutput(t, output, "release --close worker-1 in ws-a (")
+	_ = writer.Close() // EOF while the confirmation is on screen
+	teamWaitExit(t, finished, 0)
+
+	env2, cli2, _ := teamPanelFixture(t)
+	writer2, output2, finished2 := teamStartWithPipes(t, env2, cli2, nil)
+	teamWaitForOutput(t, output2, "worker-1")
+	_, _ = writer2.Write([]byte("\r")) // Enter: collect worker-1
+	teamWaitForOutput(t, output2, "report one line")
+	_ = writer2.Close() // EOF inside the collect subview
+	teamWaitExit(t, finished2, 0)
 }

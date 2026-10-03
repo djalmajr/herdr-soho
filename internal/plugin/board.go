@@ -108,6 +108,39 @@ func (s *BoardState) clamp() {
 	}
 }
 
+// pinnedIndex is the visible index of the pinned ref while a generation is
+// running; -1 when there is no pin or the ref is not in the visible list.
+// syncSelectedToPin makes the navigation start from the row the cursor is
+// drawn on: during a refresh the cursor follows the pinned ref, while a
+// filter change can leave Selected on another index.
+func (s *BoardState) syncSelectedToPin() {
+	if !s.refreshing || s.selectedRef == "" {
+		return
+	}
+	if idx := s.pinnedIndex(); idx >= 0 {
+		s.Selected = idx
+	}
+}
+
+func (s *BoardState) pinnedIndex() int {
+	if !s.refreshing || s.selectedRef == "" {
+		return -1
+	}
+	for i, entry := range s.visible() {
+		if pickerString(entry["ref"]) == s.selectedRef {
+			return i
+		}
+	}
+	return -1
+}
+
+// pinnedMissing: the pinned ref left the visible list while the load is
+// still running. No row shows the cursor, Enter copies nothing, and the
+// footer says so; ↑/↓ pick a new ref.
+func (s *BoardState) pinnedMissing() bool {
+	return s.refreshing && s.selectedRef != "" && s.pinnedIndex() < 0
+}
+
 // BoardTitle strips the leading "<role>: " prefix the CLI puts on pane
 // titles ("orchestrator: <task>", "<role>: <brief task>") and removes
 // control characters, like the picker does.
@@ -191,6 +224,13 @@ func RenderBoard(state *BoardState, width int) string {
 	}
 	lines := []string{boardTotals(agents, state.UpdatedAt), "> " + state.Query}
 	currentMachine, currentWorkspace := "", ""
+	// While the generation is running, the cursor follows the pinned ref
+	// (resolved by ref); when the ref is not in the visible list there is
+	// no cursor at all (pinnedIndex -1 matches no row).
+	cursorIdx := state.Selected
+	if state.refreshing && state.selectedRef != "" {
+		cursorIdx = state.pinnedIndex()
+	}
 	for i, entry := range state.visible() {
 		machine := pickerString(entry["machine"])
 		workspace := pickerString(entry["workspace_label"])
@@ -200,7 +240,7 @@ func RenderBoard(state *BoardState, width int) string {
 			currentWorkspace = workspace
 		}
 		cursor := " "
-		if i == state.Selected {
+		if i == cursorIdx {
 			cursor = ">"
 		}
 		rowWidth := width - 3
@@ -227,6 +267,9 @@ func RenderBoard(state *BoardState, width int) string {
 		lines = append(lines, "nenhum agente")
 	}
 	// No agent count at the bottom: the top totals line already gives it.
+	if state.pinnedMissing() {
+		lines = append(lines, "a sessão selecionada saiu desta carga; escolha outra com ↑/↓")
+	}
 	return strings.Join(lines, "\n") + "\n"
 }
 
@@ -236,11 +279,27 @@ func (s *BoardState) ApplyKey(key string) string {
 		if s.Exit != "" {
 			return s.Exit
 		}
+		if s.pinnedMissing() {
+			// The pinned ref left the visible list while the load is still
+			// running: copy nothing and close nothing; ↑/↓ pick a new ref.
+			return ""
+		}
 		list := s.visible()
 		if len(list) == 0 {
 			return ""
 		}
-		entry := list[min(s.Selected, len(list)-1)]
+		idx := min(s.Selected, len(list)-1)
+		if s.refreshing && s.selectedRef != "" {
+			// The pinned ref is in the visible list: always copy it, resolved
+			// by ref - never by the numeric index.
+			for i, entry := range list {
+				if pickerString(entry["ref"]) == s.selectedRef {
+					idx = i
+					break
+				}
+			}
+		}
+		entry := list[idx]
 		s.LastEntry = entry
 		copied := PickerCopyPayload(entry)
 		s.Copied = &copied
@@ -256,12 +315,32 @@ func (s *BoardState) ApplyKey(key string) string {
 		s.clamp()
 		return ""
 	case "up":
+		s.syncSelectedToPin()
+		if s.pinnedMissing() {
+			// The cursor is gone: ↑ picks the first visible row and makes it
+			// the new pinned ref.
+			if len(s.visible()) > 0 {
+				s.Selected = 0
+				s.selectedRef = pickerString(s.visible()[0]["ref"])
+			}
+			return ""
+		}
 		if len(s.visible()) > 0 && s.Selected > 0 {
 			s.Selected--
 			s.selectedRef = pickerString(s.visible()[s.Selected]["ref"])
 		}
 		return ""
 	case "down":
+		s.syncSelectedToPin()
+		if s.pinnedMissing() {
+			// The cursor is gone: ↓ picks the last visible row and makes it
+			// the new pinned ref.
+			if len(s.visible()) > 0 {
+				s.Selected = len(s.visible()) - 1
+				s.selectedRef = pickerString(s.visible()[s.Selected]["ref"])
+			}
+			return ""
+		}
 		if len(s.visible()) > 1 && s.Selected < len(s.visible())-1 {
 			s.Selected++
 			s.selectedRef = pickerString(s.visible()[s.Selected]["ref"])
