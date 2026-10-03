@@ -818,3 +818,57 @@ func TestTeamHardCutKeepsUTF8AfterCombiningMarks(t *testing.T) {
 		}
 	}
 }
+
+// A paste into a confirmation that has already been on screen for longer
+// than the quiet window still never confirms: its first block renews the
+// window, so its lone `y` tail arrives inside it (r89c).
+func TestTeamPasteIntoAnArmedConfirmationNeverConfirms(t *testing.T) {
+	for _, mode := range []string{"release", "gc"} {
+		t.Run(mode, func(t *testing.T) {
+			env, cli, _ := teamPanelFixture(t)
+			writer, output, finished := teamStartWithPipes(t, env, cli, nil)
+			teamWaitForOutput(t, output, "worker-1")
+			key, prompt := "x", "release --close worker-1"
+			if mode == "gc" {
+				_, _ = writer.Write([]byte("3"))
+				teamWaitForOutput(t, output, "pressure")
+				key, prompt = "g", "gc --yes in"
+			}
+			_, _ = writer.Write([]byte(key))
+			teamWaitForOutput(t, output, prompt)
+			time.Sleep(teamConfirmQuiet + 100*time.Millisecond)
+			_, _ = writer.Write([]byte(strings.Repeat(key, 4096) + "y"))
+			time.Sleep(teamConfirmQuiet + 200*time.Millisecond)
+			_, _ = writer.Write([]byte("q"))
+			_ = writer.Close()
+			teamWaitExit(t, finished, 0)
+			for _, call := range teamCalls(t, cli) {
+				if call.Argv[0] == "release" || (len(call.Argv) == 2 && call.Argv[0] == "gc" && call.Argv[1] == "--yes") {
+					t.Fatalf("a paste into an armed confirmation ran %q", call.Argv)
+				}
+			}
+		})
+	}
+}
+
+// Any block that cannot confirm restarts the window: `yy` and then a `y`
+// right after it do not confirm; a `y` after a quiet window does.
+func TestTeamQuietWindowRestartsAfterEveryOtherBlock(t *testing.T) {
+	now := time.Unix(1000, 0)
+	oldNow := teamNow
+	teamNow = func() time.Time { return now }
+	t.Cleanup(func() { teamNow = oldNow })
+	s := NewTeamState(teamViewTeam)
+	s.workers = []string{"worker-1 codex working task"}
+	s.FeedChunk("x")
+	now = now.Add(teamConfirmQuiet + time.Second)
+	s.FeedChunk("yy")
+	now = now.Add(time.Millisecond)
+	if s.FeedChunk("y"); s.pendingLoad().doRelease {
+		t.Fatal("a y right after yy confirmed")
+	}
+	now = now.Add(teamConfirmQuiet + time.Millisecond)
+	if s.FeedChunk("y"); !s.pendingLoad().doRelease {
+		t.Fatal("a y after a quiet window did not confirm")
+	}
+}
