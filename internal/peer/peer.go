@@ -1353,6 +1353,32 @@ func claudeInputRegion(visible string) ([]string, bool) {
 	return lines[borders[1]+1 : borders[0]], true
 }
 
+// claudeBoxScope is where a claude peer marker still counts as typed and
+// not sent: the box between the two border lines (claudeInputRegion) plus
+// every line below the bottom border. Below the real box sits only the
+// status footer, which never holds a peer marker; a composer drawn with
+// another prompt under a history '─' pair keeps its typed marker in scope,
+// so the check stays conservative.
+func claudeBoxScope(visible string) ([]string, bool) {
+	region, ok := claudeInputRegion(visible)
+	if !ok {
+		return nil, false
+	}
+	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
+	bottom := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		if isClaudeBorderLine(lines[i]) {
+			bottom = i
+			break
+		}
+	}
+	scope := append([]string{}, region...)
+	if bottom >= 0 {
+		scope = append(scope, lines[bottom+1:]...)
+	}
+	return scope, true
+}
+
 // codexComposerRegion returns the visible screen's lines from the codex
 // composer to the end of the screen. The composer starts at the last line
 // whose text, without its left spaces, begins with "› " (U+203A space) or is
@@ -1443,7 +1469,7 @@ func messageStillInScreen(kind, visible, endLine, id string) bool {
 		}
 	}
 	if kind == "claude" {
-		if lines, ok := claudeInputRegion(visible); ok {
+		if lines, ok := claudeBoxScope(visible); ok {
 			region := NormalizeScreen(strings.Join(lines, "\n"))
 			return strings.Contains(region, NormalizeScreen("#"+id)) || strings.Contains(region, NormalizeScreen(endLine))
 		}
@@ -1476,7 +1502,7 @@ func idInInputBox(kind, visible, id string) bool {
 		}
 	}
 	if kind == "claude" {
-		if lines, ok := claudeInputRegion(visible); ok {
+		if lines, ok := claudeBoxScope(visible); ok {
 			return strings.Contains(NormalizeScreen(strings.Join(lines, "\n")), NormalizeScreen("#"+id))
 		}
 	}
