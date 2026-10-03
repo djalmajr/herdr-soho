@@ -1296,9 +1296,13 @@ func isClaudeBorderLine(line string) bool {
 // chat history above, footer below). The borders are searched only in the
 // last 12 non-empty lines, where they must be the last two border lines: an
 // older separator higher in the history is not a box border, and one border
-// inside the window with the other above it forms no region. ok is false when
-// the window holds fewer than two border lines; the caller then keeps the
-// last-15-lines behavior.
+// inside the window with the other above it forms no region. The pair also
+// has to hold the composer: the first non-empty line between the borders,
+// without its leading spaces, must start with ❯, and no line below the
+// bottom border may start with it — a ❯ below means the composer sits there,
+// and the '─' pair is a history separator or a table, not the box. ok is
+// false when the window holds fewer than two border lines or the pair fails
+// the composer check; the caller then keeps the last-15-lines behavior.
 func claudeInputRegion(visible string) ([]string, bool) {
 	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
 	nonEmpty := 0
@@ -1324,6 +1328,27 @@ func claudeInputRegion(visible string) ([]string, bool) {
 	}
 	if len(borders) < 2 {
 		return nil, false
+	}
+	// The composer guard: a '─' pair is the box only while the composer
+	// sits in it. The first non-empty line of the region must start with
+	// the composer prompt (❯, leading spaces allowed) and no line below
+	// the bottom border may start with it — a ❯ below puts the composer
+	// under the pair, which is a history separator or a table, not the
+	// box; the conservative last-15-lines rule keeps deciding instead.
+	firstInRegion := -1
+	for i := borders[1] + 1; i < borders[0]; i++ {
+		if strings.TrimFunc(lines[i], isJSWhitespace) != "" {
+			firstInRegion = i
+			break
+		}
+	}
+	if firstInRegion < 0 || !strings.HasPrefix(strings.TrimFunc(lines[firstInRegion], isJSWhitespace), "❯") {
+		return nil, false
+	}
+	for i := borders[0] + 1; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimFunc(lines[i], isJSWhitespace), "❯") {
+			return nil, false
+		}
 	}
 	return lines[borders[1]+1 : borders[0]], true
 }

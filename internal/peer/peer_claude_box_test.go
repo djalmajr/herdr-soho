@@ -1,6 +1,8 @@
 package peer_test
 
 import (
+	"bytes"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,14 +104,14 @@ func TestClaudeInputBoxRealScreen(t *testing.T) {
 func TestClaudeInputRegion(t *testing.T) {
 	sep := claudeBoxSep
 	t.Run("the lines between the last two border lines are the box", func(t *testing.T) {
-		lines, ok := claudeInputRegion("history\n" + sep + "\nboxed\n" + sep + "\nfooter\n")
-		if !ok || len(lines) != 1 || lines[0] != "boxed" {
+		lines, ok := claudeInputRegion("history\n" + sep + "\n❯ boxed\n" + sep + "\nfooter\n")
+		if !ok || len(lines) != 1 || lines[0] != "❯ boxed" {
 			t.Fatalf("region=%+v ok=%v", lines, ok)
 		}
 	})
 	t.Run("a border with surrounding spaces still counts", func(t *testing.T) {
-		lines, ok := claudeInputRegion(sep + "  \nboxed\n\t" + sep + "\n")
-		if !ok || len(lines) != 1 || lines[0] != "boxed" {
+		lines, ok := claudeInputRegion(sep + "  \n❯ boxed\n\t" + sep + "\n")
+		if !ok || len(lines) != 1 || lines[0] != "❯ boxed" {
 			t.Fatalf("region=%+v ok=%v", lines, ok)
 		}
 	})
@@ -137,30 +139,161 @@ func TestClaudeInputRegion(t *testing.T) {
 		}
 	})
 	t.Run("three border lines in the window: the last two bound the box", func(t *testing.T) {
-		lines, ok := claudeInputRegion(sep + "\nhr in history\n" + sep + "\nboxed\n" + sep + "\nfooter\n")
-		if !ok || len(lines) != 1 || lines[0] != "boxed" {
+		lines, ok := claudeInputRegion(sep + "\nhr in history\n" + sep + "\n❯ boxed\n" + sep + "\nfooter\n")
+		if !ok || len(lines) != 1 || lines[0] != "❯ boxed" {
 			t.Fatalf("region=%+v ok=%v", lines, ok)
 		}
 	})
 	t.Run("a mixed line is not a border", func(t *testing.T) {
-		lines, ok := claudeInputRegion(sep + "\n─ x\n" + sep + "\n")
-		if !ok || len(lines) != 1 || lines[0] != "─ x" {
+		lines, ok := claudeInputRegion(sep + "\n❯ \n─ x\n" + sep + "\n")
+		if !ok || len(lines) != 2 || lines[1] != "─ x" {
 			t.Fatalf("region=%+v ok=%v", lines, ok)
 		}
 		if _, ok := claudeInputRegion(sep + "x\n" + sep + "\n"); ok {
 			t.Fatal("a trailing non-'─' rune must not count as a border")
 		}
 	})
-	t.Run("adjacent borders form an empty region", func(t *testing.T) {
-		lines, ok := claudeInputRegion(sep + "\n" + sep + "\nfooter\n")
-		if !ok || len(lines) != 0 {
-			t.Fatalf("region=%+v ok=%v", lines, ok)
+	t.Run("adjacent borders without a composer line form no region", func(t *testing.T) {
+		// An empty region holds no ❯, so the pair is not a box: the
+		// composer guard rejects it and the last 15 lines keep deciding.
+		if _, ok := claudeInputRegion(sep + "\n" + sep + "\nfooter\n"); ok {
+			t.Fatal("a border pair with no composer line must not form a region")
 		}
 	})
 	t.Run("CRLF line endings", func(t *testing.T) {
-		lines, ok := claudeInputRegion("history\r\n" + sep + "\r\nboxed\r\n" + sep + "\r\nfooter\r\n")
-		if !ok || len(lines) != 1 || lines[0] != "boxed" {
+		lines, ok := claudeInputRegion("history\r\n" + sep + "\r\n❯ boxed\r\n" + sep + "\r\nfooter\r\n")
+		if !ok || len(lines) != 1 || lines[0] != "❯ boxed" {
 			t.Fatalf("region=%+v ok=%v", lines, ok)
+		}
+	})
+	t.Run("a '─' pair without the composer inside is not the box (P2: history separators)", func(t *testing.T) {
+		// Two '─' lines in the history (a separator, a table) and the real
+		// composer typed below them, with no real borders: the pair holds no
+		// ❯ and a ❯ sits below its bottom line, so it is not the box.
+		screen := "history table\n" + sep + "\nrow\n" + sep + "\n❯ typed message\n"
+		if _, ok := claudeInputRegion(screen); ok {
+			t.Fatal("a '─' pair without the composer inside must not form a region")
+		}
+	})
+	t.Run("a separator in the history does not displace the real borders", func(t *testing.T) {
+		// One '─' separator above the real box borders: the last two border
+		// lines are still the box borders and the pair holds the empty ❯ box.
+		screen := "history table\n" + sep + "\nold message\n" + sep + "\n❯\n" + sep + "\nfooter\n"
+		lines, ok := claudeInputRegion(screen)
+		if !ok || len(lines) != 1 || lines[0] != "❯" {
+			t.Fatalf("the real borders still bound the box: region=%+v ok=%v", lines, ok)
+		}
+	})
+	t.Run("the typed message right after the ❯ keeps the pair as the box", func(t *testing.T) {
+		// The message is still typed inside the box, right after the ❯: the
+		// region holds it and the pair is still the box.
+		screen := "history\n" + sep + "\n❯ typed message\nmore text\n" + sep + "\nfooter\n"
+		lines, ok := claudeInputRegion(screen)
+		if !ok || len(lines) != 2 || lines[0] != "❯ typed message" || lines[1] != "more text" {
+			t.Fatalf("the typed message stays inside the box: region=%+v ok=%v", lines, ok)
+		}
+	})
+}
+
+// TestSendClaudeComposerBorders is the P2 guard end to end: the '─' pair
+// counts as the claude box only while the composer sits in it — the first
+// non-empty line of the region starts with ❯ and no line below the bottom
+// border does. Otherwise the last-15-lines rule decides, and a message typed
+// below a history '─' pair stays in the box instead of proving delivery.
+func TestSendClaudeComposerBorders(t *testing.T) {
+	_, prompt := stalledID(t)
+	sep := claudeBoxSep
+	pre := sep + "\n❯\n" + sep + "\nfooter\n"
+	// Each run consumes the fixture's four seeded random bytes for the
+	// peer id, so reseed before every run: the id and the prompt stay
+	// deterministic and equal to the rules'.
+	reseed := func(t *testing.T) {
+		oldReader := rand.Reader
+		rand.Reader = bytes.NewReader([]byte{1, 2, 3, 4})
+		t.Cleanup(func() { rand.Reader = oldReader })
+	}
+	stalledRules := func(post, recent string) []fakecli.Rule {
+		return []fakecli.Rule{
+			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 1, Stdout: agentJSONKind("claude", "done", "1")},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 1, Stdout: pre},
+			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 2, Stdout: agentJSONKind("claude", "done", "1")},
+			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 3, Stdout: agentJSONKind("claude", "done", "1")},
+			// The claude transcript-path get: no agent_session, so the
+			// transcript proof is not armed and the screen rules decide.
+			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 4, Stdout: agentJSONKind("claude", "done", "1")},
+			{Argv: []string{"agent", "prompt", "w0test:p0a", prompt, "--wait", "--until", "working", "--until", "blocked", "--until", "idle", "--until", "done", "--timeout", "15000"}, Stderr: stalledPromptErr, Code: 1},
+			// The stalled visible read and the proof window's repeated reads:
+			// the same screen and a stable state until the window laps.
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: post},
+			{Argv: []string{"agent", "get", "w0test:p0a"}, ArgvPrefix: true, Stdout: agentJSONKind("claude", "done", "1")},
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stdout: recent},
+		}
+	}
+	t.Run("history separators with the composer below: the typed message stays in the box and is not sent", func(t *testing.T) {
+		// The review's history-separators scenario: two '─' lines in the
+		// history (a table) and the real composer with the message typed,
+		// below them and with no real borders. The pair is not a box, so
+		// the last 15 lines hold the marker, one Enter goes, and the send
+		// keeps the 15 instead of proving over the screen.
+		post := "history table\n" + sep + "\nrow\n" + sep + "\n❯ " + prompt + "\n"
+		reseed(t)
+		f := newFixture(t, stalledRules(post, prompt+"\n"))
+		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
+		if code != 15 || out != "" {
+			t.Fatalf("the message typed below the history separators must not prove delivery: code=%d out=%q stderr=%q", code, out, stderr)
+		}
+		if !strings.Contains(stderr, "it sits in its input box after one Enter") {
+			t.Fatalf("the 15 is the Enter branch: %q", stderr)
+		}
+		if enters := countSendKeyEnters(t, f); enters != 1 {
+			t.Fatalf("one Enter goes to the box that holds the marker: %d", enters)
+		}
+		if prompts := countPromptCalls(t, f); prompts != 1 {
+			t.Fatalf("the stalled path never resends the text: %d prompts", prompts)
+		}
+	})
+	t.Run("a history separator with the real borders and the empty ❯: the taken message is out of the box", func(t *testing.T) {
+		// One '─' separator in the history above the real box borders; the
+		// message was taken and sits in the history, and the box holds a
+		// bare ❯. The guard keeps the real pair, the marker is out of the
+		// box, and the window proves the arrival over the screen: sent,
+		// no key.
+		post := "history table\n" + sep + "\n" + prompt + "\n" + sep + "\n❯\n" + sep + "\nfooter\n"
+		reseed(t)
+		f := newFixture(t, stalledRules(post, prompt+"\n"))
+		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
+		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
+			t.Fatalf("the taken message out of the box must be sent: code=%d out=%q stderr=%q", code, out, stderr)
+		}
+		if enters := countSendKeyEnters(t, f); enters != 0 {
+			t.Fatalf("no Enter goes to a claude whose box holds a bare ❯: %d", enters)
+		}
+		if prompts := countPromptCalls(t, f); prompts != 1 {
+			t.Fatalf("the stalled path never resends the text: %d prompts", prompts)
+		}
+	})
+	t.Run("the real borders with the message typed right after the ❯: the message is in the box", func(t *testing.T) {
+		// The message is still typed inside the real box, right after the
+		// ❯: the pair is the box, the marker holds in it, and the send
+		// keeps the 15 with one Enter — the screen proof never runs.
+		post := "history table\n" + prompt + "\n" + sep + "\n❯ " + prompt + "\n" + sep + "\nfooter\n"
+		reseed(t)
+		f := newFixture(t, stalledRules(post, "old history without the marker\n"))
+		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
+		if code != 15 || out != "" {
+			t.Fatalf("the message typed in the box must not prove delivery: code=%d out=%q stderr=%q", code, out, stderr)
+		}
+		if !strings.Contains(stderr, "it sits in its input box after one Enter") {
+			t.Fatalf("the 15 is the Enter branch: %q", stderr)
+		}
+		if enters := countSendKeyEnters(t, f); enters != 1 {
+			t.Fatalf("one Enter goes to the box that holds the marker: %d", enters)
+		}
+		if prompts := countPromptCalls(t, f); prompts != 1 {
+			t.Fatalf("the stalled path never resends the text: %d prompts", prompts)
 		}
 	})
 }
