@@ -1374,7 +1374,14 @@ func claudeBoxScope(visible string) ([]string, bool) {
 	}
 	scope := append([]string{}, region...)
 	if bottom >= 0 {
-		scope = append(scope, lines[bottom+1:]...)
+		// Below the box only a line with the full peer header counts: a bare
+		// #<id> in the status footer (a branch like topic/#0a1b2c3d) is not
+		// the typed message.
+		for _, line := range lines[bottom+1:] {
+			if strings.Contains(NormalizeScreen(line), NormalizeScreen("[herdr-soho:peer]")) {
+				scope = append(scope, line)
+			}
+		}
 	}
 	return scope, true
 }

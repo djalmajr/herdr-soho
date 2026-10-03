@@ -522,3 +522,24 @@ func TestClaudeAlternatePromptBelowHistoryPair(t *testing.T) {
 		t.Fatalf("the real rc.14 screen must stay out of the box")
 	}
 }
+
+// TestClaudeFooterBareIDIsNotTyped covers the R-S83c P3: a bare #<id> in the
+// status footer below the box (a branch name) does not make a delivered
+// message read as typed; only the full peer header counts below the box.
+func TestClaudeFooterBareIDIsNotTyped(t *testing.T) {
+	const id = "01020304"
+	border := strings.Repeat("─", 40)
+	screen := strings.Join([]string{
+		"❯ [herdr-soho:peer] #" + id + " Message from another agent",
+		"  > hello",
+		"  [herdr-soho:peer] #" + id + " end of message",
+		"✻ Working… (3s)",
+		border,
+		"❯",
+		border,
+		"  [Opus 5.5] [topic/#" + id + "]",
+	}, "\n") + "\n"
+	if idInInputBox("claude", screen, id) {
+		t.Fatalf("a bare #id in the footer must not count as typed:\n%s", screen)
+	}
+}
