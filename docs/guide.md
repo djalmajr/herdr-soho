@@ -188,11 +188,18 @@ mid-task (most queue it). Never send an amendment with `herdr agent
 prompt` by hand: `wait` would keep watching the old report.
 
 `HERDR_SOHO_NOWRITE=1` is a read-only inspection mode. The optional
-plugin runs `doctor` and `roster` with it: the CLI still inspects the
-focused project, but only the exact `doctor` and `roster` invocations
-run — no extra arguments, so `doctor --fix` cannot write — and the CLI
-never writes to the project (no `.gitignore` entry, no state directory,
-no friction log); every other invocation exits 2 with a message. Without
+plugin's team panel runs its reads with it. Only these invocations run:
+- the exact `doctor` and `roster`, so `doctor --fix` cannot write;
+- the exact `explain`;
+- `friction` with its reading options, but not `friction add`;
+- `collect <agent> [--lines N] [--verify]`;
+- the exact `copies`, but not `copies add`;
+- `gc` without `--yes`.
+
+The CLI then never writes to the project or the state: no `.gitignore`
+entry, no state directory, no friction log and no task-report sync. A
+state directory that does not exist reads as empty. Every other
+invocation exits 2 with a message that lists the accepted ones. Without
 the env, the CLI behaves exactly as before.
 
 ## Finding a session
@@ -225,6 +232,19 @@ clipboard — the first token is the reference, e.g. `local/w12:p1
 missing — for pasting into the chat; `Esc`/`Ctrl-C` close without
 copying. Bind it with a `[[keys.command]]` entry of
 `type = "plugin_action"` and `command = "djalmajr.herdr-soho.pick"`.
+
+The plugin has two more panels:
+- **The team board** (the `board` action) lists every agent on every
+  machine, grouped by machine and workspace, orchestrators first, with
+  its status and current task. It refreshes every 10 s.
+- **The team panel** (the `team` action; `roster` and `doctor` open it
+  too) shows the focused workspace: what the team is doing, its workers
+  and their last reports, the `doctor`, the resource pressure with what
+  `gc` would free, and the friction summary. Its only writes are
+  `release --close` of a worker and `gc --yes`, and each runs only after
+  an on-screen `y`.
+
+The README's plugin section has the keys and the install steps.
 
 ## Peer messages
 

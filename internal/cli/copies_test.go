@@ -1,0 +1,1017 @@
+package cli
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+)
+
+const (
+	agentIdleJSON = `{"result":{"agent":{"agent_status":"idle"}}}`
+	agentGoneJSON = `{"error":{"code":"agent_not_found","message":"gone"}}`
+)
+
+// copiesFixture is a hermetic project: a git repository with a worktree under
+// .worktrees/, a fake HOME, a fake TMPDIR, its own state dir and a fake
+// herdr CLI on a PATH that holds only the fake herdr, the real git and the
+// system directories (never the real herdr).
+type copiesFixture struct {
+	root     string
+	repo     string
+	worktree string
+	home     string
+	tmp      string
+	state    string
+	skill    string
+	env      platform.Env
+	cwd      string
+}
+
+func newCopiesFixture(t *testing.T, agentRules []fakecli.Rule) *copiesFixture {
+	t.Helper()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not available on PATH")
+	}
+	root := t.TempDir()
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(root, "repo")
+	home := filepath.Join(root, "home")
+	tmp := filepath.Join(root, "tmp")
+	state := filepath.Join(root, "state")
+	skill := filepath.Join(root, "skill")
+	for _, dir := range []string{repo, home, tmp, state, skill} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("fixture skill\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(skill, "roles"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(gitPath, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull,
+			"GIT_AUTHOR_NAME=fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid",
+			"GIT_COMMITTER_NAME=fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git(repo, "init", "-q")
+	git(repo, "commit", "-q", "--allow-empty", "-m", "fixture")
+	worktree := filepath.Join(repo, ".worktrees", "wt")
+	git(repo, "worktree", "add", "-q", worktree)
+
+	fakeDir := t.TempDir()
+	if _, err := fakecli.Install(t, fakeDir, "herdr", agentRules); err != nil {
+		t.Fatal(err)
+	}
+	// A PATH with git and without the herdr CLI. On Windows a link named
+	// "git" without .exe is not an executable, and git's own directory holds
+	// no herdr; elsewhere git's directory may hold herdr (Homebrew), so a
+	// link in a directory of its own is used.
+	gitBin := filepath.Dir(gitPath)
+	if runtime.GOOS != "windows" {
+		gitBin = t.TempDir()
+		if err := os.Symlink(gitPath, filepath.Join(gitBin, "git")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := platform.Env{
+		"HOME":                      home,
+		"USERPROFILE":               home,
+		"XDG_CONFIG_HOME":           filepath.Join(root, "conf"),
+		"TMPDIR":                    tmp,
+		"HERDR_ENV":                 "1",
+		"HERDR_WORKSPACE_ID":        "ws",
+		"HERDR_PANE_ID":             "p-worker",
+		"HERDR_SOHO_DIR":            state,
+		"HERDR_SOHO_SKILL_DIR":      skill,
+		"HERDR_SOHO_REGRID":         "off",
+		"HERDR_SOHO_FAKECLI_CONFIG": fakeDir,
+		"PATH":                      strings.Join([]string{fakeDir, gitBin, "/usr/bin", "/bin"}, string(os.PathListSeparator)),
+	}
+	return &copiesFixture{root: root, repo: repo, worktree: worktree, home: home, tmp: tmp, state: state, skill: skill, env: env, cwd: repo}
+}
+
+// run executes argv through Run with the fixture's cwd and swapped stdout/
+// stderr, returning the code and both streams.
+func (f *copiesFixture) run(t *testing.T, env platform.Env, argv ...string) (int, string, string) {
+	t.Helper()
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(f.cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+	oldOut, oldErr := platform.Stdout, platform.Stderr
+	var out, errOut bytes.Buffer
+	platform.Stdout, platform.Stderr = &out, &errOut
+	t.Cleanup(func() { platform.Stdout, platform.Stderr = oldOut, oldErr })
+	code := Run(argv, env)
+	return code, out.String(), errOut.String()
+}
+
+// git runs git with dir as cwd, using an isolated config.
+func (f *copiesFixture) git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not available on PATH")
+	}
+	cmd := exec.Command(gitPath, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull,
+		"GIT_AUTHOR_NAME=fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid",
+		"GIT_COMMITTER_NAME=fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func (f *copiesFixture) stateDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(f.state, "ws")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func (f *copiesFixture) writeRoster(t *testing.T, rows ...string) {
+	t.Helper()
+	dir := f.stateDir(t)
+	content := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\n"
+	for _, row := range rows {
+		content += row + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *copiesFixture) writeCopies(t *testing.T, rows []core.CopyRow) {
+	t.Helper()
+	if err := core.WriteCopies(f.stateDir(t), rows); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *copiesFixture) copiesRows(t *testing.T) []core.CopyRow {
+	t.Helper()
+	rows, err := core.ReadCopies(f.stateDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+func (f *copiesFixture) registryPath() string {
+	return filepath.Join(f.state, "ws", "copies.tsv")
+}
+
+func copiesRosterRow(name, pane string) string {
+	return strings.Join([]string{name, pane, "grok", "implementer", "xai", "1", "/tmp/work", "now", "grok-4.7", "full", "implementer", "build"}, "\t")
+}
+
+func TestMutationCopyRegistersTheCopy(t *testing.T) {
+	f := newMutationCopyFixture(t)
+	skill := filepath.Join(f.root, "skill")
+	if err := os.MkdirAll(filepath.Join(skill, "roles"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("fixture skill\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(f.root, "state")
+	if err := os.MkdirAll(filepath.Join(state, "ws"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "ws", "agents.tsv"), []byte("# roster\n"+releaseRow("worker", "p-worker", "1", "implementer", false, "/tmp/work")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(f.root, "mcopy")
+	overrides := platform.Env{"HERDR_SOHO_DIR": state, "HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HERDR_PANE_ID": "p-worker"}
+	code, out, errOut := runMutationCopyCmd(t, f, f.source, overrides, "--source", f.source, "--dest", dest)
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q; want a silent success with today's stdout", code, out, errOut)
+	}
+	if got := decodedCopy(t, out); got.Copy != dest || got.Source != f.source || got.Files != 3 {
+		t.Fatalf("stdout differs from today: %q", out)
+	}
+	rows, err := core.ReadCopies(filepath.Join(state, "ws"))
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("registry rows=%#v err=%v; want one line", rows, err)
+	}
+	row := rows[0]
+	created, parseErr := time.Parse(copiesTimeLayout, row.Created)
+	if row.Path != dest || row.Owner != "worker" || row.Pane != "p-worker" || row.Source != f.source || row.Origin != "mutation-copy" || parseErr != nil || platform.Now().Sub(created) > time.Minute {
+		t.Fatalf("registry row=%#v created=%q; want the copy owned by the pane's agent", row, row.Created)
+	}
+
+	// Re-registering the same path replaces the line instead of duplicating
+	// it: the roster pane now names a different agent.
+	if err := os.RemoveAll(dest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "ws", "agents.tsv"), []byte("# roster\n"+releaseRow("worker2", "p-worker", "1", "implementer", false, "/tmp/work")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = runMutationCopyCmd(t, f, f.source, overrides, "--source", f.source, "--dest", dest)
+	if code != 0 || errOut != "" {
+		t.Fatalf("second run code=%d out=%q err=%q", code, out, errOut)
+	}
+	rows, err = core.ReadCopies(filepath.Join(state, "ws"))
+	if err != nil || len(rows) != 1 || rows[0].Path != dest || rows[0].Owner != "worker2" {
+		t.Fatalf("registry rows=%#v err=%v; want the same path with the new owner, no duplicate", rows, err)
+	}
+}
+
+func TestMutationCopyOutsideHerdrKeepsTodayOutput(t *testing.T) {
+	f := newMutationCopyFixture(t)
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not available on PATH")
+	}
+	// A PATH with git and without the herdr CLI. On Windows a link named
+	// "git" without .exe is not an executable, and git's own directory holds
+	// no herdr; elsewhere git's directory may hold herdr (Homebrew), so a
+	// link in a directory of its own is used.
+	gitBin := filepath.Dir(gitPath)
+	if runtime.GOOS != "windows" {
+		gitBin = t.TempDir()
+		if err := os.Symlink(gitPath, filepath.Join(gitBin, "git")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := filepath.Join(f.root, "state")
+	skill := filepath.Join(f.root, "skill")
+	if err := os.MkdirAll(filepath.Join(skill, "roles"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("fixture skill\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(f.root, "mcopy")
+	// No HERDR_WORKSPACE_ID and a PATH without the herdr CLI: outside Herdr.
+	overrides := platform.Env{"PATH": gitBin, "HERDR_SOHO_DIR": state, "HERDR_SOHO_SKILL_DIR": skill}
+	code, out, errOut := runMutationCopyCmd(t, f, f.source, overrides, "--source", f.source, "--dest", dest)
+	if code != 0 {
+		t.Fatalf("code=%d err=%q; want 0 outside Herdr", code, errOut)
+	}
+	got := decodedCopy(t, out)
+	if got.Copy != dest || got.Source != f.source || got.Files != 3 {
+		t.Fatalf("stdout differs from today: %q", out)
+	}
+	if !strings.Contains(errOut, "mutation-copy: copy not registered (herdr CLI not found in PATH); remove it yourself when done") {
+		t.Fatalf("stderr=%q; want the not-registered warning", errOut)
+	}
+	if _, err := os.Stat(filepath.Join(state, "ws", "copies.tsv")); !os.IsNotExist(err) {
+		t.Fatalf("the registry was written outside Herdr: %v", err)
+	}
+	if entries, err := os.ReadDir(state); err == nil && len(entries) > 0 {
+		t.Fatalf("the state dir was created outside Herdr: %v", entries)
+	}
+}
+
+func TestCopiesAdd(t *testing.T) {
+	t.Run("registers for the pane's agent, with --agent, and as - without a pane", func(t *testing.T) {
+		f := newCopiesFixture(t, []fakecli.Rule{{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON}})
+		f.writeRoster(t, copiesRosterRow("worker", "p-worker"))
+		src := filepath.Join(f.tmp, "handcopy")
+		if err := os.MkdirAll(src, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		code, out, errOut := f.run(t, f.env, "copies", "add", src)
+		if code != 0 || out != "" || errOut != "" {
+			t.Fatalf("code=%d out=%q err=%q; want a silent success", code, out, errOut)
+		}
+		rows := f.copiesRows(t)
+		if len(rows) != 1 || rows[0].Path != src || rows[0].Owner != "worker" || rows[0].Pane != "p-worker" || rows[0].Source != "-" || rows[0].Origin != "add" {
+			t.Fatalf("registry rows=%#v; want the pane's agent with origin add and source -", rows)
+		}
+		if _, err := time.Parse(copiesTimeLayout, rows[0].Created); err != nil {
+			t.Fatalf("created=%q is not ISO-8601 UTC: %v", rows[0].Created, err)
+		}
+
+		src2 := filepath.Join(f.tmp, "handcopy2")
+		if err := os.MkdirAll(src2, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		code, out, errOut = f.run(t, f.env, "copies", "add", src2, "--agent", "worker")
+		if code != 0 || errOut != "" {
+			t.Fatalf("--agent code=%d out=%q err=%q", code, out, errOut)
+		}
+		rows = f.copiesRows(t)
+		if len(rows) != 2 || rows[1].Owner != "worker" || rows[1].Pane != "p-worker" || rows[1].Origin != "add" {
+			t.Fatalf("registry rows=%#v; want the --agent line with the roster pane", rows)
+		}
+
+		envNoPane := f.env.Clone()
+		delete(envNoPane, "HERDR_PANE_ID")
+		src3 := filepath.Join(f.tmp, "handcopy3")
+		if err := os.MkdirAll(src3, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		code, out, errOut = f.run(t, envNoPane, "copies", "add", src3)
+		if code != 0 {
+			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+		}
+		rows = f.copiesRows(t)
+		if len(rows) != 3 || rows[2].Owner != "-" || rows[2].Pane != "-" {
+			t.Fatalf("registry rows=%#v; want owner and pane - without HERDR_PANE_ID", rows)
+		}
+	})
+
+	t.Run("refuses unsafe paths with exit 2 and writes nothing", func(t *testing.T) {
+		f := newCopiesFixture(t, []fakecli.Rule{})
+		f.writeRoster(t, copiesRosterRow("worker", "p-worker"))
+		inner := filepath.Join(f.repo, "inner")
+		if err := os.MkdirAll(inner, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		target := filepath.Join(f.tmp, "plain")
+		if err := os.MkdirAll(target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		var link string
+		if runtime.GOOS != "windows" {
+			link = filepath.Join(f.tmp, "link")
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+		}
+		otherRepo := filepath.Join(f.tmp, "other-repo")
+		if err := os.MkdirAll(otherRepo, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		f.git(t, otherRepo, "init", "-q")
+		file := filepath.Join(f.tmp, "afile")
+		if err := os.WriteFile(file, []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// The volume of a real path: on Windows "." has none, and a bare
+		// "\\" is not absolute there.
+		rootPath := filepath.VolumeName(f.tmp) + string(filepath.Separator)
+		cases := []struct{ path, wantCause string }{
+			{f.repo, "is the project root or inside it"},
+			{inner, "is the project root or inside it"},
+			{f.worktree, "is the project root or inside it"},
+			{f.home, "is HOME or above it"},
+			{f.root, "is HOME or above it"},
+			{rootPath, "is the filesystem root"},
+			{otherRepo, "contains a .git (another repository or a worktree)"},
+			{filepath.Join(f.tmp, "nope"), "does not exist"},
+			{file, "not an existing directory"},
+			{filepath.Join("tmp", "plain"), "not an absolute path"},
+		}
+		if link != "" {
+			cases = append(cases, struct{ path, wantCause string }{link, "is a symlink"})
+		}
+		for _, c := range cases {
+			code, out, errOut := f.run(t, f.env, "copies", "add", c.path)
+			if code != 2 || !strings.Contains(errOut, "copies add: refusing '"+c.path+"': "+c.wantCause) || out != "" {
+				t.Fatalf("path=%q: code=%d out=%q err=%q; want refusal %q", c.path, code, out, errOut, c.wantCause)
+			}
+		}
+		if _, err := os.Stat(f.registryPath()); !os.IsNotExist(err) {
+			t.Fatalf("a refused add wrote the registry: %v", err)
+		}
+		if _, err := os.Stat(target); err != nil {
+			t.Fatalf("the plain target was touched: %v", err)
+		}
+		// An empty registry lists nothing.
+		code, out, errOut := f.run(t, f.env, "copies")
+		if code != 0 || out != "" || errOut != "" {
+			t.Fatalf("empty list code=%d out=%q err=%q; want nothing", code, out, errOut)
+		}
+	})
+
+	t.Run("an --agent outside the roster exits 3 and writes nothing", func(t *testing.T) {
+		f := newCopiesFixture(t, []fakecli.Rule{})
+		f.writeRoster(t, copiesRosterRow("worker", "p-worker"))
+		src := filepath.Join(f.tmp, "handcopy")
+		if err := os.MkdirAll(src, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		code, out, errOut := f.run(t, f.env, "copies", "add", src, "--agent", "ghost")
+		if code != 3 || !strings.Contains(errOut, "agent 'ghost' is not in the roster") {
+			t.Fatalf("code=%d out=%q err=%q; want exit 3", code, out, errOut)
+		}
+		if _, err := os.Stat(f.registryPath()); !os.IsNotExist(err) {
+			t.Fatalf("a refused --agent wrote the registry: %v", err)
+		}
+	})
+
+	t.Run("wrong usage exits 2", func(t *testing.T) {
+		f := newCopiesFixture(t, []fakecli.Rule{})
+		for _, args := range [][]string{
+			{"copies", "add"},
+			{"copies", "add", "--agent"},
+			{"copies", "add", "--agent", "worker", "--agent", "worker2"},
+			{"copies", "add", "--bogus"},
+			{"copies", "bogus"},
+		} {
+			code, out, errOut := f.run(t, f.env, args...)
+			if code != 2 || !strings.Contains(errOut, copiesUsage) {
+				t.Fatalf("args=%v: code=%d out=%q err=%q; want the usage refusal", args, code, out, errOut)
+			}
+		}
+	})
+}
+
+func TestCopiesShowsTheThreeStates(t *testing.T) {
+	f := newCopiesFixture(t, []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON},
+		{Argv: []string{"agent", "get", "worker2"}, Stderr: agentGoneJSON, Code: 1},
+	})
+	f.writeRoster(t, copiesRosterRow("worker", "p-worker"), copiesRosterRow("worker2", "p-worker2"))
+	owned, orphan, goneDir := filepath.Join(f.tmp, "owned"), filepath.Join(f.tmp, "orphan"), filepath.Join(f.tmp, "gone-dir")
+	missing := filepath.Join(f.tmp, "missing")
+	for _, dir := range []string{owned, orphan, goneDir, missing} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.RemoveAll(missing); err != nil {
+		t.Fatal(err)
+	}
+	age := core.FrictionISO(platform.Now().Add(-3 * time.Hour))
+	f.writeCopies(t, []core.CopyRow{
+		{Path: owned, Owner: "worker", Pane: "p-worker", Created: age, Source: "-", Origin: "add"},
+		{Path: orphan, Owner: "ghost", Pane: "-", Created: age, Source: "-", Origin: "add"},
+		{Path: goneDir, Owner: "worker2", Pane: "p-worker2", Created: age, Source: "-", Origin: "add"},
+		{Path: missing, Owner: "worker", Pane: "p-worker", Created: age, Source: "-", Origin: "add"},
+	})
+	code, out, errOut := f.run(t, f.env, "copies")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	want := strings.Join([]string{
+		owned + "  worker  3h  owned",
+		orphan + "  ghost  3h  orphan",
+		goneDir + "  worker2  3h  orphan",
+		missing + "  worker  3h  missing",
+	}, "\n") + "\n"
+	if out != want {
+		t.Fatalf("stdout=%q; want\n%q", out, want)
+	}
+}
+
+func TestReleaseRemovesTheAgentsCopies(t *testing.T) {
+	releaseRules := []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
+	}
+	now := core.FrictionISO(platform.Now())
+
+	t.Run("removes the agent's copies and only those", func(t *testing.T) {
+		f := newCopiesFixture(t, releaseRules)
+		f.writeRoster(t, copiesRosterRow("worker", "p-worker"), copiesRosterRow("worker2", "p-worker2"))
+		copyA, copyB := filepath.Join(f.tmp, "copy-a"), filepath.Join(f.tmp, "copy-b")
+		for _, dir := range []string{copyA, copyB} {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		f.writeCopies(t, []core.CopyRow{
+			{Path: copyA, Owner: "worker", Pane: "p-worker", Created: now, Source: "-", Origin: "mutation-copy"},
+			{Path: copyB, Owner: "worker2", Pane: "p-worker2", Created: now, Source: "-", Origin: "mutation-copy"},
+		})
+		addReleaseReport(t, filepath.Join(f.state, "ws"), "worker", false)
+		code, out, errOut := f.run(t, f.env, "release", "worker")
+		if code != 0 {
+			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+		}
+		if _, err := os.Stat(copyA); !os.IsNotExist(err) {
+			t.Fatalf("the agent's copy was not removed: %v", err)
+		}
+		if _, err := os.Stat(copyB); err != nil {
+			t.Fatalf("the other agent's copy was removed: %v", err)
+		}
+		rows := f.copiesRows(t)
+		if len(rows) != 1 || rows[0].Path != copyB || rows[0].Owner != "worker2" {
+			t.Fatalf("registry rows=%#v; want only the other agent's line", rows)
+		}
+		if !strings.Contains(out, "removed copy "+copyA+"\n") || !strings.Contains(out, "released worker\n") {
+			t.Fatalf("stdout=%q; want the removed copy line and released", out)
+		}
+		if core.RosterLine(filepath.Join(f.state, "ws"), "worker") != "" || core.RosterLine(filepath.Join(f.state, "ws"), "worker2") == "" {
+			t.Fatalf("the roster was not cleaned as before")
+		}
+	})
+
+	t.Run("--keep-copies keeps them", func(t *testing.T) {
+		f := newCopiesFixture(t, releaseRules)
+		f.writeRoster(t, copiesRosterRow("worker", "p-worker"))
+		copyA := filepath.Join(f.tmp, "copy-a")
+		if err := os.MkdirAll(copyA, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: copyA, Owner: "worker", Pane: "p-worker", Created: now, Source: "-", Origin: "mutation-copy"}})
+		addReleaseReport(t, filepath.Join(f.state, "ws"), "worker", false)
+		code, out, errOut := f.run(t, f.env, "release", "worker", "--keep-copies")
+		if code != 0 {
+			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+		}
+		if _, err := os.Stat(copyA); err != nil {
+			t.Fatalf("the copy was removed despite --keep-copies: %v", err)
+		}
+		rows := f.copiesRows(t)
+		if len(rows) != 1 || rows[0].Path != copyA {
+			t.Fatalf("registry rows=%#v; want the line kept", rows)
+		}
+		if strings.Contains(out, "removed copy") {
+			t.Fatalf("stdout=%q; --keep-copies must not remove anything", out)
+		}
+		if core.RosterLine(filepath.Join(f.state, "ws"), "worker") != "" {
+			t.Fatalf("the roster was not cleaned as before")
+		}
+	})
+
+	t.Run("a copy that fails the check is kept with a warning", func(t *testing.T) {
+		f := newCopiesFixture(t, releaseRules)
+		f.writeRoster(t, copiesRosterRow("worker", "p-worker"))
+		f.writeCopies(t, []core.CopyRow{{Path: f.home, Owner: "worker", Pane: "p-worker", Created: now, Source: "-", Origin: "mutation-copy"}})
+		addReleaseReport(t, filepath.Join(f.state, "ws"), "worker", false)
+		code, out, errOut := f.run(t, f.env, "release", "worker")
+		if code != 0 || !strings.Contains(out, "released worker\n") {
+			t.Fatalf("code=%d out=%q err=%q; the refusal must not change the release", code, out, errOut)
+		}
+		if !strings.Contains(errOut, "release: kept copy "+f.home+" (is HOME or above it)") {
+			t.Fatalf("stderr=%q; want the kept-copy warning", errOut)
+		}
+		if _, err := os.Stat(f.home); err != nil {
+			t.Fatalf("HOME was removed: %v", err)
+		}
+		rows := f.copiesRows(t)
+		if len(rows) != 1 || rows[0].Path != f.home {
+			t.Fatalf("registry rows=%#v; want the line kept", rows)
+		}
+	})
+}
+
+type gcLayout struct {
+	oldOrphan   string
+	youngOrphan string
+	owned       string
+	missing     string
+	unreg       string
+}
+
+// gcFixture seeds the registry with an old orphan, a young orphan, an owned
+// copy and a missing line, plus an unregistered mutation copy below TMPDIR.
+func gcFixture(t *testing.T) (*copiesFixture, gcLayout) {
+	t.Helper()
+	f := newCopiesFixture(t, []fakecli.Rule{{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON}})
+	f.writeRoster(t, copiesRosterRow("worker", "p-worker"))
+	// gc prints the s85 pressure line first, always; fake the measurements
+	// so the goldens stay hermetic (a real machine could print a warning
+	// line instead of the "none" one).
+	oldDisk, oldSwap := platform.DiskFree, platform.SwapUsage
+	platform.DiskFree = func(string) (int64, int64, bool) {
+		return int64(60) * 1024 * 1024 * 1024, int64(100) * 1024 * 1024 * 1024, true
+	}
+	platform.SwapUsage = func(platform.Env) (int64, int64, bool) {
+		return int64(30) * 1024 * 1024 * 1024, int64(100) * 1024 * 1024 * 1024, true
+	}
+	t.Cleanup(func() { platform.DiskFree, platform.SwapUsage = oldDisk, oldSwap })
+	layout := gcLayout{
+		oldOrphan:   filepath.Join(f.tmp, "old-orphan"),
+		youngOrphan: filepath.Join(f.tmp, "young-orphan"),
+		owned:       filepath.Join(f.tmp, "owned"),
+		missing:     filepath.Join(f.tmp, "missing"),
+		unreg:       filepath.Join(f.tmp, "herdr-soho-mutation-abc"),
+	}
+	for _, dir := range []string{layout.oldOrphan, layout.youngOrphan, layout.owned, layout.missing, layout.unreg} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 10 + 15 bytes under the old orphan: the size the output must carry.
+	if err := os.WriteFile(filepath.Join(layout.oldOrphan, "a.txt"), []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.oldOrphan, "b.txt"), []byte("012345678901234"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(layout.missing); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.unreg, "f.txt"), bytes.Repeat([]byte("0"), 40), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	threeHoursAgo := platform.Now().Add(-3 * time.Hour)
+	if err := os.Chtimes(layout.unreg, threeHoursAgo, threeHoursAgo); err != nil {
+		t.Fatal(err)
+	}
+	f.writeCopies(t, []core.CopyRow{
+		{Path: layout.oldOrphan, Owner: "ghost", Pane: "-", Created: core.FrictionISO(threeHoursAgo), Source: "-", Origin: "mutation-copy"},
+		{Path: layout.youngOrphan, Owner: "ghost", Pane: "-", Created: core.FrictionISO(platform.Now().Add(-time.Hour)), Source: "-", Origin: "mutation-copy"},
+		{Path: layout.owned, Owner: "worker", Pane: "p-worker", Created: core.FrictionISO(threeHoursAgo), Source: "-", Origin: "mutation-copy"},
+		{Path: layout.missing, Owner: "worker", Pane: "p-worker", Created: core.FrictionISO(threeHoursAgo), Source: "-", Origin: "mutation-copy"},
+	})
+	return f, layout
+}
+
+func TestGc(t *testing.T) {
+	t.Run("dry-run lists the candidates and changes nothing", func(t *testing.T) {
+		f, l := gcFixture(t)
+		before, err := os.ReadFile(f.registryPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, out, errOut := f.run(t, f.env, "gc")
+		if code != 0 || errOut != "" {
+			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+		}
+		want := strings.Join([]string{
+			"resource pressure: none (disk 60% free, swap 30% used)",
+			"would remove " + l.oldOrphan + "  25 B  ghost  3h",
+			"would remove " + l.missing + "  0 B  worker  3h",
+			"total: 25 B",
+			"run 'herdr-soho gc --yes' to remove them",
+			gcUnregisteredHeader,
+			l.unreg + "  40 B  3h",
+		}, "\n") + "\n"
+		if out != want {
+			t.Fatalf("stdout=%q; want\n%s", out, want)
+		}
+		after, err := os.ReadFile(f.registryPath())
+		if err != nil || string(after) != string(before) {
+			t.Fatalf("the dry-run rewrote the registry:\nbefore %q\nafter  %q", before, after)
+		}
+		for _, path := range []string{filepath.Join(l.oldOrphan, "a.txt"), l.owned, l.unreg} {
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("the dry-run touched %s: %v", path, err)
+			}
+		}
+	})
+
+	t.Run("--yes removes only the old orphan and drops the missing line", func(t *testing.T) {
+		f, l := gcFixture(t)
+		code, out, errOut := f.run(t, f.env, "gc", "--yes")
+		if code != 0 {
+			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+		}
+		want := strings.Join([]string{
+			"resource pressure: none (disk 60% free, swap 30% used)",
+			"removed " + l.oldOrphan + "  25 B",
+			"removed " + l.missing + "  0 B",
+			gcUnregisteredHeader,
+			l.unreg + "  40 B  3h",
+			"freed: 25 B",
+		}, "\n") + "\n"
+		if out != want {
+			t.Fatalf("stdout=%q; want\n%s", out, want)
+		}
+		if _, err := os.Stat(l.oldOrphan); !os.IsNotExist(err) {
+			t.Fatalf("the old orphan was not removed: %v", err)
+		}
+		for _, path := range []string{l.youngOrphan, l.owned, l.unreg} {
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("%s was touched: %v", path, err)
+			}
+		}
+		rows := f.copiesRows(t)
+		if len(rows) != 2 || rows[0].Path != l.youngOrphan || rows[1].Path != l.owned {
+			t.Fatalf("registry rows=%#v; want the young orphan and the owned copy only", rows)
+		}
+	})
+
+	t.Run("unregistered leaves only with --include-unregistered --yes", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlinks need elevation on Windows without developer mode")
+		}
+		f, l := gcFixture(t)
+		// A symlinked mutation copy: listed, and kept by the safety check.
+		target := filepath.Join(f.tmp, "link-target")
+		if err := os.MkdirAll(target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(target, "t.txt"), []byte("0123456789"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(f.tmp, "herdr-soho-mutation-link")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+		old := platform.Now().Add(-3 * time.Hour)
+		if err := os.Chtimes(target, old, old); err != nil {
+			t.Fatal(err)
+		}
+		// --yes without --include-unregistered leaves the unregistered copies.
+		code, out, errOut := f.run(t, f.env, "gc", "--yes")
+		if code != 0 || strings.Contains(out, "removed "+l.unreg) {
+			t.Fatalf("code=%d out=%q err=%q; unregistered must stay", code, out, errOut)
+		}
+		if _, err := os.Stat(l.unreg); err != nil {
+			t.Fatalf("the unregistered copy was removed without --include-unregistered: %v", err)
+		}
+		code, out, errOut = f.run(t, f.env, "gc", "--yes", "--include-unregistered")
+		if code != 0 {
+			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+		}
+		want := strings.Join([]string{
+			"resource pressure: none (disk 60% free, swap 30% used)",
+			gcUnregisteredHeader,
+			"removed " + l.unreg + "  40 B",
+			"kept " + link + " (is a symlink)",
+			"freed: 40 B",
+		}, "\n") + "\n"
+		if out != want {
+			t.Fatalf("stdout=%q; want\n%s", out, want)
+		}
+		if _, err := os.Stat(l.unreg); !os.IsNotExist(err) {
+			t.Fatalf("the unregistered copy was not removed: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(target, "t.txt")); err != nil {
+			t.Fatalf("the symlink target was touched: %v", err)
+		}
+		rows := f.copiesRows(t)
+		if len(rows) != 2 || rows[0].Path != l.youngOrphan || rows[1].Path != l.owned {
+			t.Fatalf("registry rows=%#v; want the young orphan and the owned copy only", rows)
+		}
+	})
+
+	t.Run("--older-than raises the threshold", func(t *testing.T) {
+		f, l := gcFixture(t)
+		code, out, errOut := f.run(t, f.env, "gc", "--older-than", "5")
+		if code != 0 || errOut != "" {
+			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+		}
+		if strings.Contains(out, l.oldOrphan) {
+			t.Fatalf("a 3h old copy is a candidate at --older-than 5:\n%s", out)
+		}
+		if !strings.Contains(out, "would remove "+l.missing+"  0 B  worker  3h") {
+			t.Fatalf("the missing line is a candidate regardless of the threshold:\n%s", out)
+		}
+		if _, err := os.Stat(l.oldOrphan); err != nil {
+			t.Fatalf("the dry-run removed the old orphan: %v", err)
+		}
+	})
+
+	t.Run("wrong usage exits 2", func(t *testing.T) {
+		f, _ := gcFixture(t)
+		for _, c := range []struct {
+			args  []string
+			cause string
+		}{
+			{args: []string{"gc", "--older-than"}, cause: gcUsage},
+			{args: []string{"gc", "--older-than", "x"}, cause: "non-negative integer"},
+			{args: []string{"gc", "--older-than", "-1"}, cause: "non-negative integer"},
+			{args: []string{"gc", "--bogus"}, cause: gcUsage},
+		} {
+			code, out, errOut := f.run(t, f.env, c.args...)
+			if code != 2 || !strings.Contains(errOut, c.cause) {
+				t.Fatalf("args=%v: code=%d out=%q err=%q; want the refusal", c.args, code, out, errOut)
+			}
+		}
+	})
+}
+
+// The review case: a case variant of a protected directory is the same
+// directory on the current macOS volume. Each subtest skips on a file
+// system that distinguishes case.
+func TestCopiesRefuseTheCaseVariantOfTheProtectedDirs(t *testing.T) {
+	old := time.Now().Add(-3 * time.Hour)
+	t.Run("a case variant of the HOME is kept by gc", func(t *testing.T) {
+		f := newCopiesFixture(t, nil)
+		upper := strings.ToUpper(f.home)
+		if _, err := os.Stat(upper); err != nil {
+			t.Skip("case sensitive volume")
+		}
+		if err := os.WriteFile(filepath.Join(f.home, "sentinel"), []byte("protected"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: upper, Owner: "-", Created: core.FrictionISO(old)}})
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if _, err := os.Stat(filepath.Join(f.home, "sentinel")); err != nil {
+			t.Fatalf("the fake HOME was touched: %v (code=%d out=%q stderr=%q)", err, code, out, stderr)
+		}
+		if code != 0 || !strings.Contains(out, "kept "+upper+" (is HOME or above it)") {
+			t.Fatalf("code=%d out=%q; want kept with the HOME refusal", code, out)
+		}
+		if rows := f.copiesRows(t); len(rows) != 1 {
+			t.Fatalf("the line left the registry: %#v", rows)
+		}
+	})
+	t.Run("a case variant of the project root is kept by gc", func(t *testing.T) {
+		f := newCopiesFixture(t, nil)
+		upper := strings.ToUpper(f.repo)
+		if _, err := os.Stat(upper); err != nil {
+			t.Skip("case sensitive volume")
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: upper, Owner: "-", Created: core.FrictionISO(old)}})
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if _, err := os.Stat(filepath.Join(f.repo, ".git")); err != nil {
+			t.Fatalf("the project root was touched: %v (code=%d out=%q stderr=%q)", err, code, out, stderr)
+		}
+		if code != 0 || !strings.Contains(out, "kept "+upper+" (is the project root or inside it)") {
+			t.Fatalf("code=%d out=%q; want kept with the project root refusal", code, out)
+		}
+	})
+	t.Run("a case variant of a path inside the project is kept by gc", func(t *testing.T) {
+		f := newCopiesFixture(t, nil)
+		sub := filepath.Join(f.repo, "sub")
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, "sentinel"), []byte("protected"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		upper := strings.ToUpper(sub)
+		if _, err := os.Stat(upper); err != nil {
+			t.Skip("case sensitive volume")
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: upper, Owner: "-", Created: core.FrictionISO(old)}})
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if _, err := os.Stat(filepath.Join(sub, "sentinel")); err != nil {
+			t.Fatalf("the path inside the project was touched: %v (code=%d out=%q stderr=%q)", err, code, out, stderr)
+		}
+		if code != 0 || !strings.Contains(out, "kept "+upper+" (is the project root or inside it)") {
+			t.Fatalf("code=%d out=%q; want kept with the project root refusal", code, out)
+		}
+	})
+}
+
+// A live lock held for more than the (shortened) timeout: the commands exit
+// 4 with the exact message and remove nothing.
+func TestCopiesCommandsGiveUpOnALiveRegistryLock(t *testing.T) {
+	lockPath := func(f *copiesFixture) string { return filepath.Join(f.state, "ws", "copies.tsv.lock") }
+	heldLock := func(t *testing.T, f *copiesFixture) string {
+		t.Helper()
+		lock := lockPath(f)
+		if err := os.WriteFile(lock, []byte(fmt.Sprintf("%d %s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339))), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := core.CopiesLockTimeout
+		core.CopiesLockTimeout = 300 * time.Millisecond
+		t.Cleanup(func() { core.CopiesLockTimeout = old })
+		return lock
+	}
+	t.Run("copies add exits 4 without registering", func(t *testing.T) {
+		f := newCopiesFixture(t, nil)
+		_ = f.stateDir(t)
+		lock := heldLock(t, f)
+		dest := filepath.Join(f.tmp, "copy-locked")
+		if err := os.MkdirAll(dest, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		code, out, stderr := f.run(t, f.env, "copies", "add", dest)
+		if code != 4 {
+			t.Fatalf("code=%d out=%q stderr=%q; want 4", code, out, stderr)
+		}
+		want := "herdr-soho: copies: registry is locked by another herdr-soho (" + lock + ")\n"
+		if stderr != want {
+			t.Fatalf("stderr=%q; want %q", stderr, want)
+		}
+		if rows := f.copiesRows(t); len(rows) != 0 {
+			t.Fatalf("rows=%#v; want nothing registered", rows)
+		}
+	})
+	t.Run("release still releases, keeps the copies and warns", func(t *testing.T) {
+		f := newCopiesFixture(t, []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON},
+			{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+			{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
+		})
+		f.writeRoster(t, copiesRosterRow("worker", "p-worker"))
+		copy := filepath.Join(f.tmp, "copy-worker")
+		if err := os.MkdirAll(copy, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: copy, Owner: "worker", Pane: "p-worker", Created: core.FrictionISO(platform.Now()), Source: "-", Origin: "mutation-copy"}})
+		addReleaseReport(t, filepath.Join(f.state, "ws"), "worker", false)
+		_ = heldLock(t, f)
+		code, out, stderr := f.run(t, f.env, "release", "worker")
+		if code != 0 {
+			t.Fatalf("code=%d out=%q stderr=%q; want 0", code, out, stderr)
+		}
+		if !strings.Contains(out, "released worker\n") || !strings.Contains(stderr, "the copies of 'worker' were not removed") {
+			t.Fatalf("out=%q stderr=%q; want released and the warning", out, stderr)
+		}
+		if core.RosterLine(filepath.Join(f.state, "ws"), "worker") != "" {
+			t.Fatalf("the roster still lists worker")
+		}
+		if _, err := os.Stat(copy); err != nil {
+			t.Fatalf("the copy was removed despite the lock: %v", err)
+		}
+		if rows := f.copiesRows(t); len(rows) != 1 || rows[0].Owner != "worker" {
+			t.Fatalf("rows=%#v; want the line kept for gc", rows)
+		}
+	})
+	t.Run("gc --yes exits 4 and removes nothing", func(t *testing.T) {
+		f := newCopiesFixture(t, nil)
+		copy := filepath.Join(f.tmp, "copy-orphan")
+		if err := os.MkdirAll(copy, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: copy, Owner: "-", Created: core.FrictionISO(time.Now().Add(-3 * time.Hour))}})
+		lock := heldLock(t, f)
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if code != 4 {
+			t.Fatalf("code=%d out=%q stderr=%q; want 4", code, out, stderr)
+		}
+		want := "herdr-soho: copies: registry is locked by another herdr-soho (" + lock + ")\n"
+		if stderr != want {
+			t.Fatalf("stderr=%q; want %q", stderr, want)
+		}
+		if _, err := os.Stat(copy); err != nil {
+			t.Fatalf("the copy was removed despite the lock: %v", err)
+		}
+		if rows := f.copiesRows(t); len(rows) != 1 {
+			t.Fatalf("rows=%#v; want the line to remain", rows)
+		}
+	})
+}
+
+// The removal stays bound to the directory the check validated: a parent
+// swapped for a protected tree between the check and the removal is refused
+// (the copy stays "changed after the check"), and without the swap the
+// removal works.
+func TestGcRemovalStaysBoundToTheValidatedParent(t *testing.T) {
+	newCase := func(t *testing.T) (*copiesFixture, string) {
+		t.Helper()
+		f := newCopiesFixture(t, nil)
+		copy := filepath.Join(f.tmp, "copy")
+		if err := os.MkdirAll(copy, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		protect := filepath.Join(f.root, "protected")
+		if err := os.MkdirAll(filepath.Join(protect, "copy"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(protect, "copy", "sentinel"), []byte("protected"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f.writeCopies(t, []core.CopyRow{{Path: copy, Owner: "-", Created: core.FrictionISO(time.Now().Add(-3 * time.Hour))}})
+		return f, copy
+	}
+	t.Run("a parent swapped after the check keeps the target intact", func(t *testing.T) {
+		f, copy := newCase(t)
+		tmpHidden := filepath.Join(f.root, "tmp-hidden")
+		protect := filepath.Join(f.root, "protected")
+		t.Cleanup(func() { removeCopyHook = nil })
+		// The hook runs between the decision-7 check and the removal: the
+		// parent is swapped for the protected tree, which holds a "copy"
+		// directory of its own.
+		removeCopyHook = func(path string) {
+			if err := os.Rename(f.tmp, tmpHidden); err != nil {
+				t.Error(err)
+			}
+			if err := os.Rename(protect, f.tmp); err != nil {
+				t.Error(err)
+			}
+		}
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if _, err := os.Stat(filepath.Join(f.tmp, "copy", "sentinel")); err != nil {
+			t.Fatalf("the protected tree was touched: %v (code=%d out=%q stderr=%q)", err, code, out, stderr)
+		}
+		if _, err := os.Stat(filepath.Join(tmpHidden, "copy")); err != nil {
+			t.Fatalf("the original copy was touched: %v", err)
+		}
+		if code != 0 || !strings.Contains(out, "kept "+copy+" (changed after the check)") {
+			t.Fatalf("code=%d out=%q; want kept (changed after the check)", code, out)
+		}
+		if rows := f.copiesRows(t); len(rows) != 1 {
+			t.Fatalf("rows=%#v; want the line to remain", rows)
+		}
+	})
+	t.Run("without the swap the removal works", func(t *testing.T) {
+		f, copy := newCase(t)
+		code, out, stderr := f.run(t, f.env, "gc", "--yes")
+		if code != 0 || !strings.Contains(out, "removed "+copy) {
+			t.Fatalf("code=%d out=%q stderr=%q; want removed", code, out, stderr)
+		}
+		if _, err := os.Stat(copy); !os.IsNotExist(err) {
+			t.Fatalf("the copy still exists (stat err=%v)", err)
+		}
+		if rows := f.copiesRows(t); len(rows) != 0 {
+			t.Fatalf("rows=%#v; want the line gone", rows)
+		}
+	})
+}

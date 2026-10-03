@@ -38,6 +38,7 @@ var ConfigScalarKeys = []string{
 	"prompt_check_seconds", "prompt_settle_seconds", "stuck_warn_minutes", "context_warn_percent", "state_dir",
 	"report_language", "notify", "feedback", "feedback_repo", "feedback_dir", "feedback_to",
 	"setup_target", "inbound", "metrics",
+	"pressure_disk_free_percent", "pressure_swap_percent",
 }
 
 var KnownKinds = []string{"claude", "codex", "grok", "agy", "gemini", "cursor", "pi", "opencode"}
@@ -179,7 +180,7 @@ func ConfigValueOk(key, value string, env platform.Env, cwd string) bool {
 	switch {
 	case key == "approvals" || strings.HasPrefix(key, "lane.") && strings.HasSuffix(key, ".approvals"):
 		return value == "ask" || value == "edits" || value == "full"
-	case key == "max_workers" || key == "provider_retries" || key == "provider_retry_delay" || key == "prompt_check_seconds" || key == "prompt_settle_seconds" || key == "stuck_warn_minutes":
+	case key == "max_workers" || key == "provider_retries" || key == "provider_retry_delay" || key == "prompt_check_seconds" || key == "prompt_settle_seconds" || key == "stuck_warn_minutes" || key == "pressure_disk_free_percent" || key == "pressure_swap_percent":
 		return decimalRE.MatchString(value)
 	case key == "multi_role" || key == "reuse_workers" || key == "lanes":
 		return value == "on" || value == "off"

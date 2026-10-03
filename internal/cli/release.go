@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,13 +19,15 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 		platform.Die("agent: Parameter not set", 1)
 	}
 	agent := argv[0]
-	closePane, force := false, false
+	closePane, force, keepCopies := false, false, false
 	for _, arg := range argv[1:] {
 		switch arg {
 		case "--close":
 			closePane = true
 		case "--force":
 			force = true
+		case "--keep-copies":
+			keepCopies = true
 		default:
 			core.DieFriction("release: unknown option "+arg, 2, frictionLogPath, "release")
 		}
@@ -76,6 +79,7 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 	}
 
 	core.RosterRemove(sd, agent)
+	releaseCopies(sd, agent, keepCopies, env, cwd)
 	_ = os.Remove(core.LastReportPath(sd, agent))
 	_ = os.Remove(filepath.Join(sd, "task-"+agent))
 	waitDir := filepath.Join(sd, "wait")
@@ -190,4 +194,58 @@ func reportEmpty(report string) bool {
 	}
 	info, err := os.Stat(report)
 	return err != nil || info.Size() == 0
+}
+
+// releaseCopies removes the released agent's registered copies at the same
+// point the roster is cleaned. A copy that fails the decision-7 check or
+// that cannot be removed keeps its registry line, with a warning; the
+// release's messages, order and exit code never change. With keepCopies it
+// leaves every line: the copies become orphans for gc. The lock gates the
+// destructive phase and covers the registry re-read and re-write, not the
+// removals. The roster is already cleaned when this runs, so a registry held
+// by another herdr-soho never fails the release: the copies stay registered,
+// with a warning, and become orphans for gc.
+func releaseCopies(sd, agent string, keepCopies bool, env platform.Env, cwd string) {
+	if keepCopies {
+		return
+	}
+	rows, err := core.ReadCopies(sd)
+	if err != nil {
+		_, _ = fmt.Fprintf(platform.Stderr, "release: kept copies registry (%v)\n", err)
+		return
+	}
+	if unlock, lockErr := core.LockCopies(sd); lockErr != nil {
+		core.Warn(fmt.Sprintf("release: the copies of '%s' were not removed (%v); run 'herdr-soho gc' later", agent, lockErr), frictionLogPath, "release")
+		return
+	} else {
+		unlock()
+	}
+	removed := map[string]bool{}
+	for _, row := range rows {
+		if row.Owner != agent {
+			continue
+		}
+		resolved, parentInfo, cause := checkedCopy(row.Path, env, cwd)
+		if cause != "" {
+			_, _ = fmt.Fprintf(platform.Stderr, "release: kept copy %s (%s)\n", row.Path, cause)
+			continue
+		}
+		if err := removeCopy(resolved, parentInfo); err != nil {
+			if errors.Is(err, errCopyChanged) {
+				_, _ = fmt.Fprintf(platform.Stderr, "release: kept copy %s (changed after the check)\n", row.Path)
+			} else {
+				_, _ = fmt.Fprintf(platform.Stderr, "release: kept copy %s (%v)\n", row.Path, err)
+			}
+			continue
+		}
+		removed[row.Path] = true
+		_, _ = fmt.Fprintf(platform.Stdout, "removed copy %s\n", row.Path)
+	}
+	if len(removed) == 0 {
+		return
+	}
+	if err := core.DropCopiesLines(sd, removed); err != nil {
+		// The removed copies' lines read as missing and gc drops them.
+		_, _ = fmt.Fprintf(platform.Stderr, "release: could not update the copy registry (%v); 'herdr-soho gc' drops the removed lines\n", err)
+	}
 }

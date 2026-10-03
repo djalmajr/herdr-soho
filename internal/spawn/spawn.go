@@ -448,6 +448,9 @@ func parseArgs(argv []string, cwd string) spawnOptions {
 }
 
 func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
+	// Machine under pressure: warn before opening more work (stderr only;
+	// the spawn proceeds as usual).
+	core.PressureWarn(ctx, env, cwd)
 	o := parseArgs(argv, cwd)
 	if o.name != "" && !agentNameRE.MatchString(o.name) {
 		core.DieFriction(fmt.Sprintf("invalid agent name '%s' (must match [a-z][a-z0-9_-]{0,31})", o.name), 2, "", "")

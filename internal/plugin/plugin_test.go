@@ -3,9 +3,7 @@ package plugin_test
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -53,6 +51,7 @@ func installBridgeFakes(t *testing.T, paneJSON string, paneCode int, cliCode int
 	herdr, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{
 		{Argv: []string{"pane", "get", "pane-a"}, Stdout: paneJSON, Code: paneCode},
 		{Argv: plugin.PickerArguments(), Stdout: "opened\n"},
+		{Argv: []string{"plugin", "pane", "open"}, ArgvPrefix: true, Stdout: "opened\n"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -72,60 +71,57 @@ func installBridgeFakes(t *testing.T, paneJSON string, paneCode int, cliCode int
 }
 
 func TestBridgeReadOnlyAndFocusedTarget(t *testing.T) {
-	// JS: "doctor: valid context invokes the CLI in the pane cwd with the context ids"
-	// Mutation captured: removing NOWRITE or using the shell cwd changes the captured child invocation.
-	env, cliBin, cwd, _ := installBridgeFakes(t, "__default__", 0, 0, "doctor-ok\n", "")
-	cwdMarker := filepath.Join(filepath.Dir(cliBin), "child-cwd.txt")
-	env["HERDR_SOHO_PLUGIN_CWD_MARKER"] = cwdMarker
-	r, err := plugin.Bridge("doctor", env, platform.Current(), cliBin)
-	if err != nil || r.Code != 0 || !strings.Contains(r.Out, "target workspace=ws-a pane=pane-a cwd="+cwd) || !strings.Contains(r.Out, "doctor-ok") {
-		t.Fatalf("bridge: result=%+v err=%v", r, err)
+	// The read-only actions now open the team panel: the bridge validates the
+	// focused target (context + `herdr pane get`) and then runs `plugin pane
+	// open` - it no longer runs the CLI with its output going to the log.
+	env, cliBin, _, _ := installBridgeFakes(t, "__default__", 0, 0, "unused\n", "")
+	for _, action := range []string{"team", "roster", "doctor"} {
+		r, err := plugin.Bridge(action, env, platform.Current(), cliBin)
+		if err != nil || r.Code != 0 || !strings.Contains(r.Out, "target workspace=ws-a pane=pane-a") || !strings.Contains(r.Out, "opened") {
+			t.Fatalf("bridge %s: result=%+v err=%v", action, r, err)
+		}
 	}
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(cliBin), "cli.json"))
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("CLI calls=%#v err=%v", calls, err)
-	}
-	if calls[0].Env["HERDR_SOHO_NOWRITE"] != "1" || calls[0].Env["HERDR_WORKSPACE_ID"] != "ws-a" || calls[0].Env["HERDR_PANE_ID"] != "pane-a" || calls[0].Env["HERDR_TAB_ID"] != "tab-a" {
-		t.Fatalf("child env=%#v", calls[0].Env)
-	}
-	if !strings.HasPrefix(calls[0].Env["PATH"], filepath.Dir(env.Get("HERDR_BIN_PATH"))+string(os.PathListSeparator)) {
-		t.Fatalf("child PATH does not start with the Herdr directory: %q", calls[0].Env["PATH"])
-	}
-	childCwd, err := os.ReadFile(cwdMarker)
-	resolvedCwd, _ := filepath.EvalSymlinks(cwd)
-	if err != nil || string(childCwd) != resolvedCwd {
-		t.Fatalf("child cwd=%q want %q err=%v", childCwd, cwd, err)
+	// The old path is gone: the CLI fake was never invoked for any of them.
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(cliBin), "cli.calls.jsonl")); !os.IsNotExist(statErr) {
+		t.Fatalf("CLI invoked for a read-only action: %v", statErr)
 	}
 	herdrCalls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(cliBin), "herdr.json"))
-	if err != nil || len(herdrCalls) != 1 || !reflect.DeepEqual(herdrCalls[0].Argv, []string{"pane", "get", "pane-a"}) {
+	if err != nil || len(herdrCalls) != 6 {
 		t.Fatalf("Herdr calls=%#v err=%v", herdrCalls, err)
+	}
+	for i, action := range []string{"team", "roster", "doctor"} {
+		if !reflect.DeepEqual(herdrCalls[i*2].Argv, []string{"pane", "get", "pane-a"}) {
+			t.Fatalf("%s pane get argv=%#v", action, herdrCalls[i*2].Argv)
+		}
+		want := plugin.TeamArguments()
+		if action == "doctor" {
+			want = plugin.TeamDoctorArguments()
+		}
+		if !reflect.DeepEqual(herdrCalls[i*2+1].Argv, want) {
+			t.Fatalf("%s pane open argv=%#v want %#v", action, herdrCalls[i*2+1].Argv, want)
+		}
 	}
 }
 
-func TestBridgeRunsHerdrAndSkillExecutablesOutsidePath(t *testing.T) {
-	// Mutation captured: replacing either exact-path call with PATH resolution can select the decoy.
-	env, cliBin, _, _ := installBridgeFakes(t, "__default__", 0, 0, "exact-skill\n", "")
+func TestBridgePaneOpenUsesExactHerdrBinary(t *testing.T) {
+	// Mutation captured: resolving the herdr binary through PATH instead of
+	// HERDR_BIN_PATH selects the decoy instead of the exact fake.
+	env, _, _, _ := installBridgeFakes(t, "__default__", 0, 0, "", "")
 	pathDir := t.TempDir()
-	for _, name := range []string{"herdr", filepath.Base(cliBin)} {
-		if _, err := fakecli.Install(t, pathDir, name, []fakecli.Rule{{AnyArgs: true, Stdout: "decoy\n"}}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := fakecli.Install(t, pathDir, "herdr", []fakecli.Rule{{AnyArgs: true, Stdout: "decoy\n"}}); err != nil {
+		t.Fatal(err)
 	}
 	env["PATH"] = pathDir
-	result, err := plugin.Bridge("doctor", env, platform.Current(), cliBin)
-	if err != nil || result.Code != 0 || !strings.Contains(result.Out, "exact-skill\n") || strings.Contains(result.Out, "decoy\n") {
-		t.Fatalf("bridge exact path result=%+v err=%v", result, err)
+	result, err := plugin.Bridge("roster", env, platform.Current(), "")
+	if err != nil || result.Code != 0 || strings.Contains(result.Out, "decoy\n") {
+		t.Fatalf("bridge pane open result=%+v err=%v", result, err)
 	}
 	herdrCalls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(env.Get("HERDR_BIN_PATH")), "herdr.json"))
-	if err != nil || len(herdrCalls) != 1 || !reflect.DeepEqual(herdrCalls[0].Argv, []string{"pane", "get", "pane-a"}) {
+	if err != nil || len(herdrCalls) != 2 || !reflect.DeepEqual(herdrCalls[1].Argv, plugin.TeamArguments()) {
 		t.Fatalf("HERDR_BIN_PATH call log=%#v err=%v", herdrCalls, err)
 	}
-	cliCalls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(cliBin), "cli.json"))
-	if err != nil || len(cliCalls) != 1 || !reflect.DeepEqual(cliCalls[0].Argv, []string{"doctor"}) {
-		t.Fatalf("exact skill call log=%#v err=%v", cliCalls, err)
-	}
-	if !filepath.IsAbs(env.Get("HERDR_BIN_PATH")) || !filepath.IsAbs(cliBin) || strings.HasPrefix(env.Get("HERDR_BIN_PATH"), pathDir) || strings.HasPrefix(cliBin, pathDir) {
-		t.Fatalf("fixtures are not separate from PATH: Herdr=%q CLI=%q PATH=%q", env.Get("HERDR_BIN_PATH"), cliBin, pathDir)
+	if !filepath.IsAbs(env.Get("HERDR_BIN_PATH")) || strings.HasPrefix(env.Get("HERDR_BIN_PATH"), pathDir) {
+		t.Fatalf("fixture is not separate from PATH: Herdr=%q PATH=%q", env.Get("HERDR_BIN_PATH"), pathDir)
 	}
 }
 
@@ -298,140 +294,5 @@ func TestClipboardDarwinUsesInputAndFallbackBytes(t *testing.T) {
 	calls, err := fakecli.ReadCallsForConfig(filepath.Join(dir, "pbcopy.json"))
 	if err != nil || len(calls) != 1 || calls[0].Stdin != "hello clip" {
 		t.Fatalf("clipboard calls=%#v err=%v", calls, err)
-	}
-}
-
-func TestBridgeMatchesJSReferenceWithFakeHerdr(t *testing.T) {
-	// JS: "read-only bridge: context validation, workspace guard, Herdr failure, and action dispatch"
-	// Mutation captured: any divergent precondition or action code changes the shared black-box result.
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("Node.js is unavailable for Go/JS differential")
-	}
-	bridgeFile, err := filepath.Abs(filepath.Join("..", "..", "plugin", "bridge.mjs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	bridgeImport, _ := json.Marshal(filepath.ToSlash(bridgeFile))
-	driver := filepath.Join(t.TempDir(), "bridge-diff.mjs")
-	script := fmt.Sprintf(`import { pathToFileURL } from 'node:url';
-const { run } = await import(pathToFileURL(%s).href);
-const result = (() => { try { return run(process.env.BRIDGE_ACTION, { env: process.env, cliScript: process.env.CLI_SCRIPT }); }
-		catch (e) { return { code: e.code, out: "", err: "herdr-soho plugin: " + e.message + "\n" }; } })();
-process.stdout.write(JSON.stringify(result));
-`, bridgeImport)
-	if err = os.WriteFile(driver, []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	type diffCase struct {
-		name      string
-		action    string
-		context   string
-		paneWs    string
-		paneCode  int
-		paneError string
-		cliCode   int
-		cliOut    string
-		cliErr    string
-	}
-	for _, tc := range []diffCase{
-		{name: "valid context", action: "doctor", context: `{"workspace_id":"ws-a","tab_id":"tab-a","focused_pane_id":"pane-a"}`, paneWs: "ws-a", cliOut: "doctor-result\n"},
-		{name: "malformed context", action: "doctor", context: `{"workspace_id":"ws-a",`, paneWs: "ws-a"},
-		{name: "workspace divergence", action: "doctor", context: `{"workspace_id":"ws-a","focused_pane_id":"pane-a"}`, paneWs: "ws-b"},
-		{name: "pane get failure", action: "doctor", context: `{"workspace_id":"ws-a","focused_pane_id":"pane-a"}`, paneWs: "ws-a", paneCode: 7, paneError: "pane unavailable"},
-		{name: "unknown action", action: "dispatch", context: `{"workspace_id":"ws-a","focused_pane_id":"pane-a"}`, paneWs: "ws-a"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			cwd := t.TempDir()
-			paneReply, _ := json.Marshal(map[string]any{"result": map[string]any{"pane": map[string]any{"workspace_id": tc.paneWs, "cwd": cwd}}})
-			herdr, installErr := fakecli.InstallWithOptions(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"pane", "get", "pane-a"}, Stdout: string(paneReply), Stderr: tc.paneError, Code: tc.paneCode}}, fakecli.InstallOptions{CaptureEnv: []string{"HERDR_BIN_PATH", "HERDR_PLUGIN_CONTEXT_JSON"}})
-			if installErr != nil {
-				t.Fatal(installErr)
-			}
-			cliBin, installErr := fakecli.InstallWithOptions(t, dir, "cli", []fakecli.Rule{{Argv: []string{tc.action}, Stdout: tc.cliOut, Stderr: tc.cliErr, Code: tc.cliCode}}, fakecli.InstallOptions{CaptureEnv: []string{"HERDR_SOHO_NOWRITE", "HERDR_WORKSPACE_ID", "HERDR_PANE_ID", "HERDR_TAB_ID", "PATH"}})
-			if installErr != nil {
-				t.Fatal(installErr)
-			}
-			cliScript := filepath.Join(dir, "cli-reference.mjs")
-			marker := filepath.Join(dir, "js-cli.json")
-			jsCLI := fmt.Sprintf(`import fs from 'node:fs';
-fs.writeFileSync(%q, JSON.stringify({cwd:process.cwd(), argv:process.argv.slice(2), env:{HERDR_SOHO_NOWRITE:process.env.HERDR_SOHO_NOWRITE,HERDR_WORKSPACE_ID:process.env.HERDR_WORKSPACE_ID,HERDR_PANE_ID:process.env.HERDR_PANE_ID,HERDR_TAB_ID:process.env.HERDR_TAB_ID,PATH_FIRST:process.env.PATH.split(process.platform === 'win32' ? ';' : ':')[0]}}));
-process.stdout.write(%q); process.stderr.write(%q); process.exit(%d);
-`, marker, tc.cliOut, tc.cliErr, tc.cliCode)
-			if writeErr := os.WriteFile(cliScript, []byte(jsCLI), 0o600); writeErr != nil {
-				t.Fatal(writeErr)
-			}
-			env := envWithFake(t, dir, map[string]string{"HERDR_BIN_PATH": herdr, "HERDR_PLUGIN_CONTEXT_JSON": tc.context, "CLI_SCRIPT": cliScript, "BRIDGE_ACTION": tc.action, "HERDR_WORKSPACE_ID": "shell-ws", "HERDR_TAB_ID": "shell-tab", "HERDR_PANE_ID": "shell-pane"})
-			command := exec.Command(node, driver)
-			command.Env = env.List()
-			jsOut, jsErr := command.CombinedOutput()
-			if jsErr != nil {
-				t.Fatalf("JS reference failed: %v output=%s", jsErr, jsOut)
-			}
-			var jsResult plugin.Result
-			var jsPayload struct {
-				Code int    `json:"code"`
-				Out  string `json:"out"`
-				Err  string `json:"err"`
-			}
-			if err := json.Unmarshal(jsOut, &jsPayload); err != nil {
-				t.Fatalf("JS result %q: %v", jsOut, err)
-			}
-			goResult, goErr := plugin.Bridge(tc.action, env, platform.Current(), cliBin)
-			if goErr != nil {
-				bridgeErr, ok := goErr.(*plugin.BridgeError)
-				if !ok {
-					t.Fatal(goErr)
-				}
-				jsResult = plugin.Result{Code: jsPayload.Code, Out: jsPayload.Out, Err: jsPayload.Err}
-				goResult = plugin.Result{Code: bridgeErr.Code, Err: "herdr-soho plugin: " + bridgeErr.Message + "\n"}
-			} else {
-				jsResult = plugin.Result{Code: jsPayload.Code, Out: jsPayload.Out, Err: jsPayload.Err}
-			}
-			if tc.name == "valid context" || tc.name == "workspace divergence" || tc.name == "pane get failure" {
-				herdrCalls, readErr := fakecli.ReadCallsForConfig(filepath.Join(dir, "herdr.json"))
-				if readErr != nil {
-					t.Fatal(readErr)
-				}
-				calls := make([][]string, len(herdrCalls))
-				for i, call := range herdrCalls {
-					calls[i] = call.Argv
-				}
-				t.Logf("stdout=%q stderr=%q code=%d herdr_calls=%#v", jsResult.Out, jsResult.Err, jsResult.Code, calls)
-			} else {
-				t.Logf("stdout=%q stderr=%q code=%d herdr_calls=none", jsResult.Out, jsResult.Err, jsResult.Code)
-			}
-			if !reflect.DeepEqual(goResult, jsResult) {
-				t.Fatalf("Go=%+v JS=%+v", goResult, jsResult)
-			}
-			if tc.name == "valid context" {
-				jsChild, readErr := os.ReadFile(marker)
-				if readErr != nil {
-					t.Fatal(readErr)
-				}
-				var jsEnv struct {
-					Cwd string            `json:"cwd"`
-					Env map[string]string `json:"env"`
-				}
-				resolvedCwd, _ := filepath.EvalSymlinks(cwd)
-				if err := json.Unmarshal(jsChild, &jsEnv); err != nil || jsEnv.Cwd != resolvedCwd || jsEnv.Env["HERDR_SOHO_NOWRITE"] != "1" || jsEnv.Env["PATH_FIRST"] != filepath.Dir(herdr) {
-					t.Fatalf("JS child cwd/env=%s err=%v", jsChild, err)
-				}
-				t.Logf("JS CLI child cwd=%q env=%v", jsEnv.Cwd, jsEnv.Env)
-				goCalls, readErr := fakecli.ReadCallsForConfig(filepath.Join(dir, "cli.json"))
-				if readErr != nil || len(goCalls) != 1 || goCalls[0].Env["HERDR_SOHO_NOWRITE"] != "1" || !strings.HasPrefix(goCalls[0].Env["PATH"], filepath.Dir(herdr)+string(os.PathListSeparator)) {
-					t.Fatalf("Go child env/calls=%#v err=%v", goCalls, readErr)
-				}
-				goEnv := map[string]string{
-					"HERDR_PANE_ID":      goCalls[0].Env["HERDR_PANE_ID"],
-					"HERDR_SOHO_NOWRITE": goCalls[0].Env["HERDR_SOHO_NOWRITE"],
-					"HERDR_TAB_ID":       goCalls[0].Env["HERDR_TAB_ID"],
-					"HERDR_WORKSPACE_ID": goCalls[0].Env["HERDR_WORKSPACE_ID"],
-					"PATH_FIRST":         strings.Split(goCalls[0].Env["PATH"], string(os.PathListSeparator))[0],
-				}
-				t.Logf("Go CLI child env=%v", goEnv)
-			}
-		})
 	}
 }

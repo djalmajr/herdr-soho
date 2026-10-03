@@ -14,11 +14,13 @@ The repository contains:
 - [`skills/herdr-soho/`](skills/herdr-soho/) — the agent skill, roles,
   templates, dependency-free Node/Bun CLI, and tests.
 - [`plugin/`](plugin/) — an optional local Herdr plugin that exposes
-  workspace-scoped, read-only actions (`doctor`, `roster`) through the same
-  CLI, plus a session picker (`pick`) that copies a session reference to
-  the clipboard. Its actions inspect the focused project and never write
-  to it (they run the CLI with `HERDR_SOHO_NOWRITE=1`: no `.gitignore`
-  entry, no state directory).
+  workspace-scoped actions (`doctor`, `roster`, `team`) through the same
+  CLI, a session picker (`pick`) that copies a session reference to the
+  clipboard, and a team board (`board`). The read-only actions open the
+  team panel, which inspects the focused project with the CLI running in
+  `HERDR_SOHO_NOWRITE=1`; only the panel's `x` and `g` confirmations run a
+  write (a release or `gc --yes`), never without the on-screen
+  confirmation.
 - [`docs/guide.md`](docs/guide.md) — usage and configuration guide.
 
 ## Install the skill
@@ -108,23 +110,38 @@ project configuration or state is lost:
 
 ## Optional Herdr plugin
 
-The plugin supports Herdr 0.9.1+ on Linux, macOS and Windows (it runs the
-CLI with the `node` on the Herdr host's `PATH`). From a local checkout of
-this repository, link it once:
+The plugin supports Herdr 0.9.1+ on Linux, macOS and Windows. Its
+actions and picker run the `herdr-soho` binary (the Go CLI), which must
+be on the Herdr server's `PATH` — install it with `install.sh` or
+`install.ps1`. If the binary was installed after the server started,
+restart the server in a shell that sees it.
+
+From a checkout of this repository, link it once:
 
 ```sh
 herdr plugin link "$PWD/plugin"
 herdr plugin action list
 ```
 
+Or install it from GitHub, for example with the tag of the installed
+release:
+
+```sh
+herdr plugin install djalmajr/herdr-soho/plugin --ref <tag>
+```
+
 A checkout linked before the rename is registered as
 `djalmajr.herdr-agents`; unlink it and link the checkout again so Herdr
 loads `djalmajr.herdr-soho`.
 
-The `doctor` and `roster` actions inspect the workspace currently focused
-in Herdr, which can differ from the invoking shell's `HERDR_*` variables.
-Their output names the resolved workspace and pane. To inspect action
-results from the CLI, run `herdr plugin log list`.
+The `team`, `roster` and `doctor` actions open the team panel on the
+workspace currently focused in Herdr (which can differ from the invoking
+shell's `HERDR_*` variables): `team` and `roster` start on the team
+view, `doctor` starts on the doctor view. The panel names the resolved
+workspace and cwd on its first line, and never refreshes by itself
+(`r` reloads). Its only writes are `x` (release the selected worker) and
+`g` (`gc --yes`), and only after their on-screen confirmation; every other
+CLI call runs with `HERDR_SOHO_NOWRITE=1`.
 
 ### Finding a session
 
@@ -159,6 +176,71 @@ key = "prefix+l" # any key
 type = "plugin_action"
 command = "djalmajr.herdr-soho.pick"
 ```
+
+### Team board
+
+The `board` action ("Teams: every agent on every machine") opens a
+board over the focused pane with every agent of every machine — local
+first, the enabled machines appended as they arrive (a machine that
+fails to load shows a status line, not an error). Agents are grouped
+by machine and workspace, the orchestrators first within each
+workspace; a line shows the state marker (`*` working, `!` blocked),
+the name, the kind, the status and the task (its `<role>: ` prefix
+stripped). The top line totals the agents by status and shows the time
+of the last update; the board refreshes by itself every 10 s.
+
+Type to filter (letters, digits, space and punctuation match
+case-insensitively over the reference, name, kind, status, task,
+workspace and tab labels, cwd and machine), `↑`/`↓` select (the
+selection stays on the same session while it is still loaded), `Enter`
+copies the selected session reference to the clipboard (the same text
+as the picker) and closes, `Esc` or `Ctrl-C` close without copying,
+`r` refreshes when the filter is empty, and `Ctrl-R` refreshes at any
+time.
+
+To bind the action to a key, add an entry to the Herdr config (any key
+you like):
+
+```toml
+[[keys.command]]
+key = "prefix+t" # any key
+type = "plugin_action"
+command = "djalmajr.herdr-soho.board"
+```
+
+### Team panel
+
+The `team`, `roster` and `doctor` actions open the same panel over the
+focused pane: `herdr-soho plugin team` (and `--view doctor` for the
+doctor view). The first line is always `herdr-soho · <workspace> ·
+<cwd>`; `1`–`4` (or `Tab`) switch the views, each reloads on demand
+(no auto-refresh) and shows the CLI's exit code and stderr when a call
+fails:
+
+1. **team** (`equipe` on screen) — what the team is doing (`explain`, wrapped) and its
+   workers: the first roster table, one line per worker, `↑`/`↓` select
+   (orchestrator first as the roster gives it). `Enter` opens a
+   scrollable report of the selected worker (`collect <agent> --lines
+   60`, `↑`/`↓` and `PgUp`/`PgDn` scroll). `x` confirms on the panel
+   (`release --close <agent> in <workspace> (<cwd>)? y/N`) and, with
+   `y`, releases that worker (`--close`) and reloads the view.
+2. **doctor** — the output of `herdr-soho doctor` for the focused
+   workspace.
+3. **resources** (`recursos` on screen) — the `gc` dry-run (pressure). `g` confirms (`gc --yes
+   in <cwd>? y/N`) and, with `y`, runs `gc --yes` and reloads.
+4. **friction** — `herdr-soho friction --summary`.
+
+A confirmation runs its write only on a `y` pressed on its own after the
+prompt has been on screen for 0.4 s with no other input: a paste (the
+panel turns on the terminal's bracketed paste and drops pasted text) or
+a key typed along with the one that opened it never confirms.
+
+`q` closes the panel from a main view and `Ctrl-C` from any view; `Esc`
+backs out of a report or a confirmation and closes a main view. Every
+read call runs in the target's cwd
+with the target's `HERDR_*` ids and `HERDR_SOHO_NOWRITE=1`. A focused
+pane from another workspace, or whose cwd does not exist, shows the
+cause on one line instead of the panel, and closes with `Esc`.
 
 ## Develop locally
 

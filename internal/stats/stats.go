@@ -819,7 +819,12 @@ func CmdCollect(args []string, command CommandContext) int {
 	pointer := taskreport.ReadTaskReportPointer(sd, agent)
 	taskPath := ""
 	if pointer != nil {
-		_, _ = taskreport.SyncTaskReport(sd, agent)
+		// SyncTaskReport rewrites (or removes) the stable task report, so
+		// under HERDR_SOHO_NOWRITE the read skips it: the pointer is still
+		// consulted for its path, nothing is written.
+		if !core.Nowrite(env) {
+			_, _ = taskreport.SyncTaskReport(sd, agent)
+		}
 		v, _ := pointer.Get("task_report")
 		taskPath, _ = v.(string)
 	}
