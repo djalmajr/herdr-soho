@@ -76,7 +76,7 @@ func TestSendArrivalBusyR2ComposerSequence(t *testing.T) {
 	if code != 15 || out != "" {
 		t.Fatalf("must refuse sent with the marker still in the composer: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	want := "herdr-soho: send: windows/w0test:p0a did not take the message (agent_prompt_stalled: stalled); read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-29a25864.screen") + "\n"
+	want := "herdr-soho: send: windows/w0test:p0a did not take the message (agent_prompt_stalled: stalled); no proof within the 0.001s window; read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-29a25864.screen") + "\n"
 	if stderr != want {
 		t.Fatalf("the refusal keeps today's stalled 15: %q", stderr)
 	}
@@ -93,6 +93,13 @@ func TestSendArrivalBusyR2VisibleQueueNoGrowth(t *testing.T) {
 	// growth. With the queue line on screen and the transcript untouched,
 	// the send must report queued right after the window — well before the
 	// command --timeout — with no key.
+	// D23: the settle bound measures the elapsed time against the --timeout,
+	// widened far past the 1s window (30 s): the settled send takes the
+	// window plus a few fake calls, while a wait that ran to the --timeout
+	// would take the full 30 s — the 2 s bound flaked on wall time when the
+	// whole Go suite ran in parallel (2.7 s on a loaded host), and the read
+	// sequence alone cannot separate the window laps from the wait's laps,
+	// so the margin is the deadline distance, measured against the --timeout.
 	const id = "01020304"
 	const cwd = "/tmp/claude-work"
 	newPrompt := func(t *testing.T) string {
@@ -127,15 +134,15 @@ func TestSendArrivalBusyR2VisibleQueueNoGrowth(t *testing.T) {
 	f.env["CLAUDE_CONFIG_DIR"] = configRoot
 	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
 	started := time.Now()
-	code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "2000", "hello"})
+	code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "30000", "hello"})
 	if code != 0 || !strings.HasPrefix(out, "queued for local/w0test:p0a") {
 		t.Fatalf("a visible queue line is queued, not sent: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	if want := "send: local/w0test:p0a is busy; waiting for its transcript to show the message (up to 2s)\n"; stderr != want {
+	if want := "send: local/w0test:p0a is busy; waiting for its transcript to show the message (up to 30s)\n"; stderr != want {
 		t.Fatalf("the busy warning goes to stderr exactly once while the transcript still has no line: %q", stderr)
 	}
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
-		t.Fatalf("the visible queue settles after the 1s window, not after the 2s --timeout, took %s", elapsed)
+	if elapsed := time.Since(started); elapsed > 30*time.Second {
+		t.Fatalf("the visible queue settles after the 1s window, not after the 30s --timeout, took %s", elapsed)
 	}
 	if enters := countSendKeyEnters(t, f); enters != 0 {
 		t.Fatalf("no key may go to a busy claude with an open queue: %d enters", enters)
