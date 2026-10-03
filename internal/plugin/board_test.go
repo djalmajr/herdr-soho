@@ -262,6 +262,7 @@ func TestBoardUpdateKeepsSelectionByRef(t *testing.T) {
 		boardEntry("local/a4", "local", "ws-a", "alpha", "worker-9", "codex", "idle", "four"),
 		boardEntry("local/a1", "local", "ws-a", "alpha", "orchestrator-1", "claude", "working", "one"),
 	}
+	update.FinishedMachines = []string{"local"}
 	applyBoardUpdate(live, update)
 	selected := pickerString(live.visible()[live.Selected]["ref"])
 	if selected != "local/a2" {
@@ -274,6 +275,7 @@ func TestBoardUpdateKeepsSelectionByRef(t *testing.T) {
 		boardEntry("local/a1", "local", "ws-a", "alpha", "orchestrator-1", "claude", "working", "one"),
 		boardEntry("local/a4", "local", "ws-a", "alpha", "worker-9", "codex", "idle", "four"),
 	}
+	update2.FinishedMachines = []string{"local"}
 	applyBoardUpdate(live, update2)
 	if live.Selected != 1 {
 		t.Fatalf("selection mid-generation after the ref disappeared=%d want 1 (the load is not complete yet)", live.Selected)
@@ -282,6 +284,7 @@ func TestBoardUpdateKeepsSelectionByRef(t *testing.T) {
 	update3 := NewBoardState()
 	update3.UpdatedAt = "12:00:00"
 	update3.Entries = append([]PickerEntry(nil), update2.Entries...)
+	update3.FinishedMachines = []string{"local"}
 	applyBoardUpdate(live, update3)
 	if live.Selected != 0 {
 		t.Fatalf("selection after the ref disappeared at the end of the load=%d want 0", live.Selected)
@@ -290,9 +293,139 @@ func TestBoardUpdateKeepsSelectionByRef(t *testing.T) {
 	live.Query = "two"
 	update4 := NewBoardState()
 	update4.Entries = []PickerEntry{boardEntry("local/a2", "local", "ws-a", "alpha", "implementer-1", "codex", "idle", "two")}
+	update4.FinishedMachines = []string{"local"}
 	applyBoardUpdate(live, update4)
 	if live.Query != "two" {
 		t.Fatalf("query after update=%q want two", live.Query)
+	}
+}
+
+// TestBoardPendingMachineKeepsAllOldRows: a machine that has not answered
+// the new load keeps ALL of its old rows - not just the first - already on
+// the refresh's first publication, and the selection keeps working on them.
+func TestBoardPendingMachineKeepsAllOldRows(t *testing.T) {
+	s := NewBoardState()
+	s.Entries = []PickerEntry{
+		boardEntry("middle/a", "middle", "w", "w", "a", "codex", "idle", "a"),
+		boardEntry("middle/b", "middle", "w", "w", "b", "codex", "idle", "b"),
+	}
+	s.Selected = 1
+	u := NewBoardState()
+	u.LoadingLocal = true
+	u.Loading = 1
+	applyBoardUpdate(s, u)
+	if got := boardRefs(s.Entries); len(got) != 2 || got[0] != "middle/a" || got[1] != "middle/b" {
+		t.Fatalf("pending machine rows=%v want both old rows of the middle machine", got)
+	}
+	s.ApplyKey("enter")
+	if got := pickerString(s.LastEntry["ref"]); got != "middle/b" {
+		t.Fatalf("Enter copied %q want middle/b (the second pending row)", got)
+	}
+}
+
+// TestBoardEmptyGenerationDropsOldRefsAtCompletion: the second load's finds
+// all succeed without agents. A machine is current once its find terminates
+// (with or without rows), so its old rows drop out as it finishes - not only
+// at the end - and the complete load publishes only the new (empty) result:
+// the old refs are gone and the selection falls to the top.
+func TestBoardEmptyGenerationDropsOldRefsAtCompletion(t *testing.T) {
+	env, exeA, _, release := boardStreamFixture(t, "middle/w1:p1", "middle")
+	live := NewBoardState()
+	gateA := boardRemoteGate(t, release, "a", []string{"slow", "fast", "middle"}, live)
+	loadBoardEntries(contextpkg.Background(), live, exeA, env, platform.Current(), gateA)
+	if len(live.visible()) == 0 {
+		t.Fatalf("the first load left the board empty: %#v", live.Entries)
+	}
+	live.Selected = 1 // a non-top row (the board lists local first)
+	exeEmpty, err := fakecli.Install(t, filepath.Dir(exeA), "empty", []fakecli.Rule{{AnyArgs: true, Stdout: ""}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded := NewBoardState()
+	pubs := 0
+	loadBoardEntries(contextpkg.Background(), loaded, exeEmpty, env, platform.Current(), func() {
+		pubs++
+		applyBoardUpdate(live, cloneBoardState(loaded))
+		// Completion is recorded per machine, not by the presence of rows:
+		// a finished machine must not keep its old rows mid-reload.
+		finished := cloneBoardState(loaded).FinishedMachines
+		for _, machine := range finished {
+			for _, entry := range live.Entries {
+				if pickerString(entry["machine"]) == machine {
+					t.Fatalf("publication %d: machine %q finished the empty load but its old row %q remains (rows=%v)", pubs, machine, pickerString(entry["ref"]), boardRefs(live.Entries))
+				}
+			}
+		}
+	})
+	loaded.UpdatedAt = boardNow().Format("15:04:05")
+	applyBoardUpdate(live, cloneBoardState(loaded))
+	if len(live.Entries) != 0 {
+		t.Fatalf("the completed empty load kept old rows: %v", boardRefs(live.Entries))
+	}
+	if live.Selected != 0 {
+		t.Fatalf("selection after the empty completion=%d want 0", live.Selected)
+	}
+}
+
+// TestBoardMachineLeavingTheListDisappearsAtCompletion: a machine that is no
+// longer in the machine list keeps its old rows while the new load is in
+// flight (its find never runs, so it never finishes), but the complete load
+// publishes only the new result, so its rows disappear and the selection
+// falls to the top.
+func TestBoardMachineLeavingTheListDisappearsAtCompletion(t *testing.T) {
+	localRow := boardEntry("local/a1", "local", "w", "alpha", "orchestrator-1", "claude", "working", "one")
+	live := NewBoardState()
+	live.Entries = []PickerEntry{localRow, boardEntry("gone/g1", "gone", "w", "beta", "worker-1", "codex", "idle", "two")}
+	live.Selected = 1
+	update := NewBoardState()
+	update.Entries = []PickerEntry{localRow}
+	update.FinishedMachines = []string{"local"}
+	applyBoardUpdate(live, update)
+	if got := boardRefs(live.Entries); len(got) != 2 || got[1] != "gone/g1" {
+		t.Fatalf("mid-load rows=%v want the gone machine's row to stay until the load completes", got)
+	}
+	update2 := NewBoardState()
+	update2.UpdatedAt = boardNow().Format("15:04:05")
+	update2.Entries = []PickerEntry{localRow}
+	update2.FinishedMachines = []string{"local"}
+	applyBoardUpdate(live, update2)
+	if got := boardRefs(live.Entries); len(got) != 1 || got[0] != "local/a1" {
+		t.Fatalf("final rows=%v want only the new load's rows (the gone machine disappears)", got)
+	}
+	if live.Selected != 0 {
+		t.Fatalf("selection after the machine left=%d want 0", live.Selected)
+	}
+}
+
+// TestBoardFailedMachineSwapsOldRowsForFailureLine: a machine whose find
+// fails in the new load terminates its find, so its old rows drop out (even
+// mid-load) and today's failure line takes their place.
+func TestBoardFailedMachineSwapsOldRowsForFailureLine(t *testing.T) {
+	localRow := boardEntry("local/a1", "local", "w", "alpha", "orchestrator-1", "claude", "working", "one")
+	live := NewBoardState()
+	live.Entries = []PickerEntry{localRow,
+		boardEntry("slow/s1", "slow", "w", "beta", "worker-1", "codex", "idle", "two"),
+		boardEntry("slow/s2", "slow", "w", "beta", "worker-2", "codex", "idle", "three")}
+	live.Selected = 2
+	update := NewBoardState()
+	update.Entries = []PickerEntry{localRow}
+	update.FinishedMachines = []string{"local", "slow"}
+	update.Failures = []PickerFailure{{Label: "slow", Cause: "exit 127: no rule"}}
+	applyBoardUpdate(live, update)
+	if got := boardRefs(live.Entries); len(got) != 1 || got[0] != "local/a1" {
+		t.Fatalf("mid-load rows=%v want the failed machine's old rows swapped out", got)
+	}
+	if render := RenderBoard(live, 80); !strings.Contains(render, "máquina slow: falhou") {
+		t.Fatalf("the failure line is missing from the render:\n%s", render)
+	}
+	update2 := NewBoardState()
+	update2.UpdatedAt = boardNow().Format("15:04:05")
+	update2.Entries = []PickerEntry{localRow}
+	update2.FinishedMachines = []string{"local", "slow"}
+	update2.Failures = []PickerFailure{{Label: "slow", Cause: "exit 127: no rule"}}
+	applyBoardUpdate(live, update2)
+	if got := boardRefs(live.Entries); len(got) != 1 || got[0] != "local/a1" {
+		t.Fatalf("final rows=%v want only the new load's rows", got)
 	}
 }
 

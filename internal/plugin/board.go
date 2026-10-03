@@ -39,9 +39,12 @@ type BoardState struct {
 	EscPending   bool
 	CSIPending   bool
 	UpdatedAt    string
-	selectedRef  string
-	refreshing   bool
-	refreshOld   []PickerEntry
+	// FinishedMachines lists the new load's machines whose find terminated
+	// (success or failure, with or without rows); the loader fills it.
+	FinishedMachines []string
+	selectedRef      string
+	refreshing       bool
+	refreshOld       []PickerEntry
 }
 
 func NewBoardState() *BoardState {
@@ -349,6 +352,7 @@ func cloneBoardState(source *BoardState) *BoardState {
 	clone := *source
 	clone.Entries = append([]PickerEntry(nil), source.Entries...)
 	clone.Failures = append([]PickerFailure(nil), source.Failures...)
+	clone.FinishedMachines = append([]string(nil), source.FinishedMachines...)
 	clone.refreshOld = append([]PickerEntry(nil), source.refreshOld...)
 	return &clone
 }
@@ -363,6 +367,7 @@ func loadBoardEntries(ctx contextpkg.Context, state *BoardState, exe string, env
 	local, err := runLocalFind(ctx, exe, env, platformName)
 	state.Loading = 0
 	state.LoadingLocal = false
+	state.FinishedMachines = append(state.FinishedMachines, "local")
 	if err != nil {
 		state.Failures = append(state.Failures, PickerFailure{Label: "local", Cause: err.Error()})
 		publish()
@@ -387,6 +392,7 @@ func loadBoardEntries(ctx contextpkg.Context, state *BoardState, exe string, env
 	publish()
 	runRemoteFinds(ctx, exe, env, platformName, machines, func(machine string, entries []PickerEntry, err error) {
 		state.Loading--
+		state.FinishedMachines = append(state.FinishedMachines, machine)
 		if err != nil {
 			state.Failures = append(state.Failures, PickerFailure{Label: machine, Cause: err.Error()})
 		} else {
@@ -397,11 +403,13 @@ func loadBoardEntries(ctx contextpkg.Context, state *BoardState, exe string, env
 }
 
 // applyBoardUpdate merges one publication of the load generation into the
-// live state. The previous list stays on screen until the new load's
-// machines re-arrive: per machine, the new load's rows when that machine
-// has results, the previous rows otherwise. The selected ref is pinned
-// across the whole generation and falls to the first row only once the
-// load is complete and the ref is gone.
+// live state. While the load is incomplete the previous list stays on
+// screen: the new load's rows when that machine's find has terminated
+// (success or failure, with or without rows), the previous rows - all of
+// them - otherwise. The complete load (UpdatedAt set) publishes only the
+// new result: machines that left the machine list and vanished agents are
+// gone. The selected ref is pinned across the whole generation and falls
+// to the first row only once the load is complete and the ref is gone.
 func applyBoardUpdate(state, update *BoardState) {
 	query, exit, copied, lastEntry, escPending, csiPending := state.Query, state.Exit, state.Copied, state.LastEntry, state.EscPending, state.CSIPending
 	if !state.refreshing {
@@ -413,7 +421,12 @@ func applyBoardUpdate(state, update *BoardState) {
 			state.selectedRef = pickerString(list[state.Selected]["ref"])
 		}
 	}
-	state.Entries = mergeBoardEntries(state.refreshOld, update.Entries)
+	if update.UpdatedAt == "" {
+		state.Entries = mergeBoardEntries(state.refreshOld, update.Entries, update.FinishedMachines)
+	} else {
+		// The load is complete: only the new result - no old rows survive.
+		state.Entries = append([]PickerEntry(nil), update.Entries...)
+	}
 	state.Failures = update.Failures
 	state.Loading = update.Loading
 	state.LoadingLocal = update.LoadingLocal
@@ -452,22 +465,20 @@ func applyBoardUpdate(state, update *BoardState) {
 	state.clamp()
 }
 
-// mergeBoardEntries keeps the previous list's rows for the machines that
-// have not re-arrived yet and the new load's rows for the ones that did
-// (new order first, then the old-only machines in the old order).
-func mergeBoardEntries(old, fresh []PickerEntry) []PickerEntry {
+// mergeBoardEntries keeps all of the previous list's rows for the machines
+// whose find has not terminated yet and only the new load's rows for the
+// ones that did (new order first, then the old-only machines in the old
+// order).
+func mergeBoardEntries(old, fresh []PickerEntry, finished []string) []PickerEntry {
 	out := append([]PickerEntry(nil), fresh...)
-	freshMachines := map[string]bool{}
-	for _, entry := range fresh {
-		freshMachines[pickerString(entry["machine"])] = true
+	done := map[string]bool{}
+	for _, machine := range finished {
+		done[machine] = true
 	}
-	oldMachines := map[string]bool{}
 	for _, entry := range old {
-		m := pickerString(entry["machine"])
-		if freshMachines[m] || oldMachines[m] {
+		if done[pickerString(entry["machine"])] {
 			continue
 		}
-		oldMachines[m] = true
 		out = append(out, entry)
 	}
 	return out
