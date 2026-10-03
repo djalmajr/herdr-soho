@@ -156,10 +156,10 @@ func TestSendPiInputBox(t *testing.T) {
 		prompt := newPromptFixture(t)
 		// Same screen as the pi history case, but 15+ lines push the marker
 		// above the last 15: for a claude whose box sits between two borders
-		// the taken message in the history is proof (like pi), the box is
-		// empty, and the send goes out with no Enter.
+		// the taken message in the history is proof (like pi), the box holds
+		// a bare ❯ (claude's empty box), and the send goes out with no Enter.
 		history := prompt + "\n" + strings.Repeat("chrome\n", 11)
-		screen := piSendScreen(strings.TrimSuffix(history, "\n"), "")
+		screen := piSendScreen(strings.TrimSuffix(history, "\n"), "❯")
 		rules := []fakecli.Rule{
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 1, Stdout: agentJSONKind("claude", "idle", "1")},
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 1, Stdout: "Before prompt\n"},
