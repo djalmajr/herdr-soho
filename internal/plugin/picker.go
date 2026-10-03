@@ -54,18 +54,18 @@ func pickerString(value any) string {
 	return text
 }
 
-func FilterPickerEntries(entries []PickerEntry, query string) []PickerEntry {
+func filterPickerEntries(entries []PickerEntry, query string, fields []string) []PickerEntry {
 	terms := strings.Fields(strings.ToLower(query))
 	if len(terms) == 0 {
 		return entries
 	}
 	out := make([]PickerEntry, 0, len(entries))
 	for _, entry := range entries {
-		var fields []string
-		for _, key := range pickerFilterFields {
-			fields = append(fields, strings.ToLower(pickerString(entry[key])))
+		var fieldsText []string
+		for _, key := range fields {
+			fieldsText = append(fieldsText, strings.ToLower(pickerString(entry[key])))
 		}
-		joined := strings.Join(fields, " ")
+		joined := strings.Join(fieldsText, " ")
 		match := true
 		for _, term := range terms {
 			if !strings.Contains(joined, term) {
@@ -78,6 +78,10 @@ func FilterPickerEntries(entries []PickerEntry, query string) []PickerEntry {
 		}
 	}
 	return out
+}
+
+func FilterPickerEntries(entries []PickerEntry, query string) []PickerEntry {
+	return filterPickerEntries(entries, query, pickerFilterFields)
 }
 
 func (s *PickerState) visible() []PickerEntry { return FilterPickerEntries(s.Entries, s.Query) }
@@ -462,15 +466,9 @@ func loadPickerEntries(ctx contextpkg.Context, state *PickerState, exe string, e
 	state.LoadingLocal = true
 	state.Loading = 1
 	publish()
-	localResult := pickerRun(ctx, exe, []string{"find", "--json"}, env, platformName, PickerFindTimeoutMs, "")
+	local, err := runLocalFind(ctx, exe, env, platformName)
 	state.Loading = 0
 	state.LoadingLocal = false
-	if localResult.Status == nil || *localResult.Status != 0 {
-		state.Failures = append(state.Failures, PickerFailure{Label: "local", Cause: pickerFailure(localResult, PickerFindTimeoutMs, true).Error()})
-		publish()
-		return
-	}
-	local, err := parsePickerFind(localResult.Stdout, "local")
 	if err != nil {
 		state.Failures = append(state.Failures, PickerFailure{Label: "local", Cause: err.Error()})
 		publish()
@@ -478,20 +476,10 @@ func loadPickerEntries(ctx contextpkg.Context, state *PickerState, exe string, e
 	}
 	state.Entries = appendUniquePicker(state.Entries, local)
 	publish()
-	herdr := env.Get("HERDR_BIN_PATH")
-	if herdr == "" {
-		herdr = "herdr"
-	}
 	state.Loading = 1
 	publish()
-	machineResult := pickerRun(ctx, herdr, []string{"machine", "list", "--json"}, env, platformName, 30_000, "")
+	machines, err := runMachineList(ctx, env, platformName)
 	state.Loading = 0
-	if machineResult.Status == nil || *machineResult.Status != 0 {
-		state.Failures = append(state.Failures, PickerFailure{Label: "máquinas", Cause: pickerFailure(machineResult, 30_000, false).Error()})
-		publish()
-		return
-	}
-	machines, err := parsePickerMachines(machineResult.Stdout)
 	if err != nil {
 		state.Failures = append(state.Failures, PickerFailure{Label: "máquinas", Cause: err.Error()})
 		publish()
@@ -503,6 +491,44 @@ func loadPickerEntries(ctx contextpkg.Context, state *PickerState, exe string, e
 	}
 	state.Loading = len(machines)
 	publish()
+	runRemoteFinds(ctx, exe, env, platformName, machines, func(machine string, entries []PickerEntry, err error) {
+		state.Loading--
+		if err != nil {
+			state.Failures = append(state.Failures, PickerFailure{Label: machine, Cause: err.Error()})
+		} else {
+			state.Entries = appendUniquePicker(state.Entries, entries)
+		}
+		publish()
+	})
+}
+
+// runLocalFind runs the local `find --json` and parses its entries.
+func runLocalFind(ctx contextpkg.Context, exe string, env platform.Env, platformName string) ([]PickerEntry, error) {
+	result := pickerRun(ctx, exe, []string{"find", "--json"}, env, platformName, PickerFindTimeoutMs, "")
+	if result.Status == nil || *result.Status != 0 {
+		return nil, pickerFailure(result, PickerFindTimeoutMs, true)
+	}
+	return parsePickerFind(result.Stdout, "local")
+}
+
+// runMachineList runs `herdr machine list --json` and returns the enabled
+// machine labels, in Herdr's order.
+func runMachineList(ctx contextpkg.Context, env platform.Env, platformName string) ([]string, error) {
+	herdr := env.Get("HERDR_BIN_PATH")
+	if herdr == "" {
+		herdr = "herdr"
+	}
+	result := pickerRun(ctx, herdr, []string{"machine", "list", "--json"}, env, platformName, 30_000, "")
+	if result.Status == nil || *result.Status != 0 {
+		return nil, pickerFailure(result, 30_000, false)
+	}
+	return parsePickerMachines(result.Stdout)
+}
+
+// runRemoteFinds runs one `find --json --machine <label>` per machine in
+// parallel and invokes onRemote as each result completes (entries are kept
+// only when they belong to that machine).
+func runRemoteFinds(ctx contextpkg.Context, exe string, env platform.Env, platformName string, machines []string, onRemote func(machine string, entries []PickerEntry, err error)) {
 	type remoteResult struct {
 		machine string
 		result  platform.RunResult
@@ -538,19 +564,11 @@ func loadPickerEntries(ctx contextpkg.Context, state *PickerState, exe string, e
 		close(results)
 	}()
 	for remote := range results {
-		state.Loading--
 		if remote.result.Status == nil || *remote.result.Status != 0 {
-			state.Failures = append(state.Failures, PickerFailure{Label: remote.machine, Cause: pickerFailure(remote.result, PickerFindTimeoutMs, true).Error()})
-			publish()
+			onRemote(remote.machine, nil, pickerFailure(remote.result, PickerFindTimeoutMs, true))
 			continue
 		}
-		if remote.err != nil {
-			state.Failures = append(state.Failures, PickerFailure{Label: remote.machine, Cause: remote.err.Error()})
-			publish()
-			continue
-		}
-		state.Entries = appendUniquePicker(state.Entries, remote.entries)
-		publish()
+		onRemote(remote.machine, remote.entries, remote.err)
 	}
 }
 
@@ -569,12 +587,16 @@ func appendUniquePicker(dest, next []PickerEntry) []PickerEntry {
 	return dest
 }
 
-func redrawPicker(w io.Writer, state *PickerState, width int) {
+func redrawArea(w io.Writer, rendered string) {
 	_, _ = fmt.Fprint(w, "\x1b[H")
-	for _, line := range strings.Split(strings.TrimSuffix(RenderPicker(state, width), "\n"), "\n") {
+	for _, line := range strings.Split(strings.TrimSuffix(rendered, "\n"), "\n") {
 		_, _ = fmt.Fprint(w, line, "\x1b[K\n")
 	}
 	_, _ = fmt.Fprint(w, "\x1b[J")
+}
+
+func redrawPicker(w io.Writer, state *PickerState, width int) {
+	redrawArea(w, RenderPicker(state, width))
 }
 
 func RunPicker(env platform.Env, platformName, executable string) (code int) {

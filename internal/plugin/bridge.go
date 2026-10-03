@@ -21,7 +21,11 @@ var actions = map[string]bool{"doctor": true, "roster": true}
 
 var pickOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "picker", "--placement", "overlay", "--focus"}
 
+var boardOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "board", "--placement", "overlay", "--focus"}
+
 func PickerArguments() []string { return append([]string(nil), pickOpenArgs...) }
+
+func BoardArguments() []string { return append([]string(nil), boardOpenArgs...) }
 
 type BridgeError struct {
 	Code    int
@@ -50,10 +54,13 @@ type Result struct {
 // Bridge runs one plugin action using the Herdr-focused pane as its target.
 func Bridge(action string, env platform.Env, platformName, executable string) (Result, error) {
 	if action == "pick" {
-		return bridgePick(env, platformName)
+		return bridgePaneOpen(env, platformName, pickOpenArgs)
+	}
+	if action == "board" {
+		return bridgePaneOpen(env, platformName, boardOpenArgs)
 	}
 	if !actions[action] {
-		return Result{}, &BridgeError{Code: ExitInvalidTarget, Message: "unknown subcommand '" + action + "' (use 'doctor', 'roster' or 'pick')"}
+		return Result{}, &BridgeError{Code: ExitInvalidTarget, Message: "unknown subcommand '" + action + "' (use 'doctor', 'roster', 'board' or 'pick')"}
 	}
 	ctx, err := parseContext(env)
 	if err != nil {
@@ -115,7 +122,9 @@ func Bridge(action string, env platform.Env, platformName, executable string) (R
 	return Result{Code: code, Out: intro + run.Stdout, Err: run.Stderr}, nil
 }
 
-func bridgePick(env platform.Env, platformName string) (Result, error) {
+// bridgePaneOpen validates the focused target like the read-only actions
+// and then opens one of the plugin panes (picker or board) over it.
+func bridgePaneOpen(env platform.Env, platformName string, openArgs []string) (Result, error) {
 	ctx, err := parseContext(env)
 	if err != nil {
 		return Result{}, err
@@ -131,7 +140,7 @@ func bridgePick(env platform.Env, platformName string) (Result, error) {
 	if focused.WorkspaceID != ctx.WorkspaceID {
 		return Result{}, &BridgeError{Code: ExitInvalidTarget, Message: fmt.Sprintf("workspace divergence: the context points to '%s' and pane %s belongs to '%s'; target rejected", ctx.WorkspaceID, ctx.PaneID, focused.WorkspaceID)}
 	}
-	run := platform.RunExecutable(herdrBin, pickOpenArgs, platform.RunOptions{Env: env, Platform: platformName, TimeoutMs: herdrTimeoutMs})
+	run := platform.RunExecutable(herdrBin, openArgs, platform.RunOptions{Env: env, Platform: platformName, TimeoutMs: herdrTimeoutMs})
 	if run.Error == "ETIMEDOUT" || run.TimedOut {
 		return Result{}, &BridgeError{Code: ExitHerdrFailure, Message: "herdr plugin pane open timed out after 30s"}
 	}

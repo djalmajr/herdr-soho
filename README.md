@@ -172,6 +172,37 @@ type = "plugin_action"
 command = "djalmajr.herdr-soho.pick"
 ```
 
+### Team board
+
+The `board` action ("Teams: every agent on every machine") opens a
+board over the focused pane with every agent of every machine — local
+first, the enabled machines appended as they arrive (a machine that
+fails to load shows a status line, not an error). Agents are grouped
+by machine and workspace, the orchestrators first within each
+workspace; a line shows the state marker (`*` working, `!` blocked),
+the name, the kind, the status and the task (its `<role>: ` prefix
+stripped). The top line totals the agents by status and shows the time
+of the last update; the board refreshes by itself every 10 s.
+
+Type to filter (letters, digits, space and punctuation match
+case-insensitively over the reference, name, kind, status, task,
+workspace and tab labels, cwd and machine), `↑`/`↓` select (the
+selection stays on the same session while it is still loaded), `Enter`
+copies the selected session reference to the clipboard (the same text
+as the picker) and closes, `Esc` or `Ctrl-C` close without copying,
+`r` refreshes when the filter is empty, and `Ctrl-R` refreshes at any
+time.
+
+To bind the action to a key, add an entry to the Herdr config (any key
+you like):
+
+```toml
+[[keys.command]]
+key = "prefix+t" # any key
+type = "plugin_action"
+command = "djalmajr.herdr-soho.board"
+```
+
 ## Develop locally
 
 ```sh

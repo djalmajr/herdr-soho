@@ -45,13 +45,13 @@ func CopyText(text string, env platform.Env, platformName string) ClipboardResul
 
 func PluginCommand(args []string, env platform.Env, platformName, executable string, stdin string) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho plugin: expected 'bridge', 'clipboard' or 'picker'")
+		_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho plugin: expected 'board', 'bridge', 'clipboard' or 'picker'")
 		return ExitInvalidTarget
 	}
 	switch args[0] {
 	case "bridge":
 		if len(args) < 2 {
-			_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho plugin: expected 'doctor', 'roster' or 'pick'")
+			_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho plugin: expected 'doctor', 'roster', 'board' or 'pick'")
 			return ExitInvalidTarget
 		}
 		r, err := Bridge(args[1], env, platformName, executable)
@@ -66,6 +66,8 @@ func PluginCommand(args []string, env platform.Env, platformName, executable str
 		_, _ = fmt.Fprint(platform.Stdout, r.Out)
 		_, _ = fmt.Fprint(platform.Stderr, r.Err)
 		return r.Code
+	case "board":
+		return RunBoard(env, platformName, executable)
 	case "clipboard":
 		CopyText(stdin, env, platformName)
 		return 0

@@ -1,4 +1,4 @@
-# herdr-soho optional plugin — read-only actions and the session picker.
+# herdr-soho optional plugin — read-only actions, the session picker and the team board.
 # Manifest contract: https://herdr.dev/docs/plugins/
 # Every command runs the `herdr-soho` binary (the Go CLI), which must be
 # on the Herdr server's PATH. The doctor/roster actions call
@@ -39,9 +39,23 @@ placement = "overlay"
 platforms = ["linux", "macos", "windows"]
 command = ["herdr-soho", "plugin", "picker"]
 
+[[panes]]
+id = "board"
+title = "herdr-soho: teams"
+placement = "overlay"
+platforms = ["linux", "macos", "windows"]
+command = ["herdr-soho", "plugin", "board"]
+
 [[actions]]
 id = "pick"
 title = "Find a session and copy its reference"
 description = "Opens the session picker over the focused pane: type to filter the panes of the local server and of the enabled machines (CLI `find --json`), Enter copies the selected reference to the clipboard and closes, Esc or Ctrl-C close without copying."
 contexts = ["workspace"]
 command = ["herdr-soho", "plugin", "bridge", "pick"]
+
+[[actions]]
+id = "board"
+title = "Teams: every agent on every machine"
+description = "Opens the team board over the focused pane: every agent of every machine (local first, the enabled machines appended as they arrive), grouped by workspace with the orchestrators first, showing each agent's state and task. It refreshes every 10 s and with r; Enter copies the selected session reference to the clipboard."
+contexts = ["workspace"]
+command = ["herdr-soho", "plugin", "bridge", "board"]

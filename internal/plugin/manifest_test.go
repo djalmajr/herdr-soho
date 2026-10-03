@@ -13,9 +13,9 @@ import (
 // call the Go CLI by name:
 //   - every command starts with "herdr-soho", "plugin";
 //   - the next subcommand is one PluginCommand dispatches
-//     (internal/plugin/clipboard.go): bridge, clipboard or picker;
+//     (internal/plugin/clipboard.go): board, bridge, clipboard or picker;
 //   - a bridge action is one Bridge accepts (internal/plugin/bridge.go):
-//     doctor, roster or pick.
+//     board, doctor, roster or pick.
 //
 // A manifest pointed at a removed Node file or a subcommand the CLI does
 // not have is rejected here.
@@ -24,8 +24,8 @@ func TestManifestCommandsUseTheGoCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pluginSubcommands := map[string]bool{"bridge": true, "clipboard": true, "picker": true}
-	bridgeActions := map[string]bool{"doctor": true, "roster": true, "pick": true}
+	pluginSubcommands := map[string]bool{"board": true, "bridge": true, "clipboard": true, "picker": true}
+	bridgeActions := map[string]bool{"board": true, "doctor": true, "roster": true, "pick": true}
 	commands := 0
 	for _, raw := range strings.Split(string(data), "\n") {
 		line := strings.TrimSpace(raw)
