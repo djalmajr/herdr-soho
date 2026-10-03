@@ -1043,23 +1043,39 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// idle baseline and a clean visible screen, or the marker in the recent
 	// history and a visible screen that shows it taken — changed since the
 	// pre-send read, no dialog, and the marker out of the input box and the
-	// queues. The stalled path never resends the text and presses no key, but
-	// the target's screen can still redraw late — a slow agent takes more
-	// than the prompt wait to start working and to draw the message — so one
-	// check can read a screen that does not show the arrival yet: the check
-	// repeats on every poll until the end of the proof window (stalledWindow).
-	// A screen that cannot be read proves nothing and does not interrupt the
-	// wait: the marker could still sit in the composer, which is not sent.
-	// The read screen must show the marker out of the input box and the
-	// queues before the moved-sequence shortcut decides: a read that still
-	// holds the marker with the sequence moved is not taken. Every read and
-	// get of the check is capped at the time then left in the proof window
-	// (stalledCheckBudget), so a slow read cannot push the window far past
-	// its deadline; a screen that fails to read within it is not a proof.
+	// queues. The local transcript proof, like pollWindow's, is consulted
+	// before the screen rules and presses no key: for a claude or pi whose
+	// transcript is armed, the count of the user lines holding this id
+	// growing is delivery, unless the visible queue line still holds the id
+	// (queued, not taken). The stalled path never resends the text and presses
+	// no key, but the target's screen can still redraw late — a slow agent
+	// takes more than the prompt wait to start working and to draw the message
+	// — so one check can read a screen that does not show the arrival yet: the
+	// check repeats on every poll until the end of the proof window
+	// (stalledWindow). A screen that cannot be read proves nothing and does
+	// not interrupt the wait: the marker could still sit in the composer,
+	// which is not sent. The read screen must show the marker out of the input
+	// box and the queues before the moved-sequence shortcut decides: a read
+	// that still holds the marker with the sequence moved is not taken.
+	// Every read and get of the check is capped at the time then left in the
+	// proof window (stalledCheckBudget), so a slow read cannot push the window
+	// far past its deadline; a screen that fails to read within it is not a
+	// proof.
 	stalledTaken := func(deadline time.Time) bool {
 		visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env, stalledCheckBudget(deadline), noteVisibleScreen)
 		if visibleErr != "" {
 			return false
+		}
+		// The transcript proof, like pollWindow's, applies before the screen
+		// rules and presses no key: the target writes the taken message to the
+		// transcript as a user line, so the count of those lines holding this
+		// id growing is delivery — unless the visible queue line still holds
+		// the id, which is queued, not taken (the same growth-not-proof rule
+		// the window applies).
+		if transcript.armed {
+			if count, ok := transcript.count(transcript.path, "#"+id); ok && count > transcript.pre {
+				return !transcript.queued(visible, id)
+			}
 		}
 		// The moved-sequence shortcut below checks only the dialog, so the
 		// taken rules are required up front: a marker still in the input box or
@@ -1159,6 +1175,10 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			// Only the stalled exits record the screen: agent_blocked and
 			// timeout keep today's message untouched.
 			if p.Code == "agent_prompt_stalled" {
+				// The proof window ran and ended without proof: say so, in
+				// seconds. The cause keeps Herdr's own "within ... ms" text,
+				// which is part of the cause.
+				msg = fmt.Sprintf("send: %s did not take the message (%s); no proof within the %ss window; read its pane before sending again", t.RefShown, cause, numberSeconds(windowMS))
 				msg = stalledExitMessage(msg)
 			}
 			platform.Die(msg, 15)
@@ -1321,6 +1341,59 @@ func piInputRegion(screen string) ([]string, bool) {
 	return lines[start:end], true
 }
 
+// isClaudeBorderLine reports whether the line is one of Claude Code's input-box
+// borders: composed only of '─' (U+2500), whitespace allowed around it. A line
+// that carries any other rune is not a border.
+func isClaudeBorderLine(line string) bool {
+	content := strings.TrimFunc(line, isJSWhitespace)
+	if content == "" {
+		return false
+	}
+	for _, r := range content {
+		if r != '─' {
+			return false
+		}
+	}
+	return true
+}
+
+// claudeInputRegion returns the visible screen's lines between the two box
+// border lines Claude Code draws around its input box (isClaudeBorderLine,
+// chat history above, footer below). The borders are searched only in the
+// last 12 non-empty lines, where they must be the last two border lines: an
+// older separator higher in the history is not a box border, and one border
+// inside the window with the other above it forms no region. ok is false when
+// the window holds fewer than two border lines; the caller then keeps the
+// last-15-lines behavior.
+func claudeInputRegion(visible string) ([]string, bool) {
+	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
+	nonEmpty := 0
+	start := len(lines)
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimFunc(lines[i], isJSWhitespace) == "" {
+			continue
+		}
+		nonEmpty++
+		start = i
+		if nonEmpty == 12 {
+			break
+		}
+	}
+	borders := make([]int, 0, 2)
+	for i := len(lines) - 1; i >= start; i-- {
+		if isClaudeBorderLine(lines[i]) {
+			borders = append(borders, i)
+			if len(borders) == 2 {
+				break
+			}
+		}
+	}
+	if len(borders) < 2 {
+		return nil, false
+	}
+	return lines[borders[1]+1 : borders[0]], true
+}
+
 // codexComposerRegion returns the visible screen's lines from the codex
 // composer to the end of the screen. The composer starts at the last line
 // whose text, without its left spaces, begins with "› " (U+203A space) or is
@@ -1393,18 +1466,25 @@ func peerMessageInHistory(visible, id string) bool {
 
 // messageStillInScreen reports whether the visible screen still holds the
 // message's marker, meaning the prompt is typed but not taken yet. For a pi
-// target the marker only counts inside the input box, and for a codex target
-// only inside the composer region: a taken message stays in the chat history,
-// which is part of the visible screen. A peer message shown as a delivered
-// codex turn (peerMessageInHistory) counts as taken, not held. Without two
-// box borders or the composer line, and for every other kind, the whole
-// visible screen still counts.
+// target the marker only counts inside the input box, for a claude target only
+// inside the box between its two border lines, and for a codex target only
+// inside the composer region: a taken message stays in the chat history, which
+// is part of the visible screen. A peer message shown as a delivered codex
+// turn (peerMessageInHistory) counts as taken, not held. Without two box
+// borders, the claude borders or the composer line, and for every other kind,
+// the whole visible screen still counts.
 func messageStillInScreen(kind, visible, endLine, id string) bool {
 	if kind == "codex" && peerMessageInHistory(visible, id) {
 		return false
 	}
 	if kind == "pi" {
 		if lines, ok := piInputRegion(visible); ok {
+			region := NormalizeScreen(strings.Join(lines, "\n"))
+			return strings.Contains(region, NormalizeScreen("#"+id)) || strings.Contains(region, NormalizeScreen(endLine))
+		}
+	}
+	if kind == "claude" {
+		if lines, ok := claudeInputRegion(visible); ok {
 			region := NormalizeScreen(strings.Join(lines, "\n"))
 			return strings.Contains(region, NormalizeScreen("#"+id)) || strings.Contains(region, NormalizeScreen(endLine))
 		}
@@ -1420,10 +1500,11 @@ func messageStillInScreen(kind, visible, endLine, id string) bool {
 }
 
 // idInInputBox reports the message's id in the screen's input area. For a pi
-// target the id must sit between the box borders, and for a codex target
-// inside the composer region, before an Enter goes to a busy agent; without
-// borders or the composer line, and for every other kind, the last 15 lines
-// still count as before. A peer message shown as a delivered codex turn
+// target the id must sit between the box borders, for a claude target inside
+// the box between its two border lines, and for a codex target inside the
+// composer region, before an Enter goes to a busy agent; without borders, the
+// claude borders or the composer line, and for every other kind, the last 15
+// lines still count as before. A peer message shown as a delivered codex turn
 // (peerMessageInHistory) is history, not the input area, so it never counts
 // as in the box.
 func idInInputBox(kind, visible, id string) bool {
@@ -1432,6 +1513,11 @@ func idInInputBox(kind, visible, id string) bool {
 	}
 	if kind == "pi" {
 		if lines, ok := piInputRegion(visible); ok {
+			return strings.Contains(NormalizeScreen(strings.Join(lines, "\n")), NormalizeScreen("#"+id))
+		}
+	}
+	if kind == "claude" {
+		if lines, ok := claudeInputRegion(visible); ok {
 			return strings.Contains(NormalizeScreen(strings.Join(lines, "\n")), NormalizeScreen("#"+id))
 		}
 	}
