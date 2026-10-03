@@ -465,9 +465,14 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 		total += cand.size
 	}
 	if !yes {
-		// Nothing at all: only the line itself, no total and no hint (G1);
-		// a registered process line also keeps the line away (s92).
-		if len(candidates) == 0 && len(unregistered) == 0 && len(procRows) == 0 {
+		// Orphan processes: the running lines whose owner is not a live
+		// roster agent (the copies' rule). Gone and reused lines are not
+		// listed; --yes drops them with a note. Processes of live owners
+		// are never candidates.
+		orphan := gcOrphanProcs(procRows, sd, env)
+		// Nothing to remove or stop: only the line itself, no total and no
+		// hint (G1).
+		if len(candidates) == 0 && len(unregistered) == 0 && len(orphan) == 0 {
 			_, _ = fmt.Fprintln(platform.Stdout, "nothing to remove")
 			return 0
 		}
@@ -485,14 +490,14 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 				_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes --include-unregistered' to remove the unregistered ones")
 			}
 		}
-		// Orphan processes: the running lines whose owner is not a live
-		// roster agent (the copies' rule). Gone and reused lines are not
-		// listed; --yes drops them with a note.
-		if orphan := gcOrphanProcs(procRows, sd, env); len(orphan) > 0 {
+		if len(orphan) > 0 {
 			now := platform.Now()
 			_, _ = fmt.Fprintln(platform.Stdout, "orphan processes:")
 			for _, row := range orphan {
 				_, _ = fmt.Fprintf(platform.Stdout, "%d  %s  %s  %s\n", row.Pid, row.Name, row.Owner, humanAge(procAge(row, now)))
+			}
+			if len(candidates) == 0 {
+				_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes' to stop them")
 			}
 		}
 		return 0
@@ -515,6 +520,7 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	removedLines := map[string]bool{}
 	freed := int64(0)
 	removedAny := false
+	procsHandled := 0
 	for _, cand := range candidates {
 		if cand.missing {
 			// Nothing is left on disk: the line only leaves the registry.
@@ -600,14 +606,18 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 				continue
 			}
 			if res.Dropped {
-				removedAny = true
+				procsHandled++
 			}
 		}
 	}
 	if removedAny {
 		_, _ = fmt.Fprintf(platform.Stdout, "freed: %s\n", humanSize(freed))
-	} else {
-		// --yes with nothing removed: the same closing line as the dry run.
+	}
+	if procsHandled > 0 {
+		_, _ = fmt.Fprintf(platform.Stdout, "process lines handled: %d\n", procsHandled)
+	}
+	if !removedAny && procsHandled == 0 {
+		// --yes with nothing removed or stopped: the dry run's closing line.
 		_, _ = fmt.Fprintln(platform.Stdout, "nothing to remove")
 	}
 	return 0

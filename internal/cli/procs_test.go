@@ -440,7 +440,8 @@ func TestGcListAndStopOrphanProcesses(t *testing.T) {
 			t.Fatalf("gc: code=%d err=%q out=%q", code, errOut, out)
 		}
 		want := "resource pressure: none (disk 60% free, swap 30% used)\norphan processes:\n" +
-			strconv.Itoa(orphan) + "  " + orphanName + "  ghost  0m\n"
+			strconv.Itoa(orphan) + "  " + orphanName + "  ghost  0m\n" +
+			"run 'herdr-soho gc --yes' to stop them\n"
 		if out != want {
 			t.Fatalf("output = %q; want %q", out, want)
 		}
@@ -467,8 +468,10 @@ func TestGcListAndStopOrphanProcesses(t *testing.T) {
 		if !strings.Contains(out, "process "+strconv.Itoa(gone)+" already gone") {
 			t.Fatalf("output = %q; want the gone note", out)
 		}
-		if !strings.HasSuffix(out, "freed: 0 B\n") {
-			t.Fatalf("output = %q; the closing line is the freed total", out)
+		// No copy was removed: the closing line counts the process lines
+		// (the orphan stopped, the reused and the gone dropped).
+		if strings.Contains(out, "freed:") || !strings.HasSuffix(out, "process lines handled: 3\n") {
+			t.Fatalf("output = %q; want only the process lines count as the closing line", out)
 		}
 		if procAlive(t, f.env, orphan) {
 			t.Fatal("the orphan process survived gc --yes")
@@ -608,4 +611,22 @@ func (f *procsFixture) runWithEnv(t *testing.T, env platform.Env, argv ...string
 	code := Run(argv, env)
 	platform.Stdout, platform.Stderr = oldOut, oldErr
 	return code, out.String(), errOut.String()
+}
+
+// A process of a live owner is never a gc candidate: with no copy and no
+// orphan process, the dry run and --yes both say nothing to remove (rdocs17).
+func TestGcWithOnlyOwnedProcessesHasNothingToRemove(t *testing.T) {
+	f := newProcsFixture(t)
+	owned := f.sleeper(t)
+	started, name, _ := platform.ProcInfo(owned, f.env)
+	f.writeProcs(t, core.ProcRow{Pid: owned, Started: started, Name: name, Owner: "worker", Pane: "p-worker", Created: core.FrictionISO(platform.Now())})
+	for _, args := range [][]string{{"gc"}, {"gc", "--yes"}} {
+		code, out, errOut := f.run(t, args...)
+		if code != 0 || errOut != "" || !strings.HasSuffix(out, "\nnothing to remove\n") {
+			t.Fatalf("%v: code=%d err=%q out=%q; want nothing to remove", args, code, errOut, out)
+		}
+		if !procAlive(t, f.env, owned) {
+			t.Fatalf("%v stopped the owned process", args)
+		}
+	}
 }
