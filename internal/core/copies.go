@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -66,8 +67,20 @@ func lockRegistry(stateDir, lockName, kind string) (func(), error) {
 		if err == nil {
 			return func() { _ = os.Remove(lockPath) }, nil
 		}
-		if !errors.Is(err, os.ErrExist) {
+		// On Windows an exclusive create of a lock file that another
+		// process has just removed (its deletion still pending) fails with
+		// ERROR_ACCESS_DENIED instead of "exists": that is contention too,
+		// retried until the timeout, which then reports this error.
+		pendingDelete := runtime.GOOS == "windows" && errors.Is(err, os.ErrPermission)
+		if !errors.Is(err, os.ErrExist) && !pendingDelete {
 			return nil, err
+		}
+		if pendingDelete {
+			if time.Now().After(deadline) {
+				return nil, err
+			}
+			time.Sleep(registryLockPoll)
+			continue
 		}
 		if held, statErr := os.Stat(lockPath); statErr == nil && time.Since(held.ModTime()) > registryLockStale {
 			_ = os.Remove(lockPath)
