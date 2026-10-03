@@ -493,3 +493,32 @@ func TestSendClaudeStalledNewMessage(t *testing.T) {
 		t.Fatalf("the stalled path never resends the text: %d prompts", prompts)
 	}
 }
+
+// TestClaudeAlternatePromptBelowHistoryPair covers the R-S83b P2: two '─'
+// separators in the history hold an old "❯" row, and the current composer
+// below them uses another prompt ("›") with the typed peer message. The pair
+// passes the composer guard, but the typed marker below the bottom border
+// must still count as typed (claudeBoxScope).
+func TestClaudeAlternatePromptBelowHistoryPair(t *testing.T) {
+	const id = "01020304"
+	border := strings.Repeat("─", 40)
+	screen := strings.Join([]string{
+		"earlier reply",
+		border,
+		"❯ old row",
+		border,
+		"› [herdr-soho:peer] #" + id + " Message from another agent",
+		"  > hello",
+		"  [herdr-soho:peer] #" + id + " end of message",
+		"  status footer",
+	}, "\n") + "\n"
+	if !idInInputBox("claude", screen, id) {
+		t.Fatalf("a typed marker under a history '─' pair must stay in the box:\n%s", screen)
+	}
+	if !messageStillInScreen("claude", screen, "[herdr-soho:peer] #"+id+" end of message", id) {
+		t.Fatalf("messageStillInScreen must keep the typed message:\n%s", screen)
+	}
+	if idInInputBox("claude", rc14ClaudeScreen, "debf6313") {
+		t.Fatalf("the real rc.14 screen must stay out of the box")
+	}
+}
