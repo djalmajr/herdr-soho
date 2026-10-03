@@ -186,7 +186,7 @@ func TestSendStalledEnter(t *testing.T) {
 		// reads of the window fail fast instead of running the default 15s.
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		want := "herdr-soho: send: local/w0test:p0a did not take the message (agent_prompt_stalled: stalled); read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
+		want := "herdr-soho: send: local/w0test:p0a did not take the message (agent_prompt_stalled: stalled); no proof within the 0.001s window; read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}

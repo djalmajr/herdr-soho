@@ -187,7 +187,7 @@ func TestSendStalledWindowUnproved(t *testing.T) {
 	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 	screenPath := filepath.Join(f.dir, "state", "ws-test", "wait", "send-"+d15WindowID+".screen")
 	code, out, stderr := f.run([]string{"send", d15Pane, "hello"})
-	want := "herdr-soho: send: " + d15Pane + " did not take the message (agent_prompt_stalled: stalled); read its pane before sending again; screen saved to " + screenPath + "\n"
+	want := "herdr-soho: send: " + d15Pane + " did not take the message (agent_prompt_stalled: stalled); no proof within the 0.001s window; read its pane before sending again; screen saved to " + screenPath + "\n"
 	if code != 15 || out != "" || stderr != want {
 		t.Fatalf("the unproved window keeps the 15 and cites the saved screen: code=%d out=%q stderr=%q", code, out, stderr)
 	}
@@ -297,7 +297,7 @@ func TestSendStalledWindowSaveImpossible(t *testing.T) {
 	}
 	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 	code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-	want := "herdr-soho: send: local/w0test:p0a did not take the message (agent_prompt_stalled: stalled); read its pane before sending again\n"
+	want := "herdr-soho: send: local/w0test:p0a did not take the message (agent_prompt_stalled: stalled); no proof within the 0.001s window; read its pane before sending again\n"
 	if code != 15 || stderr != want {
 		t.Fatalf("an impossible save keeps today's message, nothing else: code=%d stderr=%q", code, stderr)
 	}
@@ -443,7 +443,7 @@ func TestSendStalledWindowUnreadableScreen(t *testing.T) {
 	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "2000", "50"
 	screenPath := filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen")
 	code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-	want := "herdr-soho: send: local/w0test:p0a did not take the message (agent_prompt_stalled: stalled); read its pane before sending again; screen saved to " + screenPath + "\n"
+	want := "herdr-soho: send: local/w0test:p0a did not take the message (agent_prompt_stalled: stalled); no proof within the 2s window; read its pane before sending again; screen saved to " + screenPath + "\n"
 	if code != 15 || stderr != want {
 		t.Fatalf("the unreadable checks run the window to its end and the 15 cites the saved screen: code=%d stderr=%q", code, stderr)
 	}

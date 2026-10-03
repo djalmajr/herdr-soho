@@ -76,7 +76,7 @@ func TestSendArrivalBusyR2ComposerSequence(t *testing.T) {
 	if code != 15 || out != "" {
 		t.Fatalf("must refuse sent with the marker still in the composer: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	want := "herdr-soho: send: windows/w0test:p0a did not take the message (agent_prompt_stalled: stalled); read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-29a25864.screen") + "\n"
+	want := "herdr-soho: send: windows/w0test:p0a did not take the message (agent_prompt_stalled: stalled); no proof within the 0.001s window; read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-29a25864.screen") + "\n"
 	if stderr != want {
 		t.Fatalf("the refusal keeps today's stalled 15: %q", stderr)
 	}

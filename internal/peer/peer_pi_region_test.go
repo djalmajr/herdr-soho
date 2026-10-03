@@ -103,9 +103,13 @@ func TestPiSendScreenMarkers(t *testing.T) {
 			t.Fatal("without two borders the last 15 lines still count")
 		}
 	})
-	t.Run("every other kind keeps the whole-screen behavior", func(t *testing.T) {
-		if !messageStillInScreen("claude", screen(""), endLine, id) {
-			t.Fatal("a non-pi marker on screen still blocks the proof")
+	t.Run("claude reads the box between its borders; without borders the last 15 lines keep counting", func(t *testing.T) {
+		// A claude with two borders has a box between them, like pi: the
+		// marker in the history above the top border is taken, not held, so
+		// it does not block the proof — the whole-screen expectation no
+		// longer applies to it.
+		if messageStillInScreen("claude", screen(""), endLine, id) {
+			t.Fatal("a claude marker above the box borders must not block the proof")
 		}
 		// The marker is on screen but above the last 15 lines: no Enter.
 		pushedDown := screen("") + strings.Repeat("chrome\n", 15)
@@ -114,6 +118,13 @@ func TestPiSendScreenMarkers(t *testing.T) {
 		}
 		if !idInInputBox("claude", "tail #"+id+"\n", id) {
 			t.Fatal("the id in the last 15 lines of a non-pi screen still counts")
+		}
+		// A claude without borders keeps the last 15 lines as its box: a
+		// marker pushed above them does not hold, even though it is on
+		// screen.
+		pushedNoBorders := "history " + endLine + " and #" + id + "\n" + strings.Repeat("chrome\n", 15)
+		if idInInputBox("claude", pushedNoBorders, id) {
+			t.Fatal("without borders the last 15 lines are the box and do not hold a pushed-up marker")
 		}
 	})
 }

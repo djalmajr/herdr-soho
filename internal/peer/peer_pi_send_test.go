@@ -152,11 +152,12 @@ func TestSendPiInputBox(t *testing.T) {
 			t.Fatalf("today's behavior sends one Enter from the last 15 lines: %d", enters)
 		}
 	})
-	t.Run("a non-pi kind with the same screen is unchanged", func(t *testing.T) {
+	t.Run("a claude whose box is between borders proves like pi", func(t *testing.T) {
 		prompt := newPromptFixture(t)
 		// Same screen as the pi history case, but 15+ lines push the marker
-		// above the last 15: for a non-pi the whole visible screen still
-		// counts, so the message on screen is not proof and no Enter goes.
+		// above the last 15: for a claude whose box sits between two borders
+		// the taken message in the history is proof (like pi), the box is
+		// empty, and the send goes out with no Enter.
 		history := prompt + "\n" + strings.Repeat("chrome\n", 11)
 		screen := piSendScreen(strings.TrimSuffix(history, "\n"), "")
 		rules := []fakecli.Rule{
@@ -177,12 +178,12 @@ func TestSendPiInputBox(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
-		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
-			t.Fatalf("code=%d stderr=%q", code, stderr)
+		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
+		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
 		if enters := countEnters(t, f); enters != 0 {
-			t.Fatalf("the non-pi screen proof still rejects a marker on screen: %d enters", enters)
+			t.Fatalf("no Enter goes to a claude whose empty box is between the borders: %d enters", enters)
 		}
 	})
 	t.Run("pi: no Enter when the message is in the history but the transcript has no sign of it", func(t *testing.T) {
