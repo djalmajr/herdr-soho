@@ -287,3 +287,32 @@ func TestWindowsAdmissionUnreadableRoot(t *testing.T) {
 		t.Fatalf("TERM order = %v; want no signal on an unreadable root", term)
 	}
 }
+
+// A failed GetExitCodeProcess (BOOL 0) is an unknown liveness, never a
+// proven absence: the registry line stays and a wait keeps polling
+// (r92c). Only STILL_ACTIVE is running and another code is gone.
+func TestWindowsExitStateKeepsAFailedQueryUnknown(t *testing.T) {
+	old := windowsExitCode
+	t.Cleanup(func() { windowsExitCode = old })
+	for _, tc := range []struct {
+		code uint32
+		ok   bool
+		want ProcLiveness
+	}{
+		{0, false, ProcUnknown},
+		{windowsStillActiveCode, true, ProcRunning},
+		{0, true, ProcGone},
+		{1, true, ProcGone},
+	} {
+		windowsExitCode = func(uintptr) (uint32, bool) { return tc.code, tc.ok }
+		if got := windowsExitState(0); got != tc.want {
+			t.Fatalf("code=%d ok=%v: windowsExitState=%v, want %v", tc.code, tc.ok, got, tc.want)
+		}
+	}
+	// procExists on a live process (this test) whose exit query fails: not
+	// proven gone, so it still reads as existing.
+	windowsExitCode = func(uintptr) (uint32, bool) { return 0, false }
+	if !procExists(os.Getpid()) {
+		t.Fatal("procExists read a failed exit-code query as gone")
+	}
+}

@@ -203,11 +203,16 @@ func windowsOpenProc(pid int) (uintptr, ProcLiveness) {
 		}
 		return 0, ProcUnknown
 	}
-	if !windowsStillActive(handle) {
+	switch windowsExitState(handle) {
+	case ProcRunning:
+		return handle, ProcRunning
+	case ProcGone:
 		windowsProcCloseHandle.Call(handle)
 		return 0, ProcGone
+	default:
+		windowsProcCloseHandle.Call(handle)
+		return 0, ProcUnknown
 	}
-	return handle, ProcRunning
 }
 
 // windowsProcStarted reads one pid's creation time (raw FILETIME ticks of
@@ -315,26 +320,41 @@ func procReadIdentityReal(pid int, env Env) (procIdentity, ProcLiveness) {
 // windowsStillActiveCode is GetExitCodeProcess's STILL_ACTIVE (259).
 const windowsStillActiveCode = 259
 
-// windowsStillActive reports whether the process behind handle is still
-// running. An exited process stays openable while any handle to it is
-// open (its parent's, for one), so OpenProcess alone does not prove it
-// runs: only the STILL_ACTIVE exit code does. A failed query reads as
-// not running.
-func windowsStillActive(handle uintptr) bool {
-	var code uint32
-	ok, _, _ := windowsProcGetExitCodeProcess.Call(handle, uintptr(unsafe.Pointer(&code)))
-	return ok != 0 && code == windowsStillActiveCode
+// windowsExitCode queries GetExitCodeProcess; ok is false when the call
+// failed (BOOL 0), and then code means nothing. Replaceable in tests.
+var windowsExitCode = func(handle uintptr) (code uint32, ok bool) {
+	r, _, _ := windowsProcGetExitCodeProcess.Call(handle, uintptr(unsafe.Pointer(&code)))
+	return code, r != 0
 }
 
-// procExists probes the pid with a limited-information handle and its
-// exit code.
+// windowsExitState reads the liveness of the process behind handle. An
+// exited process stays openable while any handle to it is open (its
+// parent's, for one), so OpenProcess alone does not prove it runs: the
+// STILL_ACTIVE exit code is running, another exit code is the proven
+// absence, and a failed query is unknown, never gone.
+func windowsExitState(handle uintptr) ProcLiveness {
+	code, ok := windowsExitCode(handle)
+	switch {
+	case !ok:
+		return ProcUnknown
+	case code == windowsStillActiveCode:
+		return ProcRunning
+	default:
+		return ProcGone
+	}
+}
+
+// procExists reports whether the pid may still run: only a proven
+// absence (ERROR_INVALID_PARAMETER at open, or an exit code other than
+// STILL_ACTIVE) is false, so a failed query keeps a wait polling and a
+// stop from being declared done.
 func procExists(pid int) bool {
 	handle, err := windowsOpenProcess(windowsProcessQueryLimitedInformation, pid)
 	if err != nil {
-		return false
+		return !windowsGoneOpen(err)
 	}
 	defer windowsProcCloseHandle.Call(handle)
-	return windowsStillActive(handle)
+	return windowsExitState(handle) != ProcGone
 }
 
 // procAliveStates reports which of the pids is still openable: one
