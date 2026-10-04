@@ -653,3 +653,12 @@ func TestGcWithOnlyOwnedProcessesHasNothingToRemove(t *testing.T) {
 		}
 	}
 }
+
+// An empty process registry says so (G3).
+func TestProcsEmptyRegistrySaysSo(t *testing.T) {
+	f := newProcsFixture(t)
+	code, out, errOut := f.run(t, "procs")
+	if code != 0 || out != "no registered processes\n" || errOut != "" {
+		t.Fatalf("procs: code=%d out=%q err=%q; want no registered processes", code, out, errOut)
+	}
+}

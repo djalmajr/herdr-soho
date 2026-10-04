@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -260,6 +261,13 @@ func releaseCopies(sd, agent string, keepCopies bool, env platform.Env, cwd stri
 	removed := map[string]bool{}
 	for _, row := range rows {
 		if row.Owner != agent {
+			continue
+		}
+		// The worker already deleted this copy (its role asks it to): the
+		// line only leaves the registry, as gc would drop it (G2).
+		if _, err := os.Lstat(row.Path); errors.Is(err, fs.ErrNotExist) {
+			removed[row.Path] = true
+			_, _ = fmt.Fprintf(platform.Stdout, "dropped missing copy %s\n", row.Path)
 			continue
 		}
 		resolved, parentInfo, cause := checkedCopy(row.Path, env, cwd)

@@ -37,6 +37,11 @@ func procsList(ctx *core.Config, env platform.Env, cwd string) int {
 	if err != nil {
 		core.DieFriction(fmt.Sprintf("procs: cannot read the process registry (%v)", err), 4, frictionLogPath, "procs")
 	}
+	if len(rows) == 0 {
+		// An empty registry says so, apart from a silent failure (G3).
+		_, _ = fmt.Fprintln(platform.Stdout, "no registered processes")
+		return 0
+	}
 	now := platform.Now()
 	for _, row := range rows {
 		_, _ = fmt.Fprintf(platform.Stdout, "%d  %s  %s  %s  %s\n", row.Pid, row.Name, row.Owner, humanAge(procAge(row, now)), core.ProcRowState(row, env))

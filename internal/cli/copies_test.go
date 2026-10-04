@@ -402,10 +402,10 @@ func TestCopiesAdd(t *testing.T) {
 		if _, err := os.Stat(target); err != nil {
 			t.Fatalf("the plain target was touched: %v", err)
 		}
-		// An empty registry lists nothing.
+		// An empty registry says so (G3).
 		code, out, errOut := f.run(t, f.env, "copies")
-		if code != 0 || out != "" || errOut != "" {
-			t.Fatalf("empty list code=%d out=%q err=%q; want nothing", code, out, errOut)
+		if code != 0 || out != "no registered copies\n" || errOut != "" {
+			t.Fatalf("empty list code=%d out=%q err=%q; want no registered copies", code, out, errOut)
 		}
 	})
 
@@ -1089,4 +1089,30 @@ func TestGcRemovalStaysBoundToTheValidatedParent(t *testing.T) {
 			t.Fatalf("rows=%#v; want the line gone", rows)
 		}
 	})
+}
+
+// A copy the worker already deleted leaves the registry with its release:
+// nothing is on disk to remove (G2).
+func TestReleaseDropsTheAgentsMissingCopyLines(t *testing.T) {
+	f := newCopiesFixture(t, []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
+	})
+	f.writeRoster(t, copiesRosterRow("worker", "p-worker"), copiesRosterRow("worker2", "p-worker2"))
+	gone := filepath.Join(f.tmp, "deleted-by-the-worker")
+	other := filepath.Join(f.tmp, "deleted-other")
+	now := core.FrictionISO(platform.Now())
+	f.writeCopies(t, []core.CopyRow{
+		{Path: gone, Owner: "worker", Pane: "p-worker", Created: now, Source: "-", Origin: "mutation-copy"},
+		{Path: other, Owner: "worker2", Pane: "p-worker2", Created: now, Source: "-", Origin: "mutation-copy"},
+	})
+	addReleaseReport(t, filepath.Join(f.state, "ws"), "worker", false)
+	code, out, errOut := f.run(t, f.env, "release", "worker")
+	if code != 0 || !strings.Contains(out, "dropped missing copy "+gone+"\n") || strings.Contains(errOut, "kept copy") {
+		t.Fatalf("code=%d out=%q err=%q; want the missing line dropped", code, out, errOut)
+	}
+	if rows := f.copiesRows(t); len(rows) != 1 || rows[0].Path != other {
+		t.Fatalf("rows=%#v; want only the other agent's line", rows)
+	}
 }
