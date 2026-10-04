@@ -54,6 +54,20 @@ func waitForCall(t *testing.T, f *compactFixture, argv []string) {
 	t.Fatalf("no %v call in the log before the deadline", argv)
 }
 
+// waitForCallCount polls the fake herdr call log until the number of calls
+// with the exact argv reaches n (or the deadline runs out).
+func waitForCallCount(t *testing.T, f *compactFixture, argv []string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if countArgv(f.calls(t), argv) >= n {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("only %d of the %d %v calls were logged before the deadline", countArgv(f.calls(t), argv), n, argv)
+}
+
 // appendTranscript appends one line to the transcript, the way Claude Code
 // appends its compact_boundary line when the compaction finishes.
 func appendTranscript(t *testing.T, path, line string) {
@@ -247,4 +261,121 @@ func TestCompactClaudeTranscriptFileMissingUsesScreenPath(t *testing.T) {
 	if n := countArgv(calls, compactReadArgv("worker")); n != 2 {
 		t.Fatalf("recent reads=%d want 2: %#v", n, calls)
 	}
+}
+
+// TestCompactClaudeTranscriptLatchSurvivesLostTranscript covers the transcript
+// side of the proofObserved latch: the pre-send baseline count holds no
+// compact_boundary, the session transcript gains one while the wait runs
+// (the first positive evidence of this attempt, from the transcript, the
+// screen never doing), the first idle wait runs out the deadline with the
+// worker still working, and the transcript file is lost before the last
+// read — a transient loss that a re-evaluation of the last read would read
+// as no evidence. The latch keeps the attempt: the capped idle wait after
+// the deadline still runs, and the worker back at idle ends it as compacted
+// while a worker never idle ends it as a timeout; /compact is never resent.
+// The boundary append and the file removal are released by the fake CLI's
+// own WaitFile blocks on the call log, with no blind sleep.
+func TestCompactClaudeTranscriptLatchSurvivesLostTranscript(t *testing.T) {
+	// The fake herdr subprocess inherits the test environment (CleanEnv only
+	// strips HERDR_* and TMPDIR), so the WaitFile blocks die with a failed
+	// call, not a hang, if the choreography deadlocks.
+	t.Setenv("FAKECLI_WAIT_FILE_TIMEOUT_MS", "30000")
+	cwd := "/tmp/dot_work_1"
+	const noProof = "older conversation line\n"
+	const boundary = `{"type":"system","subtype":"compact_boundary","summary":"SENTINEL-BOUNDARY"}
+`
+	runCase := func(t *testing.T, wantCode int, idleAfterDeadline bool) {
+		fakeFastClock(t, 6*time.Second)
+		state := "working"
+		if idleAfterDeadline {
+			state = "idle"
+		}
+		markers := t.TempDir()
+		releaseRead := filepath.Join(markers, "release-read")
+		releaseDelete := filepath.Join(markers, "release-delete")
+		rules := []fakecli.Rule{
+			// 1: the pre-send state check. 2: the pre-send transcript lookup
+			// (the baseline count, before the send; the loop's transcript
+			// check reuses this path and only reads the file).
+			{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: claudeAgentGetJSON("idle", cwd)},
+			{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: claudeAgentGetJSON("idle", cwd)},
+			// 3: the first idle wait, the worker still working. It blocks
+			// until the test has removed the transcript file (the transient
+			// loss), so the removal is before any re-evaluation.
+			{Argv: []string{"agent", "get", "worker"}, Call: 3, WaitFile: releaseDelete, Stdout: claudeAgentGetJSON("working", cwd)},
+			// 4 on: the capped idle wait after the deadline (the worker back
+			// at idle when it returns, working when it never does) and the
+			// timeout's transcript-state lookup.
+			{Argv: []string{"agent", "get", "worker"}, ArgvPrefix: true, Stdout: claudeAgentGetJSON(state, cwd)},
+			// 1: the pre-send read, no proof. 2: the first poll, the same
+			// screen (the screen never gains a proof line); it blocks until
+			// the test has appended the boundary line. 3: the last read after
+			// the deadline, the same screen.
+			{Argv: compactReadArgv("worker"), Call: 1, Stdout: noProof},
+			{Argv: compactReadArgv("worker"), Call: 2, WaitFile: releaseRead, Stdout: noProof},
+			{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: noProof},
+			{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
+			{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
+		}
+		f, transcript := newCompactTranscriptFixture(t, "claude", cwd, `{"type":"user","content":"before the compaction"}
+`, rules)
+		var code int
+		var out, errText string
+		done := make(chan struct{})
+		go func() {
+			code, out, errText = f.run(t, "compact", "worker", "--timeout", "1000")
+			close(done)
+		}()
+		// The baseline count ran before the send: once the Enter reached the
+		// pane, append the boundary (the first positive evidence) and release
+		// the first poll.
+		waitForCall(t, f, []string{"pane", "send-keys", "p1", "Enter"})
+		appendTranscript(t, transcript, boundary)
+		if err := os.WriteFile(releaseRead, []byte(""), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// The first idle wait is now polling (the third agent get): remove
+		// the transcript file (the transient loss) and release that call.
+		waitForCallCount(t, f, []string{"agent", "get", "worker"}, 3)
+		if err := os.Remove(transcript); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(releaseDelete, []byte(""), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		<-done
+		if code != wantCode || errText != "" {
+			t.Fatalf("code=%d out=%s stderr=%s want %d with no stderr", code, out, errText, wantCode)
+		}
+		value := compactJSON(t, out)
+		if value["agent"] != "worker" || value["kind"] != "claude" {
+			t.Fatalf("json=%v", value)
+		}
+		switch wantCode {
+		case 0:
+			if value["status"] != "compacted" {
+				t.Fatalf("json=%v want compacted (the transcript latch survives the lost file; the capped idle wait still ran)", value)
+			}
+		case 9:
+			if value["status"] != "timeout" || value["transcript"] != "missing" {
+				t.Fatalf("json=%v want timeout with transcript missing (the latched wait ran to the capped deadline and the transcript was lost)", value)
+			}
+		}
+		calls := f.calls(t)
+		if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
+			t.Fatalf("send-text calls=%d want 1 (the latch never resends /compact): %#v", n, calls)
+		}
+		if n := countArgv(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 1 {
+			t.Fatalf("Enter calls=%d want 1: %#v", n, calls)
+		}
+		if data, err := os.ReadFile(transcript); err == nil {
+			t.Fatalf("the transcript file was supposed to be lost: %q", data)
+		}
+	}
+	t.Run("the worker back at idle ends the latched attempt as compacted", func(t *testing.T) {
+		runCase(t, 0, true)
+	})
+	t.Run("the worker never idle ends the latched attempt as a timeout without a resend", func(t *testing.T) {
+		runCase(t, 9, false)
+	})
 }

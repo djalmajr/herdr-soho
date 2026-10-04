@@ -325,22 +325,27 @@ func TestCompactCodexDeliveredHistoryIsCompacted(t *testing.T) {
 	}
 }
 
-// TestCompactCodexScrolledProofIsCompacted covers the review P2: the reads
-// take 40 lines, so after a scroll the older compaction leaves the screen and
-// the new one shows the same `Context compacted` — the count stays at 1 and
-// the text is identical. The proof still counts with the base rule: it sits
-// below the delivered `/compact` echo. The compact reads as done, not a
-// timeout.
-func TestCompactCodexScrolledProofIsCompacted(t *testing.T) {
+// TestCompactCodexScrolledStaleProofTimesOut documents the deliberate D22
+// cost: the reads take 40 lines, so after a scroll the older compaction
+// leaves the screen and the new one shows the same `Context compacted` — the
+// proof line, the proof count and the echo count all stay at the pre-send
+// values. With no fresh evidence the rule does not accept the stale proof
+// below the stale echo: the wait ends at the deadline timeout (9), with one
+// Enter and no clear. A real compaction that scrolls out of the 40-line
+// window in the same window the new proof appears is a false negative; the
+// orchestrator re-checks by status/screen (claude stays covered by its
+// transcript). The pre-D22 rule read this exact screen as compacted.
+func TestCompactCodexScrolledStaleProofTimesOut(t *testing.T) {
 	const before = "old conversation\n› /compact\nContext compacted\n› Ask Codex to do anything\n"
 	const after = "new conversation after scrolling\n› /compact\nContext compacted\n› Ask Codex to do anything\n"
+	fakeFastClock(t, 6*time.Second)
 	f := newCompactFixture(t, "codex", []fakecli.Rule{
-		// All agent get calls idle (the pre-send check and the idle wait after
-		// the proof).
+		// All agent get calls idle (the pre-send check and the loop's dead
+		// check).
 		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 1)},
 		// 1: pre-send, the screen before the scroll. The later reads: the
-		// screen after the scroll (the old compaction is gone, the new proof is
-		// below the delivered echo, the box is empty).
+		// screen after the scroll (the old compaction is gone, the proof is
+		// the same line below the echo, the box is empty).
 		{Argv: compactReadArgv("worker"), Call: 1, Stdout: before},
 		{Argv: compactReadArgv("worker"), Stdout: after},
 		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
@@ -348,18 +353,24 @@ func TestCompactCodexScrolledProofIsCompacted(t *testing.T) {
 		{Argv: []string{"pane", "send-keys", "p1", "ctrl+u"}, Stdout: `{"result":{}}`},
 	})
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "1000")
-	if code != 0 || errText != "" {
-		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	if code != 9 {
+		t.Fatalf("code=%d want 9 (no fresh proof after the scroll): out=%s stderr=%s", code, out, errText)
 	}
-	if value := compactJSON(t, out); value["status"] != "compacted" {
-		t.Fatalf("json=%v want compacted (the new proof after the scroll)", value)
+	if value := compactJSON(t, out); value["status"] != "timeout" {
+		t.Fatalf("json=%v want timeout (the identical proof after the scroll is not fresh)", value)
+	}
+	if strings.Contains(errText, "nothing was compacted") {
+		t.Fatalf("the ambiguous scroll must not run the stuck-composer protocol: %q", errText)
 	}
 	calls := f.calls(t)
+	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
+		t.Fatalf("send-text calls=%d want 1: %#v", n, calls)
+	}
 	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "Enter"}); n != 1 {
-		t.Fatalf("Enter calls=%d want 1: %#v", n, calls)
+		t.Fatalf("Enter calls=%d want 1 (no second Enter on the ambiguous screen): %#v", n, calls)
 	}
 	if n := countArgv(calls, []string{"pane", "send-keys", "p1", "ctrl+u"}); n != 0 {
-		t.Fatalf("ctrl+u calls=%d want 0: %#v", n, calls)
+		t.Fatalf("ctrl+u calls=%d want 0 (the box was never stuck): %#v", n, calls)
 	}
 }
 

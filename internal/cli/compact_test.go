@@ -414,14 +414,18 @@ func TestCompactClaudeFailedCompaction(t *testing.T) {
 
 func TestCompactCodexWaitsForIdleAfterProof(t *testing.T) {
 	// Codex stays working for a few seconds after the proof; the wait keeps
-	// polling agent get until it is idle again.
+	// polling agent get until it is idle again. The pre-send screen has no
+	// proof and no echo: the proof on the first poll is a fresh line (D22),
+	// so the positive semantics — the idle wait after the proof — are
+	// preserved with a legitimate baseline.
 	f := newCompactFixture(t, "codex", []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("working", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
-		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.codexProof},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: codexClearedComposer},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.codexProof},
 	})
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "30000")
 	if code != 0 || errText != "" {
@@ -1321,13 +1325,16 @@ func TestCompactClaudeNoMessagesToCompact(t *testing.T) {
 // TestCompactLaterMentionDoesNotAnchor verifies the review's later-mention
 // screen: a line that only mentions /compact after the proof is not the
 // anchor, so the proof below the sent command still counts (old code: 9).
+// The pre-send screen has no proof and no echo: the proof on the first poll
+// is a fresh line (D22), keeping the positive semantics the test covers.
 func TestCompactLaterMentionDoesNotAnchor(t *testing.T) {
 	f := newCompactFixture(t, "codex", []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"pane", "send-text", "p1", "/compact"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
-		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.codexLaterMention},
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: codexClearedComposer},
+		{Argv: compactReadArgv("worker"), Call: 2, Stdout: compactScreens.codexLaterMention},
 	})
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
 	if code != 0 || errText != "herdr-soho: warning: compact: --timeout is in milliseconds; 500 is under a second (for 500 seconds pass 500000)\n" {
@@ -1530,6 +1537,9 @@ func TestDispatchCompactCompactsThenSends(t *testing.T) {
 		{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: compactStateJSON("idle", 1)},
 		{Argv: []string{"pane", "send-text", "w0test:p0a", "/compact"}, Stdout: `{"result":{}}`},
 		{Argv: []string{"pane", "send-keys", "w0test:p0a", "Enter"}, Stdout: `{"result":{}}`},
+		// The pre-send read has no proof and no echo: the proof on the first
+		// poll is a fresh line (D22), keeping the compact step positive.
+		{Argv: compactReadArgv("worker"), Call: 1, Stdout: codexClearedComposer},
 		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: compactScreens.codexProof},
 	}
 	f := newDispatchArrivalFixture(t, "working", 1, 2, "$CURRENT_PATHS", "0", extra...)

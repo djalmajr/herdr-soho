@@ -275,7 +275,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 // command runs (nothing is written).
 func TestNowriteRejectsWritingInvocations(t *testing.T) {
 	nr := newNowriteReads(t, true)
-	const messagePrefix = "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'gc' without --yes; rejected: "
+	const messagePrefix = "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes; rejected: "
 	const messageTail = " — unset HERDR_SOHO_NOWRITE to write\n"
 	cases := []struct {
 		name     string
