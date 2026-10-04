@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -256,23 +257,53 @@ func TestStopRejectsAChildReparentedAfterTheSnapshot(t *testing.T) {
 
 // TestStopSkipsAKillWhenTheStartTimeChanged: a process that ignores TERM
 // reaches the KILL round; the injected identity read then reports a
-// different start time for it, and the KILL must not go.
+// different start time for it, and the KILL must not go. The fixture
+// prints its handshake only after SIGTERM/SIG_IGN is installed, and the
+// test waits for it (with a 10 s deadline) before it reads the identity
+// and stops: the stop never races the interpreter's start-up, and a
+// fixture that dies before it signalled fails the test instead of
+// fooling the assertions.
 func TestStopSkipsAKillWhenTheStartTimeChanged(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the unix TERM/KILL round; the windows round exercises the same contract")
 	}
 	env := procTestEnv(t)
-	cmd := exec.Command("/usr/bin/python3", "-c", "import signal,time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nwhile True: time.sleep(0.05)\n")
+	cmd := exec.Command("/usr/bin/python3", "-c", "import signal,time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nprint('ready', flush=True)\nwhile True: time.sleep(0.05)\n")
 	if _, err := exec.LookPath("/usr/bin/python3"); err != nil {
 		t.Skip("/usr/bin/python3 is not available")
 	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("opening the fixture's stdout: %v", err)
+	}
+	ready := make(chan error, 1)
+	go func() {
+		line, readErr := bufio.NewReader(stdout).ReadString('\n')
+		if readErr != nil {
+			ready <- fmt.Errorf("handshake read: %v (line %q)", readErr, line)
+			return
+		}
+		if strings.TrimSpace(line) != "ready" {
+			ready <- fmt.Errorf("unexpected handshake line %q", line)
+			return
+		}
+		ready <- nil
+	}()
 	if err := cmd.Start(); err != nil {
-		t.Skipf("starting python3: %v", err)
+		t.Fatalf("starting python3: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill() // SIGKILL: the process ignores TERM
 		_ = cmd.Wait()
 	})
+	select {
+	case err := <-ready:
+		if err != nil {
+			t.Fatalf("the fixture never signalled its SIG_IGN readiness: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the fixture did not print the handshake within 10 s of start; SIG_IGN may not be installed")
+	}
 	pid := cmd.Process.Pid
 	readStarted, _, ok := ProcInfo(pid, env)
 	if !ok {
