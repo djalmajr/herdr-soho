@@ -110,6 +110,10 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	if roleFile == "" {
 		core.DieFriction(fmt.Sprintf("unknown role '%s' (run: herdr-soho roles)", role), 3, frictionLogPath, "dispatch")
 	}
+	// F11: before any state change or send, the recorded compact phase decides
+	// the dispatch: a live or unverifiable owner for this pane refuses the
+	// send, and a proven-dead owner's or a switched-pane's record is removed.
+	core.CompactPhaseCheck(sd, agent, at(1), env)
 	forAuthors, forUnknown := []string{}, []string{}
 	var forEntries []any
 	if forValue != nil {
@@ -245,7 +249,10 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	if compact {
 		if compactProof(kind) == "" {
 			core.Warn(fmt.Sprintf("dispatch: --compact skipped: kind '%s' has no verified compact command", kind), frictionLogPath, "dispatch")
-		} else if code := compactDispatchStep(agent, at(1), kind, role, lane, model, compactDefaultTimeoutMS, ctx, env, cwd); code != 0 {
+		} else if code := compactPhaseDispatch(compactPhaseDispatchOptions{
+			Agent: agent, Pane: at(1), Kind: kind, Role: role, Lane: lane, Model: model,
+			Brief: brief, SD: sd, TimeoutMS: compactDefaultTimeoutMS, Ctx: ctx, Env: env, Cwd: cwd,
+		}); code != 0 {
 			// The compaction phase did not finish: say so, and that this brief was
 			// not sent, so the orchestrator does not look for it on the screen.
 			fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: the compact step of '%s' did not finish (exit %d); the brief was not sent\n", agent, code)
@@ -640,6 +647,74 @@ func compactDispatchStep(agent, pane, kind, role, lane, model string, timeoutMS 
 		panic(value)
 	}()
 	return compactRun(agent, pane, kind, role, lane, model, timeoutMS, ctx, env, cwd, true)
+}
+
+// compactPhaseDispatchOptions names the F11 wrapper's parameters: the
+// dispatch's own fields plus the state dir the marker lives in.
+type compactPhaseDispatchOptions struct {
+	Agent     string
+	Pane      string
+	Kind      string
+	Role      string
+	Lane      string
+	Model     string
+	Brief     string
+	SD        string
+	TimeoutMS int64
+	Ctx       *core.Config
+	Env       platform.Env
+	Cwd       string
+}
+
+// compactPhaseDispatch wraps compactDispatchStep with the F11 marker: the
+// claim stands before the phase sends anything, and the claimed token is
+// removed when the phase exits (a success, a failure and the re-raised panic
+// included), before any task state is written or the brief is sent. Only a
+// kill that skips the cleanup (SIGKILL) leaves the record, where status
+// reads it as compact-interrupted. A phase that succeeded but whose marker
+// could not be removed (a later token, an unreadable file, a lock panic)
+// aborts with 4 before the brief: the standing marker still denies the send,
+// and a different token never authorizes this dispatch's send.
+func compactPhaseDispatch(opts compactPhaseDispatchOptions) int {
+	absBrief := opts.Brief
+	if p, err := filepath.Abs(opts.Brief); err == nil {
+		absBrief = p
+	}
+	token := core.CompactPhaseClaim(core.CompactPhaseClaimOptions{SD: opts.SD, Agent: opts.Agent, Pane: opts.Pane, Brief: absBrief, Env: opts.Env})
+	fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: compacting '%s' before sending the brief; status shows this phase\n", opts.Agent)
+	// removeMarker captures the cleanup's outcome, a lock panic included
+	// (recorded, never allowed to replace the phase's own error on the panic
+	// path).
+	removeMarker := func() error {
+		return func() (err error) {
+			defer func() {
+				if v := recover(); v != nil {
+					err = fmt.Errorf("cleanup panic: %v", v)
+				}
+			}()
+			return core.CompactPhaseRemove(opts.SD, opts.Agent, token)
+		}()
+	}
+	code := func() int {
+		defer func() {
+			if r := recover(); r != nil {
+				// A failed phase keeps its own error; the cleanup failure is
+				// only recorded.
+				if err := removeMarker(); err != nil {
+					core.Warn(fmt.Sprintf("dispatch: the compact-phase marker of '%s' was not removed: %v", opts.Agent, err), frictionLogPath, "dispatch")
+				}
+				panic(r)
+			}
+		}()
+		return compactDispatchStep(opts.Agent, opts.Pane, opts.Kind, opts.Role, opts.Lane, opts.Model, opts.TimeoutMS, opts.Ctx, opts.Env, opts.Cwd)
+	}()
+	if err := removeMarker(); err != nil {
+		core.Warn(fmt.Sprintf("dispatch: the compact-phase marker of '%s' was not removed: %v", opts.Agent, err), frictionLogPath, "dispatch")
+		if code == 0 {
+			core.DieFriction(fmt.Sprintf("dispatch: the compact phase of '%s' finished, but its marker could not be removed (%v); the brief was not sent", opts.Agent, err), 4, frictionLogPath, "dispatch")
+		}
+	}
+	return code
 }
 
 // writeDispatchSidecar writes the attempt sidecar and, when the dispatch

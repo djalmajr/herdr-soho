@@ -1,6 +1,7 @@
 package wait
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -132,6 +133,23 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 	rc := 0
 	for _, agent := range argv {
 		report := core.LastReport(sd, agent)
+		// F11: a recorded compact phase outranks every other state, including a
+		// stale complete report: while its marker stands, the brief was not
+		// sent, so no report for it can exist. The marker is only read; an
+		// agent outside the roster, or a roster pane that no longer matches the
+		// record's pane, falls through to the usual state.
+		if line := core.RosterLine(sd, agent); line != "" {
+			if out, code, ok := compactPhaseStatusLine(line, sd, agent, env); ok {
+				// 9 ranks 0 (4 does not): a first non-zero code still
+				// replaces the zero rc; the existing precedence then
+				// decides the rest.
+				if code != 0 && (rc == 0 || WaitRank(code) > WaitRank(rc)) {
+					rc = code
+				}
+				fmt.Fprint(platform.Stdout, out)
+				continue
+			}
+		}
 		state, cause := "", ""
 		match, renewal, kind, model, lane, question := "", "", "", "", "", ""
 		quota := false
@@ -276,6 +294,37 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 func markerExists(sd, agent, name string) bool {
 	_, err := os.Stat(filepath.Join(sd, "wait", agent+"."+name))
 	return err == nil
+}
+
+// compactPhaseStatusLine reports the F11 compact-phase marker for a roster
+// line whose pane matches the record's pane, without modifying the marker:
+// compacting (an alive owner, exit 0), compact-interrupted (a dead owner or
+// a different start, exit 9) and compact-unknown (an unverifiable owner,
+// exit 4); a corrupted or unreadable marker is a visible error (exit 4) that
+// is never removed. ok is false when there is no marker or the record's pane
+// no longer matches (the usual state logic stands).
+func compactPhaseStatusLine(rosterLine, sd, agent string, env platform.Env) (string, int, bool) {
+	path := core.CompactPendingPath(sd, agent)
+	rec, err := core.CompactPendingRead(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", 0, false
+		}
+		core.Warn(fmt.Sprintf("status: the compact-pending marker %s of '%s' is unreadable; it was left in place", path, agent), frictionLogFile, "status")
+		return fmt.Sprintf("%s\tcompact-unknown\t\tcompact-pending marker unreadable: %s; brief was not sent\t-\t-\n", agent, path), 4, true
+	}
+	if rec.Pane != field(strings.Split(rosterLine, "\t"), 1) {
+		return "", 0, false
+	}
+	cause := fmt.Sprintf("brief was not sent: %s", rec.Brief)
+	switch core.CompactPendingOwner(rec, env) {
+	case core.CompactOwnerAlive:
+		return fmt.Sprintf("%s\tcompacting\t\t%s\t-\t-\n", agent, cause), 0, true
+	case core.CompactOwnerDead:
+		return fmt.Sprintf("%s\tcompact-interrupted\t\t%s\t-\t-\n", agent, cause), 9, true
+	default:
+		return fmt.Sprintf("%s\tcompact-unknown\t\t%s\t-\t-\n", agent, cause), 4, true
+	}
 }
 func markerRead(sd, agent, name string) string {
 	value, _ := platform.ReadTextFile(filepath.Join(sd, "wait", agent+"."+name))

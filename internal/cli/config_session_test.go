@@ -431,11 +431,11 @@ func TestNowriteRejectsPortedCommandsBeforeWriting(t *testing.T) {
 }
 
 func TestNowriteRejectsConfigWithoutSubcommand(t *testing.T) {
-	// Mutation captured: allowing bare config through HERDR_SOHO_NOWRITE emits config instead of the JS read-only error.
+	// Mutation captured: allowing bare config through HERDR_SOHO_NOWRITE emits config instead of the read-only error.
 	env, cwd := commandFixture(t)
 	env["HERDR_SOHO_NOWRITE"] = "1"
 	code, out, errOut := runIn(t, []string{"config"}, env, cwd)
-	wantErr := "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'gc' without --yes; rejected: config — unset HERDR_SOHO_NOWRITE to write\n"
+	wantErr := "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes; rejected: config — unset HERDR_SOHO_NOWRITE to write\n"
 	if code != 2 || out != "" || errOut != wantErr {
 		t.Fatalf("bare config under NOWRITE code=%d out=%q err=%q", code, out, errOut)
 	}

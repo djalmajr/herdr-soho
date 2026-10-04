@@ -430,7 +430,7 @@ $S dispatch a brief-a.md --no-wait   # fan out…
 $S dispatch b brief-b.md --no-wait
 $S wait a b                          # …then block until every report exists
 $S wait a b --any                    # or until the first one lands
-$S status [a b]                      # non-blocking (no names = the whole team): done | working | blocked | question | no-report-yet | gone | unavailable | quota | provider-error | capacity | not-received; a name outside the roster is not-in-roster when Herdr knows it (a remote ref is asked on its machine; stderr names the `herdr agent get` that reads it), else unknown-agent
+$S status [a b]                      # non-blocking (no names = the whole team): done | working | blocked | question | no-report-yet | gone | unavailable | quota | provider-error | capacity | not-received | compacting | compact-interrupted | compact-unknown; a name outside the roster is not-in-roster when Herdr knows it (a remote ref is asked on its machine; stderr names the `herdr agent get` that reads it), else unknown-agent
 ```
 
 **Amending a brief in flight.** To change a worker's brief — while it is
@@ -875,6 +875,37 @@ $S spawn implementer --effort xhigh --approvals full      # normalized effort + 
 $S spawn scouter --kind cursor --model gpt-5.3-codex --effort high --approvals full
 $S spawn implementer -- -s workspace-write -a never      # native agent args after --
 ```
+
+During `dispatch --compact`, `status` reports the pre-send phase even when
+the worker's previous report is complete. `compacting` means the dispatch
+process is still running; `compact-interrupted` (exit 9) means that process
+ended before sending the brief; `compact-unknown` (exit 4) means its identity
+could not be checked or the phase record is unreadable. The cause names
+the unsent brief when its record can be read. These states do not
+create a task report or send the brief later. They cover only the compaction
+phase of `dispatch`; `wait` still watches report files.
+
+The phase disappears before dispatch composes or sends the new brief,
+including on a handled compact error or timeout. An abruptly terminated
+dispatch leaves the phase for diagnosis. A later dispatch refuses an
+existing live or unknown owner (exit 10), and removes a phase only when its
+owner is confirmed gone or its recorded process or pane has changed.
+`status` does not remove it, including in NOWRITE mode. After an interruption,
+inspect the worker before retrying: ending the observer does not cancel the
+worker's compaction. The 300-second compact limit and `--no-wait` behavior
+are unchanged; `--timeout` still controls the report wait.
+
+A proof already below an old `/compact` echo is not evidence of the new
+attempt. The screen must gain a different proof line, more proof lines, or
+another command echo with proof below it. Claude can also prove completion
+through its transcript; OpenCode keeps its duration-bearing proof rule.
+Once observed, a fresh proof remains valid while the command waits for idle.
+Codex may time out even after a real compaction when the old echo and proof
+scroll out as identical new ones appear: the screen alone cannot establish
+which attempt produced them. A timeout is not proof of failure. Inspect the
+worker before the next brief; do not automatically send `/compact` again.
+An ambiguous historical echo with proof below it does not trigger the stuck
+composer's extra Enter or `ctrl+u`.
 
 `stats` scans composed prompts and reports in the workspace state and
 temporary routing directories. It counts accepted dispatches and legacy

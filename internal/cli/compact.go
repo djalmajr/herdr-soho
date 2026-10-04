@@ -73,10 +73,11 @@ var compactOpenCodeMenuLineRE = regexp.MustCompile(`^[│┃] /(\S+)`)
 // compactProofByKind holds the compaction proof each supported kind prints
 // after `/compact`; a kind without an entry has no verified compact command.
 // For the kinds that echo the command (claude, codex) the proof only counts
-// below the line where `/compact` was sent: an earlier compaction on the
-// screen is not proof of this one. pi and opencode do not echo it, so their
-// proof counts a line that was not on screen before the send, and opencode
-// also when its count of proof lines grows.
+// when it is new since the pre-send read (a new line, a grown count, or below
+// a grown echo count): an earlier compaction on the screen is not proof of
+// this one. pi and opencode do not echo it, so their proof counts a line that
+// was not on screen before the send, and opencode also when its count of
+// proof lines grows.
 var compactProofByKind = map[string]string{
 	"claude":   "Compacted",
 	"codex":    "Context compacted",
@@ -164,10 +165,13 @@ func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 }
 
 // compactRun sends /compact once to a rostered worker through its pane and
-// waits for the kind's compaction proof below the sent command (a claude
-// also counts when its session transcript gains a compact_boundary line,
-// because the screen shows no confirmation), then for the worker back at
-// idle or done. It is the shared step behind the `compact`
+// waits for a fresh proof of the compaction (claude, codex and pi: a proof
+// line unseen since the pre-send read, a proof-line count that grew since
+// the pre-send read, or a proof below the last /compact echo when the echo
+// count grew since the pre-send read; a claude also counts when its session
+// transcript gains a compact_boundary line, because the screen shows no
+// confirmation; an opencode counts its dated done line), then for the worker
+// back at idle or done. It is the shared step behind the `compact`
 // command and `dispatch --compact`. The caller must have checked the roster
 // and the kind. A pi worker whose footer shows a thinking level gets it
 // turned off with shift+tab before the send and the level back after the
@@ -185,7 +189,8 @@ func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 // nothing-to-compact (0), and /compact not on top or a missing menu clears
 // the box and exits 4. A codex gets its composer checked right after the
 // Enter, on the first proof poll (up to five seconds, one poll per second):
-// a /compact that sits in the box means the Enter did not submit it (it can
+// a /compact that sits in the box, with no proof below the last /compact,
+// means the Enter did not submit it (it can
 // land before the TUI draws /compact and its command popup), so before any
 // proof is trusted the line must leave the box; a second Enter gets the same
 // check, and a line that stays in the box after both is cleared with ctrl+u
@@ -212,15 +217,17 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	}
 	// opencode proves the compaction with the done-line regex instead of a
 	// substring, and counts a screen whose count of proof lines grew (it does
-	// not echo the /compact it runs); the other kinds keep the substring rule.
-	var seen map[string]bool
+	// not echo the /compact it runs); claude, codex and pi compare each screen
+	// against the pre-send baseline: a fresh proof line, a grown proof-line
+	// count, or a grown echo count with the proof below the last echo. A stale
+	// proof below a stale echo on an otherwise unchanged screen is not proof.
 	var proofNew func(screen string) bool
 	if kind == "opencode" {
-		seen = compactOpenCodeProofLines(before)
+		seen := compactOpenCodeProofLines(before)
 		proofNew = func(screen string) bool { return compactOpenCodeProofNew(screen, before, seen) }
 	} else {
-		seen = compactProofLines(before, proof)
-		proofNew = func(screen string) bool { return compactProofNew(screen, proof, seen) }
+		base := compactProofBaseline{screen: before, proof: proof, seen: compactProofLines(before, proof)}
+		proofNew = func(screen string) bool { return compactProofNew(screen, base) }
 	}
 	endings := compactEndings(kind)
 	endSeen := make([]map[string]bool, len(endings))
@@ -287,6 +294,12 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	endStatus := ""
 	endLine := ""
 	compacted := false
+	// proofObserved latches the first positive evidence of this attempt — a
+	// screen proof or the claude transcript — for the rest of the run,
+	// including the last read after the deadline: a screen that scrolls (or a
+	// transient transcript error) while the idle wait is still running must
+	// not lose evidence already seen. The latch never skips the return to idle.
+	proofObserved := false
 	proceedToWait := true
 	if kind == "opencode" {
 		switch compactOpenCodeMenuSelection(agent, env) {
@@ -313,24 +326,28 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 		for {
 			if !compacted && endStatus == "" {
 				screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
-				if kind == "codex" && compactCodexComposerStuck(screen) && !proofNew(screen) {
-					// A /compact on the composer line means the command never ran:
-					// an Enter that lands before the TUI draws /compact and its
-					// command popup does not submit the box, and no proof can then
-					// appear (codex has no endings), so without this check the wait
-					// only ends at the full deadline. The check runs only when no
-					// proof of this compaction is already on screen: a delivered
-					// /compact leaves its echo in the history above a now-empty or
-					// busy composer, and the proof below it is the compaction's own.
-					// Confirm the line left the box (five seconds, one poll per
-					// second) before any proof is trusted (a stale proof below an
-					// older /compact echo would otherwise read as this one's); one
-					// more Enter gets the same confirm, and a line that stays in the
-					// box after both is cleared and reported (4, nothing was
-					// compacted).
-					screen = compactCodexComposerRetry(agent, pane, kind, env)
+				if kind == "codex" && compactCodexComposerStuck(screen, proof) && !proofNew(screen) {
+					// A /compact on the composer line, with no proof below the last
+					// /compact, means the command never ran: an Enter that lands before
+					// the TUI draws /compact and its command popup does not submit the
+					// box, and no proof can then appear (codex has no endings), so
+					// without this check the wait only ends at the full deadline. A
+					// delivered /compact instead leaves its echo in the history above a
+					// now-empty or busy composer, with the proof below the last echo:
+					// the composer is not stuck then, fresh or stale proof alike, and
+					// the screen goes to the proof check — a stale proof with no new
+					// evidence ends at the deadline timeout, with no second Enter and no
+					// clear. When the composer is really stuck: confirm the line left the
+					// box (five seconds, one poll per second) before any proof is
+					// trusted; one more Enter gets the same confirm, and a line that
+					// stays in the box after both is cleared and reported (4, nothing
+					// was compacted).
+					screen = compactCodexComposerRetry(agent, pane, kind, proof, env)
 				}
 				if proofNew(screen) || transcriptRisen() {
+					proofObserved = true
+				}
+				if proofObserved {
 					compacted = compactWaitIdle(agent, env, deadline)
 				} else {
 					// An ending counts only when it belongs to this attempt: below a
@@ -361,10 +378,12 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	// The deadline ran out without proof or ending: the compaction can finish
 	// right after it. One last read runs the same proofs (the screen, the
 	// claude transcript, the opencode regex and the endings); /compact is
-	// never sent again.
+	// never sent again. A proof observed earlier (proofObserved) is not
+	// re-evaluated on a screen that may have scrolled: it still gets the
+	// capped idle wait that follows.
 	if !compacted && endStatus == "" {
 		screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
-		if proofNew(screen) || transcriptRisen() {
+		if proofObserved || proofNew(screen) || transcriptRisen() {
 			// The idle wait that follows gets a short cap of its own: ten poll
 			// intervals from now.
 			compacted = compactWaitIdle(agent, env, platform.Now().Add(compactPollInterval*10))
@@ -531,10 +550,20 @@ func compactCodexComposerLine(screen string) (string, bool) {
 }
 
 // compactCodexComposerStuck reports whether the /compact still sits in the
-// codex composer: the composer line is the sent command itself. A screen
-// without a composer line (a read before the TUI drew the box, or a frozen
-// worker) is not stuck: the proof wait and its liveness checks take over.
-func compactCodexComposerStuck(screen string) bool {
+// codex composer: the composer line is the sent command itself, with no
+// proof below the last /compact. A proof below the last /compact (fresh or
+// stale) means the command was delivered and its echo sits in the history
+// above an empty or busy composer: not stuck. A stale proof is never success
+// by itself — the fresh-proof rule decides that; here it only keeps the
+// retry protocol (a second Enter and a clear) from firing on a delivered
+// command, for every consumer of the check (the proof poll, the confirm and
+// the re-read before the second Enter). A screen without a composer line (a
+// read before the TUI drew the box, or a frozen worker) is not stuck: the
+// proof wait and its liveness checks take over.
+func compactCodexComposerStuck(screen, proof string) bool {
+	if compactProofBelow(screen, proof) {
+		return false
+	}
 	line, ok := compactCodexComposerLine(screen)
 	if !ok {
 		return false
@@ -548,11 +577,11 @@ func compactCodexComposerStuck(screen string) bool {
 // like the proof wait. It returns the first screen whose composer no longer
 // holds /compact, or "" when the line is still there at the end of the
 // window.
-func compactComposerCleared(agent string, env platform.Env) string {
+func compactComposerCleared(agent, proof string, env platform.Env) string {
 	deadline := platform.Now().Add(compactComposerWindow)
 	for {
 		screen := herdr.AgentRead(env, agent, "recent", intPtr(compactScreenLines))
-		if !compactCodexComposerStuck(screen) {
+		if !compactCodexComposerStuck(screen, proof) {
 			return screen
 		}
 		compactDieOnDeadWorker(agent, herdr.AgentState(agent, env, herdr.Timeout, nil))
@@ -573,8 +602,8 @@ func compactComposerCleared(agent string, env platform.Env) string {
 // box after both is cleared with ctrl+u and reported (4, nothing was
 // compacted). It returns the first screen whose composer no longer holds
 // /compact, so the proof check runs on a screen past the stuck state.
-func compactCodexComposerRetry(agent, pane, kind string, env platform.Env) string {
-	if screen := compactComposerCleared(agent, env); screen != "" {
+func compactCodexComposerRetry(agent, pane, kind, proof string, env platform.Env) string {
+	if screen := compactComposerCleared(agent, proof, env); screen != "" {
 		return screen
 	}
 	// Right before the second Enter: re-read the state and the screen. A
@@ -595,11 +624,11 @@ func compactCodexComposerRetry(agent, pane, kind string, env platform.Env) strin
 	// or another command is in it now): the second Enter goes only to a
 	// composer that still holds /compact; any other screen goes back to the
 	// proof check with no key.
-	if !compactCodexComposerStuck(screen) {
+	if !compactCodexComposerStuck(screen, proof) {
 		return screen
 	}
 	herdr.PaneSendKeys(pane, "Enter", env)
-	if screen := compactComposerCleared(agent, env); screen != "" {
+	if screen := compactComposerCleared(agent, proof, env); screen != "" {
 		return screen
 	}
 	herdr.PaneSendKeys(pane, "ctrl+u", env)
@@ -637,17 +666,36 @@ func compactProofLines(screen, proof string) map[string]bool {
 	return out
 }
 
-// compactProofNew reports a proof below the echoed /compact, or a proof line
-// that was not on screen before the send (pi prints `Compacted from <n>
-// tokens` with no echo of the command).
-func compactProofNew(screen, proof string, seen map[string]bool) bool {
-	if compactProofBelow(screen, proof) {
-		return true
-	}
-	for line := range compactProofLines(screen, proof) {
-		if !seen[line] {
+// compactProofBaseline is the pre-send screen state the fresh-proof rule
+// compares a later screen against: the baseline screen, the kind's proof
+// text, and the trimmed proof lines already on screen before the send.
+type compactProofBaseline struct {
+	screen string
+	proof  string
+	seen   map[string]bool
+}
+
+// compactProofNew reports a proof of this /compact for the kinds that echo
+// the command or print a fresh line (claude, codex, pi): a proof line unseen
+// since the baseline, OR a proof-line count that grew since the baseline, OR
+// a proof below the last /compact echo when the echo count grew since the
+// baseline. A screen that only redrew (clock, context, a working/idle line,
+// state_change_seq) leaves the proof text and the counts unchanged, so a
+// stale proof below a stale echo is not proof, even after a scroll that
+// shifts the lines; a new echo without a proof is not proof either. The
+// opencode regex rule and the claude transcript rule are separate and
+// unchanged.
+func compactProofNew(screen string, base compactProofBaseline) bool {
+	for line := range compactProofLines(screen, base.proof) {
+		if !base.seen[line] {
 			return true
 		}
+	}
+	if compactLineCount(screen, base.proof) > compactLineCount(base.screen, base.proof) {
+		return true
+	}
+	if compactCommandCount(screen) > compactCommandCount(base.screen) && compactProofBelow(screen, base.proof) {
+		return true
 	}
 	return false
 }
