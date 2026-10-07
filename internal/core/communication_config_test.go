@@ -23,6 +23,14 @@ func policyFixture(t *testing.T) (platform.Env, string) {
 	t.Helper()
 	skill := skillDir(t) // before the chdir: the test binary's cwd is internal/core
 	root := t.TempDir()
+	// Canonicalize the existing temporary root before deriving any
+	// fixture path (same short-alias vs canonical reason as the core
+	// fixture): the product resolves project paths through git, which
+	// reports the canonical form.
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("canonicalize the fixture root: %v", err)
+	}
 	repo := filepath.Join(root, "repo")
 	home := filepath.Join(root, "home")
 	conf := filepath.Join(root, "conf")

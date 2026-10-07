@@ -148,24 +148,29 @@ func TestFindStreamPublishesBeforeDeadlineAndStopsRemoteProcess(t *testing.T) {
 }
 
 func TestFindStreamLocalBeforeStoppedRemote(t *testing.T) {
+	deadlineMs := 800
+	if runtime.GOOS == "windows" {
+		// Windows Server CI exhausted 800ms while starting enumeration.
+		// Leave startup room while keeping the global deadline below the
+		// fake's 10s wait cap and checking that local rows arrive first.
+		deadlineMs = 3000
+	}
+	deadlineArg := strconv.Itoa(deadlineMs)
+	minimumWait := time.Duration(deadlineMs)*time.Millisecond - 200*time.Millisecond
 	t.Run("local rows print while the stopped remote is still due, and the run exits at the deadline", func(t *testing.T) { // 验收 1: 真实 CmdFind 入口, 本地先于停机的远程
 		dir := t.TempDir()
 		rules := []fakecli.Rule{
 			{Argv: []string{"api", "snapshot"}, Stdout: `{"result":{"snapshot":` + localSnapshot + `}}`},
 			{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"slow","enabled":true}]`},
-			// The remote waits for a file that never appears; the 800ms
-			// global deadline must kill it well before the fake's own 10s
-			// cap. The deadline is calibrated over the race-instrumented
-			// fake's re-exec cost (the fixture removes the race runtime's
-			// 1s at-exit wait via GORACE=atexit_sleep_ms=0): the measured
-			// spawn is ~20ms, so 800ms holds the contract under -race and a
-			// loaded host.
+			// The remote waits for a file that never appears. The global
+			// deadline must stop it before the fake's own 10s wait cap.
+			// Race detection stays enabled without its artificial exit wait.
 			{Argv: []string{"--machine", "slow", "api", "snapshot"}, WaitFile: filepath.Join(dir, "never-slow")},
 		}
 		f := newFixtureAt(t, dir, rules)
 		f.env["FAKECLI_WAIT_FILE_TIMEOUT_MS"] = "10000"
 		start := time.Now()
-		code, out, stderr := f.run([]string{"find", "build", "--all", "--timeout", "800"})
+		code, out, stderr := f.run([]string{"find", "build", "--all", "--timeout", deadlineArg})
 		elapsed := time.Since(start)
 		if code != 0 {
 			t.Fatalf("code=%d out=%q stderr=%q elapsed=%v", code, out, stderr, elapsed)
@@ -179,8 +184,8 @@ func TestFindStreamLocalBeforeStoppedRemote(t *testing.T) {
 		if !strings.Contains(stderr, `machine 'slow' unavailable`) || !strings.Contains(stderr, "timed out") {
 			t.Fatalf("stderr=%q elapsed=%v (want the remote's deadline diagnostic)", stderr, elapsed)
 		}
-		if elapsed < 600*time.Millisecond || elapsed > 8000*time.Millisecond {
-			t.Fatalf("elapsed=%v (want near the 800ms deadline, not the fake's 10s cap)", elapsed)
+		if elapsed < minimumWait || elapsed > 8000*time.Millisecond {
+			t.Fatalf("elapsed=%v (want near the %dms deadline, not the fake's 10s cap)", elapsed, deadlineMs)
 		}
 	})
 	t.Run("json rows stay one clean object per line", func(t *testing.T) {
@@ -192,7 +197,7 @@ func TestFindStreamLocalBeforeStoppedRemote(t *testing.T) {
 		})
 		f.env["FAKECLI_WAIT_FILE_TIMEOUT_MS"] = "10000"
 		start := time.Now()
-		code, out, stderr := f.run([]string{"find", "build", "--all", "--json", "--timeout", "800"})
+		code, out, stderr := f.run([]string{"find", "build", "--all", "--json", "--timeout", deadlineArg})
 		elapsed := time.Since(start)
 		if code != 0 {
 			t.Fatalf("code=%d out=%q stderr=%q elapsed=%v", code, out, stderr, elapsed)
@@ -211,8 +216,8 @@ func TestFindStreamLocalBeforeStoppedRemote(t *testing.T) {
 		if !strings.Contains(stderr, `machine 'slow' unavailable`) {
 			t.Fatalf("stderr=%q elapsed=%v", stderr, elapsed)
 		}
-		if elapsed < 600*time.Millisecond || elapsed > 8000*time.Millisecond {
-			t.Fatalf("elapsed=%v (want near the 800ms deadline)", elapsed)
+		if elapsed < minimumWait || elapsed > 8000*time.Millisecond {
+			t.Fatalf("elapsed=%v (want near the %dms deadline)", elapsed, deadlineMs)
 		}
 	})
 	t.Run("a stopped enumeration still leaves the local rows and reports the deadline", func(t *testing.T) { // 验收 1: 枚举停掉也在本地输出之后
@@ -223,7 +228,7 @@ func TestFindStreamLocalBeforeStoppedRemote(t *testing.T) {
 		})
 		f.env["FAKECLI_WAIT_FILE_TIMEOUT_MS"] = "10000"
 		start := time.Now()
-		code, out, stderr := f.run([]string{"find", "--all", "--timeout", "800"})
+		code, out, stderr := f.run([]string{"find", "--all", "--timeout", deadlineArg})
 		elapsed := time.Since(start)
 		if code != 0 {
 			t.Fatalf("code=%d out=%q stderr=%q elapsed=%v", code, out, stderr, elapsed)
@@ -234,8 +239,8 @@ func TestFindStreamLocalBeforeStoppedRemote(t *testing.T) {
 		if !strings.Contains(stderr, "machine list failed") || !strings.Contains(stderr, "timed out") {
 			t.Fatalf("stderr=%q elapsed=%v", stderr, elapsed)
 		}
-		if elapsed < 600*time.Millisecond || elapsed > 8000*time.Millisecond {
-			t.Fatalf("elapsed=%v (want near the 800ms deadline)", elapsed)
+		if elapsed < minimumWait || elapsed > 8000*time.Millisecond {
+			t.Fatalf("elapsed=%v (want near the %dms deadline)", elapsed, deadlineMs)
 		}
 	})
 }

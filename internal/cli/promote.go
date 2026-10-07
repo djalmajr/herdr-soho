@@ -18,6 +18,8 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/spawn"
 )
 
+var promoteProcRowState = core.ProcRowState
+
 // promote's exit codes:
 //
 //	0 promoted (or already promoted, verified)
@@ -279,7 +281,7 @@ func promoteProcPreflight(sd, liveName, pane string, env platform.Env) (string, 
 		if row.Owner != liveName && row.Pane != pane {
 			continue
 		}
-		switch core.ProcRowState(row, env) {
+		switch promoteProcRowState(row, env) {
 		case "running":
 			running = append(running, fmt.Sprintf("%d (%s)", row.Pid, row.Name))
 		case "unknown":
@@ -426,7 +428,8 @@ func promoteUnresolvedTask(sd, agent string) (string, int) {
 // report); anything else — a whitespace-only pointer, a relative path, a
 // missing file, a non-regular target, an unreadable or empty target — is
 // an unresolved-task refusal (exit 3). The target's readability is proved
-// by opening it (a bounded open-close, no content read).
+// by reading one byte of a nonempty report. Opening alone does not prove
+// data is readable, for example when another handle holds a byte-range lock.
 func promoteReportPointer(sd, agent string) (pointer string, refusal string, code int) {
 	raw, err := boundedRead(core.LastReportPath(sd, agent), promoteReadLimit)
 	if err != nil {
@@ -453,9 +456,15 @@ func promoteReportPointer(sd, agent string) (pointer string, refusal string, cod
 	if err != nil {
 		return pointer, fmt.Sprintf("promote: the assigned task '%s' report pointer %q is not readable; deliver the report before promoting", agent, pointer), promoteRefused
 	}
-	_ = target.Close()
 	if info.Size() == 0 {
+		_ = target.Close()
 		return pointer, fmt.Sprintf("promote: the assigned task '%s' report pointer %q names an empty report; deliver the report before promoting", agent, pointer), promoteRefused
+	}
+	var firstByte [1]byte
+	_, readErr := target.Read(firstByte[:])
+	closeErr := target.Close()
+	if readErr != nil || closeErr != nil {
+		return pointer, fmt.Sprintf("promote: the assigned task '%s' report pointer %q is not readable; deliver the report before promoting", agent, pointer), promoteRefused
 	}
 	return pointer, "", 0
 }

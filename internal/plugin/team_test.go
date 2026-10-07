@@ -347,9 +347,10 @@ func TestTeamPanelReadsCarryNowriteCwdAndTargetIDs(t *testing.T) {
 		}
 	}
 	childCwd, err := os.ReadFile(cwdMarker)
-	resolved, _ := filepath.EvalSymlinks(cwd)
-	if err != nil || string(childCwd) != resolved {
-		t.Fatalf("child cwd=%q want %q err=%v", childCwd, resolved, err)
+	resolved, expectedErr := filepath.EvalSymlinks(cwd)
+	actual, actualErr := filepath.EvalSymlinks(string(childCwd))
+	if err != nil || expectedErr != nil || actualErr != nil || actual != resolved {
+		t.Fatalf("child cwd=%q want %q read=%v expected=%v actual=%v", childCwd, resolved, err, expectedErr, actualErr)
 	}
 }
 

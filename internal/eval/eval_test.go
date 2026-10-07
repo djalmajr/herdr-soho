@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -31,15 +32,28 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "cli stage:", err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(stage)
-	cliBinary = filepath.Join(stage, "herdr-soho-eval")
+	name := "herdr-soho-eval"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	cliBinary = filepath.Join(stage, name)
 	build := exec.Command("go", "build", "-o", cliBinary, filepath.Join("..", "..", "cmd", "herdr-soho-eval"))
 	build.Env = hermeticEnv(stage)
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "herdr-soho-eval build failed: %v\n%s\n", err, out)
+		if cerr := os.RemoveAll(stage); cerr != nil {
+			fmt.Fprintf(os.Stderr, "cli stage cleanup failed: %v\n", cerr)
+		}
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	if cerr := os.RemoveAll(stage); cerr != nil {
+		fmt.Fprintf(os.Stderr, "cli stage cleanup failed: %v\n", cerr)
+		if code == 0 {
+			code = 1
+		}
+	}
+	os.Exit(code)
 }
 
 // hermeticEnv points the Go toolchain at an isolated stage (fresh build

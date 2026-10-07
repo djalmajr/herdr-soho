@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/djalmajr/herdr-soho/internal/testutil"
+
 	"github.com/djalmajr/herdr-soho/internal/collaboration"
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -498,14 +500,14 @@ func TestPromoteRefusesAStaleInheritedContext(t *testing.T) {
 
 func TestPromoteRefusesAStaleOrMismatchedScope(t *testing.T) {
 	t.Run("workspace mismatch", func(t *testing.T) {
-		f := staleFixture(t, `{"result":{"agent":{"name":"sub-orch","pane_id":"ws:pS","workspace_id":"other-ws","cwd":"%s","agent_status":"working"}}}`)
+		f := staleFixture(t, `{"result":{"agent":{"name":"sub-orch","pane_id":"ws:pS","workspace_id":"other-ws","cwd":%s,"agent_status":"working"}}}`)
 		code, _, stderr := runPromote(t, f, f.env)
 		if code != 4 || !strings.Contains(stderr, "reports workspace other-ws") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 	})
 	t.Run("pane mismatch", func(t *testing.T) {
-		f := staleFixture(t, `{"result":{"agent":{"name":"sub-orch","pane_id":"ws:pX","workspace_id":"ws","cwd":"%s","agent_status":"working"}}}`)
+		f := staleFixture(t, `{"result":{"agent":{"name":"sub-orch","pane_id":"ws:pX","workspace_id":"ws","cwd":%s,"agent_status":"working"}}}`)
 		code, _, stderr := runPromote(t, f, f.env)
 		if code != 4 || !strings.Contains(stderr, "reports pane ws:pX") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -552,7 +554,11 @@ func staleFixture(t *testing.T, agentGetTemplate string) *copiesFixture {
 	fakeDir := t.TempDir()
 	stdout := agentGetTemplate
 	if strings.Contains(stdout, "%s") {
-		stdout = fmt.Sprintf(stdout, f.repo)
+		repoJSON, err := json.Marshal(f.repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout = fmt.Sprintf(stdout, string(repoJSON))
 	}
 	rules := []fakecli.Rule{
 		{Argv: []string{"pane", "current", "--current"}, Stdout: promotePaneCurrent},
@@ -771,15 +777,13 @@ func TestPromoteRefusesCallerOwnedResources(t *testing.T) {
 		f, _ := promoteFixture(t, "sub-orch", "working", promoteVerbRules()...)
 		sd := f.stateDir(t)
 		promoteRoster(t, sd, "sub-orch")
-		// Install a fake ps next to the herdr fake (same config dir, so the
-		// handler's config env resolves both): it answers with an
-		// unparseable line, the read fails, the kernel check finds the live
-		// pid, and the state is unknown.
-		if _, err := fakecli.Install(t, f.env.Get("HERDR_SOHO_FAKECLI_CONFIG"), "ps", []fakecli.Rule{
-			{Argv: []string{"ps", "-o"}, ArgvPrefix: true, Stdout: "unparseable line\n"},
-		}); err != nil {
-			t.Fatal(err)
-		}
+		// An unavailable native process snapshot must refuse the command on
+		// every OS. Windows reads the kernel directly, so a fake ps cannot
+		// supply this failure. Inject only the snapshot dependency, keeping
+		// the real promotion checks and roster mutation path.
+		oldReader := promoteProcRowState
+		promoteProcRowState = func(core.ProcRow, platform.Env) string { return "unknown" }
+		t.Cleanup(func() { promoteProcRowState = oldReader })
 		env := f.env.Clone()
 		registryFile(t, sd, "procs.tsv", "pid\tstarted\tname\towner\tpane\tcreated\n"+fmt.Sprintf("%d\tMon Oct  5 00:00:00 2026\tworker\tsub-orch\tws:pS\t2026-10-06T00:00:00Z\n", os.Getpid()))
 		rosterBefore := rosterRaw(t, sd)
@@ -926,18 +930,10 @@ func TestPromoteSubsequentInitRetainsTheOrchestratorIdentity(t *testing.T) {
 	})
 }
 
-// makeUnreadableForTest makes path unreadable for the test user (mode 000)
-// and restores it in cleanup; it skips under root, where mode 000 does not
-// deny reads.
-func makeUnreadableForTest(t *testing.T, path string) {
+// makeUnreadableForTest blocks actual file reads and restores them in cleanup.
+func makeUnreadableForTest(t *testing.T, path string) func() {
 	t.Helper()
-	if os.Getuid() == 0 {
-		t.Skipf("running as root: mode 000 does not deny reads to %s", path)
-	}
-	if err := os.Chmod(path, 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	return testutil.DenyFileReads(t, path)
 }
 
 // assertRefusedNothing proves a refusal mutated nothing on the herdr side:
@@ -965,9 +961,9 @@ func TestPromoteRefusesAnUnreadableRoster(t *testing.T) {
 		core.RosterAppend(sd, []string{"impl-1", "ws:p1", "claude", "implementer", "anthropic", "0", "/repo", "impl-start", "claude-opus-5-5", "ask", "implementer", "build"})
 		path := filepath.Join(sd, "agents.tsv")
 		before := rosterRaw(t, sd)
-		makeUnreadableForTest(t, path)
+		releaseReadDenial := makeUnreadableForTest(t, path)
 		code, out, stderr := runPromote(t, f, f.env)
-		_ = os.Chmod(path, 0o600)
+		releaseReadDenial()
 		if code != 4 || !strings.Contains(stderr, "roster is unreadable") {
 			t.Fatalf("code=%d stderr=%q (an unreadable roster is not an empty roster and not already-promoted)", code, stderr)
 		}
@@ -985,9 +981,9 @@ func TestPromoteRefusesAnUnreadableRoster(t *testing.T) {
 		promoteRoster(t, sd, "sub-orch")
 		path := filepath.Join(sd, "agents.tsv")
 		before := rosterRaw(t, sd)
-		makeUnreadableForTest(t, path)
+		releaseReadDenial := makeUnreadableForTest(t, path)
 		code, out, stderr := runPromote(t, f, f.env)
-		_ = os.Chmod(path, 0o600)
+		releaseReadDenial()
 		if code != 4 || !strings.Contains(stderr, "roster is unreadable") {
 			t.Fatalf("code=%d stderr=%q (an unreadable roster refuses exit 4, not the empty-roster exit 3)", code, stderr)
 		}
@@ -1040,9 +1036,9 @@ func TestPromoteRefusesAnUnreadableTask(t *testing.T) {
 	writeTask(t, sd, "sub-orch", "sub-orch: Build the thing ✓")
 	taskPath := filepath.Join(sd, "task-sub-orch")
 	before := rosterRaw(t, sd)
-	makeUnreadableForTest(t, taskPath)
+	releaseReadDenial := makeUnreadableForTest(t, taskPath)
 	code, out, stderr := runPromote(t, f, f.env)
-	_ = os.Chmod(taskPath, 0o600)
+	releaseReadDenial()
 	if code != 4 || !strings.Contains(stderr, "task file of 'sub-orch' is unreadable") {
 		t.Fatalf("code=%d stderr=%q (an unreadable task is not an absent task)", code, stderr)
 	}
@@ -1198,9 +1194,9 @@ func TestPromoteRefusesAnUnreadableReportPointer(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := rosterRaw(t, sd)
-	makeUnreadableForTest(t, pointerPath)
+	releaseReadDenial := makeUnreadableForTest(t, pointerPath)
 	code, out, stderr := runPromote(t, f, f.env)
-	_ = os.Chmod(pointerPath, 0o600)
+	releaseReadDenial()
 	if code != 4 || !strings.Contains(stderr, "report pointer") || !strings.Contains(stderr, "is unreadable") {
 		t.Fatalf("code=%d stderr=%q (an unreadable pointer file is not an empty pointer)", code, stderr)
 	}

@@ -221,7 +221,7 @@ func procFlagsSessionSleeper(t *testing.T, env Env) *exec.Cmd {
 }
 
 // procFlagsRawFlaggedState reads the owned pid's raw ps line (lstart,
-// state, comm) with the real ps and returns the state token exactly as
+// stat, comm) with the real ps and returns the full state token exactly as
 // the system prints it: it polls (with a ceiling) until the settled
 // fixture shows a modifier flag (the session-leader flag), so the read
 // never races the fixture's start-up.
@@ -230,7 +230,7 @@ func procFlagsRawFlaggedState(t *testing.T, env Env, pid int) (string, string) {
 	deadline := time.Now().Add(10 * time.Second)
 	var last string
 	for {
-		r := RunCli("ps", []string{"-o", "lstart=,state=,comm=", "-p", strconv.Itoa(pid)}, RunOptions{Env: env, TimeoutMs: 5000})
+		r := RunCli("ps", []string{"-o", "lstart=,stat=,comm=", "-p", strconv.Itoa(pid)}, RunOptions{Env: env, TimeoutMs: 5000})
 		if r.Status != nil && *r.Status == 0 {
 			fields := strings.Fields(r.Stdout)
 			// lstart is five fields (day, month, day, time, year); the
@@ -416,12 +416,12 @@ func TestProcFlagsMalformedAndFailedPs(t *testing.T) {
 	})
 }
 
-// The genuine native proof: an owned session-leader fixture read through
-// the real ps. The kernel prints the state with the session-leader flag
-// (Ss on the blocked reader), and the readers must take the flagged token
-// as running with the exact lstart identity — the exact shape the
-// operator's Ss capture processes had, which the single-letter state
-// group refused.
+// The native tier reads an owned session leader through the real ps.
+// The stat field includes modifiers on both supported Unix systems; Linux's
+// state field used by production only includes the base letter, while macOS
+// also supplies modifiers there. This tier verifies native identity and
+// liveness on both systems; the deterministic tier above proves modifier
+// parsing, including the real macOS shape the single-letter parser refused.
 func TestProcFlagsNativeFlaggedState(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("ps-based process info is unix; the windows read is the native kernel32 path")

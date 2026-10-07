@@ -20,6 +20,15 @@ func TestMain(m *testing.M) {
 func fixture(t *testing.T) (platform.Env, string) {
 	t.Helper()
 	root := t.TempDir()
+	// Canonicalize the existing temporary root before deriving any
+	// fixture path: the platform's git and filepath.EvalSymlinks report
+	// the canonical form (on Windows the long path behind the short 8.3
+	// alias), while t.TempDir can hand back the short alias; one shared
+	// form keeps expected and actual paths comparable on every platform.
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("canonicalize the fixture root: %v", err)
+	}
 	repo := filepath.Join(root, "repo")
 	home := filepath.Join(root, "home")
 	conf := filepath.Join(root, "conf")
@@ -50,20 +59,29 @@ func fixture(t *testing.T) (platform.Env, string) {
 // gitOnlyDir returns a directory holding only a link to the system git:
 // the restricted PATH tail the fixture envs carry (git is a known native
 // binary the production root/ignore paths resolve; nothing else is
-// resolvable on the PATH).
+// resolvable on the PATH). The link is staged under the platform-native
+// name: on Windows FindExecutable only tries the PATHEXT extensions (the
+// bare name is never attempted), so the fixture must hold git.exe there,
+// and on Unix it holds git. The FindExecutable PATHEXT contract is left
+// unchanged; only the staged name follows it.
 func gitOnlyDir(t *testing.T) string {
 	t.Helper()
 	path, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatalf("locate the system git: %v", err)
 	}
+	name := "git"
+	if runtime.GOOS == "windows" {
+		name = "git.exe"
+	}
 	dir := t.TempDir()
-	if err := os.Symlink(path, filepath.Join(dir, "git")); err != nil {
+	target := filepath.Join(dir, name)
+	if err := os.Symlink(path, target); err != nil {
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
 			t.Fatalf("reading the system git: %v", readErr)
 		}
-		if writeErr := os.WriteFile(filepath.Join(dir, "git"), data, 0o755); writeErr != nil {
+		if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
 			t.Fatalf("copying the system git: %v", writeErr)
 		}
 	}

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -519,6 +520,16 @@ func TestBuildRejectsExistingDestBeforeStaging(t *testing.T) {
 	})
 
 	t.Run("lookup error", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			// Windows chmod cannot deny directory traversal. An invalid
+			// path produces a real lookup error before any compiler runs.
+			base := t.TempDir()
+			err := run(t, base, filepath.Join(base, "invalid?name", "dist"))
+			if err == nil || !strings.Contains(err.Error(), "checking destination") {
+				t.Fatalf("err = %v", err)
+			}
+			return
+		}
 		if os.Getuid() == 0 {
 			t.Skip("root ignores permission bits")
 		}

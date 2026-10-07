@@ -171,7 +171,11 @@ func TestCmdSetupDryRunAndRefusalPrecedeWrites(t *testing.T) {
 		if err := os.WriteFile(file, []byte("tracked"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		for _, args := range [][]string{{"add", localInstructionFile}, {"-c", "user.name=test", "commit", "-qm", "initial"}} {
+		// Hermetic commit identity: the runner may have no global git
+		// identity (and no auto-detectable e-mail), and host signing
+		// settings must not be able to interfere, so the identity and
+		// the signing policy come from the command itself.
+		for _, args := range [][]string{{"add", localInstructionFile}, {"-c", "user.name=test", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "initial"}} {
 			cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("git %v: %v: %s", args, err, out)

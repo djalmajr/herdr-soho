@@ -177,9 +177,12 @@ func runCliFixtureGrandchild(role string) *exec.Cmd {
 	return cmd
 }
 
-// runCliFixtureProgram places a copy of the test binary (a hard link when
-// supported, a copy otherwise) under dir with the given name: the native
-// fixture program the RunCli tests exec, replacing the old sh scripts.
+// runCliFixtureProgram places an independent copy of the test binary under
+// dir with the given name: the native fixture program the RunCli tests
+// exec, replacing the old sh scripts. A hard link when supported (Unix), a
+// byte copy otherwise, and on Windows always a byte copy. A loaded parent
+// image can keep a hard-linked fixture in use on Windows Server CI; an
+// independent copy separates cleanup from the parent's lifetime.
 func runCliFixtureProgram(t *testing.T, dir, name string) {
 	t.Helper()
 	exe, err := os.Executable()
@@ -187,6 +190,16 @@ func runCliFixtureProgram(t *testing.T, dir, name string) {
 		t.Fatalf("locating the test binary: %v", err)
 	}
 	target := filepath.Join(dir, name)
+	if runtime.GOOS == "windows" {
+		// A loaded parent image can prevent hard-link cleanup on Windows.
+		// Keep this fixture independent of the running parent image.
+		if data, readErr := os.ReadFile(exe); readErr != nil {
+			t.Fatalf("reading the test binary: %v", readErr)
+		} else if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
+			t.Fatalf("writing the fixture program: %v", writeErr)
+		}
+		return
+	}
 	if err := os.Link(exe, target); err != nil {
 		data, readErr := os.ReadFile(exe)
 		if readErr != nil {
@@ -373,6 +386,14 @@ func assertRootReference(t *testing.T, reference *windowsReference, name string,
 	}
 	if reference != nil {
 		var err error
+		fixtureRoot, err = filepath.EvalSymlinks(fixtureRoot)
+		if err != nil {
+			t.Fatalf("canonical fixture root: %v", err)
+		}
+		got, err = filepath.EvalSymlinks(got)
+		if err != nil {
+			t.Fatalf("canonical %s root: %v", name, err)
+		}
 		got, err = filepath.Rel(fixtureRoot, got)
 		if err != nil {
 			t.Fatalf("relative %s root: %v", name, err)
@@ -488,7 +509,11 @@ func TestLauncherPath(t *testing.T) {
 		// A symlinked binary inside a directory with a space and a quote:
 		// the hostile spacing must not defeat the resolution, and the
 		// skill directory must play no part.
-		weird := filepath.Join(t.TempDir(), "sp ace", `qu"ote`)
+		quoteName := `qu"ote`
+		if runtime.GOOS == "windows" {
+			quoteName = "qu'ote"
+		} // A double quote is not a legal Windows filename.
+		weird := filepath.Join(t.TempDir(), "sp ace", quoteName)
 		if err := os.MkdirAll(weird, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -928,7 +953,8 @@ func TestRunCli(t *testing.T) {
 			t.Fatal(err)
 		}
 		r := RunCli("fixture", nil, RunOptions{Env: env, Cwd: cwd})
-		if r.Status == nil || *r.Status != 0 || strings.TrimSpace(r.Stdout) != canonicalCwd {
+		actualCwd, actualErr := filepath.EvalSymlinks(strings.TrimSpace(r.Stdout))
+		if r.Status == nil || *r.Status != 0 || actualErr != nil || actualCwd != canonicalCwd {
 			t.Fatalf("cwd result=%#v want=%q", r, canonicalCwd)
 		}
 	})

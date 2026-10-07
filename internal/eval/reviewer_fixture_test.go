@@ -92,14 +92,21 @@ func nativeGoAliasName() string {
 }
 
 // installGoAlias installs the trusted native go executable into the
-// private directory under the platform alias name: os.Link first (no
-// symlink privilege, no Developer Mode), and a verified byte-identical
-// executable copy when the hard link is unavailable. linkFunc is the
+// private directory under the platform alias name: os.Link first on
+// Unix (no symlink privilege, no Developer Mode), and a verified
+// byte-identical executable copy when the hard link is unavailable. On
+// Windows the alias is always the verified byte copy: a hard link to
+// the running go tool image can block removal of the fixture directory
+// entry on the Windows Server CI hosts (the mapped image pins it) while
+// go test is active, breaking the TempDir cleanup. linkFunc is the
 // hard-link operation (os.Link in production; the failing seam in the
 // helper control that forces the copy fallback).
 func installGoAlias(t *testing.T, priv, goBin string, linkFunc func(src, dst string) error) string {
 	t.Helper()
 	alias := filepath.Join(priv, nativeGoAliasName())
+	if runtime.GOOS == "windows" {
+		return copyGoAlias(t, priv, goBin)
+	}
 	if err := linkFunc(goBin, alias); err == nil {
 		return alias
 	}
@@ -137,9 +144,9 @@ func copyGoAlias(t *testing.T, priv, goBin string) string {
 }
 
 // restrictedGoPathDir builds the transient restricted Go-only PATH: a
-// private directory holding only the native go alias (hard link, or the
-// verified byte copy when the hard link is unavailable), proven free of
-// every banned engine by host resolution.
+// private directory holding only the native go alias (hard link on Unix,
+// the verified byte copy on Windows or when the hard link is
+// unavailable), proven free of every banned engine by host resolution.
 func restrictedGoPathDir(t *testing.T, goBin string) string {
 	t.Helper()
 	priv := t.TempDir()
@@ -692,7 +699,8 @@ func TestRestrictedGoPathHelper(t *testing.T) {
 		}
 	}
 
-	// Production hard-link path.
+	// Production alias path (hard link on Unix, verified byte copy on
+	// Windows).
 	priv := t.TempDir()
 	alias := installGoAlias(t, priv, goBin, os.Link)
 	if _, resolved := engineResolves(priv, "go"); !resolved {

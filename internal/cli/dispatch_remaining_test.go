@@ -561,7 +561,9 @@ func TestDispatchRemainingCases(t *testing.T) {
 					continue
 				}
 				if core.NowStamp(platform.Now().Add(300*time.Millisecond)) == stamp {
-					return "$ROOT/state/ws/briefs/worker-" + stamp + ".md"
+					// The separators must match the composed path: codex prints
+					// the dispatch's own path, backslashed on Windows.
+					return "$ROOT" + string(filepath.Separator) + "state" + string(filepath.Separator) + "ws" + string(filepath.Separator) + "briefs" + string(filepath.Separator) + "worker-" + stamp + ".md"
 				}
 				time.Sleep(time.Millisecond)
 			}
@@ -603,7 +605,9 @@ func TestDispatchRemainingCases(t *testing.T) {
 					continue
 				}
 				if core.NowStamp(platform.Now().Add(300*time.Millisecond)) == stamp {
-					return "$ROOT/state/ws/briefs/worker-" + stamp + ".md"
+					// The separators must match the composed path: codex prints
+					// the dispatch's own path, backslashed on Windows.
+					return "$ROOT" + string(filepath.Separator) + "state" + string(filepath.Separator) + "ws" + string(filepath.Separator) + "briefs" + string(filepath.Separator) + "worker-" + stamp + ".md"
 				}
 				time.Sleep(time.Millisecond)
 			}
@@ -766,7 +770,15 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			target += ".exe"
 		}
-		if err := os.Link(exe, target); err != nil {
+		if runtime.GOOS == "windows" {
+			// A loaded parent image can prevent hard-link cleanup on Windows.
+			// Keep this fixture independent of the running parent image.
+			if data, readErr := os.ReadFile(exe); readErr != nil {
+				t.Fatalf("reading the test binary: %v", readErr)
+			} else if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
+				t.Fatalf("writing the fixture program: %v", writeErr)
+			}
+		} else if err := os.Link(exe, target); err != nil {
 			data, readErr := os.ReadFile(exe)
 			if readErr != nil {
 				t.Fatalf("reading the test binary: %v", readErr)

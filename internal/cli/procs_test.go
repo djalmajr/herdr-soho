@@ -121,9 +121,12 @@ func blockForever() {
 	os.Exit(1) // unreachable: the read blocks until a signal stops the process
 }
 
-// helperExe places a copy of the test binary under dir/name (a hard link
-// when supported, a copy otherwise) so ps prints name as the command base
-// name, exactly like the old sleep/sh fixtures did.
+// helperExe places an independent copy of the test binary under dir/name
+// so ps prints name as the command base name, exactly like the old sleep/
+// sh fixtures did: a hard link when supported (Unix), a byte copy
+// otherwise, and on Windows always a byte copy. A loaded parent image can
+// keep a hard-linked fixture in use on Windows Server CI; an independent
+// copy leaves fixture cleanup independent of the parent's lifetime.
 func helperExe(t *testing.T, dir, name string) string {
 	t.Helper()
 	exe, err := os.Executable()
@@ -134,6 +137,16 @@ func helperExe(t *testing.T, dir, name string) string {
 		name += ".exe"
 	}
 	target := filepath.Join(dir, name)
+	if runtime.GOOS == "windows" {
+		// A loaded parent image can prevent hard-link cleanup on Windows.
+		// Keep this fixture independent of the running parent image.
+		if data, readErr := os.ReadFile(exe); readErr != nil {
+			t.Fatalf("reading the test binary: %v", readErr)
+		} else if writeErr := os.WriteFile(target, data, 0o700); writeErr != nil {
+			t.Fatalf("writing the fixture copy: %v", writeErr)
+		}
+		return target
+	}
 	if err := os.Link(exe, target); err != nil {
 		data, readErr := os.ReadFile(exe)
 		if readErr != nil {

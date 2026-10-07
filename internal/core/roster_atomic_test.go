@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/djalmajr/herdr-soho/internal/testutil"
 )
 
 // subOrchRow is the row the tests promote: pane ws:pS, name sub-orch, role
@@ -37,20 +39,11 @@ func rosterAtomicRead(t *testing.T, dir string) string {
 	return string(raw)
 }
 
-// makeUnreadable makes path unreadable for the test user (mode 000) and
-// restores it in cleanup; it skips under root, where mode 000 does not
-// deny reads.
-func makeUnreadable(t *testing.T, path string) {
+// makeUnreadable blocks actual file reads and restores them in cleanup.
+func makeUnreadable(t *testing.T, path string) func() {
 	t.Helper()
-	if os.Getuid() == 0 {
-		t.Skipf("running as root: mode 000 does not deny reads to %s", path)
-	}
-	if err := os.Chmod(path, 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	return testutil.DenyFileReads(t, path)
 }
-
 func TestRosterRemoveIfRemovesExactlyTheMatchingRow(t *testing.T) {
 	dir := rosterAtomicFixture(t)
 	removed, err := RosterRemoveIf(dir, "ws:pS", subOrchRow)
@@ -248,9 +241,9 @@ func TestRosterRemoveIfUnreadableRosterIsAnError(t *testing.T) {
 	dir := rosterAtomicFixture(t)
 	before := rosterAtomicRead(t, dir)
 	path := filepath.Join(dir, "agents.tsv")
-	makeUnreadable(t, path)
+	releaseReadDenial := makeUnreadable(t, path)
 	removed, err := RosterRemoveIf(dir, "ws:pS", subOrchRow)
-	_ = os.Chmod(path, 0o600)
+	releaseReadDenial()
 	if removed || err == nil {
 		t.Fatalf("removed=%v err=%v; an unreadable roster must be an error, not a vanished row", removed, err)
 	}
