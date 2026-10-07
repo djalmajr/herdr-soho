@@ -20,6 +20,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/layout"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/provider"
+	"github.com/djalmajr/herdr-soho/internal/startup"
 	"github.com/djalmajr/herdr-soho/internal/taskreport"
 	"github.com/djalmajr/herdr-soho/internal/text"
 )
@@ -277,6 +278,61 @@ func fieldAt(values []string, i int) string {
 		return values[i]
 	}
 	return ""
+}
+
+// warnStartupBlocked prints the precise warning of the cursor/Windows
+// startup gate: the reason the start is refused (the verified workspace
+// trust dialog, or the unverified screen the assessment ended on) and that
+// nothing was typed or sent — the pane stays open for the user to read
+// and answer; the spawn never answers the dialog itself.
+func warnStartupBlocked(name, kind, state string, ev startup.Evaluation, ctx *core.Config, env platform.Env) {
+	what := "the startup is unverified"
+	switch {
+	case ev.Verdict == startup.VerdictBlocked:
+		what = "it is showing the workspace trust dialog"
+	case ev.Reason == startup.ReasonEmptyScreen:
+		what = "the visible screen is empty (the TUI did not draw)"
+	case ev.Reason == startup.ReasonLaunchOnly:
+		what = "the visible screen shows only the shell prompt/launch line"
+	case ev.Reason == startup.ReasonScreenUnavailable:
+		what = "the visible screen could not be read"
+	case ev.Reason == startup.ReasonStateUnavailable:
+		what = "the agent state could not be read"
+	}
+	Warn(fmt.Sprintf("agent '%s' (%s) startup is not ready: %s (state %s); no input was sent — read the pane (herdr agent read %s --source visible) and answer it yourself (herdr agent send-keys %s <keys>; herdr agent wait %s --timeout 60000)", name, kind, what, state, name, name, name), ctx, env, "spawn")
+}
+
+// gateReuse assesses the visible screen of a reused cursor session on
+// Windows before the spawn emits ready for it (issue #59). The reuse
+// decision itself (identity, capacity, model, family, history) is
+// untouched: this only refuses to call a blocked or unverified session
+// ready, with the same evidence and result as a fresh start
+// (blocked_at_startup, the precise warning, the screen printed, exit 7).
+// Every other kind or platform skips it without any herdr read, and a
+// name without a roster row is left to the fresh path (emitReuse says the
+// same and returns false).
+func gateReuse(name, role, kind string, ctx *core.Config, env platform.Env, cwd string) {
+	if !startup.Enabled(kind) {
+		return
+	}
+	sd := core.StateDirPath(ctx, env, cwd)
+	line := core.RosterLine(sd, name)
+	if line == "" {
+		return
+	}
+	st := herdr.AgentState(name, env, herdr.Timeout, nil)
+	screen, screenOK := herdr.AgentReadOK(env, name, "visible", intPtr(40))
+	ev := startup.Evaluate(kind, startup.CurrentPlatform(), st.State, screen, screenOK)
+	if !ev.Refuses() {
+		return
+	}
+	f := strings.Split(line, "\t")
+	out := jsonjs.O("name", name, "pane_id", fieldAt(f, 1), "kind", kind, "role", role, "family", fieldAt(f, 4), "reused", true, "previous_role", fieldAt(f, 3), "effort", fieldAt(f, 14), "model", fieldAt(f, 8), "agent_args", fieldAt(f, 13), "status", "blocked_at_startup")
+	out.Set("startup_evidence", jsonjs.O(startup.FieldState, st.State, startup.FieldReason, ev.Reason, startup.FieldSource, ev.Source))
+	_, _ = fmt.Fprintln(platform.Stdout, jsonjs.StringifyIndent(out, 2))
+	warnStartupBlocked(name, kind, st.State, ev, ctx, env)
+	_, _ = fmt.Fprint(platform.Stdout, herdr.AgentRead(env, name, "visible", intPtr(40)))
+	platform.Die("", 7)
 }
 
 // renameLaneWorker renames the reused worker's agent to newName with the same
@@ -614,11 +670,12 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 				name = o.name
 				renamedTo = o.name
 			}
+			gateReuse(name, o.role, actual, ctx, env, cwd)
 			EmitReuse(name, o.role, actual, ctx, env, cwd)
 			sameTreeEditors(name, o.role, fieldAt(f, 6), sd, env, cwd, ctx)
-			warnMsg := fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s; its session already holds earlier briefs", lane, selected, o.role)
+			warnMsg := fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s; existing session context is retained", lane, selected, o.role)
 			if renamedTo != "" {
-				warnMsg = fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s, renamed to '%s'; its session already holds earlier briefs", lane, selected, o.role, renamedTo)
+				warnMsg = fmt.Sprintf("reusing idle lane '%s' worker '%s' as %s, renamed to '%s'; existing session context is retained", lane, selected, o.role, renamedTo)
 			}
 			Warn(warnMsg, ctx, env, "spawn")
 			return
@@ -650,12 +707,13 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		reused, unavailable, _ := FindReusable(o.role, kind, o.cwd, o.name, o.model, o.approvals, ctx, env, cwd)
 		if reused != "" {
 			previous := fieldAt(strings.Split(core.RosterLine(sd, reused), "\t"), 3)
+			gateReuse(reused, o.role, kind, ctx, env, cwd)
 			EmitReuse(reused, o.role, kind, ctx, env, cwd)
 			sameTreeEditors(reused, o.role, o.cwd, sd, env, cwd, ctx)
 			if previous == o.role {
-				Warn(fmt.Sprintf("reusing idle worker '%s' (%s, %s); its session already holds earlier briefs", reused, kind, o.role), ctx, env, "spawn")
+				Warn(fmt.Sprintf("reusing idle worker '%s' (%s, %s); existing session context is retained", reused, kind, o.role), ctx, env, "spawn")
 			} else {
-				Warn(fmt.Sprintf("reusing idle worker '%s' (%s, was %s, now %s); its session already holds earlier briefs", reused, kind, previous, o.role), ctx, env, "spawn")
+				Warn(fmt.Sprintf("reusing idle worker '%s' (%s, was %s, now %s); existing session context is retained", reused, kind, previous, o.role), ctx, env, "spawn")
 			}
 			return
 		}
@@ -820,6 +878,32 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	if !blocked && kind == "grok" && isGrokTrustDialog(lastScreen) {
 		blocked = true
 	}
+	// The cursor/Windows startup gate (issue #59): herdr reports the agent
+	// ready (idle, interactive_ready) while the TUI never draws — the
+	// verified workspace trust dialog, or historically only the shell
+	// launch line on the screen. The start window observed the screen; the
+	// shared assessment takes the final verdict, and a refusing verdict
+	// (blocked or unverified) takes the existing blocked path —
+	// blocked_at_startup, the screen printed, exit 7 — so the spawn never
+	// claims ready for those cases and never types or answers the dialog.
+	// Every other kind or platform keeps the window's verdict and the JSON
+	// without the evidence field.
+	cursorGate := false
+	cursorGateEv := startup.Evaluation{}
+	if !blocked && startup.Enabled(kind) {
+		screen, screenOK := lastScreen, true
+		if screen == "" {
+			// The window never saw a non-empty screen: one fresh read tells
+			// an empty screen (the TUI did not draw) from a failed read.
+			screen, screenOK = herdr.AgentReadOK(env, o.name, "visible", intPtr(40))
+		}
+		cursorGateEv = startup.Evaluate(kind, startup.CurrentPlatform(), lastState, screen, screenOK)
+		cursorGate = true
+		if cursorGateEv.Refuses() {
+			warnStartupBlocked(o.name, kind, lastState, cursorGateEv, ctx, env)
+			blocked = true
+		}
+	}
 	contextWindow := ""
 	if !blocked && kind == "grok" {
 		// context_window.grok opens the fresh grok with the requested window
@@ -866,12 +950,19 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	if burst {
 		out.Set("burst", true)
 	}
+	if cursorGate {
+		out.Set("startup_evidence", jsonjs.O(startup.FieldState, lastState, startup.FieldReason, cursorGateEv.Reason, startup.FieldSource, cursorGateEv.Source))
+	}
 	_, _ = fmt.Fprintln(platform.Stdout, jsonjs.StringifyIndent(out, 2))
 	if autoRegrid && core.Cfg(ctx, "regrid", "on", env) == "on" {
 		layout.AutoRegrid(ctx, env, cwd, "regrid after spawn failed; panes left as inserted (see friction)")
 	}
 	if blocked {
-		Warn(fmt.Sprintf("agent '%s' is blocked during startup (update prompt, login, trust dialog…). Screen follows; ask the user before answering it, then: herdr agent send-keys %s <keys>; herdr agent wait %s --timeout 60000", o.name, o.name, o.name), ctx, env, "spawn")
+		if !cursorGate {
+			// The gate already printed the precise warning when it refused
+			// the start; the generic line names the other startup dialogs.
+			Warn(fmt.Sprintf("agent '%s' is blocked during startup (update prompt, login, trust dialog…). Screen follows; ask the user before answering it, then: herdr agent send-keys %s <keys>; herdr agent wait %s --timeout 60000", o.name, o.name, o.name), ctx, env, "spawn")
+		}
 		_, _ = fmt.Fprint(platform.Stdout, herdr.AgentRead(env, o.name, "visible", intPtr(40)))
 		platform.Die("", 7)
 	}
@@ -1174,7 +1265,16 @@ func checkStartWindow(o spawnOptions, kind string, env platform.Env, created boo
 			if marker && canRelaunch {
 				break
 			}
-			if !marker || !time.Now().Before(end) {
+			// The cursor/Windows startup gate (issue #59): the verified
+			// trust dialog stops the observation immediately, and a blank or
+			// launch-only screen is re-probed until the window ends (the TUI
+			// can draw late) instead of ending it on the first probe; every
+			// other kind or platform returns exactly as before.
+			if startup.Enabled(kind) && startup.ActiveTrustDialog(screen) {
+				return lastState, lastScreen, blocked
+			}
+			hold := startup.Enabled(kind) && (strings.TrimSpace(screen) == "" || startup.LaunchOnly(screen))
+			if (!marker && !hold) || !time.Now().Before(end) {
 				return lastState, lastScreen, blocked
 			}
 			time.Sleep(poll)

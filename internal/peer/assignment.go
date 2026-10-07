@@ -1,0 +1,178 @@
+package peer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/collaboration"
+	"github.com/djalmajr/herdr-soho/internal/communication"
+	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/sessionref"
+)
+
+type AssignmentMessageOptions struct {
+	AssignmentID string
+	Target       string
+	Type         string
+	Body         string
+	EventID      string
+	TimeoutMS    int
+	Config       *core.Config
+	Env          platform.Env
+	Cwd          string
+}
+
+// SendAssignmentMessage submits once through Herdr without waiting for the
+// receiving worker to finish. Submitted is terminal delivery, not receipt
+// by the model or approval of the task.
+func SendAssignmentMessage(options AssignmentMessageOptions) (collaboration.DeliveryResult, error) {
+	refused := func(err error) (collaboration.DeliveryResult, error) {
+		return collaboration.DeliveryResult{Status: "refused", Cause: err.Error()}, err
+	}
+	if core.Nowrite(options.Env) {
+		return refused(errors.New("worker message is a write; NOWRITE refuses"))
+	}
+	if options.Config == nil || options.AssignmentID == "" || options.Type == "" || strings.TrimSpace(options.Body) == "" {
+		return refused(errors.New("worker message requires assignment, type and nonempty body"))
+	}
+	if platform.Current() == "win32" {
+		if executable, ok := platform.FindExecutable("herdr", options.Env, platform.Current()); ok {
+			ext := strings.ToLower(filepath.Ext(executable))
+			if ext == ".cmd" || ext == ".bat" {
+				return refused(errors.New("worker messages on Windows require the native Herdr executable; a batch launcher cannot preserve the complete multiline prompt"))
+			}
+		}
+	}
+	budget := options.TimeoutMS
+	if budget <= 0 || budget > 30000 {
+		budget = 30000
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(budget)*time.Millisecond)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	remaining := func() int { return max(1, int(time.Until(deadline).Milliseconds())) }
+	if core.StateInSkill(options.Config, options.Env, options.Cwd) != "" {
+		return refused(errors.New("worker messages cannot write state inside the skill"))
+	}
+	env := options.Env.Clone()
+	if env.Get("HERDR_WORKSPACE_ID") == "" {
+		env["HERDR_WORKSPACE_ID"] = core.WorkspaceID(options.Config, env, options.Cwd)
+	}
+	sd := core.StateDirPath(options.Config, env, options.Cwd)
+	a, err := (collaboration.Store{StateDir: sd}).Read(options.AssignmentID)
+	if err != nil {
+		return refused(err)
+	}
+	if !a.Active() {
+		return refused(errors.New("collaboration is not active for delivery"))
+	}
+	if platform.StateProjectRoot(env, options.Cwd) != a.Root {
+		return refused(errors.New("sender is outside the assigned repository"))
+	}
+	if err := collaboration.CheckParticipants(a, sd, env, ctx); err != nil {
+		return refused(err)
+	}
+	from, member := a.Member(env.Get("HERDR_PANE_ID"))
+	if !member {
+		return refused(errors.New("sender is not an assigned participant"))
+	}
+	var pending *collaboration.Event
+	if options.Type != "review.question" {
+		for i := range a.Events {
+			e := &a.Events[i]
+			typ := map[string]string{"ready": "review.ready", "corrected": "review.ready", "findings": "review.finding", "approved": "review.result"}[e.Type]
+			if options.EventID != "" && e.ID == options.EventID && e.Actor == from.Name && e.Delivery == "pending" && e.Round == a.Round && e.Revision == a.Revision && typ == options.Type {
+				pending = e
+				break
+			}
+		}
+		if pending == nil {
+			return refused(errors.New("review event messages require a persisted pending event for this revision"))
+		}
+	}
+	if a.Phase == collaboration.Escalated && (pending == nil || pending.Type != "findings") {
+		return refused(errors.New("escalated collaboration awaits the orchestrator"))
+	}
+	to := a.Reviewer
+	if from.Pane == to.Pane {
+		to = a.Author
+	}
+	if options.Target != to.Name {
+		ref := sessionref.ParseRef(options.Target)
+		if ref == nil || ref.Machine != sessionref.LocalMachine || ref.PaneID != to.Pane {
+			return refused(errors.New("destination is not the assigned local participant"))
+		}
+	}
+	if pending != nil || a.Phase == collaboration.Reviewing || a.Phase == collaboration.AwaitingOrchestrator {
+		if err := collaboration.CheckRevision(a); err != nil {
+			return refused(err)
+		}
+	}
+	policy, err := communication.Load(options.Config, env)
+	if err != nil {
+		return refused(err)
+	}
+	destinationConfig, destinationEnv := inboundConfiguration(to.Cwd, a.Workspace, env)
+	for _, layer := range destinationConfig.Layers {
+		if layer.ReadError != nil {
+			return refused(fmt.Errorf("destination inbound configuration is unreadable: %s: %w", layer.Source, layer.ReadError))
+		}
+	}
+	inbound := core.Cfg(&destinationConfig, "inbound", "auto", destinationEnv)
+	if inbound != "auto" && inbound != "off" {
+		return refused(errors.New("destination has an invalid inbound policy"))
+	}
+	err = policy.Authorize(communication.Request{From: communication.Participant{Name: from.Name, Role: from.Role, Lane: from.Lane}, To: communication.Participant{Name: to.Name, Role: to.Role, Lane: to.Lane}, Type: options.Type, AssignmentID: a.ID, Assigned: true, Inbound: inbound})
+	if err != nil {
+		return refused(err)
+	}
+	if err := ctx.Err(); err != nil {
+		return refused(fmt.Errorf("submission deadline reached before delivery: %w", err))
+	}
+	screen, cause := readScreen(sessionref.LocalMachine, to.Pane, "visible", 0, env, remaining(), nil)
+	if cause != "" {
+		return refused(fmt.Errorf("cannot inspect recipient screen: %s", cause))
+	}
+	state := agentGet(sessionref.LocalMachine, to.Pane, env, remaining())
+	if !state.OK || state.PaneID != to.Pane {
+		return refused(errors.New("recipient changed or became unavailable"))
+	}
+	if isDialogScreen(screen, to.Kind, state.Status) {
+		return refused(errors.New("recipient is showing a dialog; nothing was sent"))
+	}
+	current, err := collaboration.ResolveParticipant(sd, to.Name, env, ctx)
+	if err != nil || !collaboration.SameParticipant(to, current) {
+		return refused(errors.New("recipient session changed before submission"))
+	}
+	if time.Now().After(deadline) {
+		return refused(errors.New("submission deadline reached before delivery"))
+	}
+	id := options.EventID
+	if id == "" {
+		id = RandomPeerID()
+	}
+	header := strings.Split(PeerHeader(HeaderField(sessionref.FormatRef(sessionref.Ref{Machine: sessionref.LocalMachine, PaneID: from.Pane})), HeaderField(from.Name), HeaderField(from.Kind), HeaderField(from.Role), id), "\n")
+	header[2] = fmt.Sprintf("Reply within this assignment: herdr-soho send %s --assignment %s --type review.question \"<your reply>\"", from.Name, a.ID)
+	metadata := fmt.Sprintf("Assignment: %s; type: %s; round: %d; revision: %s.", a.ID, HeaderField(options.Type), a.Round, a.Revision)
+	message := strings.Join(header, "\n") + "\n" + metadata + "\n\n" + QuotePeerBody(LiteralPeerText(options.Body)) + "\n" + PeerEndLine(id)
+	// No --wait: neither side waits for the other's turn, report or idle.
+	r := platform.RunCli("herdr", []string{"agent", "prompt", to.Pane, message}, platform.RunOptions{Env: env, TimeoutMs: remaining()})
+	result := collaboration.DeliveryResult{Status: "submitted"}
+	if r.Status == nil || *r.Status != 0 || r.TimedOut || r.NotFound {
+		code, cause := structuredError(r.Stdout, r.Stderr, "agent prompt", "submission could not be confirmed")
+		result = collaboration.DeliveryResult{Status: "uncertain", Cause: cause}
+		if code == "agent_blocked" || code == "agent_not_found" || r.NotFound {
+			result.Status = "refused"
+		}
+	}
+	appendPeerAssignmentLog(sd, sessionref.FormatRef(sessionref.Ref{Machine: sessionref.LocalMachine, PaneID: from.Pane}), sessionref.FormatRef(sessionref.Ref{Machine: sessionref.LocalMachine, PaneID: to.Pane}), result.Status, utf16Length(options.Body), id, env, a.ID, options.Type, fmt.Sprint(a.Round))
+	if result.Status != "submitted" {
+		return result, errors.New(result.Cause)
+	}
+	return result, nil
+}

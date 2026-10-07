@@ -8,21 +8,20 @@ import (
 	"testing"
 
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
-// herdrLogger installs a fake herdr that logs every call and exits 3: any
-// herdr call made by the code under test lands in the log.
+// herdrLogger installs a fake herdr (the shared fakecli: the re-executed
+// test binary, no shell script behind the name) that logs every call and
+// exits 3: any herdr call made by the code under test lands in the call
+// log, and every call fails as the old sh fake failed.
 func herdrLogger(t *testing.T, dir string) (bin, log string) {
 	t.Helper()
 	bin = filepath.Join(dir, "bin")
-	log = filepath.Join(dir, "herdr-calls.log")
-	if err := os.MkdirAll(bin, 0o700); err != nil {
+	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{AnyArgs: true, Code: 3}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(bin, "herdr"), []byte("#!/bin/sh\necho \"$@\" >> "+log+"\nexit 3\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return bin, log
+	return bin, filepath.Join(bin, "herdr.calls.jsonl")
 }
 
 func assertNoHerdrCalls(t *testing.T, log string) {
@@ -37,6 +36,14 @@ func assertNoHerdrCalls(t *testing.T, log string) {
 	if len(data) != 0 {
 		t.Fatalf("herdr was called: %q", data)
 	}
+}
+
+// herdrLoggerEnv builds the restricted env for the herdrLogger fakes:
+// the fake bin first (the fake herdr wins), then the git-only directory
+// (the production code under test resolves git and nothing else).
+func herdrLoggerEnv(t *testing.T, bin string) platform.Env {
+	t.Helper()
+	return platform.Env{"PATH": bin + string(os.PathListSeparator) + gitOnlyDir(t), "HERDR_SOHO_FAKECLI_CONFIG": bin}
 }
 
 // skillFixture builds a skill dir (SKILL.md + roles) and an empty home in a
@@ -166,7 +173,9 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		bin, log := herdrLogger(t, root)
 		env := platform.Env{
 			"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home,
-			"PATH": bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		}
+		for key, value := range herdrLoggerEnv(t, bin) {
+			env[key] = value
 		}
 		code, msg := stateDirExit(t, ctx, env, skill)
 		want := "the state dir '" + filepath.Join(skill, ".herdr-soho") + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"
@@ -184,7 +193,9 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		bin, log := herdrLogger(t, root)
 		env := platform.Env{
 			"HERDR_SOHO_SKILL_DIR": skill, "HOME": home, "USERPROFILE": home,
-			"PATH": bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		}
+		for key, value := range herdrLoggerEnv(t, bin) {
+			env[key] = value
 		}
 		code, msg := stateDirExit(t, ctx, env, skill)
 		want := "the state dir '" + filepath.Join(skill, ".herdr-soho") + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"
@@ -288,7 +299,7 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 
 	t.Run("StateRoot from a cwd inside a skill that is a git checkout: no .gitignore is created", func(t *testing.T) {
 		_, skill, home := gitSkill(t)
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": os.Getenv("PATH")}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		dir := StateRoot(ctx, env, skill)
 		if dir != filepath.Join(skill, ".herdr-soho") {
 			t.Fatalf("dir=%q want %q", dir, filepath.Join(skill, ".herdr-soho"))
@@ -302,7 +313,7 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(skill, ".gitignore"), []byte("# pre-existing\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": os.Getenv("PATH")}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		StateRoot(ctx, env, skill)
 		got, err := os.ReadFile(filepath.Join(skill, ".gitignore"))
 		if err != nil || string(got) != "# pre-existing\n" {
@@ -314,7 +325,7 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(skill, ".gitignore"), []byte("# pre-existing\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": os.Getenv("PATH")}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		dir := StateDirPath(ctx, env, skill)
 		if dir != filepath.Join(skill, ".herdr-soho", "ws") {
 			t.Fatalf("dir=%q want %q", dir, filepath.Join(skill, ".herdr-soho", "ws"))
@@ -336,7 +347,7 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 		if out, gitErr := exec.Command("git", "init", "-q", proj).CombinedOutput(); gitErr != nil {
 			t.Fatalf("git init: %s %v", out, gitErr)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": os.Getenv("PATH")}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		dir := StateRoot(ctx, env, proj)
 		if dir != filepath.Join(proj, ".herdr-soho") {
 			t.Fatalf("dir=%q want %q", dir, filepath.Join(proj, ".herdr-soho"))

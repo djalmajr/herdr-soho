@@ -62,7 +62,7 @@ herd_label_max=16
 # Reuse an idle worker of the same role, kind and cwd whose last report is
 # already written instead of opening a new pane: on (default) | off.
 # `spawn --reuse` / `--fresh` override per call. A reused worker keeps its
-# earlier briefs in context: compact or clear its session before an
+# existing session context: compact or clear its session before an
 # unrelated slice (SKILL.md, "One agent, one growing session"); `--fresh`
 # opens another pane. Reuse never counts against max_workers.
 reuse_workers=on
@@ -249,6 +249,24 @@ setup_target=canonical
 # off refuses the message with exit 18. Every attempt is recorded in
 # <state>/peer-messages.tsv (never the message body).
 inbound=auto
+
+# Worker-to-worker messages: off (default) | policy. With policy, named
+# directional rules decide which worker may send which message type to which
+# participant, inside an active assignment created by the orchestrator:
+#   worker_messages.rules.<name>.from=role:implementer
+#   worker_messages.rules.<name>.to=role:reviewer
+#   worker_messages.rules.<name>.types=review.ready,review.question
+#   worker_messages.rules.<name>.scope=assignment
+#   worker_messages.rules.<name>.enabled=off   (explicit tombstone: deactivates
+#                                               a rule inherited from a lower layer)
+# Selectors are role:<role>, lane:<lane> or agent:<name> (comma-separated
+# lists, no wildcards); the agent name selects the current member of the
+# assignment. A rule is directional (from/to does not authorize the reverse
+# trip), is taken whole from the highest layer that names it — a partial rule
+# in a higher layer is an error, never completed from a lower one — and
+# inbound=off at the destination always wins. Allowed types: review.ready,
+# review.question, review.finding, review.result.
+worker_messages=off
 
 # Opt-in performance metrics: with on, the wait that settles a report appends one JSON line
 # per report to <state dir>/metrics.jsonl (role, model, effort and timing — never content).

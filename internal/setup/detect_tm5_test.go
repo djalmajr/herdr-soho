@@ -352,7 +352,7 @@ func TestSetupDetectTM5ParityGoldens(t *testing.T) {
 
 func runDetectTM5Golden(t *testing.T, name string) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-setup-detect.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-setup-detect.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

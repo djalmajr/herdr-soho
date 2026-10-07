@@ -16,7 +16,14 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
-func TestMain(m *testing.M) { fakecli.RunTests(m) }
+func TestMain(m *testing.M) {
+	// CLI fixtures must not depend on this host's disk/swap pressure. Tests
+	// of the warning override these existing hooks explicitly and restore
+	// this calm default; production measurements are unchanged.
+	platform.DiskFree = func(string) (int64, int64, bool) { return 50, 100, true }
+	platform.SwapUsage = func(platform.Env) (int64, int64, bool) { return 0, 100, true }
+	fakecli.RunTests(m)
+}
 
 func TestStateCommandParity(t *testing.T) {
 	t.Run("roster reads live agent objects and records panes before skipping nameless rows", func(t *testing.T) { // Mutation captured: refusing *jsonjs.Object makes the worker gone and lists the nameless pane owner.

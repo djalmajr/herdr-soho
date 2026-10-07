@@ -47,17 +47,27 @@ func PromptSitsInInput(screen string) bool {
 const boxPrefix = "\u2503"
 
 // PromptEvidence reports whether the screen shows this dispatch's prompt: the
-// composed path whole on a line, whole once the box lines of a full-screen TUI
-// are joined back (opencode wraps the path inside its box, so a box line holds
-// only a prefix such as `…/briefs/<agent>-`, which every brief of that agent
-// shares), or whole once the history lines pi wraps a consumed prompt into are
-// reassembled. The fragment and queue rules of QueuedPromptEvidence apply only
-// to lines outside the `┃` box. When the screen carries pi's two input-box
-// borders (PiInputRegion), every rule here — the whole-line check, the `┃` box
-// join, and the queue rules — skips the lines between the borders: there a
-// prompt sits typed and not sent yet, so the composed path whole on one box
-// line is not arrival. Without the two borders the whole screen is inspected,
-// as before.
+// composed path whole on a line that opens with the prompt marker (or the
+// recognized queue chrome before it, lineOpensWithPrompt), whole once the box
+// lines of a full-screen TUI are joined back (opencode wraps the path inside
+// its box, so a box line holds only a prefix such as `…/briefs/<agent>-`,
+// which every brief of that agent shares; earlier steps may precede the
+// prompt, and the path must reassemble, wrap by wrap, from the box line that
+// opens the prompt with the marker, so a box of prose quoting the file proves
+// nothing), or whole once the history lines pi wraps a consumed prompt into
+// are reassembled. The path must sit whole at a path boundary
+// (holdsPathBoundary for the line check, blockMatchesPath for the box and
+// wrapped blocks): a longer file name that only contains the path (composed +
+// "-other", an embedded same-prefix name) is not this prompt. A quoted prose
+// line that merely mentions or quotes the marker — with a longer or the exact
+// file name — is not a prompt or queue line and never proves the prompt. The
+// queue rule of QueuedPromptEvidence applies only to lines outside the `┃` box
+// and opens with the marker as well. When the screen carries pi's two
+// input-box borders (PiInputRegion), every rule here — the whole-line check,
+// the `┃` box join, and the queue rules — skips the lines between the borders:
+// there a prompt sits typed and not sent yet, so the composed path whole on
+// one box line is not arrival. Without the two borders the whole screen is
+// inspected, as before.
 func PromptEvidence(screen, composed string) bool {
 	if composed == "" {
 		return false
@@ -70,32 +80,47 @@ func PromptEvidence(screen, composed string) bool {
 	outsideRegion := func(i int) bool {
 		return !inBox || i < boxStart || i >= boxEnd
 	}
-	if inBox {
-		// A line inside pi's input box holds the prompt typed and not sent
-		// yet: only the lines outside the region can carry the whole path.
-		for i, line := range lines {
-			if outsideRegion(i) && strings.Contains(line, composed) {
-				return true
-			}
+	// A line proves the whole path only when it opens with the prompt marker
+	// (or the recognized queue chrome before it) and the path sits whole at a
+	// path boundary: quoted prose that merely mentions the marker or the file
+	// is not this prompt.
+	for i, line := range lines {
+		if outsideRegion(i) && lineOpensWithPrompt(line) && holdsPathBoundary(line, nil, composed) {
+			return true
 		}
-	} else if strings.Contains(screen, composed) {
-		return true
 	}
-	var joined, outside strings.Builder
+	var boxLines []string
+	var outside strings.Builder
 	for i, line := range lines {
 		if !outsideRegion(i) {
 			continue
 		}
 		head := strings.TrimLeft(line, " \t")
 		if strings.HasPrefix(head, boxPrefix) {
-			joined.WriteString(strings.TrimPrefix(head, boxPrefix))
+			boxLines = append(boxLines, strings.TrimLeft(strings.TrimPrefix(head, boxPrefix), " \t"))
 			continue
 		}
 		outside.WriteString(line)
 		outside.WriteString("\n")
 	}
-	if strings.Contains(stripSpace(joined.String()), stripSpace(composed)) {
-		return true
+	// The box's own text proves the path only from a genuine anchored prompt
+	// line inside the box: earlier steps may precede the prompt, but the path
+	// must reassemble, wrap by wrap, from the line that opens the prompt with
+	// the marker — so a box of prose quoting the exact file, or prose after an
+	// unrelated anchored marker, keeps the delivery uncertain.
+	boxMarker := strings.TrimRight(PromptMarker, " ")
+	for k := range boxLines {
+		if !lineOpensWithMarker(boxLines[k], boxMarker) {
+			continue
+		}
+		var block strings.Builder
+		for _, cont := range boxLines[k:] {
+			block.WriteString(cont)
+			block.WriteString("\n")
+		}
+		if blockMatchesPath(block.String(), PromptMarker+composed) {
+			return true
+		}
 	}
 	if wrappedBlockEvidence(screen, lines, composed) {
 		return true
@@ -236,48 +261,119 @@ func stripSpace(s string) string {
 
 // QueuedPromptEvidence reports whether the screen carries the dispatched prompt in the
 // agent's queue with the composed path truncated. It inspects only the last 15 non-empty
-// lines: a line is proof when it contains "Read the file" and (a) carries the radical of the
-// composed file (its base name without .brief.md), (b) shows at least 8 characters of a path
-// prefix that is a substring of the composed path, or (c) sits on a queue chrome line that
-// starts with the arrow marker or "Steering:" after its leading spaces.
+// lines: a line is proof when it opens with the prompt marker (or the recognized queue
+// chrome before it, lineOpensWithPrompt) and shows the composed file's identity — its
+// full exact basename or its radical (the base name without .brief.md) with a valid
+// boundary — so the queue may clip away the leading directories and still prove the
+// file. A common directory fragment of the composed path, an incomplete timestamp or
+// name, a queue chrome line that carries no identity, a bare "Read the file", and a
+// quoted prose line that mentions the marker or names the file — with a longer or the
+// exact name — never prove the prompt: an old or unrelated queued brief keeps the
+// delivery uncertain instead of closing the dispatch as queued.
 func QueuedPromptEvidence(screen, composed string) bool {
-	radical := strings.TrimSuffix(filepath.Base(composed), ".brief.md")
+	base := filepath.Base(composed)
+	radical := strings.TrimSuffix(base, ".brief.md")
+	if radical == "" {
+		return false
+	}
 	for _, line := range LastNonEmptyLines(screen, 15) {
-		if !strings.Contains(line, "Read the file") {
-			continue
-		}
-		if strings.Contains(line, radical) {
-			return true
-		}
-		fragment := queuedPathFragment(line)
-		if len([]rune(fragment)) >= 8 && fragment != "" && strings.Contains(composed, fragment) {
-			return true
-		}
-		if head := strings.TrimLeft(line, " \t"); strings.HasPrefix(head, "\u21b3") || strings.HasPrefix(head, "Steering:") {
+		if lineOpensWithPrompt(line) && lineShowsComposedIdentity(line, base, radical) {
 			return true
 		}
 	}
 	return false
 }
 
-// queuedPathFragment returns the text after "Read the file ", without its leading quotes
-// and ellipsis, up to the next ellipsis.
-func queuedPathFragment(line string) string {
-	i := strings.Index(line, PromptMarker)
-	if i < 0 {
-		return ""
+// lineOpensWithMarker reports whether the line opens with marker at an
+// anchored position: marker at the line start (after leading spaces and
+// tabs), or right after the recognized queue chrome — the arrow marker or the
+// "Steering:" label, the two queue prefixes pi shows — with marker next.
+// Prose that mentions or quotes the marker later in a sentence is not a
+// prompt or queue line and never proves the prompt by itself.
+func lineOpensWithMarker(line, marker string) bool {
+	head := strings.TrimLeft(line, " \t")
+	if strings.HasPrefix(head, marker) {
+		return true
 	}
-	// The leading quote and ellipsis go first: Cursor shows '.../herdr-so…'.
-	tail := strings.TrimLeft(line[i+len(PromptMarker):], `'"`)
-	tail = strings.TrimPrefix(tail, "\u2026")
-	tail = strings.TrimPrefix(tail, "...")
-	cut := len(tail)
-	for _, marker := range []string{"\u2026", "..."} {
-		if j := strings.Index(tail, marker); j >= 0 && j < cut {
-			cut = j
+	rest := ""
+	switch {
+	case strings.HasPrefix(head, "\u21b3"):
+		rest = head[len("\u21b3"):]
+	case strings.HasPrefix(head, "Steering:"):
+		rest = head[len("Steering:"):]
+	default:
+		return false
+	}
+	return strings.HasPrefix(strings.TrimLeft(rest, " \t"), marker)
+}
+
+// lineOpensWithPrompt is the anchored prompt-marker check: the marker with
+// its trailing space, so the line carries the prompt text, not just the word
+// sequence of the marker.
+func lineOpensWithPrompt(line string) bool {
+	return lineOpensWithMarker(line, PromptMarker)
+}
+
+// lineShowsComposedIdentity reports whether the line shows the composed file's identity
+// in one of its whitespace fields: after the field's display clips (the quotes and
+// ellipses the TUI wraps a truncated path in), the field must end with the full basename
+// or with the radical alone, and the text before that
+// suffix is empty only when no clip stood in front of it, or it ends at a path separator,
+// so the file name is a whole path element, not a clipped or embedded part of another.
+// A clipped leading directory keeps proving the file; a longer name that only contains
+// the identity (build-…-final.brief.md, xbuild-…), a name clipped mid-rune, and a clip
+// that lands right before the name do not.
+func lineShowsComposedIdentity(line, base, radical string) bool {
+	for _, field := range strings.Fields(line) {
+		tail, leadClipped := stripFieldClips(field)
+		for _, suffix := range []string{base, radical} {
+			if !strings.HasSuffix(tail, suffix) {
+				continue
+			}
+			before := tail[:len(tail)-len(suffix)]
+			if strings.HasSuffix(before, "/") || strings.HasSuffix(before, `\`) {
+				return true
+			}
+			if before == "" && !leadClipped {
+				return true
+			}
 		}
 	}
-	return tail[:cut]
+	return false
+}
+
+// stripFieldClips removes the leading and trailing display clips of a queue field — the
+// quotes and ellipses the TUI wraps a truncated path in — and reports whether a leading
+// clip was present: a leading clip right before the file name could as well have clipped
+// a longer name (xbuild-…), so it never validates the boundary on its own.
+func stripFieldClips(field string) (string, bool) {
+	leadClipped := false
+	for {
+		changed := false
+		if strings.HasPrefix(field, "\u2026") {
+			field = strings.TrimPrefix(field, "\u2026")
+			leadClipped, changed = true, true
+		} else if strings.HasPrefix(field, "...") {
+			field = strings.TrimPrefix(field, "...")
+			leadClipped, changed = true, true
+		}
+		if trimmed := strings.TrimLeft(field, `'"`); trimmed != field {
+			field, changed = trimmed, true
+		}
+		if strings.HasSuffix(field, "\u2026") {
+			field = strings.TrimSuffix(field, "\u2026")
+			changed = true
+		} else if strings.HasSuffix(field, "...") {
+			field = strings.TrimSuffix(field, "...")
+			changed = true
+		}
+		if trimmed := strings.TrimRight(field, `'"`); trimmed != field {
+			field, changed = trimmed, true
+		}
+		if !changed {
+			return field, leadClipped
+		}
+	}
 }
 
 // MarkerSeq returns the second whitespace-delimited field, or an empty string.

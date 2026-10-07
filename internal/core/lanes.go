@@ -598,6 +598,26 @@ func EnforceWorkerCap(ctx *Config, env platform.Env, cwd string) {
 	if len(names) < cap {
 		return
 	}
+	// The calling agent does not count against its own cap: a promoted
+	// sub-orchestrator keeps its roster row until it is demoted, and a worker
+	// that calls spawn from its own pane is itself. The other live workers —
+	// including other genuine sub-orchestrators — still count.
+	caller := ""
+	if env.Get("HERDR_PANE_ID") != "" {
+		caller = herdr.CallerAgentName(env)
+	}
+	if caller != "" {
+		kept := make([]string, 0, len(names))
+		for _, n := range names {
+			if n != caller {
+				kept = append(kept, n)
+			}
+		}
+		names = kept
+	}
+	if len(names) < cap {
+		return
+	}
 	platform.DieFriction(fmt.Sprintf("max_workers=%s reached (%d live: %s). Release a finished worker (release <name> --close), let spawn reuse an idle one of the same role (reuse_workers=on / --reuse), or raise max_workers.", capStr, len(names), strings.Join(names, " ")), 8)
 }
 

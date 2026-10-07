@@ -7,19 +7,141 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"testing"
 
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
 // The two review probes of review-2-20261003T173031 (findings 1 and 2),
-// now durable: fake ps answers, real sleep processes owned by the test
-// (killed in the cleanup), StopProcRow as the entry point. The fake ps
-// scripts sit first on PATH; ps/sleep/sh come from the system
-// directories.
+// now durable: a fake ps (the shared fakecli re-execution) and real sleeper
+// processes owned by the test (killed in the cleanup), StopProcRow as the
+// entry point. The fake ps sits first on PATH; ps resolves from the system
+// directories and nothing else (no shell, interpreter or sleep on the
+// restricted env).
+
+// The sleeper is the test binary itself, re-executed in a fixture role:
+// no external sleep, no shell. The role rides in test-private environment
+// (argv carries only the test flag).
+const (
+	procsSleeperRoleEnv = "HERDR_PROCS_SLEEPER_ROLE"
+	procsSleeperTest    = "TestProcsSleeperHelper"
+)
+
+// TestProcsSleeperHelper is the re-executed helper entry: when the role env
+// is set the fixture role runs and the process exits; in the main test run
+// the env is unset and the function returns without running anything.
+func TestProcsSleeperHelper(t *testing.T) {
+	if os.Getenv(procsSleeperRoleEnv) != "sleeper" {
+		return
+	}
+	// A long-lived process that dies from the default SIGTERM: the owned
+	// stand-in for the old `sleep 300`. It blocks inside a real blocking
+	// syscall (a read on a pipe whose write end this process keeps open):
+	// a parked select is a self-declared deadlock, and the default
+	// SIGTERM/SIGKILL still stop the process while it is blocked.
+	r, w, err := os.Pipe()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fixture sleeper: pipe: %v\n", err)
+		os.Exit(1)
+	}
+	_ = w // held open for the life of the process: the read never returns.
+	buf := make([]byte, 1)
+	_, _ = r.Read(buf)
+	os.Exit(1) // unreachable: the read blocks until a signal stops the process
+}
+
+// sleeperExe places a copy of the test binary under dir/sleep (a hard link
+// when supported, a copy otherwise) so the process table prints sleep as
+// the command base name, exactly like the old fixture did.
+func sleeperExe(t *testing.T, dir string) string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locating the test binary: %v", err)
+	}
+	target := filepath.Join(dir, "sleep")
+	if err := os.Link(exe, target); err != nil {
+		data, readErr := os.ReadFile(exe)
+		if readErr != nil {
+			t.Fatalf("reading the test binary: %v", readErr)
+		}
+		if writeErr := os.WriteFile(target, data, 0o700); writeErr != nil {
+			t.Fatalf("writing the fixture copy: %v", writeErr)
+		}
+	}
+	return target
+}
+
+// spawnSleeper starts the sleeper and owns it for the whole test (killed
+// and reaped in the cleanup, also when an assertion failed).
+func spawnSleeper(t *testing.T, exe string) int {
+	t.Helper()
+	cmd := exec.Command(exe, "-test.run=^TestProcsSleeperHelper$")
+	cmd.Env = []string{"PATH=/usr/bin:/bin", procsSleeperRoleEnv + "=sleeper"}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting the sleeper fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd.Process.Pid
+}
+
+// sleeperGonePid is a sleeper the test killed and reaped: the pid is gone.
+func sleeperGonePid(t *testing.T, exe string) int {
+	t.Helper()
+	cmd := exec.Command(exe, "-test.run=^TestProcsSleeperHelper$")
+	cmd.Env = []string{"PATH=/usr/bin:/bin", procsSleeperRoleEnv + "=sleeper"}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting the sleeper fixture: %v", err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait() // reap: the entry leaves the table (the kill's exit error is expected)
+	return pid
+}
+
+// psOnlyDir returns a directory holding only a link to the system ps: the
+// tail of the restricted PATH the fixture env carries (no shell,
+// interpreter or sleep resolvable; ps is the only native command the
+// production reads use).
+func psOnlyDir(t *testing.T) string {
+	t.Helper()
+	path, err := exec.LookPath("ps")
+	if err != nil {
+		t.Fatalf("locate the system ps: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(path, filepath.Join(dir, "ps")); err != nil {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("reading the system ps: %v", readErr)
+		}
+		if writeErr := os.WriteFile(filepath.Join(dir, "ps"), data, 0o755); writeErr != nil {
+			t.Fatalf("copying the system ps: %v", writeErr)
+		}
+	}
+	return dir
+}
+
+// installFakePs places the shared fakecli ps in dir with the given rules
+// and returns the env the consumer must run with: the fake dir first on
+// PATH (a ps-only directory after: the restricted env resolves ps and
+// nothing else) and the fakecli config marker the re-execution needs to
+// dispatch as the fake.
+func installFakePs(t *testing.T, dir string, rules []fakecli.Rule) platform.Env {
+	t.Helper()
+	if _, err := fakecli.Install(t, dir, "ps", rules); err != nil {
+		t.Fatal(err)
+	}
+	return platform.Env{"PATH": dir + ":" + psOnlyDir(t), "HERDR_SOHO_FAKECLI_CONFIG": dir}
+}
 
 // TestReview92RootStartChangedDuringCollection: the consumer's registered
 // identity read (lstart=,state=,comm=) gives the registered start, but
@@ -27,38 +149,21 @@ import (
 // root must not be signalled, StopProcRow must keep the line, and the
 // stop must not be claimed.
 func TestReview92RootStartChangedDuringCollection(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the unix ps-based fixture; the windows round exercises the same contract")
-	}
-	cmd := exec.Command("/bin/sleep", "300")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
-	t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
-	pid := cmd.Process.Pid
-
 	dir := t.TempDir()
-	script := fmt.Sprintf(`#!/bin/sh
-if [ "$1" = "-A" ]; then printf '%d %d\n'; exit 0; fi
-case "$2" in
- lstart=,state=,comm=) printf 'Sat Oct  3 00:00:00 2026 S sleep\n';;
- lstart=,ppid=,state=) if kill -0 %d 2>/dev/null; then printf 'Sat Oct  3 00:00:01 2026 %d S\n';fi;;
- pid=,state=) if kill -0 %d 2>/dev/null; then printf '%d S\n';fi;;
-esac
-`, pid, os.Getpid(), pid, os.Getpid(), pid, pid)
-	if err := os.WriteFile(filepath.Join(dir, "ps"), []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	env := platform.Env{"PATH": dir + ":/usr/bin:/bin"}
+	pid := spawnSleeper(t, sleeperExe(t, dir))
+	env := installFakePs(t, dir, []fakecli.Rule{
+		{Argv: []string{"-A", "-o", "pid=,ppid="}, Stdout: fmt.Sprintf("%d %d\n", pid, os.Getpid())},
+		{Argv: []string{"-o", "lstart=,state=,comm="}, ArgvPrefix: true, Stdout: "Sat Oct  3 00:00:00 2026 S sleep\n"},
+		{Argv: []string{"-o", "lstart=,ppid=,state="}, ArgvPrefix: true, Stdout: fmt.Sprintf("Sat Oct  3 00:00:01 2026 %d S\n", os.Getpid())},
+		{Argv: []string{"-o", "pid=,state="}, ArgvPrefix: true, Stdout: fmt.Sprintf("%d S\n", pid)},
+	})
 	row := ProcRow{Pid: pid, Started: "Sat Oct  3 00:00:00 2026", Name: "sleep", Owner: "ghost"}
 	if err := WriteProcs(dir, []ProcRow{row}); err != nil {
 		t.Fatal(err)
 	}
 	result := StopProcRow(dir, row, env)
 	t.Logf("owned pid=%d result=%+v", pid, result)
-	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil || strings.Contains(result.Line, "stopped process") {
+	if err := syscall.Kill(pid, 0); err != nil || strings.Contains(result.Line, "stopped process") {
 		t.Fatal("root was stopped despite changed start between registered identity check and collection")
 	}
 	if result.Dropped {
@@ -82,38 +187,21 @@ esac
 // absence: StopProcRow must report the error and keep the line, no
 // signal, no drop.
 func TestReview92UnreadableIdentityKeepsRegistration(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the unix ps-based fixture; the windows round exercises the same contract")
-	}
-	cmd := exec.Command("/bin/sleep", "300")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
-	t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
-	pid := cmd.Process.Pid
-
 	dir := t.TempDir()
-	script := fmt.Sprintf(`#!/bin/sh
-if [ "$1" = "-A" ]; then printf '%d %d\n'; exit 0; fi
-case "$2" in
- lstart=,state=,comm=) printf 'Sat Oct  3 00:00:00 2026 S sleep\n';;
- lstart=,ppid=,state=) echo 'identity query failed' >&2; : %d %d; exit 1;;
- pid=,state=) if kill -0 %d 2>/dev/null; then printf '%d S\n';fi;;
-esac
-`, pid, os.Getpid(), pid, os.Getpid(), pid, pid)
-	if err := os.WriteFile(filepath.Join(dir, "ps"), []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	env := platform.Env{"PATH": dir + ":/usr/bin:/bin"}
+	pid := spawnSleeper(t, sleeperExe(t, dir))
+	env := installFakePs(t, dir, []fakecli.Rule{
+		{Argv: []string{"-A", "-o", "pid=,ppid="}, Stdout: fmt.Sprintf("%d %d\n", pid, os.Getpid())},
+		{Argv: []string{"-o", "lstart=,state=,comm="}, ArgvPrefix: true, Stdout: "Sat Oct  3 00:00:00 2026 S sleep\n"},
+		{Argv: []string{"-o", "lstart=,ppid=,state="}, ArgvPrefix: true, Stderr: "identity query failed\n", Code: 1},
+		{Argv: []string{"-o", "pid=,state="}, ArgvPrefix: true, Stdout: fmt.Sprintf("%d S\n", pid)},
+	})
 	row := ProcRow{Pid: pid, Started: "Sat Oct  3 00:00:00 2026", Name: "sleep", Owner: "ghost"}
 	if err := WriteProcs(dir, []ProcRow{row}); err != nil {
 		t.Fatal(err)
 	}
 	result := StopProcRow(dir, row, env)
 	t.Logf("owned pid=%d result=%+v", pid, result)
-	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
+	if err := syscall.Kill(pid, 0); err != nil {
 		t.Fatal("fixture not alive")
 	}
 	if result.Err == nil || result.Dropped {
@@ -135,35 +223,18 @@ esac
 // (the process is alive) reads as unknown, never as gone — a failed read
 // is not an absence.
 func TestProcRowStateUnknownWhenTheReadFails(t *testing.T) {
-	cmd := exec.Command("/bin/sleep", "300")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
-	t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
-	pid := cmd.Process.Pid
-
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ps"), []byte("#!/bin/sh\nexit 9\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	env := platform.Env{"PATH": dir + ":/usr/bin:/bin"}
+	exe := sleeperExe(t, dir)
+	pid := spawnSleeper(t, exe)
+	env := installFakePs(t, dir, []fakecli.Rule{{AnyArgs: true, Code: 9}})
 	row := ProcRow{Pid: pid, Started: "Sat Oct  3 00:00:00 2026", Name: "sleep", Owner: "ghost"}
 	if st := ProcRowState(row, env); st != "unknown" {
 		t.Fatalf("ProcRowState = %q; want unknown (a failed read is not an absence)", st)
 	}
 	// The proven absence reads as gone: a dead, reaped pid.
-	dead := exec.Command("/bin/sleep", "0.1")
-	if err := dead.Start(); err != nil {
-		t.Fatal(err)
-	}
-	deadPid := dead.Process.Pid
-	if err := dead.Wait(); err != nil {
-		t.Fatal(err)
-	}
+	deadPid := sleeperGonePid(t, exe)
 	deadRow := ProcRow{Pid: deadPid, Started: "Sat Oct  3 00:00:00 2026", Name: "sleep", Owner: "ghost"}
-	envDead := platform.Env{"PATH": "/usr/bin:/bin"}
+	envDead := platform.Env{"PATH": psOnlyDir(t)}
 	if st := ProcRowState(deadRow, envDead); st != "gone" {
 		t.Fatalf("ProcRowState(dead) = %q; want gone", st)
 	}

@@ -37,6 +37,12 @@ func (r *pickerPIDRecorder) snapshot() []int {
 // unblocks one), so the test - not the wall clock - imposes the completion
 // order; in delay mode (gated=false) the fakes sleep delays[machine] ms as
 // before.
+// pickerParallelFixture installs the picker's fake CLI. The machine list is
+// always slow, fast, middle. In gated mode each fake remote snapshot blocks
+// until its own release file appears before answering (the returned release
+// function unblocks one), so the test - not the wall clock - imposes the
+// completion order; in delay mode (gated=false) the fakes sleep
+// delays[machine] ms as before.
 func pickerParallelFixture(t *testing.T, delays map[string]int, gated bool) (platform.Env, string, func(string)) {
 	t.Helper()
 	dir := t.TempDir()
@@ -47,17 +53,21 @@ func pickerParallelFixture(t *testing.T, delays map[string]int, gated bool) (pla
 			t.Fatal(err)
 		}
 	}
-	local := `{"ref":"local/w1:p1","machine":"local","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","name":"local","kind":"codex","status":"idle"}` + "\n"
-	rules := []fakecli.Rule{{Argv: []string{"find", "--json"}, Stdout: local}}
+	snapshot := func(name string) string {
+		return fmt.Sprintf(`{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1","label":"w1"}],"tabs":[{"tab_id":"w1:t1"}],"agents":[{"pane_id":"w1:p1","name":%q,"agent":"codex","agent_status":"idle"}],"panes":[{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1"}]}}}`, name)
+	}
+	rules := []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Stdout: snapshot("local")},
+		{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"slow","enabled":true},{"label":"fast","enabled":true},{"label":"middle","enabled":true}]`},
+	}
 	for _, machine := range []string{"slow", "fast", "middle"} {
-		row := fmt.Sprintf(`{"ref":"%s/w1:p1","machine":"%s","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","name":"%s","kind":"codex","status":"idle"}`+"\n", machine, machine, machine)
-		rule := fakecli.Rule{Argv: []string{"find", "--json", "--machine", machine}, Stdout: row, Delay: delays[machine]}
+		rule := fakecli.Rule{Argv: []string{"--machine", machine, "api", "snapshot"}, Stdout: snapshot(machine), Delay: delays[machine]}
 		if gated {
 			rule.WaitFile = filepath.Join(releaseDir, "release-"+machine)
 		}
 		rules = append(rules, rule)
 	}
-	cliPath, err := fakecli.Install(t, dir, "herdr-soho", rules)
+	cliPath, err := fakecli.Install(t, dir, "herdr", rules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,14 +91,10 @@ func pickerParallelFixture(t *testing.T, delays map[string]int, gated bool) (pla
 	return env, cliPath, release
 }
 
-// pickerParallelEnv installs the fake herdr (machine list) and builds the
-// picker's environment for the fixture directory.
+// pickerParallelEnv builds the picker's environment for the fixture
+// directory (the fake herdr is installed by pickerParallelFixture).
 func pickerParallelEnv(t *testing.T, dir string) platform.Env {
 	t.Helper()
-	_, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"slow","enabled":true},{"label":"fast","enabled":true},{"label":"middle","enabled":true}]`}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	env := platform.Env{}
 	for _, item := range fakecli.Env(testutil.CleanEnv(t), dir, fakecli.EnvOptions{IncludeBasePath: true}) {
 		key, value, ok := strings.Cut(item, "=")
@@ -125,10 +131,11 @@ func pickerStartWithPipes(t *testing.T, env platform.Env, cliPath string) (*os.F
 
 // waitForPickerRow waits (30 s) for the row to appear in the accumulated
 // screen. The failure messages name the serial-execution hypothesis: with
-// the release gates a run that searches the machines one by one in
+// the release gates a run that snapshots the machines one by one in
 // machine-list order (slow, fast, middle) blocks on the first, still
-// unreleased machine and never shows the waited row; the find timeout (60 s)
-// is longer than the deadline, so it cannot unmask the block in time.
+// unreleased machine and never shows the waited row; the per-call snapshot
+// timeout is longer than the global deadline, so it cannot unmask the block
+// in time.
 func waitForPickerRow(t *testing.T, output *os.File, finished <-chan int, row string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second) // returns as soon as the row shows; Windows process starts can take seconds

@@ -87,13 +87,13 @@ func TestClaudeInputBoxRealScreen(t *testing.T) {
 			t.Fatal("the message between the borders must count as still on screen")
 		}
 	})
-	t.Run("without the borders the last 15 lines still count", func(t *testing.T) {
+	t.Run("without the borders the screen proof stays conservative and no Enter goes", func(t *testing.T) {
 		noBorders := "history\n" + peer.PeerEndLine(id) + "\n"
 		if !messageStillInScreen("claude", noBorders, endLine, id) {
 			t.Fatal("without two borders the whole visible screen still counts")
 		}
-		if !idInInputBox("claude", "tail #"+id+"\n", id) {
-			t.Fatal("the id in the last 15 lines of a screen without borders still counts")
+		if idInInputBox("claude", "tail #"+id+"\n", id) {
+			t.Fatal("a screen without the recognized box presses no Enter")
 		}
 	})
 }
@@ -198,8 +198,9 @@ func TestClaudeInputRegion(t *testing.T) {
 // TestSendClaudeComposerBorders is the P2 guard end to end: the '─' pair
 // counts as the claude box only while the composer sits in it — the first
 // non-empty line of the region starts with ❯ and no line below the bottom
-// border does. Otherwise the last-15-lines rule decides, and a message typed
-// below a history '─' pair stays in the box instead of proving delivery.
+// border does. Otherwise the layout is not recognized: the screen proof
+// stays conservative and no Enter goes, so a message typed below a history
+// '─' pair keeps the 15 with the proof window unproved.
 func TestSendClaudeComposerBorders(t *testing.T) {
 	_, prompt := stalledID(t)
 	sep := claudeBoxSep
@@ -222,6 +223,8 @@ func TestSendClaudeComposerBorders(t *testing.T) {
 			// transcript proof is not armed and the screen rules decide.
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 4, Stdout: agentJSONKind("claude", "done", "1")},
 			{Argv: []string{"agent", "prompt", "w0test:p0a", prompt, "--wait", "--until", "working", "--until", "blocked", "--until", "idle", "--until", "done", "--timeout", "15000"}, Stderr: stalledPromptErr, Code: 1},
+			// The Enter, for the subtest whose real box holds the marker.
+			{Argv: []string{"agent", "send-keys", "w0test:p0a", "enter"}, Code: 0},
 			// The stalled visible read and the proof window's repeated reads:
 			// the same screen and a stable state until the window laps.
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: post},
@@ -229,12 +232,13 @@ func TestSendClaudeComposerBorders(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stdout: recent},
 		}
 	}
-	t.Run("history separators with the composer below: the typed message stays in the box and is not sent", func(t *testing.T) {
+	t.Run("history separators with the composer below: no recognized box, no Enter, the send keeps the 15", func(t *testing.T) {
 		// The review's history-separators scenario: two '─' lines in the
 		// history (a table) and the real composer with the message typed,
 		// below them and with no real borders. The pair is not a box, so
-		// the last 15 lines hold the marker, one Enter goes, and the send
-		// keeps the 15 instead of proving over the screen.
+		// the layout is not recognized: no Enter goes, the screen proof
+		// keeps the marker held, and the proof window laps without proof:
+		// the 15 says the window ran.
 		post := "history table\n" + sep + "\nrow\n" + sep + "\n❯ " + prompt + "\n"
 		reseed(t)
 		f := newFixture(t, stalledRules(post, prompt+"\n"))
@@ -243,11 +247,11 @@ func TestSendClaudeComposerBorders(t *testing.T) {
 		if code != 15 || out != "" {
 			t.Fatalf("the message typed below the history separators must not prove delivery: code=%d out=%q stderr=%q", code, out, stderr)
 		}
-		if !strings.Contains(stderr, "it sits in its input box after one Enter") {
-			t.Fatalf("the 15 is the Enter branch: %q", stderr)
+		if !strings.Contains(stderr, "no proof within the 1s window") {
+			t.Fatalf("the 15 is the unproved window branch: %q", stderr)
 		}
-		if enters := countSendKeyEnters(t, f); enters != 1 {
-			t.Fatalf("one Enter goes to the box that holds the marker: %d", enters)
+		if enters := countSendKeyEnters(t, f); enters != 0 {
+			t.Fatalf("the history '─' pair is not a recognized box: no Enter goes: %d", enters)
 		}
 		if prompts := countPromptCalls(t, f); prompts != 1 {
 			t.Fatalf("the stalled path never resends the text: %d prompts", prompts)
@@ -286,7 +290,7 @@ func TestSendClaudeComposerBorders(t *testing.T) {
 		if code != 15 || out != "" {
 			t.Fatalf("the message typed in the box must not prove delivery: code=%d out=%q stderr=%q", code, out, stderr)
 		}
-		if !strings.Contains(stderr, "it sits in its input box after one Enter") {
+		if !strings.Contains(stderr, "the last read showed it in its input box after one Enter") {
 			t.Fatalf("the 15 is the Enter branch: %q", stderr)
 		}
 		if enters := countSendKeyEnters(t, f); enters != 1 {
@@ -479,7 +483,7 @@ func TestSendClaudeStalledNewMessage(t *testing.T) {
 	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "500", "50"
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 	screenPath := filepath.Join(f.dir, "state", "ws-test", "wait", "send-"+id+".screen")
-	want := "herdr-soho: send: local/w0test:p0a did not take the message (agent_prompt_stalled: stalled); no proof within the 0.5s window; read its pane before sending again; screen saved to " + screenPath + "\n"
+	want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message (agent_prompt_stalled: stalled); delivery is uncertain: no proof within the 0.5s window; read its pane for #01020304 or a reply before sending again; screen saved to " + screenPath + "\n"
 	if code != 15 || out != "" || stderr != want {
 		t.Fatalf("the unproved stalled 15 says the window ran and cites the saved screen: code=%d out=%q stderr=%q want %q", code, out, stderr, want)
 	}

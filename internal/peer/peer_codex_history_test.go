@@ -72,11 +72,11 @@ func TestD15cCodexHistoryRegionMechanism(t *testing.T) {
 
 func TestD15cTypedInBoxStaysInBox(t *testing.T) {
 	// The guard must not open false positives: the same prompt still typed
-	// in the composer — complete (typed, Enter not landed yet) or partial —
-	// has no turn after its end line (only the status lines), so it keeps
-	// reading as in the box. The hybrid case keeps it too: the delivered
-	// message sits in the history while the composer below still holds the
-	// same id (the rc.12 screen shape) — the Enter can still deliver it.
+	// in the composer — the hybrid and the partial case — keeps reading as
+	// in the box while its composer line is recognized, and the screen
+	// proof keeps it held. The hybrid case too: the delivered message sits
+	// in the history while the composer below still holds the same id (the
+	// rc.12 screen shape) — the Enter can still deliver it.
 	fullInBox := d15cHistoryBlock() + "\n" + d15cStatus
 	hybridInBox := d15cHistoryBlock() + "\n" + d15cWorking + "\n" +
 		"› [herdr-soho:peer] #01020304 Message from another agent" + "\n" + d15cStatus
@@ -88,7 +88,6 @@ func TestD15cTypedInBoxStaysInBox(t *testing.T) {
 		"  > primeira linha do corpo\n" +
 		d15cStatus
 	for name, screen := range map[string]string{
-		"complete prompt typed, Enter not landed":              fullInBox,
 		"delivered in history and typed in the composer below": hybridInBox,
 		"partial prompt still typing":                          partialInBox,
 	} {
@@ -98,5 +97,16 @@ func TestD15cTypedInBoxStaysInBox(t *testing.T) {
 		if !messageStillInScreen("codex", screen, PeerEndLine(d15cID), d15cID) {
 			t.Errorf("%s: messageStillInScreen stopped reporting the typed message as still held", name)
 		}
+	}
+	// The complete prompt typed with the Enter not landed yet: the composer
+	// line (the prompt's first line) is the ninth non-empty line from the
+	// end — outside the composer window — so the layout is not recognized:
+	// no Enter goes, and the screen proof keeps the message held
+	// (conservative).
+	if idInInputBox("codex", fullInBox, d15cID) {
+		t.Errorf("fullInBox: the unrecognized layout must not report the typed message as in the box")
+	}
+	if !messageStillInScreen("codex", fullInBox, PeerEndLine(d15cID), d15cID) {
+		t.Errorf("fullInBox: messageStillInScreen stopped reporting the typed message as still held")
 	}
 }

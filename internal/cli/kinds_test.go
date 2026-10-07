@@ -66,7 +66,7 @@ func TestKindsCommands(t *testing.T) {
 		var stderr bytes.Buffer
 		platform.Stderr = &stderr
 		t.Cleanup(func() { platform.Stderr = oldErr })
-		if code := cmdModel(nil, nil); code != 1 || stderr.String() != "herdr-soho.mjs: 1: kind\n" {
+		if code := cmdModel(nil, nil); code != 1 || stderr.String() != "herdr-soho: 1: kind\n" {
 			t.Fatalf("code=%d stderr=%q", code, stderr.String())
 		}
 	})

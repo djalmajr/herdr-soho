@@ -1,6 +1,8 @@
 package doctor
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/setuptext"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
@@ -345,21 +348,128 @@ func TestDoctorReadsHerdrVersionAndLargeSkillFromPath(t *testing.T) { // Mutatio
 	}
 }
 
-func TestDoctorRecognizesOnlyCurrentSessionStartHook(t *testing.T) { // JS: "doctor requires the current SessionStart command"
+func TestDoctorRecognizesNativeAndOldSessionStartHooks(t *testing.T) { // JS: "doctor requires the current SessionStart command"
+	for _, tc := range []struct {
+		name     string
+		command  string
+		wantLine string
+	}{{
+		"the exact native hook is recognized as present", setuptext.SetupHookDoctor(),
+		"ok     Claude hooks present in .claude/settings.json",
+	}, {
+		"the recognized previous herdr-soho shell hook warns for the setup replacement", setuptext.PreviousHookDoctor(),
+		"old herdr-soho shell hooks in .claude/settings.json: run '",
+	}, {
+		"the exact pre-rename herdr-agents hook warns for the setup replacement", setuptext.LegacyHookDoctor(),
+		"legacy herdr-agents hooks in .claude/settings.json: run '",
+	}, {
+		"a foreign command that only mentions herdr-soho is not a herdr-soho hook", "sh -c herdr-soho doctor",
+		"warn   no herdr-soho hooks in .claude/settings.json",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			env := platform.Env{"HOME": root, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
+			ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
+			settings := filepath.Join(root, ".claude", "settings.json")
+			if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(settings, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":`+quoteCommand(tc.command)+`}]}]}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out strings.Builder
+			DoctorCheck(&ctx, env, root, &out)
+			got := out.String()
+			if !strings.Contains(got, tc.wantLine) {
+				t.Fatalf("expected %q in:\n%s", tc.wantLine, got)
+			}
+			if tc.command == setuptext.PreviousHookDoctor() {
+				// The setup guidance names the native launcher, never the
+				// obsolete skill scripts path.
+				launcher := platform.LauncherPath(env)
+				if !strings.Contains(got, "to replace them with the native hook commands") || !strings.Contains(got, launcher+" setup'") || strings.Contains(got, "scripts/herdr-soho") {
+					t.Fatalf("old-hook guidance is not the native launcher:\n%s", got)
+				}
+			}
+		})
+	}
+}
+
+func TestDoctorWarnsWhenNativeAndPreviousHooksCoexist(t *testing.T) {
+	for _, obsolete := range []struct{ name, command, warning string }{
+		{"previous", setuptext.PreviousHookDoctor(), "old herdr-soho shell hooks"},
+		{"legacy", setuptext.LegacyHookDoctor(), "legacy herdr-agents hooks"},
+	} {
+		for _, nativeFirst := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/native-first=%v", obsolete.name, nativeFirst), func(t *testing.T) {
+				root := t.TempDir()
+				env := platform.Env{"HOME": root, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
+				ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
+				commands := []string{setuptext.SetupHookDoctor(), obsolete.command}
+				if !nativeFirst {
+					commands[0], commands[1] = commands[1], commands[0]
+				}
+				settings := filepath.Join(root, ".claude", "settings.json")
+				if err := os.MkdirAll(filepath.Dir(settings), 0755); err != nil {
+					t.Fatal(err)
+				}
+				body := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":` + quoteCommand(commands[0]) + `},{"type":"command","command":` + quoteCommand(commands[1]) + `}]}]}}`
+				if err := os.WriteFile(settings, []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+				var out strings.Builder
+				DoctorCheck(&ctx, env, root, &out)
+				if !strings.Contains(out.String(), obsolete.warning) || strings.Contains(out.String(), "ok     Claude hooks present") {
+					t.Fatalf("mixed hook settings were accepted without migration warning:\n%s", out.String())
+				}
+				after, err := os.ReadFile(settings)
+				if err != nil || string(after) != body {
+					t.Fatalf("doctor mutated settings: %q err=%v", after, err)
+				}
+			})
+		}
+	}
+}
+
+func quoteCommand(command string) string {
+	b, err := json.Marshal(command)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// TestDoctorSetupGuidanceUsesTheNativeLauncher proves the setup guidance
+// lines carry the platform.LauncherPath binary (the actual native executable
+// when no HERDR_SOHO_BIN override exists), never the obsolete scripts path.
+func TestDoctorSetupGuidanceUsesTheNativeLauncher(t *testing.T) {
 	root := t.TempDir()
 	env := platform.Env{"HOME": root, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
-	settings := filepath.Join(root, ".claude", "settings.json")
-	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(settings, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"sh -c herdr-soho doctor"}]}]}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	var out strings.Builder
 	DoctorCheck(&ctx, env, root, &out)
-	if !strings.Contains(out.String(), "warn   no herdr-soho hooks in .claude/settings.json") {
-		t.Fatalf("stale hook was accepted: %s", out.String())
+	got := out.String()
+	launcher := platform.LauncherPath(env)
+	for _, line := range []string{"then run '" + launcher + " doctor --fix --panes <n>' with their answer.", "run '" + launcher + " setup' (writes the delegation rules"} {
+		if !strings.Contains(got, line) {
+			t.Fatalf("setup guidance line missing (%s):\n%s", line, got)
+		}
+	}
+	if strings.Contains(got, "scripts/herdr-soho") {
+		t.Fatalf("obsolete scripts path leaked into the setup guidance:\n%s", got)
+	}
+	// A hostile HERDR_SOHO_BIN override is refused by LauncherPath (code 2)
+	// before any guidance is emitted: the doctor never runs it.
+	hostile := platform.Env{"HOME": root, "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_SOHO_BIN": "relative-bin"}
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		var out2 strings.Builder
+		DoctorCheck(&ctx, hostile, root, &out2)
+	}()
+	exit, ok := recovered.(*platform.ExitError)
+	if !ok || exit.Code != 2 {
+		t.Fatalf("hostile HERDR_SOHO_BIN: recovered %#v; want ExitError code 2 (fail closed, no guidance)", recovered)
 	}
 }
 
@@ -580,6 +690,34 @@ func TestDoctorNamesSeparateClaudeMdWithLegacyBlock(t *testing.T) { // JS: "setu
 			got := strings.Contains(out.String(), "setup --target CLAUDE.md' to rename it in place")
 			if got != tc.want {
 				t.Fatalf("separate CLAUDE.md warning=%v, want %v:\n%s", got, tc.want, out.String())
+			}
+		})
+	}
+}
+
+func TestDoctorDiscardedModelsNameTheHigherConfigLayer(t *testing.T) {
+	for _, tc := range []struct{ name, lanes, kindKey, modelKey, want string }{
+		{"lane", "on", "lane_build_kind", "lane_build_model", "warn   config: lane.build.model=grok-4.7 (user) is ignored: lane.build.kind=codex comes from a higher layer (project) without a model\n"},
+		{"role", "off", "role_implementer_kind", "role_implementer_model", "warn   config: role.implementer.model=grok-4.7 (user) is ignored: role.implementer.kind=codex comes from a higher layer (project) without a model\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			roles := filepath.Join(root, "roles")
+			if err := os.Mkdir(roles, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(roles, "implementer.md"), []byte("---\nmode: edit\n---\nImplement.\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			env := platform.Env{"HERDR_SOHO_SKILL_DIR": root, "HERDR_SOHO_ROLES": roles}
+			ctx := core.Config{Entries: map[string]core.ConfigEntry{
+				"lanes": {Value: tc.lanes, Source: "project"}, "panes": {Value: "4", Source: "project"}, "lane_build_roles": {Value: "implementer", Source: "project"},
+				tc.kindKey: {Value: "codex", Source: "project"}, tc.modelKey: {Value: "grok-4.7", Source: "user"},
+			}}
+			var out strings.Builder
+			doctorDiscardedModels(&ctx, env, root, &Say{Out: &out})
+			if out.String() != tc.want {
+				t.Fatalf("discarded model warning=%q; want %q", out.String(), tc.want)
 			}
 		})
 	}

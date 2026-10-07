@@ -244,6 +244,62 @@ func TestMutationGuard(t *testing.T) {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, out, stderr)
 		}
 	})
+	t.Run("cargo metadata target_directory inside and outside source (fake cargo, no toolchain)", func(t *testing.T) {
+		// The cargo metadata success path used to be reachable only through a
+		// real toolchain (the skipped matrix above); a deterministic fake
+		// cargo covers it here, with a PATH that contains nothing but the
+		// fake, so an absent or different real cargo cannot influence the
+		// result.
+		s := newGuardFixture(t)
+		if err := os.WriteFile(filepath.Join(s.copy, "Cargo.toml"), []byte("[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		install := func(rules []fakecli.Rule) platform.Env {
+			t.Helper()
+			bin := t.TempDir()
+			if _, err := fakecli.Install(t, bin, "cargo", rules); err != nil {
+				t.Fatal(err)
+			}
+			return envFrom(fakecli.Env(os.Environ(), bin))
+		}
+		metadata := func(target string) string { return fmt.Sprintf(`{"target_directory":%q}`, target) }
+		for _, tc := range []struct {
+			name       string
+			rules      []fakecli.Rule
+			code       int
+			stdoutPart string
+		}{
+			{
+				"absolute target_directory inside source fails", []fakecli.Rule{{Argv: []string{"metadata", "--offline", "--no-deps", "--format-version", "1"}, Stdout: metadata(filepath.Join(s.source, "target-x"))}},
+				1, "fail cargo-config: cargo metadata puts target_directory inside the source tree",
+			},
+			{
+				"absolute target_directory outside source passes", []fakecli.Rule{{Argv: []string{"metadata", "--offline", "--no-deps", "--format-version", "1"}, Stdout: metadata(filepath.Join(s.copy, "target"))}},
+				0, "ok cargo-config",
+			},
+			{
+				// Relative to the copy, like cargo reports it.
+				"relative target_directory outside source passes", []fakecli.Rule{{Argv: []string{"metadata", "--offline", "--no-deps", "--format-version", "1"}, Stdout: metadata("target")}},
+				0, "ok cargo-config",
+			},
+			{
+				"relative target_directory inside source fails", []fakecli.Rule{{Argv: []string{"metadata", "--offline", "--no-deps", "--format-version", "1"}, Stdout: metadata("../source/target-x")}},
+				1, "fail cargo-config: cargo metadata puts target_directory inside the source tree",
+			},
+			{
+				"cargo metadata exit failure fails closed", []fakecli.Rule{{Argv: []string{"metadata", "--offline", "--no-deps", "--format-version", "1"}, Code: 1, Stderr: "error: could not find `Cargo.toml`\n"}},
+				1, "fail cargo-config: cargo metadata failed; target-dir cannot be resolved safely",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				env := install(tc.rules)
+				code, out, stderr := runMutationGuardFixture(t, s, []string{s.copy, "--source", s.source}, env)
+				if code != tc.code || !strings.Contains(out, tc.stdoutPart) || (tc.code == 0 && stderr != "") {
+					t.Fatalf("code=%d stdout=%q stderr=%q want code %d containing %q", code, out, stderr, tc.code, tc.stdoutPart)
+				}
+			})
+		}
+	})
 	t.Run("non-executable cargo on PATH fails closed when metadata cannot spawn", func(t *testing.T) { // Mutation captured: treating a regular non-executable cargo file as absent returns textual-config success.
 		s := newGuardFixture(t)
 		if err := os.WriteFile(filepath.Join(s.copy, "Cargo.toml"), []byte("[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n"), 0o600); err != nil {
@@ -356,6 +412,16 @@ func TestMutationGuard(t *testing.T) {
 		code, out, _ = runMutationGuardFixture(t, s, []string{s.copy, "--source", s.source}, nil)
 		if code != 1 || !strings.Contains(filepath.ToSlash(out), "fail cargo-config: .cargo/config sets target-dir inside the source tree") {
 			t.Fatalf("precedence code=%d stdout=%q", code, out)
+		}
+		if err := os.WriteFile(filepath.Join(cargoDir, "config"), []byte("[build]\ntarget-dir = \"isolated\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cargoDir, "config.toml"), []byte("[build]\ntarget-dir = "+target+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, out, stderr = runMutationGuardFixture(t, s, []string{s.copy, "--source", s.source}, nil)
+		if code != 0 || !strings.Contains(out, "ok cargo-config") || stderr != "" {
+			t.Fatalf("copy config.toml must be ignored behind isolated config: code=%d stdout=%q stderr=%q", code, out, stderr)
 		}
 		if err := os.Remove(filepath.Join(s.copy, "Cargo.toml")); err != nil {
 			t.Fatal(err)

@@ -43,6 +43,7 @@ func TestCommandHelpFirstPositionOnly(t *testing.T) {
 
 	t.Run("send --help prints the send lines", func(t *testing.T) {
 		const want = "  herdr-soho send <ref|name> <message…> | --file <path> [--now] [--timeout MS]\n" +
+			"                      [--assignment ID --type review.question]\n" +
 			"                                             # peer message to an agent of any kind (a reference, or a name on the local server); waits for a busy target to settle by default; the target project's inbound=off refuses (exit 18)\n"
 		code, out, errOut := runIn(t, []string{"send", "--help"}, env, cwd)
 		if code != 0 || out != want || errOut != "" {
@@ -79,4 +80,17 @@ func TestCommandHelpFirstPositionOnly(t *testing.T) {
 			t.Fatalf("code=%d out=%q err=%q; want the unknown command error", code, out, errOut)
 		}
 	})
+}
+
+func TestCollaborationHelpIncludesWholeWorkflow(t *testing.T) {
+	env, cwd := commandFixture(t)
+	code, out, stderr := runIn(t, []string{"collaborate", "--help"}, env, cwd)
+	if code != 0 || stderr != "" {
+		t.Fatalf("help: %d %s", code, stderr)
+	}
+	for _, word := range []string{"start <author>", "status <assignment>", "event <assignment>", "stop <assignment>", "finalize <assignment>", "--revision", "--verdict"} {
+		if !strings.Contains(out, word) {
+			t.Fatalf("missing help %s: %s", word, out)
+		}
+	}
 }

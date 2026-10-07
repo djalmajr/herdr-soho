@@ -27,6 +27,14 @@ func localPlanFixture(t *testing.T) (string, platform.Env, *core.Config) {
 		t.Skip("git is required for local setup plan tests")
 	}
 	root := t.TempDir()
+	// Canonicalize the existing temporary root before deriving any
+	// fixture path: the product reports canonical paths (git /
+	// EvalSymlinks), while t.TempDir can hand back the short Windows
+	// alias; one shared form keeps expected and actual paths comparable.
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("canonicalize the fixture root: %v", err)
+	}
 	cmd := exec.Command(git, "init", "-q", root)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)

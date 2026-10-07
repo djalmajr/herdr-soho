@@ -277,9 +277,9 @@ func TestDoctorTM6CLIAndParity(t *testing.T) {
 					tm6Write(t, conf, "lane.build.kind=grok\n")
 				}
 				code, out, errOut := runIn(t, want.Args, stepEnv, cwd)
-				program := filepath.Join(stepEnv.Get("HERDR_SOHO_SKILL_DIR"), "scripts", "herdr-soho")
-				if platform.Current() == "win32" {
-					program += ".cmd"
+				program, programErr := os.Executable()
+				if programErr != nil {
+					t.Fatal(programErr)
 				}
 				out = strings.ReplaceAll(out, program, "PROG")
 				out = normalizeGoldenRoot(out, root)
@@ -312,7 +312,7 @@ func TestDoctorTM6CLIAndParity(t *testing.T) {
 
 func tm6LoadDoctorGoldens(t *testing.T) map[string]tm6GoldenScenario {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-doctor.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-doctor.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

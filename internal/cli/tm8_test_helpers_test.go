@@ -86,7 +86,7 @@ func runTM8ConfigGolden(t *testing.T, name string) {
 	if runtime.GOOS == "windows" {
 		t.Skip("parity-config JS fixture specifies POSIX temporary git paths")
 	}
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-config.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-config.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

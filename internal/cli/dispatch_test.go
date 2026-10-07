@@ -151,8 +151,8 @@ func TestDispatchUsageErrorsPortedCases(t *testing.T) {
 		code   int
 		stderr string
 	}{
-		{name: "missing agent", args: nil, code: 1, stderr: "herdr-soho.mjs: 1: agent\n"},
-		{name: "missing brief", args: []string{"worker"}, code: 1, stderr: "herdr-soho.mjs: 2: brief.md\n"},
+		{name: "missing agent", args: nil, code: 1, stderr: "herdr-soho: 1: agent\n"},
+		{name: "missing brief", args: []string{"worker"}, code: 1, stderr: "herdr-soho: 2: brief.md\n"},
 		{name: "unknown option", args: []string{"worker", f.brief, "--not-an-option"}, code: 2, stderr: "herdr-soho: dispatch: unknown option --not-an-option\n"},
 		{name: "missing file", args: []string{"worker", filepath.Join(f.root, "missing.md")}, code: 2, stderr: "herdr-soho: brief not found: " + filepath.Join(f.root, "missing.md") + "\n"},
 		{name: "unknown agent", args: []string{"other", f.brief}, code: 3, stderr: "herdr-soho: agent 'other' is not in this skill's roster (spawn it first, or pass a name you spawned)\n"},
@@ -168,7 +168,7 @@ func TestDispatchUsageErrorsPortedCases(t *testing.T) {
 		for _, tc := range []struct {
 			args []string
 			want string
-		}{{[]string{"run"}, "herdr-soho.mjs: 1: role\n"}, {[]string{"run", "implementer"}, "herdr-soho.mjs: 2: brief.md\n"}} {
+		}{{[]string{"run"}, "herdr-soho: 1: role\n"}, {[]string{"run", "implementer"}, "herdr-soho: 2: brief.md\n"}} {
 			oldErr := platform.Stderr
 			var stderr bytes.Buffer
 			platform.Stderr = &stderr

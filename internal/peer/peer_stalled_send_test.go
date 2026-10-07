@@ -125,7 +125,7 @@ func TestSendStalledEnter(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		want := "herdr-soho: send: local/w0test:p0a did not take the message: it sits in its input box after one Enter; read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
+		want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message: the last read showed it in its input box after one Enter; delivery is uncertain; read its pane for #01020304 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -186,7 +186,7 @@ func TestSendStalledEnter(t *testing.T) {
 		// reads of the window fail fast instead of running the default 15s.
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		want := "herdr-soho: send: local/w0test:p0a did not take the message (agent_prompt_stalled: stalled); no proof within the 0.001s window; read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
+		want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message (agent_prompt_stalled: stalled); delivery is uncertain: no proof within the 0.001s window; read its pane for #01020304 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -197,13 +197,14 @@ func TestSendStalledEnter(t *testing.T) {
 			t.Fatalf("the stalled path never resends the text: %d prompts", prompts)
 		}
 	})
-	t.Run("stalled: a non-pi kind keeps the last-15-lines rule for the box", func(t *testing.T) {
+	t.Run("stalled: a claude without the recognized box presses no Enter", func(t *testing.T) {
 		_, prompt := stalledID(t)
-		// No '─' separator lines: for the claude kind the box is the last 15
-		// lines of the visible screen, as before.
+		// No '─' separator lines: the claude layout is not recognized, so
+		// no Enter goes — uncertainty is not permission to press Enter —
+		// and the proof window laps without proof: the 15 says the window
+		// ran.
 		pre := "chrome line\n❯ \n"
 		box := prompt + "\n❯ \n"
-		post := peer.PeerEndLine("01020304") + "\n✻ done\n❯ \n"
 		rules := []fakecli.Rule{
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 1, Stdout: agentJSONKind("claude", "idle", "1")},
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 1, Stdout: pre},
@@ -213,19 +214,21 @@ func TestSendStalledEnter(t *testing.T) {
 			// agent_session, so the transcript proof is not armed.
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 4, Stdout: agentJSONKind("claude", "idle", "1")},
 			{Argv: []string{"agent", "prompt", "w0test:p0a", prompt, "--wait", "--until", "working", "--until", "blocked", "--until", "idle", "--until", "done", "--timeout", "15000"}, Stderr: stalledPromptErr, Code: 1},
-			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: box},
-			{Argv: []string{"agent", "send-keys", "w0test:p0a", "enter"}, Code: 0},
-			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 5, Stdout: agentJSONKind("claude", "working", "2")},
-			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 3, Stdout: post},
+			// The stalled read and the proof window's polls: the same screen,
+			// catch-all so a second poll on a slow machine still matches.
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: box},
 		}
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
-			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		if code != 15 || out != "" {
+			t.Fatalf("the unrecognized box must not press Enter and must not prove delivery: code=%d out=%q stderr=%q", code, out, stderr)
 		}
-		if enters := countSendKeyEnters(t, f); enters != 1 {
-			t.Fatalf("the non-pi stalled message in the box needs exactly one Enter: %d", enters)
+		if !strings.Contains(stderr, "no proof within the 0.001s window") {
+			t.Fatalf("the 15 says the proof window ran: %q", stderr)
+		}
+		if enters := countSendKeyEnters(t, f); enters != 0 {
+			t.Fatalf("no Enter goes to a claude without the recognized box: %d", enters)
 		}
 		if prompts := countPromptCalls(t, f); prompts != 1 {
 			t.Fatalf("the stalled path never resends the text: %d prompts", prompts)
@@ -241,7 +244,7 @@ func TestSendStalledEnter(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (agent_blocked") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (agent_blocked") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if enters := countSendKeyEnters(t, f); enters != 0 {
@@ -259,7 +262,7 @@ func TestSendStalledEnter(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (timeout)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (timeout)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if enters := countSendKeyEnters(t, f); enters != 0 {

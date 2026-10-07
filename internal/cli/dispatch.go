@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/djalmajr/herdr-soho/internal/collaboration"
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/dispatch"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
@@ -19,6 +20,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/provider"
 	"github.com/djalmajr/herdr-soho/internal/spawn"
+	"github.com/djalmajr/herdr-soho/internal/startup"
 	"github.com/djalmajr/herdr-soho/internal/stats"
 	"github.com/djalmajr/herdr-soho/internal/taskreport"
 	waitpkg "github.com/djalmajr/herdr-soho/internal/wait"
@@ -30,11 +32,11 @@ var writeDispatchSidecar = dispatch.WriteSidecar
 
 func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	if len(argv) < 1 || argv[0] == "" {
-		fmt.Fprintln(platform.Stderr, "herdr-soho.mjs: 1: agent")
+		fmt.Fprintln(platform.Stderr, "herdr-soho: 1: agent")
 		return 1
 	}
 	if len(argv) < 2 || argv[1] == "" {
-		fmt.Fprintln(platform.Stderr, "herdr-soho.mjs: 2: brief.md")
+		fmt.Fprintln(platform.Stderr, "herdr-soho: 2: brief.md")
 		return 1
 	}
 	agent, brief := argv[0], argv[1]
@@ -85,6 +87,9 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	if st, err := os.Stat(brief); err != nil || !st.Mode().IsRegular() {
 		core.DieFriction("brief not found: "+brief, 2, frictionLogPath, "dispatch")
 	}
+	// Resolve the native command before any compact step, task state,
+	// collaboration cleanup or interaction with the worker.
+	platform.LauncherPath(env)
 	sd := core.StateDirPath(ctx, env, cwd)
 	line := core.RosterLine(sd, agent)
 	if line == "" {
@@ -105,6 +110,24 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	if role == "" {
 		role = at(3)
 	}
+	active, stateErr := (collaboration.Store{StateDir: sd}).ActiveFor(at(1))
+	if stateErr != nil {
+		core.DieFriction("dispatch: collaboration state is unreadable: "+stateErr.Error(), 4, frictionLogPath, "dispatch")
+	}
+	if active != nil {
+		if env.Get("HERDR_WORKSPACE_ID") == "" {
+			env = env.Clone()
+			env["HERDR_WORKSPACE_ID"] = core.WorkspaceID(ctx, env, cwd)
+		}
+		member, _ := active.Member(at(1))
+		body, readErr := os.ReadFile(brief)
+		if amend || role != member.Role || active.Phase != collaboration.Preparing || readErr != nil || collaboration.Hash(body) != active.BriefHash {
+			core.DieFriction("dispatch: active collaboration "+active.ID+" keeps its contract and participant roles; stop and finalize it before another dispatch", 10, frictionLogPath, "dispatch")
+		}
+		if err := collaboration.CheckParticipants(*active, sd, env); err != nil {
+			core.DieFriction("dispatch: "+err.Error(), 4, frictionLogPath, "dispatch")
+		}
+	}
 	kind, family := at(2), at(4)
 	roleFile := core.RoleFile(role, env, cwd)
 	if roleFile == "" {
@@ -113,6 +136,23 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	// F11: before any state change or send, the recorded compact phase decides
 	// the dispatch: a live or unverifiable owner for this pane refuses the
 	// send, and a proven-dead owner's or a switched-pane's record is removed.
+	// The cursor/Windows startup preflight (issue #59) sits before it: before
+	// any prompt, compaction or report/sidecar mutation — independent of
+	// prompt_check_seconds, --queue, --resend and --amend — a blocked (the
+	// verified workspace trust dialog) or unverified (blank, unreadable or
+	// launch-only screen) cursor start on Windows refuses the dispatch with
+	// the existing blocked result (exit 7, the cause naming the reason):
+	// nothing is typed and no task pointer, report or sidecar is touched.
+	// Every other kind or platform skips the check without an extra herdr
+	// read, and a safe screen proceeds to the duplicate handling and the
+	// send below, unchanged.
+	if startup.Enabled(kind) {
+		st, screen, screenOK := cursorStartupScreen(agent, env)
+		ev := startup.Evaluate(kind, startup.CurrentPlatform(), st.State, screen, screenOK)
+		if ev.Refuses() {
+			return dispatchCursorStartupRefusal(agent, role, kind, "", "", "", st.State, ev, sd)
+		}
+	}
 	core.CompactPhaseCheck(sd, agent, at(1), env)
 	forAuthors, forUnknown := []string{}, []string{}
 	var forEntries []any
@@ -337,7 +377,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	}
 	prompt := dispatch.ComposePrompt(roleFile, role, agent, briefRaw, report, ctx, env, kind, args, shared)
 	if amend {
-		prompt = dispatch.ComposeAmendment(briefRaw, report, ctx, env, kind, args, shared)
+		prompt = dispatch.ComposeAmendment(briefRaw, report, ctx, env, kind, args, shared, agent)
 	}
 	if err := os.WriteFile(composed, []byte(prompt), 0o666); err != nil {
 		panic(err)
@@ -461,6 +501,16 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		count, ok := transcriptCount(transcriptPath, transcriptPathMarker(composed))
 		return ok && count > transcriptPre
 	}
+	// The dialog can land after the preflight (for example during the
+	// settle): a recheck right before the actual input — no AgentPrompt and
+	// no arrival/retry Enter go to the cursor workspace trust dialog. The
+	// send was already claimed (pointer, last-report, the attempted
+	// sidecar): restore the task state, like the failed-send path, and end
+	// with the blocked result.
+	if blocked, ev, st := cursorStartupRefusal(kind, agent, env); blocked {
+		_ = restoreTaskDispatch(sd, agent, lastPath, lastData, priorPointer)
+		return dispatchCursorStartupRefusal(agent, role, kind, composed, report, taskReport, st.State, ev, sd)
+	}
 	p := herdr.AgentPrompt(agent, text, env)
 	if !p.Ok {
 		_ = restoreTaskDispatch(sd, agent, lastPath, lastData, priorPointer)
@@ -500,33 +550,108 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		}
 		if !wasWorking && !waitDispatchArrivalExtra(window, env, arrived, transcriptArrival) {
 			screen := herdr.AgentRead(env, agent, "visible", nil)
-			screenMoved := strconv.FormatUint(uint64(waitpkg.CksumField(screen)), 10) != H0
-			if screenMoved && composedPathSeenOutsideInput(agent, composed, env) {
-				// The path is visible in the scrollback, outside the input box.
-			} else if waitpkg.PromptSitsInInput(screen) {
-				_ = herdr.AgentSendKeys(agent, "enter", env)
-				enterSent = true
-				core.Warn(fmt.Sprintf("prompt to '%s' sat in the input box; sent Enter", agent), frictionLogPath, "dispatch")
-				if !waitDispatchArrival(window, env, arrived) {
-					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "an Enter on the text left in its input box")
+			if firstEnterReady(kind, screen, composed) {
+				// A recognized composer still holds this exact composed prompt
+				// path: the prompt is typed and not sent. A report, a read, the
+				// history or a dialog never authorizes the Enter on an empty or
+				// unrelated draft; an unrecognized region is not positive proof.
+				if blocked, ev, st := cursorStartupRefusal(kind, agent, env); blocked {
+					// The dialog appeared after the send: the Enter would be
+					// its input — refuse with the blocked result, no key sent.
+					return dispatchCursorStartupRefusal(agent, role, kind, composed, report, taskReport, st.State, ev, sd)
+				}
+				if ui := provider.DialogUI(kind, screen); ui != "" {
+					// A known trust/approval/question UI is up: the Enter would
+					// be its input — no key, delivery not-received.
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "its "+ui+" dialog")
+				}
+				if herdr.AgentSendKeys(agent, "enter", env) {
+					enterSent = true
+					core.Warn(fmt.Sprintf("prompt to '%s' sat in the input box; sent Enter", agent), frictionLogPath, "dispatch")
+					if !waitDispatchArrival(window, env, arrived) {
+						return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "an Enter on the text left in its input box")
+					}
+				} else {
+					// The send-key call failed: the input is failed and
+					// unverified — do not claim the Enter sent.
+					core.Warn(fmt.Sprintf("prompt to '%s' sat in the input box; its Enter failed", agent), frictionLogPath, "dispatch")
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "a failed Enter on the text left in its input box")
 				}
 			} else if staleAuthBlock(agent, env, H0, preSeq, enterSent, resent) {
 				return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "its block on a provider auth error")
 			} else {
-				core.Warn(fmt.Sprintf("prompt to '%s' did not arrive; sending it once more", agent), frictionLogPath, "dispatch")
-				H0 = strconv.FormatUint(uint64(waitpkg.CksumField(herdr.AgentRead(env, agent, "visible", nil))), 10)
-				preSeq = seqString(herdr.AgentState(agent, env, herdr.Timeout, nil).Seq)
-				if herdr.AgentPrompt(agent, text, env).Ok {
-					resent = true
-					proof := func() bool {
-						cur := herdr.AgentRead(env, agent, "visible", nil)
-						return (strconv.FormatUint(uint64(waitpkg.CksumField(cur)), 10) != H0 && composedPathSeenOutsideInput(agent, composed, env)) || arrived()
+				// The text can land in the composer between the first arrival
+				// check and this retry: re-read the actual input region right
+				// before the retry and act only on a recognized composer.
+				resendScreen, resendScreenOK := herdr.AgentReadOK(env, agent, "visible", nil)
+				H0 = strconv.FormatUint(uint64(waitpkg.CksumField(resendScreen)), 10)
+				resendState := herdr.AgentState(agent, env, herdr.Timeout, nil)
+				if blocked, ev, st := cursorStartupRefusal(kind, agent, env); blocked {
+					// The dialog appeared before the resend: the resend would
+					// type into it — refuse with the blocked result.
+					return dispatchCursorStartupRefusal(agent, role, kind, composed, report, taskReport, st.State, ev, sd)
+				}
+				if ui := provider.DialogUI(kind, resendScreen); ui != "" {
+					// A known trust/approval/question UI on the screen: it
+					// takes no Enter from here (the Enter would answer it)
+					// and no repeated prompt — keep the delivery uncertain and
+					// leave the pane to be read; the wait phase owns the dialog
+					// (question result or the opt-in auto-approve).
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "its "+ui+" dialog")
+				}
+				if resendState.State == "blocked" && !(preSeq != "" && seqString(resendState.Seq) != "" && preSeq != seqString(resendState.Seq)) {
+					// A blocked target is on a dialog the screen rules could
+					// not name: it takes no Enter from here and no repeated
+					// prompt — end not-received and leave the pane to be read.
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "its block on a dialog")
+				}
+				region, recognized := provider.ComposerRegion(kind, resendScreen)
+				if !resendScreenOK {
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "an unreadable input region")
+				}
+				if nonEmpty(report) || transcriptArrival() || ((resendState.State == "working" || resendState.State == "blocked") && preSeq != "" && seqString(resendState.Seq) != "" && preSeq != seqString(resendState.Seq)) {
+					// Receipt can arrive between the deadline and this final read.
+					// Preserve the original sequence baseline; never resend it.
+				} else if recognized && provider.ComposerHoldsPath(region, composed) {
+					// This exact composed prompt path is in the recognized
+					// composer: the text landed after the arrival check. Send
+					// only the bounded Enter and never duplicate the text.
+					if herdr.AgentSendKeys(agent, "enter", env) {
+						enterSent = true
+						core.Warn(fmt.Sprintf("prompt to '%s' reached its input after the arrival check; sent Enter without resending", agent), frictionLogPath, "dispatch")
+						if !waitDispatchArrival(window, env, arrived) {
+							return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "an Enter on the text left in its input box")
+						}
+					} else {
+						// The send-key call failed: the input is failed and
+						// unverified — do not claim the Enter sent.
+						core.Warn(fmt.Sprintf("prompt to '%s' reached its input after the arrival check; its Enter failed", agent), frictionLogPath, "dispatch")
+						return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "a failed Enter on the text left in its input box")
 					}
-					if !waitDispatchArrival(window, env, proof) {
+				} else if provider.ScreenShowsPath(resendScreen, composed) || !recognized || !dispatchComposerEmpty(kind, region) || (resendState.State != "idle" && resendState.State != "done") {
+					// This path is visible on the screen but outside the
+					// recognized composer — in the history above an empty or
+					// unrelated composer, or on a screen whose input region is
+					// not recognized: the delivery is uncertain. No Enter and
+					// no repeated text; read the pane instead.
+					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "an unconfirmed input region")
+				} else {
+					// Repeating text requires a readable, recognized empty
+					// composer and no trace in the readable recent screen.
+					// Failed or clipped reads never prove nondelivery.
+					recent, recentOK := herdr.AgentReadOK(env, agent, "recent-unwrapped", intPtr(40))
+					if !recentOK || provider.ScreenShowsPath(recent, composed) {
+						return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "an unconfirmed recent screen")
+					}
+					core.Warn(fmt.Sprintf("prompt to '%s' did not arrive; sending it once more", agent), frictionLogPath, "dispatch")
+					if herdr.AgentPrompt(agent, text, env).Ok {
+						resent = true
+						if !waitDispatchArrivalExtra(window, env, arrived, transcriptArrival) {
+							return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "one resend")
+						}
+					} else {
 						return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "one resend")
 					}
-				} else {
-					return dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA, forEntries, env, wasWorking, "one resend")
 				}
 			}
 		}
@@ -872,41 +997,6 @@ func waitWorkingTurnEnd(agent, preSeq string, window time.Duration, env platform
 	}
 }
 func intPtr(v int) *int { return &v }
-func composedPathSeenOutsideInput(agent, composed string, env platform.Env) bool {
-	screen := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
-	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
-	boxStart, boxEnd, inBox := 0, 0, false
-	if s, e, ok := provider.PiInputRegion(screen); ok {
-		boxStart, boxEnd, inBox = s, e, true
-	}
-	if inBox {
-		// With pi's two input-box borders, "outside the input box" is the lines
-		// outside the region between them: the footer below the box counts as
-		// outside, and a line between the borders holds the prompt typed and
-		// not sent yet.
-		for i, line := range lines {
-			if (i < boxStart || i >= boxEnd) && strings.Contains(line, composed) {
-				return true
-			}
-		}
-		return false
-	}
-	kept := []string{}
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
-			kept = append(kept, line)
-		}
-	}
-	if len(kept) <= 3 {
-		return false
-	}
-	for _, line := range kept[:len(kept)-3] {
-		if strings.Contains(line, composed) {
-			return true
-		}
-	}
-	return false
-}
 
 // transcriptPathMarker returns a path the way a session transcript (a
 // Claude Code session transcript, a pi session file) writes it inside a JSON
@@ -954,6 +1044,95 @@ func writeDispatchError(agent, role, kind, composed, report, taskReport, raw str
 	fmt.Fprintln(platform.Stdout, jsonjs.Stringify(obj))
 	core.Warn(warning, frictionLogPath, "dispatch")
 	return code
+}
+
+// cursorStartupScreen reads the agent's state and the visible screen once
+// for the cursor/Windows startup checks (issue #59): the shared runner's
+// calls, the same reads the consumers already spend on safe screens.
+func cursorStartupScreen(agent string, env platform.Env) (herdr.AgentStateResult, string, bool) {
+	st := herdr.AgentState(agent, env, herdr.Timeout, nil)
+	screen, screenOK := herdr.AgentReadOK(env, agent, "visible", nil)
+	return st, screen, screenOK
+}
+
+// firstEnterReady reports whether the screen authorizes the first Enter: a
+// recognized composer (the roster kind) holding the exact composed prompt
+// path. A report, a read, the history or a dialog never authorizes the
+// Enter on an empty or unrelated draft, and an unrecognized region is not
+// positive composer proof.
+func firstEnterReady(kind, screen, composed string) bool {
+	region, recognized := provider.ComposerRegion(kind, screen)
+	return recognized && provider.ComposerHoldsPath(region, composed)
+}
+
+// dispatchComposerEmpty accepts only whitespace after the provider's input
+// prompt, never another draft. It is a retry-text prerequisite, not receipt.
+func dispatchComposerEmpty(kind string, region []string) bool {
+	for i, line := range region {
+		line = strings.TrimSpace(line)
+		if i == 0 {
+			switch kind {
+			case "codex":
+				line = strings.TrimSpace(strings.TrimPrefix(line, "›"))
+			case "claude":
+				line = strings.TrimSpace(strings.TrimPrefix(line, "❯"))
+			}
+		}
+		if line != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// cursorStartupRefusal reports whether the current visible screen is the
+// cursor workspace trust dialog or unverified startup, under the shared gate (kind and platform
+// checked inside): the recheck right before an actual input (the
+// AgentPrompt or an arrival/retry Enter). A dialog that appears during the
+// settle must receive no input. Non-target kinds or platforms return
+// false without any herdr read.
+func cursorStartupRefusal(kind, agent string, env platform.Env) (bool, startup.Evaluation, herdr.AgentStateResult) {
+	if !startup.Enabled(kind) {
+		return false, startup.Evaluation{}, herdr.AgentStateResult{}
+	}
+	st, screen, screenOK := cursorStartupScreen(agent, env)
+	ev := startup.Evaluate(kind, startup.CurrentPlatform(), st.State, screen, screenOK)
+	return ev.Refuses(), ev, st
+}
+
+// warnCursorStartupRefusal prints the precise refusal warning: the reason
+// the dispatch was refused before any input (the verified workspace trust
+// dialog, or the unverified screen the assessment ended on) and that
+// nothing was typed or sent — the pane stays open for the user to read
+// and answer.
+func warnCursorStartupRefusal(agent, kind, state string, ev startup.Evaluation) {
+	what := "the startup is unverified"
+	switch {
+	case ev.Verdict == startup.VerdictBlocked:
+		what = "it is on the cursor workspace trust dialog"
+	case ev.Reason == startup.ReasonEmptyScreen:
+		what = "the visible screen is empty (the TUI did not draw)"
+	case ev.Reason == startup.ReasonLaunchOnly:
+		what = "the visible screen shows only the shell prompt/launch line"
+	case ev.Reason == startup.ReasonScreenUnavailable:
+		what = "the visible screen could not be read"
+	case ev.Reason == startup.ReasonStateUnavailable:
+		what = "the agent state could not be read"
+	}
+	core.Warn(fmt.Sprintf("dispatch: '%s' (%s) startup is not ready: %s (state %s); nothing was typed or sent — read the pane (herdr agent read %s --source visible) and answer it yourself, then dispatch again", agent, kind, what, state, agent), frictionLogPath, "dispatch")
+}
+
+// dispatchCursorStartupRefusal ends the dispatch without typing anything:
+// the existing blocked result (wait_status "blocked", exit 7) with the
+// cause naming the startup reason and the startup_evidence carrying the
+// state, the reason and the visible source. On the initial preflight
+// refusal the composed prompt, report and task report do not exist yet
+// (empty); the task pointer and last-report are restored by the caller
+// when the send was already claimed.
+func dispatchCursorStartupRefusal(agent, role, kind, composed, report, taskReport, state string, ev startup.Evaluation, sd string) int {
+	warnCursorStartupRefusal(agent, kind, state, ev)
+	last := jsonjs.O("cause", startup.EvidencePrefix+ev.Reason, "startup_evidence", jsonjs.O(startup.FieldState, state, startup.FieldReason, ev.Reason, startup.FieldSource, ev.Source))
+	return emitDispatchResult(agent, role, kind, composed, report, taskReport, "blocked", false, last, 0, sd, false, false)
 }
 func dispatchNotReceived(agent, role, kind, composed, report, taskReport, sd, sidecar, lane, model, effort, session, briefSHA string, forEntries []any, env platform.Env, wasWorking bool, why string) int {
 	_ = lane
@@ -1024,7 +1203,7 @@ func emitDispatchResult(agent, role, kind, composed, report, taskReport, status 
 	}
 	out.Set("auto_approved", approved)
 	if last != nil {
-		for _, key := range []string{"question", "lane", "model", "match", "renewal", "cause", "retries"} {
+		for _, key := range []string{"question", "lane", "model", "match", "renewal", "cause", "retries", "startup_evidence"} {
 			if v, ok := last.Get(key); ok {
 				out.Set(key, v)
 			}
@@ -1179,17 +1358,8 @@ func ownedPaths(body string, aliases map[string][]string) []string {
 			continue
 		}
 		title := m[2]
-		if strings.HasPrefix(strings.ToLower(title), "owned files") || strings.HasPrefix(strings.ToLower(title), "owned") || strings.HasPrefix(strings.ToLower(title), "scope") || strings.HasPrefix(strings.ToLower(title), "arquivos") || strings.HasPrefix(strings.ToLower(title), "escopo") {
+		if dispatch.BriefSectionTitleMatches(title, "Owned files", aliases) {
 			start, level = i, len(m[1])
-			break
-		}
-		for _, alias := range aliases["Owned files"] {
-			if strings.HasPrefix(strings.ToLower(title), strings.ToLower(alias)) {
-				start, level = i, len(m[1])
-				break
-			}
-		}
-		if start >= 0 {
 			break
 		}
 	}
@@ -1769,14 +1939,15 @@ func noWaitObservation(agent, role, kind, lane, model, report string, env platfo
 
 func cmdRun(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	if len(argv) < 1 || argv[0] == "" {
-		fmt.Fprintln(platform.Stderr, "herdr-soho.mjs: 1: role")
+		fmt.Fprintln(platform.Stderr, "herdr-soho: 1: role")
 		return 1
 	}
 	if len(argv) < 2 || argv[1] == "" {
-		fmt.Fprintln(platform.Stderr, "herdr-soho.mjs: 2: brief.md")
+		fmt.Fprintln(platform.Stderr, "herdr-soho: 2: brief.md")
 		return 1
 	}
 	role, brief := argv[0], argv[1]
+	platform.LauncherPath(env)
 	spawnArgs, dispatchArgs, noWait := splitRunArgs(argv[2:])
 	oldOut := platform.Stdout
 	var spawnOut strings.Builder

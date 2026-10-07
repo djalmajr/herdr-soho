@@ -29,6 +29,34 @@ func rosterSender(t *testing.T, f *fixture, name, role string) {
 	}
 }
 
+func TestSendWorkerLookupFailureOrIncompleteRegistrationNeverBypassesGuard(t *testing.T) {
+	for _, incomplete := range []bool{false, true} {
+		t.Run(fmt.Sprint(incomplete), func(t *testing.T) {
+			f := newFixture(t, []fakecli.Rule{{Argv: []string{"agent", "get", "w0test:p0a"}, Code: 1, Stderr: "unavailable"}})
+			f.env["HERDR_PANE_ID"] = "w0test:p0a"
+			rosterSender(t, f, "worker", "implementer")
+			if incomplete {
+				if err := os.WriteFile(filepath.Join(f.env["HERDR_SOHO_DIR"], "ws-test", "agents.tsv"), []byte("worker\tw0test:p0a\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			code, _, _ := f.run([]string{"send", "target", "hello"})
+			if code != 2 {
+				t.Fatalf("unverified worker was allowed: %d", code)
+			}
+			calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, call := range calls {
+				if len(call.Argv) > 1 && (call.Argv[1] == "prompt" || (call.Argv[1] == "get" && call.Argv[2] == "target")) {
+					t.Fatalf("target was reached: %v", call.Argv)
+				}
+			}
+		})
+	}
+}
+
 // paneSenderRules is the rule set of a successful local send whose sender
 // pane is w0test:p0a: get Call 1 is the guard's sender identity lookup, and
 // Calls 2–5 follow the working-target flow (resolveTarget, screenGet,

@@ -108,20 +108,62 @@ func newSetupTM7Fixture(t *testing.T) setupTM7Fixture {
 
 func setupTM7GoldenPath(t *testing.T, name string) string {
 	t.Helper()
-	return filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", name)
+	return filepath.Join("..", "testdata", "legacy", name)
 }
 
+// readSetupTM7Golden loads a frozen oracle golden and applies the testutil
+// hook oracle adapter: the frozen expected hook outputs embed the exact
+// pre-native herdr-soho shell commands (raw and JSON-quoted, in the
+// expected Files/Out values), and the adapter rewrites only those exact
+// strings to the approved native literals. Seeds and every other frozen
+// expectation pass through untouched.
 func readSetupTM7Golden[T any](t *testing.T, name string) T {
 	t.Helper()
 	data, err := os.ReadFile(setupTM7GoldenPath(t, name))
 	if err != nil {
 		t.Fatal(err)
 	}
+	var tree any
+	if err := json.Unmarshal(data, &tree); err != nil {
+		t.Fatal(err)
+	}
+	adapted, err := json.Marshal(testutil.ApplyHookOracle(tree))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var goldens T
-	if err := json.Unmarshal(data, &goldens); err != nil {
+	if err := json.Unmarshal(adapted, &goldens); err != nil {
 		t.Fatal(err)
 	}
 	return goldens
+}
+
+// The H2 PATH advisory replaced the obsolete skill-script install warning.
+// The frozen oracles keep the old line in the expected stderr; this
+// exact-line rewrite (and nothing else) adapts the expected hook output to
+// the native advisory. The PROG: prefix is the test's stderr normalization
+// of the "herdr-soho: " prefix.
+const (
+	legacyHookAdviceLine = "PROG: warning: SessionStart hook cannot resolve herdr-soho; install the skill under the project's or user's .agents/skills or .claude/skills directory"
+	nativeHookAdviceLine = "PROG: warning: SessionStart hook cannot resolve herdr-soho in PATH; add the native herdr-soho binary to PATH so the generated hooks ('herdr-soho hook reminder', 'herdr-soho hook doctor') can run"
+)
+
+// adaptSetupTM7HookAdvice rewrites the obsolete advisory line to the native
+// PATH advisory in the expected step output. The setup-no-abs-path case
+// needs the line inserted instead: it symlinks the skill into the repo,
+// which the old script-path check found (no warning), while the PATH-based
+// check warns deterministically because the fixture PATH holds no
+// herdr-soho binary. The warning is emitted before every other stderr
+// line.
+func adaptSetupTM7HookAdvice(name string, steps []setupTM7Step) []setupTM7Step {
+	for i := range steps {
+		steps[i].Out = strings.ReplaceAll(steps[i].Out, legacyHookAdviceLine, nativeHookAdviceLine)
+		steps[i].Err = strings.ReplaceAll(steps[i].Err, legacyHookAdviceLine, nativeHookAdviceLine)
+		if name == "setup-no-abs-path" && !strings.Contains(steps[i].Err, nativeHookAdviceLine) {
+			steps[i].Err = nativeHookAdviceLine + "\n" + steps[i].Err
+		}
+	}
+	return steps
 }
 
 func writeSetupTM7Seed(t *testing.T, root, rel, content string) {
@@ -195,6 +237,7 @@ func runSetupTM7Golden(t *testing.T, name string, seed func(t *testing.T, fix se
 	if !ok {
 		t.Fatalf("setup golden %q missing", name)
 	}
+	want.Steps = adaptSetupTM7HookAdvice(name, want.Steps)
 	fix := newSetupTM7Fixture(t)
 	if seed != nil {
 		seed(t, fix)

@@ -22,7 +22,7 @@ type laneGolden struct {
 
 func TestParityLanesGolden(t *testing.T) {
 	// JS: "parity: lane_names / lane_of_role / max_workers matrix"
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-lanes.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-lanes.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestParityLanesGolden(t *testing.T) {
 
 func TestSetupLaneSpecGolden(t *testing.T) {
 	// JS: "parity: setup_lane_spec over valid and rejected specs"
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-lanes.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-lanes.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestSetupLaneSpecGolden(t *testing.T) {
 
 func TestApplyLaneFileGolden(t *testing.T) {
 	// JS: "parity: apply_lane_file (nine seeds: bytes, modes, printed lines, warnings, no temps)"
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-lanes.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-lanes.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

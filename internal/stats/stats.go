@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/djalmajr/herdr-soho/internal/collaboration"
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
@@ -22,6 +23,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/reportscan"
 	"github.com/djalmajr/herdr-soho/internal/taskreport"
 	textutil "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/herdr-soho/internal/wait"
 )
 
 var pairRE = regexp.MustCompile(`^(.+)-(\d{8}T\d{6})(-\d+)?$`)
@@ -816,6 +818,22 @@ func CmdCollect(args []string, command CommandContext) int {
 		}
 	}
 	sd := core.StateDir(ctx, env, cwd)
+	// An active collaboration outranks the report: while its assignment is
+	// active the participant is still working, so the initial or stale
+	// report is an artifact, never the completion. The cycle is shown
+	// instead, read-only: no SyncTaskReport, no terminal fallback, no
+	// retry. The inspection is the same one status/wait use (the active
+	// assignment, the verified participants and the single policy engine's
+	// mode), and the workspace is derived at most once, only when needed.
+	if line := core.RosterLine(sd, agent); line != "" {
+		pane := ""
+		if fields := strings.Split(line, "\t"); len(fields) > 1 {
+			pane = fields[1]
+		}
+		if view, ok := wait.CollaborationViewForPane(sd, pane, ctx, wait.DerivedWorkspaceEnv(ctx, env, cwd)); ok {
+			return collectCollaboration(agent, view, verify, env, cwd, logFile, sd)
+		}
+	}
 	pointer := taskreport.ReadTaskReportPointer(sd, agent)
 	taskPath := ""
 	if pointer != nil {
@@ -889,6 +907,79 @@ func CmdCollect(args []string, command CommandContext) int {
 func orNone(s string) string {
 	if s == "" {
 		return "<none dispatched>"
+	}
+	return s
+}
+
+// collectCollaboration is the collect output while the agent's roster pane
+// hosts an active collaboration: the cycle's state — the assignment, its
+// participants, the phase, round, revision and last delivery — and the
+// last evidence (the last event's report, or the initial/stale report
+// before any event). The report is an artifact, never the completion: it
+// is named but never printed, and nothing is finalized or approved here —
+// only the orchestrator may finalize it. Without evidence the state is
+// shown with an explicit absence and exit 0; the two failures (an
+// unreadable or unverifiable state, or an off or unreadable policy) show
+// the cause and exit 4, keeping the assignment's metadata when it was
+// read. --verify checks the evidence's hashes when it exists; it never
+// finalizes the cycle.
+func collectCollaboration(agent string, view wait.CollaborationView, verify bool, env platform.Env, cwd, logFile, sd string) int {
+	stale := ""
+	if p := core.LastReport(sd, agent); p != "" {
+		if _, e := os.Stat(p); e == nil {
+			if _, ce := os.Stat(filepath.Join(sd, "reports", filepath.Base(p))); ce == nil {
+				p = filepath.Join(sd, "reports", filepath.Base(p))
+			}
+			stale = p
+		}
+	}
+	evidence := ""
+	if view.Assignment != nil {
+		if events := view.Assignment.Events; len(events) > 0 {
+			evidence = events[len(events)-1].Report
+		}
+	}
+	if evidence == "" {
+		evidence = stale
+	}
+	fields := []any{"agent", agent, "status", view.State, "report", absent(stale)}
+	if view.Assignment != nil {
+		fields = append(fields,
+			"assignment", view.Assignment.ID,
+			"participants", []any{view.Assignment.Author.Name, view.Assignment.Reviewer.Name},
+			"phase", view.Assignment.Phase, "round", view.Assignment.Round,
+			"max_rounds", view.Assignment.MaxRounds, "revision", view.Assignment.Revision,
+			"delivery", view.Delivery)
+	} else {
+		fields = append(fields, "assignment", "none")
+	}
+	fields = append(fields, "evidence", absent(evidence))
+	if view.State != "collaborating" {
+		fields = append(fields, "cause", view.Cause)
+	}
+	line := jsonjs.Stringify(jsObject(fields...)) + "\n"
+	if verify && view.State == "collaborating" && evidence != "" {
+		output(line)
+		hash, err := collaboration.ValidReport(evidence)
+		if err != nil {
+			core.DieFriction("collect --verify: cannot read evidence: "+err.Error(), 4, logFile, "collect")
+		}
+		if view.Assignment != nil && len(view.Assignment.Events) > 0 {
+			events := view.Assignment.Events
+			if hash != events[len(events)-1].ReportHash {
+				core.DieFriction("collect --verify: round evidence changed after publication", 16, logFile, "collect")
+			}
+		}
+		return verifyFiles(sd, agent, evidence, env, cwd, logFile)
+	}
+	output(line)
+	return view.Code
+}
+
+// absent renders an empty path as the explicit absence.
+func absent(s string) string {
+	if s == "" {
+		return "none"
 	}
 	return s
 }

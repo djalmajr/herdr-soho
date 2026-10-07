@@ -23,7 +23,9 @@ func setPickerRaw(file *os.File) (func() error, error) {
 	const enableProcessedInput = 0x0001
 	const enableLineInput = 0x0002
 	const enableEchoInput = 0x0004
-	raw := old &^ (enableProcessedInput | enableLineInput | enableEchoInput)
+	// Keep enhanced keyboard sequences intact when reading the ConPTY input.
+	const enableVirtualTerminalInput = 0x0200
+	raw := old&^(enableProcessedInput|enableLineInput|enableEchoInput) | enableVirtualTerminalInput
 	ok, _, err = setConsoleModePicker.Call(uintptr(handle), uintptr(raw))
 	if ok == 0 {
 		return nil, err
@@ -37,7 +39,10 @@ func setPickerRaw(file *os.File) (func() error, error) {
 	}, nil
 }
 
-func pickerTerminalWidth(handle uintptr) (int, error) {
+// pickerTerminalSize returns the actual terminal viewport size in cells
+// (columns, rows) for handle, measured on the screen buffer window (the
+// visible rectangle), not the full scrollback buffer size.
+func pickerTerminalSize(handle uintptr) (width, height int, err error) {
 	type coord struct{ X, Y int16 }
 	type rect struct{ Left, Top, Right, Bottom int16 }
 	type info struct {
@@ -50,7 +55,14 @@ func pickerTerminalWidth(handle uintptr) (int, error) {
 	var screen info
 	ok, _, err := getConsoleScreenBufferInfoPicker.Call(handle, uintptr(unsafe.Pointer(&screen)))
 	if ok == 0 {
-		return 0, err
+		return 0, 0, err
 	}
-	return int(screen.Window.Right - screen.Window.Left + 1), nil
+	return int(screen.Window.Right - screen.Window.Left + 1), int(screen.Window.Bottom - screen.Window.Top + 1), nil
+}
+
+// pickerTerminalWidth keeps the existing width-only contract for callers
+// that only need the columns.
+func pickerTerminalWidth(handle uintptr) (int, error) {
+	w, _, err := pickerTerminalSize(handle)
+	return w, err
 }

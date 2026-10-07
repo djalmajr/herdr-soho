@@ -156,6 +156,34 @@ func windowsBaseName(value string) string {
 	return value
 }
 
+// ReadProcFull reads one pid's creation time, image base name and the
+// three-way liveness in one snapshot (the single OpenProcess read, the
+// windows counterpart of the unix single ps read): the creation time is
+// the raw FILETIME as decimal ticks of 100 ns and the name the base
+// segment of the executable path, both empty unless the pid reads as
+// running. The three-way result tells a proven absence (the open fails
+// with ERROR_INVALID_PARAMETER, or the exit code is not STILL_ACTIVE) from
+// an unreadable read (any other open or query failure): the procs add
+// path refuses the first (exit 2) and reports the second (exit 4) instead
+// of collapsing both into the dead-process refusal, and the one snapshot
+// never races a second read to name the first read's failure.
+func ReadProcFull(pid int, env Env) (string, string, ProcLiveness) {
+	handle, live := windowsOpenProc(pid)
+	if live != ProcRunning {
+		return "", "", live
+	}
+	defer windowsProcCloseHandle.Call(handle)
+	ticks, err := windowsCreationTicks(handle)
+	if err != nil {
+		return "", "", ProcUnknown
+	}
+	name, err := windowsImageName(handle)
+	if err != nil {
+		return "", "", ProcUnknown
+	}
+	return strconv.FormatInt(ticks, 10), windowsBaseName(name), ProcRunning
+}
+
 // ProcInfo reads the creation time and the image base name of one pid
 // through kernel32 (OpenProcess with PROCESS_QUERY_LIMITED_INFORMATION,
 // GetProcessTimes, QueryFullProcessImageNameW). The creation time is the
@@ -163,22 +191,10 @@ func windowsBaseName(value string) string {
 // offers, so two reads of the same process compare equal and two distinct
 // creations within one second do not. ok is true only for a running pid:
 // a proven absence and an unreadable read both read as not running (the
-// three-way result is ReadProc).
+// three-way result is ReadProcFull).
 func ProcInfo(pid int, env Env) (string, string, bool) {
-	handle, live := windowsOpenProc(pid)
-	if live != ProcRunning {
-		return "", "", false
-	}
-	defer windowsProcCloseHandle.Call(handle)
-	ticks, err := windowsCreationTicks(handle)
-	if err != nil {
-		return "", "", false
-	}
-	name, err := windowsImageName(handle)
-	if err != nil {
-		return "", "", false
-	}
-	return strconv.FormatInt(ticks, 10), windowsBaseName(name), true
+	started, name, live := ReadProcFull(pid, env)
+	return started, name, live == ProcRunning
 }
 
 // windowsGoneOpen reports whether a failed OpenProcess proves the pid's

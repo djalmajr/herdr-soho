@@ -98,7 +98,9 @@ func TestQueuedRetryUsesOriginalEpochAndStartsRetryNow(t *testing.T) { // JS: "w
 	platform.Now = func() time.Time { return fixedNow }
 	t.Cleanup(func() { platform.Now = previousNow })
 	prompt := "/tmp/worker-brief.md"
-	f := newQueuedProbeFixture(t, "idle", "5", "Read the file "+prompt+" in full and execute it.\n", map[string]string{
+	// Adapted contract: the queued retry needs a recognized composer
+	// holding the stored path — the claude box, not a plain history line.
+	f := newQueuedProbeFixture(t, "idle", "5", claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{
 		"queued": "1 5 " + prompt + "\n",
 	})
 	if got := f.probe(""); got != "working" {
@@ -205,11 +207,11 @@ type queuedProbeFixture struct {
 	ctx *core.Config
 }
 
-func newQueuedProbeFixture(t *testing.T, state, seq, screen string, markers map[string]string) *queuedProbeFixture {
-	return newQueuedProbeFixtureWithSequences(t, state, []string{seq}, screen, markers)
+func newQueuedProbeFixture(t *testing.T, state, seq, screen string, markers map[string]string, extra ...fakecli.Rule) *queuedProbeFixture {
+	return newQueuedProbeFixtureWithSequences(t, state, []string{seq}, screen, markers, extra...)
 }
 
-func newQueuedProbeFixtureWithSequences(t *testing.T, state string, sequences []string, screen string, markers map[string]string) *queuedProbeFixture {
+func newQueuedProbeFixtureWithSequences(t *testing.T, state string, sequences []string, screen string, markers map[string]string, extra ...fakecli.Rule) *queuedProbeFixture {
 	t.Helper()
 	base := t.TempDir()
 	f := &queuedProbeFixture{sd: filepath.Join(base, "state", "ws"), bin: filepath.Join(base, "bin"), ctx: &core.Config{Entries: map[string]core.ConfigEntry{}}}
@@ -256,11 +258,16 @@ func newQueuedProbeFixtureWithSequences(t *testing.T, state string, sequences []
 		}
 		rules = append(rules, fakecli.Rule{Argv: read, Stdout: value})
 	}
+	// Extra rules (for instance a failing send-keys) install before the
+	// catch-all success rule: the first matching rule wins.
+	rules = append(rules, extra...)
 	rules = append(rules, fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}})
 	if _, err := fakecli.Install(t, f.bin, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	f.env = platform.Env{"PATH": f.bin, "HERDR_SOHO_FAKECLI_CONFIG": f.bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock"), "HERDR_SOHO_WAIT_POLL_MS": "1"}
+	// Re-executed race test binaries retain detection without the detector's
+	// one-second exit sleep, which would consume the real wait deadline.
+	f.env = platform.Env{"PATH": f.bin, "GORACE": "atexit_sleep_ms=0", "HERDR_SOHO_FAKECLI_CONFIG": f.bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock"), "HERDR_SOHO_WAIT_POLL_MS": "1"}
 	return f
 }
 

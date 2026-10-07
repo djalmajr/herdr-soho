@@ -1,26 +1,28 @@
 package plugin
 
 import (
-	"bufio"
 	contextpkg "context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/djalmajr/herdr-soho/internal/peer"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
-const PickerFindTimeoutMs = 60_000
-
 var pickerProcessStarted func(int)
+
+// pickerDiscoveryTimeoutMS is the picker/board's global discovery deadline:
+// the local snapshot, the machine list and every remote query together. The
+// tests shorten it; the engine defaults to it when it is not positive.
+var pickerDiscoveryTimeoutMS = 30_000
 
 var pickerFilterFields = []string{"ref", "name", "kind", "status", "workspace_label", "tab_label", "cwd", "machine"}
 
@@ -32,6 +34,7 @@ type PickerFailure struct {
 }
 
 type PickerState struct {
+	ViewState    SessionViewState
 	Entries      []PickerEntry
 	Query        string
 	Selected     int
@@ -41,12 +44,16 @@ type PickerState struct {
 	LastEntry    PickerEntry
 	Copied       *string
 	Exit         string
-	EscPending   bool
-	CSIPending   bool
+	TerminalKeys // shared raw-input decoder (EscPending/CSIPending)
+	// NavPending is true while a navigation is in flight: Enter and
+	// Ctrl+Enter are rejected and the frozen target stays in NavTarget.
+	NavPending bool
+	NavTarget  PickerEntry
+	NavFailure *PickerFailure // action feedback survives discovery publications
 }
 
 func NewPickerState() *PickerState {
-	return &PickerState{Entries: []PickerEntry{}, Failures: []PickerFailure{}}
+	return &PickerState{Entries: []PickerEntry{}, Failures: []PickerFailure{}, ViewState: SessionViewState{View: sessionViewTable, Sort: sessionSortPane}}
 }
 
 func pickerString(value any) string {
@@ -84,7 +91,15 @@ func FilterPickerEntries(entries []PickerEntry, query string) []PickerEntry {
 	return filterPickerEntries(entries, query, pickerFilterFields)
 }
 
-func (s *PickerState) visible() []PickerEntry { return FilterPickerEntries(s.Entries, s.Query) }
+// visible is the filtered list in the state's order: the legacy order when
+// the enhanced view is off, the grouped order otherwise.
+func (s *PickerState) visible() []PickerEntry {
+	list := FilterPickerEntries(s.Entries, s.Query)
+	if s.ViewState.Enabled {
+		return sessionVisibleEntries(list, s.ViewState)
+	}
+	return list
+}
 
 func (s *PickerState) clamp() {
 	n := len(s.visible())
@@ -149,15 +164,10 @@ func StripPickerControls(text string) string {
 	return out.String()
 }
 
+// PickerCopyPayload returns only the sanitized machine/pane reference.
+// An absent reference cannot be copied as a routable identity.
 func PickerCopyPayload(entry PickerEntry) string {
-	display := func(v any) string {
-		value := StripPickerControls(pickerString(v))
-		if value == "" {
-			return "-"
-		}
-		return value
-	}
-	return fmt.Sprintf("%s (%s, %s, %s) %s", display(entry["ref"]), display(entry["name"]), display(entry["kind"]), display(entry["status"]), display(entry["cwd"]))
+	return StripPickerControls(pickerString(entry["ref"]))
 }
 
 func jsLength(text string) int { return len(utf16.Encode([]rune(text))) }
@@ -244,26 +254,58 @@ func RenderPicker(state *PickerState, width int) string {
 
 func (s *PickerState) ApplyKey(key string) string {
 	switch key {
-	case "enter":
-		if s.Exit != "" {
-			return s.Exit
+	case "enter", "ctrl-enter":
+		// Enter navigates and focuses the selected pane (Ctrl+Enter stays
+		// the undocumented compatibility alias); neither copies. The loop
+		// runs the existing NavigateSelection safety checks and closes
+		// only on a verified successful navigation.
+		return s.startNavigation()
+	case "c":
+		// c copies the selected pane's full reference in the list focus
+		// and keeps the modal open (the loop confirms it in the status
+		// area); in the enhanced search focus the same key - bare or the
+		// kitty encoded printable c - is ordinary search text. The copy is
+		// gated while a navigation is pending and on an empty visible
+		// list; an entry without a reference fabricates nothing.
+		if s.NavPending || s.Exit != "" {
+			return ""
+		}
+		if s.ViewState.Enabled && s.ViewState.SearchFocused {
+			s.applyPickerChar("c")
+			return ""
 		}
 		list := s.visible()
 		if len(list) == 0 {
 			return ""
 		}
 		entry := list[min(s.Selected, len(list)-1)]
+		payload := PickerCopyPayload(entry)
+		if payload == "" {
+			return ""
+		}
 		s.LastEntry = entry
-		copied := PickerCopyPayload(entry)
-		s.Copied = &copied
-		s.Exit = "copy"
+		s.Copied = &payload
 		return "copy"
+	case "update":
+		// The board understands the legacy Ctrl+R; the picker ignores it.
+		return ""
 	case "esc", "ctrl-c":
 		if s.Exit == "" {
 			s.Exit = "esc"
 		}
 		return s.Exit
+	case "tab":
+		// The enhanced popup toggles the search/list focus; the legacy input
+		// ignores the key, as before.
+		if s.ViewState.Enabled {
+			s.ViewState.SearchFocused = !s.ViewState.SearchFocused
+		}
+		return ""
 	case "backspace":
+		if s.ViewState.Enabled {
+			// Backspace edits in search focus; Tab returns to the list.
+			s.ViewState.SearchFocused = true
+		}
 		s.Query = jsSlice(s.Query, jsLength(s.Query)-1)
 		s.clamp()
 		return ""
@@ -281,128 +323,100 @@ func (s *PickerState) ApplyKey(key string) string {
 		if jsLength(key) == 1 {
 			r, _ := utf8.DecodeRuneInString(key)
 			if r >= 0x20 && r != 0x7f {
-				s.Query += key
-				s.clamp()
+				s.applyPickerChar(key)
 			}
 		}
 		return ""
 	}
 }
 
+// startNavigation begins the focus navigation of the selected row: it
+// freezes the target (NavPending, NavTarget) so Enter and Ctrl+Enter are
+// rejected while the navigation is in flight and a second trigger is a
+// no-op; the loop runs the existing NavigateSelection safety checks and
+// closes only on a verified successful navigation.
+func (s *PickerState) startNavigation() string {
+	if s.NavPending || s.Exit != "" {
+		return ""
+	}
+	list := s.visible()
+	if len(list) == 0 {
+		return ""
+	}
+	entry := list[min(s.Selected, len(list)-1)]
+	s.LastEntry = entry
+	s.NavPending = true
+	s.NavTarget = entry
+	return "navigate"
+}
+
+// applySortOrViewKey interprets one enhanced list-focus p/w/s/v key: it
+// changes the sort or the presentation and keeps the selection on the full
+// ref of the row selected before the change. It reports false when the key
+// is not a sort/view key.
+func (s *PickerState) applySortOrViewKey(key string) bool {
+	list := s.visible()
+	ref := ""
+	if len(list) > 0 {
+		ref = pickerString(list[min(s.Selected, len(list)-1)]["ref"])
+	}
+	switch key {
+	case "p":
+		sessionApplySort(&s.ViewState, sessionSortPane)
+	case "w":
+		sessionApplySort(&s.ViewState, sessionSortWorkspace)
+	case "s":
+		sessionApplySort(&s.ViewState, sessionSortStatus)
+	case "v":
+		sessionToggleView(&s.ViewState)
+	default:
+		return false
+	}
+	s.Selected = sessionKeepSelection(s.visible(), s.Selected, ref)
+	return true
+}
+
+// applyPickerChar applies one printable character. The legacy input and the
+// enhanced search focus append it to the query; the enhanced list focus
+// first interprets the p/w/s/v sort/view keys and then enters the search
+// with any other character.
+func (s *PickerState) applyPickerChar(key string) {
+	if s.ViewState.Enabled {
+		if !s.ViewState.SearchFocused && s.applySortOrViewKey(key) {
+			return
+		}
+		s.ViewState.SearchFocused = true
+	}
+	s.Query += key
+	s.clamp()
+}
+
+// FeedChunk parses raw input with the shared decoder and applies keys in
+// order; it stops at the first action, like the terminal loop. Both the
+// legacy encodings (CR, 0x03, 0x08/0x7f, bare ESC, CSI A/B) and the
+// enhanced ones enabled by the keyboard-protocol push (CSI 13u, CSI 27u,
+// CSI 99;5u, CSI 114;5u, CSI 13;5u, CSI 27;5;13~) are recognized; query
+// replies, key-release events and unknown CSI are ignored, and a pending
+// sequence is bounded.
 func (s *PickerState) FeedChunk(chunk string) string {
 	for _, r := range chunk {
-		ch := string(r)
-		if s.CSIPending {
-			s.CSIPending = !(r >= 0x40 && r <= 0x7e)
-			if r >= 0x40 && r <= 0x7e {
-				if r == 'A' {
-					s.ApplyKey("up")
-				}
-				if r == 'B' {
-					s.ApplyKey("down")
-				}
-			}
-			if s.Exit != "" {
-				return s.Exit
-			}
+		key := s.TerminalKeys.Feed(r)
+		if key == "" {
 			continue
 		}
-		if s.EscPending {
-			s.EscPending = false
-			if r == '[' {
-				s.CSIPending = true
-				continue
-			}
-			s.ApplyKey("esc")
-			return s.Exit
-		}
-		switch r {
-		case 0x1b:
-			s.EscPending = true
-		case '\r', '\n':
-			s.ApplyKey("enter")
-			if s.Exit != "" {
-				return s.Exit
-			}
-		case 0x7f, 0x08:
-			s.ApplyKey("backspace")
-		case 0x03:
-			s.ApplyKey("ctrl-c")
-			return s.Exit
-		default:
-			if r >= 0x20 && r != 0x7f {
-				s.ApplyKey(ch)
-			}
+		if action := s.ApplyKey(key); action != "" {
+			return action
 		}
 	}
 	return s.Exit
 }
 
 func (s *PickerState) FlushEsc() string {
-	if !s.EscPending {
+	if s.TerminalKeys.FlushEsc() == "" {
 		return ""
 	}
-	s.EscPending = false
 	s.ApplyKey("esc")
 	return s.Exit
-}
-
-func parsePickerFind(text, label string) ([]PickerEntry, error) {
-	var entries []PickerEntry
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var entry map[string]any
-		if err := json.Unmarshal([]byte(line), &entry); err != nil || entry == nil {
-			return nil, fmt.Errorf("%s: invalid JSON line", label)
-		}
-		for _, key := range []string{"ref", "machine", "workspace_id", "tab_id", "pane_id"} {
-			if pickerString(entry[key]) == "" {
-				return nil, fmt.Errorf("%s: line without '%s'", label, key)
-			}
-		}
-		entries = append(entries, entry)
-	}
-	return entries, nil
-}
-
-func parsePickerMachines(text string) ([]string, error) {
-	var value any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &value); err != nil {
-		return nil, fmt.Errorf("machine list: invalid JSON")
-	}
-	var list []any
-	switch v := value.(type) {
-	case []any:
-		list = v
-	case map[string]any:
-		if items, ok := v["machines"].([]any); ok {
-			list = items
-		}
-	}
-	if list == nil {
-		return nil, fmt.Errorf("machine list: no machine array")
-	}
-	labels := make([]string, 0)
-	for _, item := range list {
-		machine, ok := item.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("machine list: invalid item")
-		}
-		label := pickerString(machine["label"])
-		if label == "" {
-			label = pickerString(machine["id"])
-		}
-		if label == "" {
-			return nil, fmt.Errorf("machine list: item without label")
-		}
-		if machine["enabled"] == true {
-			labels = append(labels, label)
-		}
-	}
-	return labels, nil
 }
 
 func pickerRun(parent contextpkg.Context, exe string, args []string, env platform.Env, platformName string, timeout int, input string) platform.RunResult {
@@ -420,39 +434,62 @@ func pickerRun(parent contextpkg.Context, exe string, args []string, env platfor
 	return platform.RunCli(exe, args, opts)
 }
 
-func pickerFailure(result platform.RunResult, timeout int, find bool) error {
-	if result.NotFound {
-		return fmt.Errorf("%s not found", map[bool]string{true: "find", false: "herdr"}[find])
-	}
-	if result.TimedOut {
-		if find {
-			return fmt.Errorf("find timed out after %ds", timeout/1000)
+// pickerDiscoveryRun adapts the discovery engine's injectable CLI operation
+// to the picker's runner: the engine's context and per-call timeout are
+// honored, and HERDR_BIN_PATH selects the herdr binary when it is set.
+func pickerDiscoveryRun(env platform.Env, platformName string) func(string, []string, platform.RunOptions) platform.RunResult {
+	return func(exe string, args []string, opts platform.RunOptions) platform.RunResult {
+		if exe == "herdr" {
+			if herdr := env.Get("HERDR_BIN_PATH"); herdr != "" {
+				exe = herdr
+			}
 		}
-		return fmt.Errorf("timed out after %ds", timeout/1000)
-	}
-	if result.Error != "" {
-		return fmt.Errorf("spawn failed: %s", result.Error)
-	}
-	if result.Status == nil {
-		return fmt.Errorf("killed")
-	}
-	if find {
-		if result.Stderr != "" {
-			return fmt.Errorf("exit %d: %s", *result.Status, truncateUTF16(strings.TrimSpace(result.Stderr), 120))
+		parent := opts.Context
+		if parent == nil {
+			parent = contextpkg.Background()
 		}
-		return fmt.Errorf("exit %d", *result.Status)
+		return pickerRun(parent, exe, args, env, platformName, opts.TimeoutMs, "")
 	}
-	if result.Stderr != "" {
-		return fmt.Errorf("exit %d: %s", *result.Status, truncateUTF16(strings.TrimSpace(result.Stderr), 120))
-	}
-	return fmt.Errorf("exit %d", *result.Status)
 }
 
-func truncateUTF16(text string, length int) string {
-	if jsLength(text) > length {
-		return jsSlice(text, length)
+// pickerEntriesFromBatch converts the engine's session rows into the
+// picker/board entry maps.
+func pickerEntriesFromBatch(batch peer.SessionResult) []PickerEntry {
+	out := make([]PickerEntry, 0, len(batch.Entries))
+	for _, entry := range batch.Entries {
+		out = append(out, PickerEntry{
+			"ref": entry.Ref, "machine": entry.Machine,
+			"workspace_id": entry.WorkspaceID, "workspace_label": entry.WorkspaceLabel,
+			"tab_id": entry.TabID, "tab_label": entry.TabLabel, "pane_id": entry.PaneID,
+			"name": entry.Name, "kind": entry.Kind, "status": entry.Status,
+			"cwd": entry.Cwd, "title": entry.Title,
+		})
 	}
-	return text
+	return out
+}
+
+// batchMachines names the completed machine, including a successful empty
+// snapshot. Older aggregate callers can still identify it from rows/failures.
+func batchMachines(batch peer.SessionResult) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	if batch.Machine != "" {
+		seen[batch.Machine] = true
+		out = append(out, batch.Machine)
+	}
+	for _, failure := range batch.Failures {
+		if !seen[failure.Machine] {
+			seen[failure.Machine] = true
+			out = append(out, failure.Machine)
+		}
+	}
+	for _, entry := range batch.Entries {
+		if !seen[entry.Machine] {
+			seen[entry.Machine] = true
+			out = append(out, entry.Machine)
+		}
+	}
+	return out
 }
 
 func clonePickerState(source *PickerState) *PickerState {
@@ -462,114 +499,44 @@ func clonePickerState(source *PickerState) *PickerState {
 	return &clone
 }
 
-func loadPickerEntries(ctx contextpkg.Context, state *PickerState, exe string, env platform.Env, platformName string, publish func()) {
+// loadPickerEntries loads every pane through the shared discovery engine:
+// the local snapshot publishes before the machine enumeration and the remote
+// snapshots, at most four remote queries run concurrently, and one global
+// deadline covers the local snapshot, the machine list and every remote
+// query. The load context carries the close cancellation to every
+// subprocess; the load never drops old rows itself - it only appends.
+func loadPickerEntries(ctx contextpkg.Context, state *PickerState, env platform.Env, platformName string, publish func()) {
 	state.LoadingLocal = true
 	state.Loading = 1
 	publish()
-	local, err := runLocalFind(ctx, exe, env, platformName)
-	state.Loading = 0
-	state.LoadingLocal = false
-	if err != nil {
-		state.Failures = append(state.Failures, PickerFailure{Label: "local", Cause: err.Error()})
-		publish()
-		return
-	}
-	state.Entries = appendUniquePicker(state.Entries, local)
-	publish()
-	state.Loading = 1
-	publish()
-	machines, err := runMachineList(ctx, env, platformName)
-	state.Loading = 0
-	if err != nil {
-		state.Failures = append(state.Failures, PickerFailure{Label: "máquinas", Cause: err.Error()})
-		publish()
-		return
-	}
-	if len(machines) == 0 {
-		publish()
-		return
-	}
-	state.Loading = len(machines)
-	publish()
-	runRemoteFinds(ctx, exe, env, platformName, machines, func(machine string, entries []PickerEntry, err error) {
-		state.Loading--
-		if err != nil {
-			state.Failures = append(state.Failures, PickerFailure{Label: machine, Cause: err.Error()})
-		} else {
+	final := peer.DiscoverSessions(peer.DiscoverOptions{
+		Env:         env,
+		All:         true,
+		TimeoutMS:   pickerDiscoveryTimeoutMS,
+		Concurrency: peer.DiscoverMaxConcurrency,
+		Context:     ctx,
+		Run:         pickerDiscoveryRun(env, platformName),
+	}, func(batch peer.SessionResult) {
+		if entries := pickerEntriesFromBatch(batch); len(entries) > 0 {
 			state.Entries = appendUniquePicker(state.Entries, entries)
+		}
+		for _, failure := range batch.Failures {
+			state.Failures = append(state.Failures, PickerFailure{Label: failure.Machine, Cause: failure.Cause})
+		}
+		if state.LoadingLocal {
+			// The first batch is always the local snapshot; after it the
+			// machine list and the remote queries are in flight.
+			state.LoadingLocal = false
+			state.Loading = 1
 		}
 		publish()
 	})
-}
-
-// runLocalFind runs the local `find --json` and parses its entries.
-func runLocalFind(ctx contextpkg.Context, exe string, env platform.Env, platformName string) ([]PickerEntry, error) {
-	result := pickerRun(ctx, exe, []string{"find", "--json"}, env, platformName, PickerFindTimeoutMs, "")
-	if result.Status == nil || *result.Status != 0 {
-		return nil, pickerFailure(result, PickerFindTimeoutMs, true)
+	if final.ListCause != "" {
+		state.Failures = append(state.Failures, PickerFailure{Label: "máquinas", Cause: final.ListCause})
 	}
-	return parsePickerFind(result.Stdout, "local")
-}
-
-// runMachineList runs `herdr machine list --json` and returns the enabled
-// machine labels, in Herdr's order.
-func runMachineList(ctx contextpkg.Context, env platform.Env, platformName string) ([]string, error) {
-	herdr := env.Get("HERDR_BIN_PATH")
-	if herdr == "" {
-		herdr = "herdr"
-	}
-	result := pickerRun(ctx, herdr, []string{"machine", "list", "--json"}, env, platformName, 30_000, "")
-	if result.Status == nil || *result.Status != 0 {
-		return nil, pickerFailure(result, 30_000, false)
-	}
-	return parsePickerMachines(result.Stdout)
-}
-
-// runRemoteFinds runs one `find --json --machine <label>` per machine in
-// parallel and invokes onRemote as each result completes (entries are kept
-// only when they belong to that machine).
-func runRemoteFinds(ctx contextpkg.Context, exe string, env platform.Env, platformName string, machines []string, onRemote func(machine string, entries []PickerEntry, err error)) {
-	type remoteResult struct {
-		machine string
-		result  platform.RunResult
-		entries []PickerEntry
-		err     error
-	}
-	results := make(chan remoteResult, len(machines))
-	var searches sync.WaitGroup
-	for _, machine := range machines {
-		machine := machine
-		searches.Add(1)
-		go func() {
-			defer searches.Done()
-			result := pickerRun(ctx, exe, []string{"find", "--json", "--machine", machine}, env, platformName, PickerFindTimeoutMs, "")
-			remote := remoteResult{machine: machine, result: result}
-			if result.Status != nil && *result.Status == 0 {
-				entries, parseErr := parsePickerFind(result.Stdout, machine)
-				if parseErr != nil {
-					remote.err = parseErr
-				} else {
-					for _, entry := range entries {
-						if pickerString(entry["machine"]) == machine {
-							remote.entries = append(remote.entries, entry)
-						}
-					}
-				}
-			}
-			results <- remote
-		}()
-	}
-	go func() {
-		searches.Wait()
-		close(results)
-	}()
-	for remote := range results {
-		if remote.result.Status == nil || *remote.result.Status != 0 {
-			onRemote(remote.machine, nil, pickerFailure(remote.result, PickerFindTimeoutMs, true))
-			continue
-		}
-		onRemote(remote.machine, remote.entries, remote.err)
-	}
+	state.LoadingLocal = false
+	state.Loading = 0
+	publish()
 }
 
 func appendUniquePicker(dest, next []PickerEntry) []PickerEntry {
@@ -588,15 +555,22 @@ func appendUniquePicker(dest, next []PickerEntry) []PickerEntry {
 }
 
 func redrawArea(w io.Writer, rendered string) {
+	// Keep the team's scrolling overlay and frame delimiters separate from
+	// the height-bounded native popups. Raw terminals need explicit CRLF.
 	_, _ = fmt.Fprint(w, "\x1b[H")
 	for _, line := range strings.Split(strings.TrimSuffix(rendered, "\n"), "\n") {
-		_, _ = fmt.Fprint(w, line, "\x1b[K\n")
+		_, _ = fmt.Fprint(w, line, "\x1b[K\r\n")
 	}
 	_, _ = fmt.Fprint(w, "\x1b[J")
 }
 
-func redrawPicker(w io.Writer, state *PickerState, width int) {
-	redrawArea(w, RenderPicker(state, width))
+func redrawModal(w io.Writer, rendered string) {
+	_, _ = fmt.Fprint(w, "\x1b[H\x1b[J")
+	for row, line := range strings.Split(strings.TrimSuffix(rendered, "\n"), "\n") {
+		// Raw terminals do not translate LF to CRLF. Absolute positioning
+		// also avoids scrolling when the last row fills the viewport.
+		_, _ = fmt.Fprintf(w, "\x1b[%d;1H%s", row+1, line)
+	}
 }
 
 func RunPicker(env platform.Env, platformName, executable string) (code int) {
@@ -605,152 +579,323 @@ func RunPicker(env platform.Env, platformName, executable string) (code int) {
 	if info, err := stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
 		isTTY = true
 	}
-	return withPickerTerminal(isTTY, func() (func() error, error) { return setPickerRaw(stdin) }, stdout, func() int {
-		return runPickerLoop(env, platformName, executable, stdin, stdout, isTTY)
+	shutdownSignals := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignals, pickerShutdownSignals()...)
+	defer signal.Stop(shutdownSignals)
+	state := newSessionState(env, platformName, isTTY)
+	return withPickerTerminalMouse(isTTY, func() (func() error, error) { return setPickerRaw(stdin) }, stdout, state, func() int {
+		return runSessionLoopWithSignals(env, platformName, executable, stdin, stdout, isTTY, shutdownSignals, true, state)
 	})
 }
 
-func withPickerTerminal(terminal bool, setRaw func() (func() error, error), stdout io.Writer, run func() int) (code int) {
+// keyboardPushSeq/keyboardPopSeq implement the kitty keyboard-protocol
+// lifecycle around the overlay: flag 1 (disambiguate) is pushed so
+// Ctrl+Enter arrives as CSI 13;5u instead of plain CR, and popped before
+// the exact previous raw mode is restored. The push/pop query responses
+// (CSI ? 1 u / CSI ? 0 u) were probed natively on both hosts; the decoder
+// ignores them as unknown CSI.
+const (
+	keyboardPushSeq = "\x1b[>1u"
+	keyboardPopSeq  = "\x1b[<u"
+)
+
+// The DEC modes the popup reads before it may change mouse tracking: the
+// tracking families (9, 1000, 1001, 1002, 1003) and the encoding families
+// (1005, 1006, 1015, 1016). Enabling 1000 or 1006 displaces the other
+// members of their exclusive family, so their prior states are captured
+// too.
+var mouseModes = []int{9, 1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016}
+
+// The two modes the popup enables for the vertical wheel: 1000 (button
+// events) and 1006 (SGR encoding). They are the required modes of the
+// negotiation: without both known, nothing is enabled.
+var mouseWheelModes = []int{1000, 1006}
+
+// mouseQueryTimeout bounds the asynchronous DECRQM negotiation inside the
+// one input loop: a terminal that never answers keeps its mouse state
+// untouched - unknown is never read as off, and the wheel enhancement
+// stays unavailable rather than the terminal being corrupted.
+const mouseQueryTimeout = time.Second
+
+// mouseNegotiation is the popup's temporary SGR mouse tracking, negotiated
+// asynchronously inside the one input loop: the DECRQM answers arrive on
+// the input stream (the same reader that feeds the decoder, no second
+// stdin reader), and the enables are written only once the required prior
+// states are known. Only a mode the DECRQM answers reported reset (2) is
+// enabled; set (1) and permanent set (3) are left alone; permanent reset
+// (4) and unknown states keep the terminal untouched.
+type mouseNegotiation struct {
+	decoder   *TerminalKeys
+	deadline  time.Time
+	decided   bool
+	failed    bool
+	enabled   []int // wheel modes successfully enabled, in enable order
+	displaced []int // prior-set modes the enables displaced, in restore order
+}
+
+func newMouseNegotiation(decoder *TerminalKeys) *mouseNegotiation {
+	decoder.MouseReplyPending = true
+	return &mouseNegotiation{decoder: decoder}
+}
+
+// querySeq is the DECRQM query of every mode the popup may touch; a query
+// changes nothing.
+func (m *mouseNegotiation) querySeq() string {
+	var b strings.Builder
+	for _, mode := range mouseModes {
+		b.WriteString("\x1b[?" + strconv.Itoa(mode) + "$p")
+	}
+	return b.String()
+}
+
+// poll runs the bounded negotiation: once both required modes are known
+// (or the timeout runs out) it enables exactly the wheel modes the DECRQM
+// answers reported reset, and records the prior-set modes the enables
+// displace. A failed write never marks the mode as enabled. It reports
+// whether it just decided.
+func isMouseMode(mode int) bool {
+	for _, candidate := range mouseModes {
+		if candidate == mode {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *mouseNegotiation) poll(w io.Writer) bool {
+	if m == nil || m.decided {
+		return false
+	}
+	known := true
+	for _, mode := range mouseModes {
+		if _, ok := m.decoder.DecrQM[mode]; !ok {
+			known = false
+			break
+		}
+	}
+	if !known && time.Now().Before(m.deadline) {
+		return false
+	}
+	m.decided = true
+	m.decoder.MouseReplyPending = false
+	if !known {
+		m.failed = true
+		return true
+	}
+	// A query response of zero means unsupported, never an off state.
+	for _, mode := range mouseWheelModes {
+		prior := m.decoder.DecrQM[mode]
+		if prior != 1 && prior != 2 && prior != 3 {
+			m.failed = true
+			return true
+		}
+	}
+	families := [][]int{{9, 1000, 1001, 1002, 1003}, {1005, 1006, 1015, 1016}}
+	for i, mode := range mouseWheelModes {
+		if m.decoder.DecrQM[mode] != 2 {
+			continue
+		}
+		for _, alternate := range families[i] {
+			if alternate != mode && m.decoder.DecrQM[alternate] == 3 {
+				m.failed = true
+				return true
+			}
+		}
+	}
+	for i, mode := range mouseWheelModes {
+		if m.decoder.DecrQM[mode] != 2 {
+			continue
+		}
+		// Record before writing: a failed/partial write may already have
+		// reached the terminal. Cleanup conservatively restores known state.
+		m.enabled = append(m.enabled, mode)
+		m.displace(families[i])
+		seq := "\x1b[?" + strconv.Itoa(mode) + "h"
+		if n, err := io.WriteString(w, seq); err != nil || n != len(seq) {
+			m.failed = true
+			m.restore(w)
+			return true
+		}
+	}
+	return true
+}
+
+// displace records (and will restore on the exit) the prior-set members of
+// one exclusive family that a successful enable disables: only a mutable
+// set (1) is re-enabled; a permanent set (3) is left to the terminal.
+func (m *mouseNegotiation) displace(family []int) {
+	for _, mode := range family {
+		if m.decoder.DecrQM[mode] == 1 {
+			m.displaced = append(m.displaced, mode)
+		}
+	}
+}
+
+func (m *mouseNegotiation) enabledMode(mode int) bool {
+	for _, e := range m.enabled {
+		if e == mode {
+			return true
+		}
+	}
+	return false
+}
+
+// wheelAvailable reports whether the vertical wheel can be delivered:
+// every required mode is either already on (set or permanent set) or
+// successfully enabled by the popup.
+func (m *mouseNegotiation) wheelAvailable() bool {
+	if m == nil || !m.decided || m.failed {
+		return false
+	}
+	for _, mode := range mouseWheelModes {
+		if prior := m.decoder.DecrQM[mode]; prior == 1 || prior == 3 {
+			continue
+		}
+		if !m.enabledMode(mode) {
+			return false
+		}
+	}
+	return true
+}
+
+// restore undoes exactly what the popup changed, in a coherent order: the
+// wheel modes it successfully enabled are disabled first, then the
+// prior-set modes the enables displaced are re-enabled. A mode whose prior
+// state was never learned, or that was never changed, is not touched - the
+// restore never disables a pre-existing mode blindly.
+func (m *mouseNegotiation) restore(w io.Writer) {
+	if m == nil {
+		return
+	}
+	for _, mode := range m.enabled {
+		_, _ = fmt.Fprintf(w, "\x1b[?%dl", mode)
+	}
+	for _, mode := range m.displaced {
+		_, _ = fmt.Fprintf(w, "\x1b[?%dh", mode)
+	}
+}
+
+func withPickerTerminal(terminal bool, setRaw func() (func() error, error), stdout io.Writer, run func() int) int {
+	return withPickerTerminalMouse(terminal, setRaw, stdout, nil, run)
+}
+
+// withPickerTerminalMouse is the terminal lifecycle of the owned popups:
+// the raw mode and the kitty keyboard-protocol push around the run, and -
+// when a state is given - the temporary SGR mouse tracking of the unified
+// session runtime, negotiated asynchronously inside the run (the query is
+// written here, the bounded decision and the enables happen in the input
+// loop through state.Mouse). On every exit path - cancel, signal, normal
+// exit and panic - the keyboard is popped, the exact previous mouse modes
+// are restored (only what the popup successfully changed; a mode whose
+// prior state was never learned is not touched), the exact previous raw
+// mode is restored and the cursor is shown again before the panic
+// re-raises. The mouse cleanup is registered before any protocol write.
+func withPickerTerminalMouse(terminal bool, setRaw func() (func() error, error), stdout io.Writer, state *BoardState, run func() int) (code int) {
 	var restore func() error
+	var mouse *mouseNegotiation
+	keyboardPushed := false
+	rawStarted := false
+	defer func() {
+		if keyboardPushed {
+			_, _ = fmt.Fprint(stdout, keyboardPopSeq)
+		}
+		mouse.restore(stdout)
+		if restore != nil {
+			_ = restore()
+		}
+		if rawStarted {
+			_, _ = fmt.Fprint(stdout, "\x1b[?25h")
+		}
+	}()
 	if terminal {
 		var err error
 		restore, err = setRaw()
 		if err != nil {
+			restore = nil
 			return 1
 		}
+		rawStarted = true
+		n, err := io.WriteString(stdout, keyboardPushSeq)
+		keyboardPushed = n == len(keyboardPushSeq)
+		if err != nil || !keyboardPushed {
+			return 1
+		}
+		if state != nil {
+			state.TerminalKeys.DecrQM = nil
+			mouse = newMouseNegotiation(&state.TerminalKeys)
+			state.Mouse = mouse
+			mouse.deadline = time.Now().Add(mouseQueryTimeout)
+			seq := mouse.querySeq()
+			if n, err := io.WriteString(stdout, seq); err != nil || n != len(seq) {
+				mouse.decided, mouse.failed = true, true
+				state.MouseReplyPending = false
+				return 1
+			}
+		}
 	}
-	defer func() {
-		if restore != nil {
-			_ = restore()
-		}
-		if terminal {
-			_, _ = fmt.Fprint(stdout, "\x1b[?25h")
-		}
-		if value := recover(); value != nil {
-			panic(value)
-		}
-	}()
 	return run()
 }
 
-func runPickerLoop(env platform.Env, platformName, executable string, stdin, stdout *os.File, isTTY bool) int {
-	shutdownSignals := make(chan os.Signal, 1)
-	signal.Notify(shutdownSignals, pickerShutdownSignals()...)
-	defer signal.Stop(shutdownSignals)
-	return runPickerLoopWithSignals(env, platformName, executable, stdin, stdout, isTTY, shutdownSignals)
+// PickerTerminal is the exported form of withPickerTerminal so the tests
+// can exercise the protocol lifecycle (push/pop order, restore, re-panic)
+// without a real TTY. It negotiates no mouse tracking (nil state), as
+// before the unified session runtime.
+func PickerTerminal(terminal bool, setRaw func() (func() error, error), stdout io.Writer, run func() int) int {
+	return withPickerTerminal(terminal, setRaw, stdout, run)
 }
 
+// PickerTerminalWithMouse is the exported form of withPickerTerminalMouse
+// so the tests can drive the async SGR mouse negotiation (the DECRQM
+// answers arrive on the input stream and the bounded decision happens in
+// the run through state.Mouse): the exact-mode restore on every exit path,
+// including panic, is exercised without a real TTY.
+func PickerTerminalWithMouse(terminal bool, setRaw func() (func() error, error), stdout io.Writer, state *BoardState, run func() int) int {
+	return withPickerTerminalMouse(terminal, setRaw, stdout, state, run)
+}
+
+// runPickerLoopWithSignals is the picker command's entry into the one
+// board-derived session runtime (the picker flavor keeps its non-TTY
+// display contract); it is a thin adapter, not a second loop.
 func runPickerLoopWithSignals(env platform.Env, platformName, executable string, stdin, stdout *os.File, isTTY bool, shutdownSignals <-chan os.Signal) int {
-	state := NewPickerState()
-	state.LoadingLocal = true
-	state.Loading = 1
-	if isTTY {
-		_, _ = fmt.Fprint(stdout, "\x1b[?25l")
-	}
-	width := 80
-	if isTTY {
-		if n, err := pickerTerminalWidth(stdout.Fd()); err == nil && n > 0 {
-			width = n
+	return runSessionLoopWithSignals(env, platformName, executable, stdin, stdout, isTTY, shutdownSignals, true, NewBoardState())
+}
+
+// applyPickerUpdate merges one discovery publication into the live state:
+// the publication's rows, failures and loading flags replace the list, while
+// the query, selection, presentation, search focus, decoder and action
+// state - and the navigation freeze - stay on the live side. The enhanced
+// selection follows the full ref of the selected row, so a publication that
+// inserts an earlier machine, workspace or pane re-orders the list without
+// moving the selection; the legacy selection keeps the numeric index, as
+// before.
+func applyPickerUpdate(state, update *PickerState) {
+	query, selected, exit, copied, lastEntry, keys, viewState, navPending, navTarget, navFailure := state.Query, state.Selected, state.Exit, state.Copied, state.LastEntry, state.TerminalKeys, state.ViewState, state.NavPending, state.NavTarget, state.NavFailure
+	ref := ""
+	if viewState.Enabled {
+		if list := state.visible(); len(list) > 0 {
+			ref = pickerString(list[min(selected, len(list)-1)]["ref"])
 		}
 	}
-	redrawPicker(stdout, state, width)
-	loadCtx, cancelLoad := contextpkg.WithCancel(contextpkg.Background())
-	updates := make(chan *PickerState, 16)
-	loadDone := make(chan struct{})
-	go func() {
-		defer close(updates)
-		defer close(loadDone)
-		loaded := NewPickerState()
-		publish := func() {
-			select {
-			case updates <- clonePickerState(loaded):
-			case <-loadCtx.Done():
-			}
-		}
-		loadPickerEntries(loadCtx, loaded, executable, env, platformName, publish)
-	}()
-	defer func() { cancelLoad(); <-loadDone }()
-	type inputResult struct {
-		value string
-		err   error
+	*state = *update
+	state.Query, state.Selected, state.Exit, state.Copied, state.LastEntry, state.TerminalKeys, state.ViewState, state.NavPending, state.NavTarget, state.NavFailure = query, selected, exit, copied, lastEntry, keys, viewState, navPending, navTarget, navFailure
+	if navFailure != nil {
+		state.Failures = append(append([]PickerFailure(nil), state.Failures...), *navFailure)
 	}
-	input := make(chan inputResult)
-	doneInput := make(chan struct{})
-	defer close(doneInput)
-	go func() {
-		reader := bufio.NewReader(stdin)
-		for {
-			r, _, err := reader.ReadRune()
-			select {
-			case input <- inputResult{value: string(r), err: err}:
-			case <-doneInput:
-				return
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	var escTimer <-chan time.Time
-	var updateChannel <-chan *PickerState = updates
-	for {
-		select {
-		case <-shutdownSignals:
-			state.ApplyKey("esc")
-		case update, ok := <-updateChannel:
-			if !ok {
-				updateChannel = nil
-				continue
-			}
-			query, selected, exit, copied, lastEntry, escPending, csiPending := state.Query, state.Selected, state.Exit, state.Copied, state.LastEntry, state.EscPending, state.CSIPending
-			*state = *update
-			state.Query, state.Selected, state.Exit, state.Copied, state.LastEntry, state.EscPending, state.CSIPending = query, selected, exit, copied, lastEntry, escPending, csiPending
-			state.clamp()
-			redrawPicker(stdout, state, width)
-		case item := <-input:
-			if item.err != nil {
-				if item.err == io.EOF {
-					if state.EscPending {
-						state.FlushEsc()
-					} else {
-						state.ApplyKey("esc")
-					}
-					break
-				}
-				return 1
-			}
-			action := state.FeedChunk(item.value)
-			if action == "copy" {
-				CopyText(*state.Copied, env, platformName)
-				if state.LastEntry != nil {
-					bin := env.Get("HERDR_BIN_PATH")
-					if bin == "" {
-						bin = "herdr"
-					}
-					_ = pickerRun(contextpkg.Background(), bin, []string{"notification", "show", "herdr-soho", "--body", "copied " + StripPickerControls(pickerString(state.LastEntry["ref"])), "--sound", "none"}, env, platformName, 30_000, "")
-				}
-			}
-			if action != "" {
-				break
-			}
-			if state.EscPending {
-				escTimer = time.After(50 * time.Millisecond)
-			} else {
-				escTimer = nil
-			}
-			redrawPicker(stdout, state, width)
-		case <-escTimer:
-			if state.FlushEsc() != "" {
-				break
-			}
-			redrawPicker(stdout, state, width)
-		}
-		if state.Exit != "" {
-			break
-		}
+	state.Selected = sessionKeepSelection(state.visible(), state.Selected, ref)
+	state.clamp()
+}
+
+// navApplyResult folds one navigation outcome into the picker state: a
+// success closes; a failure stays visible with the query and selection
+// preserved (an actionable modal) and nothing copied.
+func navApplyResult(state *PickerState, res NavigationResult) {
+	machine := pickerString(state.NavTarget["machine"])
+	state.NavPending = false
+	state.NavTarget = nil
+	if res.OK {
+		state.Exit = "navigate"
+		return
 	}
-	if state.Exit == "copy" || state.Exit == "esc" {
-		return 0
-	}
-	return 1
+	state.NavFailure = &PickerFailure{Label: machine, Cause: res.Cause}
+	state.Failures = append(state.Failures, *state.NavFailure)
 }

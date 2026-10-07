@@ -20,11 +20,54 @@ type ConfigEntry struct {
 	Original string
 }
 
+// ConfigLayer is one config layer read as a unit by LoadConfig: the source
+// label plus every entry the file contributed, keyed by normalized key. A
+// reader of the layers (for example the worker_messages policy) resolves a
+// named entry as a whole from the highest layer that names it.
+type ConfigLayer struct {
+	Source       string
+	File         string
+	ReadError    error
+	Entries      map[string]ConfigEntry
+	OriginalKeys []string
+}
+
 // Config records the normalized key values and preserves first insertion order.
 type Config struct {
 	Entries map[string]ConfigEntry
 	Order   []string
 	Sources []string
+	Layers  []ConfigLayer
+}
+
+// ConfigLayerPath names one file LoadConfig reads, with its source label.
+type ConfigLayerPath struct {
+	Source string // defaults | user | project | session
+	File   string
+}
+
+// ConfigLayerPaths returns only the paths captured during loading. A fresh
+// config has no paths; resolving a session requires the loaded base layers.
+func ConfigLayerPaths(ctx *Config, env platform.Env, cwd string) []ConfigLayerPath {
+	if ctx == nil {
+		return nil
+	}
+	paths := make([]ConfigLayerPath, 0, len(ctx.Layers))
+	for _, layer := range ctx.Layers {
+		paths = append(paths, ConfigLayerPath{Source: layer.Source, File: layer.File})
+	}
+	return paths
+}
+
+func baseConfigLayerPaths(env platform.Env, cwd string) []ConfigLayerPath {
+	paths := []ConfigLayerPath{
+		{Source: "defaults", File: filepath.Join(platform.SkillDir(env), "config.defaults")},
+		{Source: "user", File: EffectiveConfigFile(platform.UserConfigPath(platform.Current(), env), LegacyUserConfigPath(platform.Current(), env))},
+	}
+	if file := ProjectConfigFileUsed(env, cwd); file != "" {
+		paths = append(paths, ConfigLayerPath{Source: "project", File: file})
+	}
+	return paths
 }
 
 var ConfigScalarKeys = []string{
@@ -37,14 +80,14 @@ var ConfigScalarKeys = []string{
 	"provider_retry_delay", "provider_capacity_texts", "provider_error_texts",
 	"prompt_check_seconds", "prompt_settle_seconds", "stuck_warn_minutes", "context_warn_percent", "state_dir",
 	"report_language", "notify", "feedback", "feedback_repo", "feedback_dir", "feedback_to",
-	"setup_target", "inbound", "metrics",
+	"setup_target", "inbound", "worker_messages", "metrics",
 	"pressure_disk_free_percent", "pressure_swap_percent",
 }
 
 var KnownKinds = []string{"claude", "codex", "grok", "agy", "gemini", "cursor", "pi", "opencode"}
 var EffortLadder = []string{"low", "medium", "high", "xhigh", "max"}
 
-var dottedKeyRE = regexp.MustCompile(`^(?:role\.[a-z][a-z0-9_-]*\.(?:kind|model|effort|args)|lane\.[a-z][a-z0-9_-]*\.(?:roles|kind|model|effort|approvals|panes|args)|model\.[a-z][a-z0-9_.-]+|effort\.[a-z][a-z0-9_-]+|context_window\.[a-z][a-z0-9_-]+|args\.[a-z][a-z0-9_-]+)$`)
+var dottedKeyRE = regexp.MustCompile(`^(?:role\.[a-z][a-z0-9_-]*\.(?:kind|model|effort|args)|lane\.[a-z][a-z0-9_-]*\.(?:roles|kind|model|effort|approvals|panes|args)|model\.[a-z][a-z0-9_.-]+|effort\.[a-z][a-z0-9_-]+|context_window\.[a-z][a-z0-9_-]+|args\.[a-z][a-z0-9_-]+|worker_messages\.rules\.[a-z][a-z0-9_]*\.(?:from|to|types|scope|enabled))$`)
 var decimalRE = regexp.MustCompile(`^[0-9]+$`)
 var positiveDecimalRE = regexp.MustCompile(`^[1-9][0-9]*$`)
 
@@ -74,18 +117,62 @@ func LoadConfig(env platform.Env, cwd string) Config {
 		cwd, _ = os.Getwd()
 	}
 	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0, 4)}
-	loadConfigFile(filepath.Join(platform.SkillDir(env), "config.defaults"), "defaults", &ctx)
-	loadConfigFile(EffectiveConfigFile(platform.UserConfigPath(platform.Current(), env), LegacyUserConfigPath(platform.Current(), env)), "user", &ctx)
-	loadConfigFile(ProjectConfigFileUsed(env, cwd), "project", &ctx)
+	for _, layer := range baseConfigLayerPaths(env, cwd) {
+		loadConfigFile(layer.File, layer.Source, &ctx)
+	}
+	if problem := projectConfigProblem(env, cwd); problem != nil {
+		// Legacy values still use their existing fallback. New policy reads
+		// must see an invalid or inaccessible preferred layer rather than
+		// silently inheriting permissions from a lower one.
+		ctx.Layers = append(ctx.Layers, *problem)
+	}
+	// state_dir may be supplied by any of the three preceding layers.
 	if file := SessionConfPath(&ctx, env, cwd); file != "" {
 		loadConfigFile(file, "session", &ctx)
 	}
 	return ctx
 }
 
+func projectConfigProblem(env platform.Env, cwd string) *ConfigLayer {
+	roots := []string{platform.ProjectRoot(env, cwd), platform.StateProjectRoot(env, cwd)}
+	seen := map[string]bool{}
+	for _, root := range roots {
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		for _, file := range []string{filepath.Join(root, ".agents", "herdr-soho.conf"), LegacyProjectConfigPath(root)} {
+			info, err := os.Lstat(file)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err == nil && info.Mode()&os.ModeSymlink != 0 {
+				info, err = os.Stat(file)
+			}
+			if err == nil && info.Mode().IsRegular() {
+				return nil
+			}
+			if err == nil {
+				err = fmt.Errorf("configuration path is not a regular file")
+			}
+			return &ConfigLayer{Source: "project", File: file, ReadError: err, Entries: map[string]ConfigEntry{}}
+		}
+	}
+	return nil
+}
+
 func loadConfigFile(file, label string, ctx *Config) {
+	if absolute, err := filepath.Abs(file); err == nil {
+		file = absolute
+	}
 	raw, err := platform.ReadTextFile(file)
+	layer := make(map[string]ConfigEntry)
+	record := ConfigLayer{Source: label, File: file, Entries: layer}
 	if err != nil {
+		if !os.IsNotExist(err) {
+			record.ReadError = err
+		}
+		ctx.Layers = append(ctx.Layers, record)
 		return
 	}
 	ctx.Sources = append(ctx.Sources, label)
@@ -102,6 +189,7 @@ func loadConfigFile(file, label string, ctx *Config) {
 			continue
 		}
 		rawKey := trimJSWhitespace(line[:eq])
+		record.OriginalKeys = append(record.OriginalKeys, rawKey)
 		key := NormalizeKey(rawKey)
 		value := trimJSWhitespace(line[eq+1:])
 		if len(value) >= 2 && strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") {
@@ -114,7 +202,9 @@ func loadConfigFile(file, label string, ctx *Config) {
 			ctx.Order = append(ctx.Order, key)
 		}
 		ctx.Entries[key] = ConfigEntry{Value: value, Source: label, Original: rawKey}
+		layer[key] = ctx.Entries[key]
 	}
+	ctx.Layers = append(ctx.Layers, record)
 }
 
 func splitLines(text string) []string {
@@ -188,6 +278,8 @@ func ConfigValueOk(key, value string, env platform.Env, cwd string) bool {
 		return value == "canonical" || value == "local"
 	case key == "inbound":
 		return value == "auto" || value == "off"
+	case key == "worker_messages":
+		return value == "off" || value == "policy"
 	case key == "panes":
 		return value == "2" || value == "3" || value == "4"
 	case key == "pane_mode":
@@ -517,6 +609,18 @@ func DottedKeyName(key string, ctx *Config, env platform.Env, cwd string) string
 	if head == "context" && len(parts) >= 3 && parts[1] == "window" {
 		return "context_window." + strings.Join(parts[2:], ".")
 	}
+	if head == "worker" && len(parts) >= 5 && parts[1] == "messages" && parts[2] == "rules" {
+		// worker_messages.rules.<name>.<field>: the name may hold underscores,
+		// so the field is the longest known suffix of the joined tail.
+		rest := strings.Join(parts[3:], "_")
+		for _, field := range []string{"enabled", "types", "scope", "from", "to"} {
+			suffix := "_" + field
+			if strings.HasSuffix(rest, suffix) && len(rest) > len(suffix) && ruleNameRE.MatchString(strings.TrimSuffix(rest, suffix)) {
+				return "worker_messages.rules." + strings.TrimSuffix(rest, suffix) + "." + field
+			}
+		}
+		return strings.Join(parts, ".")
+	}
 	if head == "model" {
 		position := parts[len(parts)-1]
 		if len(parts) >= 3 && (position == "worker" || position == "orchestrator") {
@@ -645,8 +749,10 @@ func CmdConfig(ctx *Config, env platform.Env, cwd string) {
 	fmt.Fprintln(platform.Stdout, strings.Join(lines, "\n"))
 }
 
+var ruleNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
 func isDottedNormalizedKey(key string) bool {
-	return strings.HasPrefix(key, "args_") || strings.HasPrefix(key, "role_") || strings.HasPrefix(key, "model_") || strings.HasPrefix(key, "effort_") || strings.HasPrefix(key, "lane_") || strings.HasPrefix(key, "context_window_")
+	return strings.HasPrefix(key, "args_") || strings.HasPrefix(key, "role_") || strings.HasPrefix(key, "model_") || strings.HasPrefix(key, "effort_") || strings.HasPrefix(key, "lane_") || strings.HasPrefix(key, "context_window_") || strings.HasPrefix(key, "worker_messages_rules_")
 }
 
 func padUTF16(value string, width int) string {

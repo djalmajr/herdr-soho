@@ -421,8 +421,8 @@ func TestDispatchUnavailableAgentGetKeepsTodayBehavior(t *testing.T) {
 		{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Stdout: `{"result":{"sent":true}}`},
 	})
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
-	// An unavailable agent get does not refuse: the dispatch types the
-	// brief and ends as today (not-received after the resend, exit 15).
+	// The original submission still occurs, but unavailable state and an
+	// unrecognized screen cannot authorize a repeated prompt.
 	if code != 15 {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errText)
 	}
@@ -432,10 +432,10 @@ func TestDispatchUnavailableAgentGetKeepsTodayBehavior(t *testing.T) {
 	if strings.Contains(errText, "still working on its open task") {
 		t.Fatalf("the refusal fired for an unavailable agent get: %q", errText)
 	}
-	if !strings.Contains(errText, "did not arrive; sending it once more") {
-		t.Fatalf("the today resend is missing: %q", errText)
+	if strings.Contains(errText, "sending it once more") || !strings.Contains(errText, "unconfirmed input region") {
+		t.Fatalf("unavailable state must remain uncertain without resend: %q", errText)
 	}
-	if n := countArgvPrefix(f.calls(t), []string{"agent", "prompt"}); n != 2 {
-		t.Fatalf("typed %d prompt(s); want 2 (the resend)", n)
+	if n := countArgvPrefix(f.calls(t), []string{"agent", "prompt"}); n != 1 {
+		t.Fatalf("typed %d prompt(s); want only the original submission", n)
 	}
 }

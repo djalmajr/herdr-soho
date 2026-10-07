@@ -69,7 +69,7 @@ func testSkillDir(t *testing.T) string {
 
 func TestParityConfigGolden(t *testing.T) {
 	// JS: "parity: config and session command goldens"
-	goldenPath := filepath.Join(testSkillDir(t), "scripts", "test", "golden", "parity-config.json")
+	goldenPath := filepath.Join("..", "testdata", "legacy", "parity-config.json")
 	data, err := os.ReadFile(goldenPath)
 	if err != nil {
 		t.Fatal(err)
@@ -435,7 +435,7 @@ func TestNowriteRejectsConfigWithoutSubcommand(t *testing.T) {
 	env, cwd := commandFixture(t)
 	env["HERDR_SOHO_NOWRITE"] = "1"
 	code, out, errOut := runIn(t, []string{"config"}, env, cwd)
-	wantErr := "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes; rejected: config — unset HERDR_SOHO_NOWRITE to write\n"
+	wantErr := "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: config — unset HERDR_SOHO_NOWRITE to write\n"
 	if code != 2 || out != "" || errOut != wantErr {
 		t.Fatalf("bare config under NOWRITE code=%d out=%q err=%q", code, out, errOut)
 	}

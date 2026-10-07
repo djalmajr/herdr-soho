@@ -5,8 +5,9 @@ package core
 // and the by-pid owner classification. Liveness uses real processes: the
 // test binary re-executed as a helper (portable; no /bin/sleep), and the
 // platform's own by-pid read (ps on unix, kernel32 on windows). Only the
-// cases that need a failing by-pid read for an alive pid use the unix fake
-// ps, and those alone are skipped on windows.
+// cases that need a failing by-pid read for an alive pid use the unix
+// fake ps (the shared fakecli: the re-executed test binary, no shell
+// script behind the name), and those alone are skipped on windows.
 
 import (
 	"encoding/json"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
 const compactPhaseLivenessChildEnv = "COMPACT_PHASE_LIVENESS_CHILD"
@@ -82,33 +84,26 @@ func compactPhaseDeadPID(t *testing.T) int {
 }
 
 // compactPhaseTestEnv builds the per-test environment: on unix a fake ps
-// (that answers the recorded lstart for the test's own pid and fails for
-// any other) ahead of the system paths; on windows the by-pid read is a
-// direct kernel32 call that ignores the env, so nothing is faked.
+// (the shared fakecli: it answers the recorded lstart for the test's own
+// pid and fails for any other) on a PATH that holds nothing else; on
+// windows the by-pid read is a direct kernel32 call that ignores the env,
+// so nothing is faked. The by-pid read is the only ps form the code under
+// test issues (`ps -o lstart=,state=,comm= -p <pid>`), so no fallback to
+// the system ps is needed.
 func compactPhaseTestEnv(t *testing.T) platform.Env {
 	t.Helper()
 	fakebin := filepath.Join(t.TempDir(), "fakebin")
-	if err := os.MkdirAll(fakebin, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if runtime.GOOS == "windows" {
 		return platform.Env{"PATH": fakebin + string(os.PathListSeparator) + `C:\Windows\System32`}
 	}
-	script := "#!/bin/sh\n" +
-		"# usage: ps -o lstart=,state=,comm= -p <pid>\n" +
-		"pid=\"$4\"\n" +
-		"if [ \"$1\" = \"-o\" ] && [ \"$3\" = \"-p\" ]; then\n" +
-		"  case \"$pid\" in\n" +
-		fmt.Sprintf("    %d) printf 'Sat Oct  3 12:00:00 2026 R fake-test\\n' ;;\n", os.Getpid()) +
-		"    *) printf 'no row for this pid\\n' >&2; exit 3 ;;\n" +
-		"  esac\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"exec /usr/bin/ps \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(fakebin, "ps"), []byte(script), 0o755); err != nil {
+	rules := []fakecli.Rule{
+		{Argv: []string{"-o", "lstart=,state=,comm=", "-p", strconv.Itoa(os.Getpid())}, Stdout: "Sat Oct  3 12:00:00 2026 R fake-test\n"},
+		{Argv: []string{"-o", "lstart=,state=,comm=", "-p"}, ArgvPrefix: true, Stderr: "no row for this pid\n", Code: 3},
+	}
+	if _, err := fakecli.Install(t, fakebin, "ps", rules); err != nil {
 		t.Fatal(err)
 	}
-	return platform.Env{"PATH": fakebin + string(os.PathListSeparator) + "/usr/bin:/bin"}
+	return platform.Env{"PATH": fakebin, "HERDR_SOHO_FAKECLI_CONFIG": fakebin}
 }
 
 func compactPhaseTestState(t *testing.T) string {
@@ -313,7 +308,9 @@ func TestCompactPhaseClaimRefusesWhenSelfIdentityUnreadable(t *testing.T) {
 	}
 	sd := compactPhaseTestState(t)
 	fakebin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(fakebin, "ps"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	// The shared fakecli ps fails every query: the unreadable own identity
+	// the 4 refusal asserts (no shell script behind the name).
+	if _, err := fakecli.Install(t, fakebin, "ps", []fakecli.Rule{{AnyArgs: true, Code: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	code := 0
@@ -329,7 +326,7 @@ func TestCompactPhaseClaimRefusesWhenSelfIdentityUnreadable(t *testing.T) {
 		}()
 		CompactPhaseClaim(CompactPhaseClaimOptions{
 			SD: sd, Agent: "worker", Pane: "p1", Brief: "/abs/brief.md",
-			Env: platform.Env{"PATH": fakebin},
+			Env: platform.Env{"PATH": fakebin, "HERDR_SOHO_FAKECLI_CONFIG": fakebin},
 		})
 	}()
 	if code != 4 {

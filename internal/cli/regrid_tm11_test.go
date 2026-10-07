@@ -14,7 +14,7 @@ import (
 
 func TestTM11RegridFailureParity(t *testing.T) {
 	t.Run(`JS: "parity: regrid exits 4 on a failed move, with the bash message and friction entry"`, func(t *testing.T) {
-		data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-regrid.json"))
+		data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-regrid.json"))
 		if err != nil {
 			t.Fatal(err)
 		}

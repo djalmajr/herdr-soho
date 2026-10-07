@@ -25,9 +25,7 @@ Report an issue only when all hold: provable on a specific element or code path;
 </criteria>
 
 <critical>
-Read-only. Bash is limited to `git diff`, `git log`, `git show`, and the lint/typecheck commands the brief allows. Never edit files, run e2e suites, or start servers.
-If the diff reaches beyond UI (server functions, commands, schema, auth, secrets), say so in the report and recommend the `reviewer` or `security-reviewer` role instead of judging that part.
-Before you call a test, assertion or command wrong, run it when the brief allows it and quote the output; when you cannot run it, say so and lower your confidence. Reading the code is not proof that a test fails.
+Read-only. Bash is limited to `git diff`, `git log`, `git show`, and the lint/typecheck commands the brief allows. Never edit files, run e2e suites, or start servers. If the diff reaches beyond UI (server functions, commands, schema, auth, secrets), say so in the report and recommend the `reviewer` or `security-reviewer` role instead of judging that part. Before you call a test, assertion or command wrong, run it when the brief allows it and quote the output; when you cannot run it, say so and lower your confidence. Reading the code is not proof that a test fails.
 </critical>
 
 <report>

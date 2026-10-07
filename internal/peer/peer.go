@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/djalmajr/herdr-soho/internal/communication"
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
@@ -162,7 +164,13 @@ func PeerHeaderRemote(pane, hostname, senderName, senderKind, senderRole, id str
 	}, "\n")
 }
 
-func PeerEndLine(id string) string { return fmt.Sprintf("%s #%s end of message", PeerPrefix, id) }
+// PeerEndPrefix is the peer message's closing-line marker: the peer prefix
+// closed by a slash, so an opening header line ("[herdr-soho:peer] #<id>")
+// can never be read as the end of a message and an end line can never be
+// read as an opening header.
+const PeerEndPrefix = "[/herdr-soho:peer]"
+
+func PeerEndLine(id string) string { return fmt.Sprintf("%s #%s end of message", PeerEndPrefix, id) }
 
 func QuotePeerBody(body string) string {
 	lines := strings.Split(body, "\n")
@@ -232,6 +240,11 @@ func SenderInfo(ctx *core.Config, env platform.Env, cwd string) (ref, name, kind
 }
 
 func inboundPolicy(targetCwd, targetWorkspace string, env platform.Env) string {
+	config, policyEnv := inboundConfiguration(targetCwd, targetWorkspace, env)
+	return core.Cfg(&config, "inbound", "auto", policyEnv)
+}
+
+func inboundConfiguration(targetCwd, targetWorkspace string, env platform.Env) (core.Config, platform.Env) {
 	policyEnv := env.Clone()
 	skillDir := env.Get("HERDR_SOHO_SKILL_DIR")
 	for key := range policyEnv {
@@ -251,7 +264,7 @@ func inboundPolicy(targetCwd, targetWorkspace string, env platform.Env) string {
 		delete(policyEnv, "HERDR_ENV")
 	}
 	config := core.LoadConfig(policyEnv, targetCwd)
-	return core.Cfg(&config, "inbound", "auto", policyEnv)
+	return config, policyEnv
 }
 
 func agentGet(machine, target string, env platform.Env, timeoutMS int) agentInfo {
@@ -569,9 +582,26 @@ func isJSWhitespace(r rune) bool {
 	return r >= 0x9 && r <= 0xd || r == 0x20 || r == 0xa0 || r == 0x1680 || r >= 0x2000 && r <= 0x200a || r == 0x2028 || r == 0x2029 || r == 0x202f || r == 0x205f || r == 0x3000 || r == 0xfeff
 }
 
+// isDialogScreen reports whether the screen shows a dialog the send must not
+// send a key into: a known trust, approval, or question UI per the shared
+// provider classifier (provider.DialogUI — tried for every known kind when
+// the kind is unknown, like the blocked-state rule), the startup trust
+// patterns of the last 10 lines, or a blocked-state question dialog. The
+// shared classifier is an additional refusal on top of the current
+// protections: it matches a known dialog line anywhere on the screen and is
+// not gated on the status.
 func isDialogScreen(screen, kind, status string) bool {
 	if screen == "" {
 		return false
+	}
+	knownKinds := []string{kind}
+	if kind == "" {
+		knownKinds = []string{"codex", "claude", "opencode"}
+	}
+	for _, k := range knownKinds {
+		if provider.DialogUI(k, screen) != "" {
+			return true
+		}
 	}
 	bottom10 := strings.Join(TailLines(screen, 10), "\n")
 	bottom10 = textutil.ASCIILower(bottom10)
@@ -582,11 +612,7 @@ func isDialogScreen(screen, kind, status string) bool {
 	}
 	if status == "blocked" {
 		bottom20 := strings.Join(TailLines(screen, 20), "\n")
-		kinds := []string{kind}
-		if kind == "" {
-			kinds = []string{"codex", "claude", "opencode"}
-		}
-		for _, k := range kinds {
+		for _, k := range knownKinds {
 			if questionDialog(k, bottom20) {
 				return true
 			}
@@ -664,6 +690,10 @@ func boundedEnvNumber(raw string, fallback, max int) int {
 }
 
 func appendPeerLog(stateDir, from, to, result string, chars int, id string, env platform.Env) {
+	appendPeerAssignmentLog(stateDir, from, to, result, chars, id, env)
+}
+
+func appendPeerAssignmentLog(stateDir, from, to, result string, chars int, id string, env platform.Env, metadata ...string) {
 	if core.Nowrite(env) {
 		return
 	}
@@ -673,6 +703,9 @@ func appendPeerLog(stateDir, from, to, result string, chars int, id string, env 
 	}
 	clean := func(v string) string { return peerLogSeparators.ReplaceAllString(v, " ") }
 	line := fmt.Sprintf("%s\t%s\t%s\t%s\t%d\t%s\n", platform.Now().Format("2006-01-02T15:04:05"), clean(from), clean(to), clean(result), chars, clean(id))
+	for _, value := range metadata {
+		line = strings.TrimSuffix(line, "\n") + "\t" + clean(value) + "\n"
+	}
 	if os.MkdirAll(stateDir, 0o755) == nil {
 		f, err := os.OpenFile(filepath.Join(stateDir, PeerLogFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666)
 		if err == nil {
@@ -698,6 +731,7 @@ type proofResult struct {
 
 func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	target, file := "", ""
+	assignment, messageType := "", ""
 	now, timeoutMS := false, DefaultSendTimeoutMS
 	timeoutGiven := false
 	words := []string{}
@@ -706,13 +740,17 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		switch a {
 		case "--now":
 			now = true
-		case "--file", "--timeout":
+		case "--file", "--timeout", "--assignment", "--type":
 			if i+1 >= len(argv) || argv[i+1] == "" || strings.HasPrefix(argv[i+1], "--") {
 				platform.Die("send: "+a+" expects a value", 2)
 			}
 			i++
 			if a == "--file" {
 				file = argv[i]
+			} else if a == "--assignment" {
+				assignment = argv[i]
+			} else if a == "--type" {
+				messageType = argv[i]
 			} else {
 				n, ok := parsePositiveInt(argv[i])
 				if !ok {
@@ -749,6 +787,27 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	if body == "" {
 		platform.Die("send: empty message (pass the message words or --file <path>)", 2)
 	}
+	if assignment != "" || messageType != "" {
+		if messageType != "review.question" {
+			platform.Die("send: only review.question is free text; publish ready/findings/corrected/approved with collaborate event and a declared revision", 2)
+		}
+		if assignment == "" || messageType == "" {
+			platform.Die("send: --assignment and --type must be passed together", 2)
+		}
+		result, err := SendAssignmentMessage(AssignmentMessageOptions{AssignmentID: assignment, Target: target, Type: messageType, Body: body, TimeoutMS: timeoutMS, Config: ctx, Env: env, Cwd: cwd})
+		if err != nil {
+			code := 2
+			if errors.Is(err, communication.ErrInboundOff) {
+				code = 18
+			}
+			if result.Status == "uncertain" {
+				code = 15
+			}
+			platform.Die("send: "+err.Error(), code)
+		}
+		fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O("status", result.Status, "assignment", assignment, "type", messageType)))
+		return 0
+	}
 	id := RandomPeerID()
 	// Decide with StateInSkill/StateRootPath before any StateDirPath/StateRoot/
 	// WorkspaceID, so the refusal leaves no side effect (no .gitignore append,
@@ -757,6 +816,24 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was sent)", core.StateRootPath(ctx, env, cwd), skill), 2)
 	}
 	senderRef, senderName, senderKind, senderRole := SenderInfo(ctx, env, cwd)
+	if _, err := os.ReadFile(filepath.Join(core.StateDirPath(ctx, env, cwd), "agents.tsv")); err != nil && !os.IsNotExist(err) {
+		platform.Die("send: worker registration is unreadable; nothing was sent", 4)
+	}
+	// The pane registration remains authoritative if the best-effort name
+	// lookup failed: an unavailable worker cannot bypass the default refusal.
+	for _, row := range core.RosterRows(core.StateDirPath(ctx, env, cwd)) {
+		parts := strings.Split(row, "\t")
+		if len(parts) > 1 && parts[1] != "" && parts[1] == env.Get("HERDR_PANE_ID") {
+			senderName, senderRole = parts[0], "unknown"
+			if senderName == "" || senderName == "-" {
+				senderName = "registered-worker"
+			}
+			if len(parts) > 3 {
+				senderRole = parts[3]
+			}
+			break
+		}
+	}
 	// A rostered worker reports through its report file, not by message: refuse
 	// before any send. The orchestrator (role -) and sub-orchestrators keep
 	// sending; no HERDR_PANE_ID or a failing sender lookup leaves the send alone.
@@ -1004,7 +1081,10 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			recent, readErr := readScreen(t.Machine, t.TargetArg, "recent-unwrapped", recentLines, env, HerdrCallTimeoutMS, noteVisibleScreen)
 			if readErr == "" {
 				result.RecentReadSucceeded = true
-				if strings.Contains(recent, "#"+id) {
+				// The recent gate requires this message's receipt marker (header
+				// opening or closing line, either closing form, unquoted, exact
+				// id): a bare "#id" a reply or a footer can cite is not it.
+				if receiptLineInText(recent, id) {
 					visible, visibleErr := readScreen(t.Machine, t.TargetArg, "visible", 0, env, HerdrCallTimeoutMS, noteVisibleScreen)
 					if visibleErr == "" {
 						if visible != preScreen && !isDialogScreen(visible, t.Kind, statusOr(curGet, currentStatus)) {
@@ -1090,8 +1170,11 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		if preSeq != "" && curGet.Seq != "" && curGet.Seq != preSeq && preIdle {
 			return !isDialogScreen(visible, t.Kind, curGet.Status)
 		}
+		// Like pollWindow's recent gate, the marker must be this message's
+		// receipt marker (header opening or closing line, either closing form,
+		// unquoted, exact id), not a bare "#id" a reply can cite.
 		recent, readErr := readScreen(t.Machine, t.TargetArg, "recent-unwrapped", recentLines, env, stalledCheckBudget(deadline), noteVisibleScreen)
-		if readErr != "" || !strings.Contains(recent, "#"+id) {
+		if readErr != "" || !receiptLineInText(recent, id) {
 			return false
 		}
 		return visible != preScreen && !isDialogScreen(visible, t.Kind, statusOr(curGet, currentStatus)) &&
@@ -1140,14 +1223,21 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 					log(senderRef, t.RefShown, "dialog")
 					platform.Die(fmt.Sprintf("send: %s is showing a dialog after the message was typed; press nothing and read its pane", t.RefShown), 17)
 				}
-				_ = sendKey(t.Machine, t.TargetArg, "enter", env)
+				// The key transport reports whether the Enter actually landed
+				// (herdr send-keys exited 0); a failed send is never claimed as
+				// pressed, and no second Enter or resend follows.
+				entered := sendKey(t.Machine, t.TargetArg, "enter", env)
 				if res := pollWindow(); res.Proven {
 					log(senderRef, t.RefShown, "sent")
 					_, _ = fmt.Fprintf(platform.Stdout, "sent to %s\n", t.RefShown)
 					return 0
 				}
 				log(senderRef, t.RefShown, "stalled")
-				platform.Die(stalledExitMessage(fmt.Sprintf("send: %s did not take the message: it sits in its input box after one Enter; read its pane before sending again", t.RefShown)), 15)
+				cause := "the last read showed it in its input box after one Enter"
+				if !entered {
+					cause = "the last read showed it in its input box, but the Enter did not send"
+				}
+				platform.Die(stalledExitMessage(fmt.Sprintf("send: %s did not confirm taking the message: %s; delivery is uncertain; read its pane for #%s or a reply before sending again", t.RefShown, cause, id)), 15)
 			}
 			// The marker is not in the input box (or the screen could not be
 			// read), yet the prompt can have been taken anyway: a taken codex
@@ -1171,14 +1261,18 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			if p.Code == "timeout" {
 				cause = "timeout"
 			}
-			msg := fmt.Sprintf("send: %s did not take the message (%s); read its pane before sending again", t.RefShown, cause)
+			// The prompt call failed before proof ran: the text may or may not
+			// sit in the target's composer, so the message says delivery is
+			// uncertain and names the reconciliation (the marker or a reply),
+			// never that the message was not delivered.
+			msg := fmt.Sprintf("send: %s did not confirm taking the message (%s); delivery is uncertain; read its pane for #%s or a reply before sending again", t.RefShown, cause, id)
 			// Only the stalled exits record the screen: agent_blocked and
 			// timeout keep today's message untouched.
 			if p.Code == "agent_prompt_stalled" {
 				// The proof window ran and ended without proof: say so, in
 				// seconds. The cause keeps Herdr's own "within ... ms" text,
 				// which is part of the cause.
-				msg = fmt.Sprintf("send: %s did not take the message (%s); no proof within the %ss window; read its pane before sending again", t.RefShown, cause, numberSeconds(windowMS))
+				msg = fmt.Sprintf("send: %s did not confirm taking the message (%s); delivery is uncertain: no proof within the %ss window; read its pane for #%s or a reply before sending again", t.RefShown, cause, numberSeconds(windowMS), id)
 				msg = stalledExitMessage(msg)
 			}
 			platform.Die(msg, 15)
@@ -1304,9 +1398,12 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	idInBox := idInInputBox(t.Kind, preEnterVis, id)
 	if !idInBox {
 		log(senderRef, t.RefShown, "lost")
-		platform.Die(fmt.Sprintf("send: %s did not take the message (no sign of it in its state or screen); read its pane before sending again", t.RefShown), 15)
+		platform.Die(fmt.Sprintf("send: %s did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #%s or a reply before sending again", t.RefShown, id), 15)
 	}
-	_ = sendKey(t.Machine, t.TargetArg, "enter", env)
+	// The key transport reports whether the Enter actually landed (herdr
+	// send-keys exited 0); a failed send is never claimed as pressed, and no
+	// second Enter or resend follows.
+	entered := sendKey(t.Machine, t.TargetArg, "enter", env)
 	res = pollWindow()
 	if res.Proven {
 		log(senderRef, t.RefShown, "sent")
@@ -1322,7 +1419,11 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		platform.Die(fmt.Sprintf("send: could not confirm that %s took the message (%s); read its pane before sending again", t.RefShown, cause), 15)
 	}
 	log(senderRef, t.RefShown, "lost")
-	platform.Die(fmt.Sprintf("send: %s did not take the message (no sign of it in its state or screen); read its pane before sending again", t.RefShown), 15)
+	lostCause := "no sign of it in its state or screen"
+	if !entered {
+		lostCause = "the Enter did not send and there is no sign of it in its state or screen"
+	}
+	platform.Die(fmt.Sprintf("send: %s did not confirm taking the message (%s); delivery is uncertain; read its pane for #%s or a reply before sending again", t.RefShown, lostCause, id), 15)
 	return 15
 }
 
@@ -1330,193 +1431,170 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 // composed only of '─' (U+2500), ignoring whitespace: pi's input box, whose
 // borders are those two separator lines (chat history above, footer below).
 // ok is false when the screen has fewer than two such lines; the caller then
-// keeps the whole-screen behavior. The region rule lives in provider, where the
-// dispatch arrival check reuses it; this adapter hands it the lines back.
+// keeps the conservative behavior. The region rule is the shared composer
+// recognition in provider (provider.ComposerRegion); this adapter hands the
+// lines back.
 func piInputRegion(screen string) ([]string, bool) {
-	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
-	start, end, ok := provider.PiInputRegion(screen)
-	if !ok {
-		return nil, false
-	}
-	return lines[start:end], true
-}
-
-// isClaudeBorderLine reports whether the line is one of Claude Code's input-box
-// borders: composed only of '─' (U+2500), whitespace allowed around it. A line
-// that carries any other rune is not a border.
-func isClaudeBorderLine(line string) bool {
-	content := strings.TrimFunc(line, isJSWhitespace)
-	if content == "" {
-		return false
-	}
-	for _, r := range content {
-		if r != '─' {
-			return false
-		}
-	}
-	return true
+	return provider.ComposerRegion("pi", screen)
 }
 
 // claudeInputRegion returns the visible screen's lines between the two box
-// border lines Claude Code draws around its input box (isClaudeBorderLine,
-// chat history above, footer below). The borders are searched only in the
-// last 12 non-empty lines, where they must be the last two border lines: an
-// older separator higher in the history is not a box border, and one border
-// inside the window with the other above it forms no region. The pair also
-// has to hold the composer: the first non-empty line between the borders,
-// without its leading spaces, must start with ❯, and no line below the
-// bottom border may start with it — a ❯ below means the composer sits there,
-// and the '─' pair is a history separator or a table, not the box. ok is
-// false when the window holds fewer than two border lines or the pair fails
-// the composer check; the caller then keeps the last-15-lines behavior.
+// border lines Claude Code draws around its input box (chat history above,
+// footer below), with the shared provider's box recognition: the borders are
+// lines of '─' (U+2500) within the last 12 non-empty lines, where they must
+// be the last two border lines, and the pair has to hold the composer — the
+// first non-empty line between the borders, without its leading spaces,
+// starts with ❯ and no line below the bottom border may start with it (a ❯
+// below means the composer sits there and the '─' pair is a history
+// separator or a table, not the box). ok is false when the pair fails the
+// recognition; the caller then keeps the conservative behavior.
 func claudeInputRegion(visible string) ([]string, bool) {
-	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
-	nonEmpty := 0
-	start := len(lines)
-	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.TrimFunc(lines[i], isJSWhitespace) == "" {
-			continue
-		}
-		nonEmpty++
-		start = i
-		if nonEmpty == 12 {
-			break
-		}
-	}
-	borders := make([]int, 0, 2)
-	for i := len(lines) - 1; i >= start; i-- {
-		if isClaudeBorderLine(lines[i]) {
-			borders = append(borders, i)
-			if len(borders) == 2 {
-				break
-			}
-		}
-	}
-	if len(borders) < 2 {
-		return nil, false
-	}
-	// The composer guard: a '─' pair is the box only while the composer
-	// sits in it. The first non-empty line of the region must start with
-	// the composer prompt (❯, leading spaces allowed) and no line below
-	// the bottom border may start with it — a ❯ below puts the composer
-	// under the pair, which is a history separator or a table, not the
-	// box; the conservative last-15-lines rule keeps deciding instead.
-	firstInRegion := -1
-	for i := borders[1] + 1; i < borders[0]; i++ {
-		if strings.TrimFunc(lines[i], isJSWhitespace) != "" {
-			firstInRegion = i
-			break
-		}
-	}
-	if firstInRegion < 0 || !strings.HasPrefix(strings.TrimFunc(lines[firstInRegion], isJSWhitespace), "❯") {
-		return nil, false
-	}
-	for i := borders[0] + 1; i < len(lines); i++ {
-		if strings.HasPrefix(strings.TrimFunc(lines[i], isJSWhitespace), "❯") {
-			return nil, false
-		}
-	}
-	return lines[borders[1]+1 : borders[0]], true
+	return provider.ComposerRegion("claude", visible)
 }
 
 // claudeBoxScope is where a claude peer marker still counts as typed and
-// not sent: the box between the two border lines (claudeInputRegion) plus
-// every line below the bottom border. Below the real box sits only the
+// not sent: the box between the two border lines (the shared provider
+// recognition, claudeInputRegion) plus every line below the box's bottom
+// border that carries the full peer header. Below the real box sits only the
 // status footer, which never holds a peer marker; a composer drawn with
 // another prompt under a history '─' pair keeps its typed marker in scope,
 // so the check stays conservative.
 func claudeBoxScope(visible string) ([]string, bool) {
-	region, ok := claudeInputRegion(visible)
+	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
+	start, end, ok := provider.ComposerRegionBounds("claude", visible)
 	if !ok {
 		return nil, false
 	}
-	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
-	bottom := -1
-	for i := len(lines) - 1; i >= 0; i-- {
-		if isClaudeBorderLine(lines[i]) {
-			bottom = i
-			break
-		}
-	}
-	scope := append([]string{}, region...)
-	if bottom >= 0 {
-		// Below the box only a line with the full peer header counts: a bare
-		// #<id> in the status footer (a branch like topic/#0a1b2c3d) is not
-		// the typed message.
-		for _, line := range lines[bottom+1:] {
-			if strings.Contains(NormalizeScreen(line), NormalizeScreen("[herdr-soho:peer]")) {
-				scope = append(scope, line)
-			}
+	scope := append([]string{}, lines[start:end]...)
+	// Below the box only a line with the full peer header counts: a bare
+	// #<id> in the status footer (a branch like topic/#0a1b2c3d) is not
+	// the typed message.
+	for _, line := range lines[start:] {
+		if strings.Contains(NormalizeScreen(line), NormalizeScreen(PeerPrefix)) {
+			scope = append(scope, line)
 		}
 	}
 	return scope, true
 }
 
-// codexComposerRegion returns the visible screen's lines from the codex
-// composer to the end of the screen. The composer starts at the last line
-// whose text, without its left spaces, begins with "› " (U+203A space) or is
-// just "›", and that line must sit inside the last 8 non-empty screen lines.
-// ok is false when no such line is there; the caller then keeps the
-// whole-screen behavior. A taken message sits in the history above the
-// composer, so the composer region is what holds the prompt until it is
-// taken; this adapter hands the lines back like piInputRegion.
+// codexComposerRegion returns the visible screen's lines of the codex
+// composer input, with the shared provider's composer recognition: the
+// composer starts at the last line whose text, without its left spaces,
+// begins with "› " (U+203A space) or is just "›", and that line must sit
+// inside the last 8 non-empty screen lines; the region's end is what the
+// shared recognition reports (ComposerRegionBounds), which need not be the
+// end of the screen. ok is false when no such line is there; the caller
+// then keeps the conservative behavior. A taken message sits in the history
+// above the composer, so the composer region is what holds the prompt until
+// it is taken; this adapter hands the lines back like piInputRegion.
 func codexComposerRegion(visible string) ([]string, bool) {
-	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
-	nonEmpty := 0
-	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.TrimFunc(lines[i], isJSWhitespace) == "" {
-			continue
-		}
-		nonEmpty++
-		head := strings.TrimLeft(lines[i], " \t")
-		if head == "›" || strings.HasPrefix(head, "› ") {
-			// The first such line from the end is the last composer line.
-			return lines[i:], nonEmpty <= 8
-		}
-		if nonEmpty >= 8 {
-			break
+	return provider.ComposerRegion("codex", visible)
+}
+
+// peerEndLineIn reports whether the line is this message's closing line in
+// either form: the current "[/herdr-soho:peer] #<id> end of message" or the
+// legacy "[herdr-soho:peer] #<id> end of message". The match is anchored to
+// the whole line: after NormalizeScreen a real closing line is the marker
+// itself (with an optional leading history "›"), so a prose line, an
+// assistant bullet or a history echo that merely contains the marker is not
+// it. The id must be this message's exact id: an unrelated id, or a longer
+// id that only has this one as a prefix, is not this message's end. A quoted
+// line ("> ...") never counts: the quoted body of a peer message is payload,
+// and a closing marker quoted into it or glued onto its end without a line
+// break (the rc12 shape) is never positive receipt, however the terminal
+// drew it.
+func peerEndLineIn(line, id string) bool {
+	norm := NormalizeScreen(line)
+	if strings.HasPrefix(norm, ">") {
+		return false // quoted payload: a marker in it is part of the quoted body
+	}
+	for _, marker := range []string{PeerEndPrefix + "#" + id + "endofmessage", PeerPrefix + "#" + id + "endofmessage"} {
+		if norm == marker || norm == "›"+marker {
+			return true // the marker is the whole line (optional history "›")
 		}
 	}
-	return nil, false
+	return false
+}
+
+// isHexRune reports whether the rune is a hex digit. The message ids are hex,
+// so a hex digit right after one of them is a longer id, not the end of it.
+func isHexRune(r rune) bool {
+	return r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F'
+}
+
+// receiptLineIn reports whether the line carries a receipt marker of this
+// message: its closing line in either form (peerEndLineIn, anchored to the
+// whole line) or the opening of its header ("[herdr-soho:peer] #<id>"),
+// anchored the same way: after NormalizeScreen the real line starts with the
+// marker (an optional leading history "›" stripped), and the rune after the
+// opening id is not a hex digit, so a longer id that only has this one as a
+// prefix is not it. A quoted line never counts: the quoted body of a peer
+// message is payload and can carry a spoofed opening or closing line, no
+// matter how the terminal drew it. The id must be this message's exact id in
+// both: an unrelated id is not the receipt of this send. This is the marker
+// the recent-history gate of the proof window and the stalled check require:
+// a bare "#<id>" a reply, a footer, a prose line or another message can cite
+// is not it.
+func receiptLineIn(line, id string) bool {
+	norm := NormalizeScreen(line)
+	if !strings.HasPrefix(norm, ">") {
+		open := PeerPrefix + "#" + id
+		rest := strings.TrimPrefix(norm, "›")
+		if strings.HasPrefix(rest, open) {
+			after := rest[len(open):]
+			if after == "" || !isHexRune(rune(after[0])) {
+				return true // the header opens the line; the id is complete
+			}
+		}
+	}
+	return peerEndLineIn(line, id)
+}
+
+// receiptLineInText reports whether any line of a screen or a recent read
+// carries a receipt marker of this message (receiptLineIn).
+func receiptLineInText(text, id string) bool {
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		if receiptLineIn(line, id) {
+			return true
+		}
+	}
+	return false
 }
 
 // peerMessageInHistory reports that the visible screen shows this message's
-// peer prompt as a delivered codex turn: its header line, the `end of
-// message` line below it, and a codex turn line after that end line
-// (working, done, or the reply — the `•` lines). On codex a user message in
-// the history starts with `› ` just like the composer, and while the agent
-// works the real composer can be absent from the captured screen, so the
-// history's `›` line would otherwise pass for the composer and a delivered
-// message would read as still typed in the box (D15c). A composer line that
-// still holds this id after the end line means the prompt is typed in the
-// box (the Enter can still deliver it), and a prompt with no turn after its
-// end line — nothing but the status lines — keeps reading as the box.
+// peer prompt as a delivered codex turn: its closing line (peerEndLineIn,
+// either form) and a codex turn line after it (working, done, or the reply
+// — the `•` lines). The header is not required: a truncated screen can hold
+// the closing line and the turn with the header scrolled off, and the
+// closing line carries the exact id, so the end line alone is the receipt.
+// On codex a user message in the history starts with `› ` just like the
+// composer, and while the agent works the real composer can be absent from
+// the captured screen, so the history's `›` line would otherwise pass for
+// the composer and a delivered message would read as still typed in the box
+// (D15c). A composer line that still holds this message's typed prompt after
+// the end line means the prompt is in the box (the Enter can still deliver
+// it), and a prompt with no turn after its end line — nothing but the status
+// lines — keeps reading as the box.
 func peerMessageInHistory(visible, id string) bool {
 	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
-	header := PeerPrefix + " #" + id
-	end := PeerEndLine(id)
+	headerNorm := NormalizeScreen(PeerPrefix + " #" + id)
 	for i, line := range lines {
-		if !strings.Contains(line, header) || strings.Contains(line, "end of message") {
+		if !peerEndLineIn(line, id) {
 			continue
 		}
-		for j := i + 1; j < len(lines); j++ {
-			if !strings.Contains(lines[j], end) {
-				continue
+		delivered := false
+		for _, below := range lines[i+1:] {
+			belowNorm := NormalizeScreen(below)
+			head := strings.TrimLeft(belowNorm, " \t")
+			if strings.HasPrefix(head, "›") && strings.Contains(belowNorm, headerNorm) {
+				return false // the composer below still holds the typed prompt
 			}
-			delivered := false
-			for _, below := range lines[j+1:] {
-				belowNorm := NormalizeScreen(below)
-				head := strings.TrimLeft(belowNorm, " \t")
-				if strings.HasPrefix(head, "›") && strings.Contains(belowNorm, NormalizeScreen(header)) {
-					return false // the composer below still holds the typed prompt
-				}
-				if strings.HasPrefix(head, "•") {
-					delivered = true
-				}
+			if strings.HasPrefix(head, "•") {
+				delivered = true
 			}
-			if delivered {
-				return true
-			}
+		}
+		if delivered {
+			return true
 		}
 	}
 	return false
@@ -1524,72 +1602,96 @@ func peerMessageInHistory(visible, id string) bool {
 
 // messageStillInScreen reports whether the visible screen still holds the
 // message's marker, meaning the prompt is typed but not taken yet. For a pi
-// target the marker only counts inside the input box, for a claude target only
-// inside the box between its two border lines, and for a codex target only
-// inside the composer region: a taken message stays in the chat history, which
-// is part of the visible screen. A peer message shown as a delivered codex
-// turn (peerMessageInHistory) counts as taken, not held. Without two box
-// borders, the claude borders or the composer line, and for every other kind,
-// the whole visible screen still counts.
+// target the marker only counts inside the input box, for a claude target
+// inside its box scope (claudeBoxScope), and for a codex target inside the
+// composer region: the shared provider recognition of the kind's composer,
+// so a taken message stays in the chat history, which is part of the visible
+// screen. A peer message shown as a delivered codex turn
+// (peerMessageInHistory) counts as taken, not held. Without the recognized
+// composer, and for every other kind, the whole visible screen still counts:
+// unknown input stays conservative and is never positive receipt.
 func messageStillInScreen(kind, visible, endLine, id string) bool {
 	if kind == "codex" && peerMessageInHistory(visible, id) {
 		return false
 	}
-	if kind == "pi" {
-		if lines, ok := piInputRegion(visible); ok {
-			region := NormalizeScreen(strings.Join(lines, "\n"))
-			return strings.Contains(region, NormalizeScreen("#"+id)) || strings.Contains(region, NormalizeScreen(endLine))
-		}
-	}
+	var lines []string
+	var ok bool
 	if kind == "claude" {
-		if lines, ok := claudeBoxScope(visible); ok {
-			region := NormalizeScreen(strings.Join(lines, "\n"))
-			return strings.Contains(region, NormalizeScreen("#"+id)) || strings.Contains(region, NormalizeScreen(endLine))
-		}
+		lines, ok = claudeBoxScope(visible)
+	} else {
+		lines, ok = provider.ComposerRegion(kind, visible)
 	}
-	if kind == "codex" {
-		if lines, ok := codexComposerRegion(visible); ok {
-			region := NormalizeScreen(strings.Join(lines, "\n"))
-			return strings.Contains(region, NormalizeScreen("#"+id)) || strings.Contains(region, NormalizeScreen(endLine))
-		}
+	if ok {
+		region := NormalizeScreen(strings.Join(lines, "\n"))
+		return strings.Contains(region, NormalizeScreen("#"+id)) || strings.Contains(region, NormalizeScreen(endLine))
 	}
 	visibleNorm := NormalizeScreen(visible)
 	return strings.Contains(visibleNorm, NormalizeScreen(endLine)) || strings.Contains(visibleNorm, NormalizeScreen("#"+id))
 }
 
-// idInInputBox reports the message's id in the screen's input area. For a pi
-// target the id must sit between the box borders, for a claude target inside
-// the box between its two border lines, and for a codex target inside the
-// composer region, before an Enter goes to a busy agent; without borders, the
-// claude borders or the composer line, and for every other kind, the last 15
-// lines still count as before. A peer message shown as a delivered codex turn
-// (peerMessageInHistory) is history, not the input area, so it never counts
-// as in the box.
+// idInInputBox reports whether a retry Enter may go to this screen for this
+// message: only a recognized actual composer (the shared provider recognition
+// for the kind — pi's input box, the claude box scope, the codex composer
+// region) holding this exact message's header (composerHeaderLineIn: a line
+// that opens with "[herdr-soho:peer] #<id>", unquoted, the id complete — a
+// hex digit right after it is a longer id, not this one) licenses the key.
+// A marker in a footer or in older history sits outside the recognized
+// composer; an unrecognized layout, an unknown kind, and a known
+// trust/approval/question UI (provider.DialogUI) refuse it the same way.
+// Uncertainty is not permission to press Enter: without the recognized
+// composer there is no Enter — the last-fifteen-lines fallback is gone. A
+// peer message shown as a delivered codex turn (peerMessageInHistory) is
+// history, not the input area, so it never counts as in the box.
 func idInInputBox(kind, visible, id string) bool {
+	if id == "" {
+		return false
+	}
+	// A known trust, approval, or question UI takes the Enter as its answer:
+	// the shared classifier refuses it, as the startup and dialog checks do.
+	if provider.DialogUI(kind, visible) != "" {
+		return false
+	}
 	if kind == "codex" && peerMessageInHistory(visible, id) {
 		return false
 	}
-	if kind == "pi" {
-		if lines, ok := piInputRegion(visible); ok {
-			return strings.Contains(NormalizeScreen(strings.Join(lines, "\n")), NormalizeScreen("#"+id))
-		}
-	}
+	var lines []string
+	var ok bool
 	if kind == "claude" {
-		if lines, ok := claudeBoxScope(visible); ok {
-			return strings.Contains(NormalizeScreen(strings.Join(lines, "\n")), NormalizeScreen("#"+id))
-		}
+		lines, ok = claudeBoxScope(visible)
+	} else {
+		lines, ok = provider.ComposerRegion(kind, visible)
 	}
-	if kind == "codex" {
-		if lines, ok := codexComposerRegion(visible); ok {
-			return strings.Contains(NormalizeScreen(strings.Join(lines, "\n")), NormalizeScreen("#"+id))
-		}
+	if !ok {
+		return false
 	}
-	for _, line := range TailLines(visible, 15) {
-		if strings.Contains(NormalizeScreen(line), NormalizeScreen("#"+id)) {
+	for _, line := range lines {
+		if composerHeaderLineIn(line, id) {
 			return true
 		}
 	}
 	return false
+}
+
+// composerHeaderLineIn reports whether a line of a recognized composer
+// region is this message's header opening: after NormalizeScreen, with an
+// optional leading composer prompt glyph (the claude "❯" or the codex "›")
+// stripped, the line starts with "[herdr-soho:peer] #<id>" and the rune
+// right after the id is not a hex digit, so a longer id that only has this
+// one as a prefix is not it. A quoted line ("> ...") never counts: the
+// quoted body of a peer message is payload and can carry a spoofed header,
+// no matter how the terminal drew it.
+func composerHeaderLineIn(line, id string) bool {
+	norm := NormalizeScreen(line)
+	if strings.HasPrefix(norm, ">") {
+		return false // quoted payload: a header in it is part of the quoted body
+	}
+	rest := strings.TrimPrefix(strings.TrimPrefix(norm, "❯"), "›")
+	open := PeerPrefix + "#" + id
+	if !strings.HasPrefix(rest, open) {
+		return false
+	}
+	after := rest[len(open):]
+	return after == "" || !isHexRune(rune(after[0]))
 }
 
 // steeringQueued reports a visible pi queue line (`Steering: …`) that holds
@@ -1622,16 +1724,19 @@ func claudeQueued(visible, id string) bool {
 // codexQueued reports a visible codex follow-up queue line above the
 // composer: a line whose text, without its left spaces, begins with "↳"
 // (U+21B3) and holds this message's id. The message is enqueued for a later
-// turn, not delivered yet. Without a composer line the whole visible screen
-// is searched, as the pi and claude queue checks do.
+// turn, not delivered yet. The "above the composer" bound is the actual
+// composer start from the shared recognition (ComposerRegionBounds), not a
+// length derived from the region — the region need not run to the screen
+// end, so only lines strictly before that start count as the queue. Without
+// a recognized composer, no line proves a queued receipt.
 func codexQueued(visible, id string) bool {
 	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
-	end := len(lines)
-	if region, ok := codexComposerRegion(visible); ok {
-		end = len(lines) - len(region)
+	start, _, ok := provider.ComposerRegionBounds("codex", visible)
+	if !ok {
+		start = 0
 	}
 	want := NormalizeScreen("#" + id)
-	for _, line := range lines[:end] {
+	for _, line := range lines[:start] {
 		head := strings.TrimLeft(NormalizeScreen(line), " \t")
 		if strings.HasPrefix(head, "↳") && strings.Contains(head, want) {
 			return true
@@ -1659,6 +1764,7 @@ func CmdFind(argv []string, env platform.Env) int {
 	words := []string{}
 	machines := []string{sessionref.LocalMachine}
 	all, jsonOutput := false, false
+	timeoutMS := 0
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
 		switch a {
@@ -1668,29 +1774,29 @@ func CmdFind(argv []string, env platform.Env) int {
 			jsonOutput = true
 		case "--machine":
 			if i+1 >= len(argv) || argv[i+1] == "" || strings.HasPrefix(argv[i+1], "--") {
-				platform.DieFriction("usage: find [search words] [--machine <label>]... [--all] [--json]", 2)
+				platform.DieFriction("usage: find [search words] [--machine <label>]... [--all] [--json] [--timeout MS]", 2)
 			}
 			i++
 			if !contains(machines, argv[i]) {
 				machines = append(machines, argv[i])
 			}
+		case "--timeout":
+			// Rejected before any herdr invocation: an invalid deadline must
+			// not cost a single subprocess.
+			if i+1 >= len(argv) || argv[i+1] == "" || strings.HasPrefix(argv[i+1], "--") {
+				platform.DieFriction("find: --timeout expects the deadline in milliseconds (a positive integer)", 2)
+			}
+			i++
+			if n, ok := parsePositiveInt(argv[i]); !ok {
+				platform.DieFriction("find: --timeout expects the deadline in milliseconds (a positive integer)", 2)
+			} else {
+				timeoutMS = n
+			}
 		default:
 			if strings.HasPrefix(a, "--") {
-				platform.DieFriction("usage: find [search words] [--machine <label>]... [--all] [--json]", 2)
+				platform.DieFriction("usage: find [search words] [--machine <label>]... [--all] [--json] [--timeout MS]", 2)
 			}
 			words = append(words, a)
-		}
-	}
-	if all {
-		list, cause := MachineList(SnapshotOptions{Env: env})
-		if cause != "" {
-			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: find: machine list failed: %s\n", cause)
-		} else {
-			for _, m := range list {
-				if m.Enabled && !contains(machines, m.Label) {
-					machines = append(machines, m.Label)
-				}
-			}
 		}
 	}
 	if len(words) == 1 {
@@ -1698,24 +1804,30 @@ func CmdFind(argv []string, env platform.Env) int {
 			machines = append(machines, ref.Machine)
 		}
 	}
-	result := FetchSessions(machines, SnapshotOptions{Env: env})
-	for _, failure := range result.Failures {
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: find: machine '%s' unavailable: %s\n", failure.Machine, failure.Cause)
-	}
-	matched := MatchEntries(result.Entries, words)
-	for _, e := range matched {
-		if jsonOutput {
-			_, _ = fmt.Fprintln(platform.Stdout, jsonjs.Stringify(entryJSON(e)))
-		} else {
-			_, _ = fmt.Fprintf(platform.Stdout, "%s\n", strings.Join([]string{tsv(e.Ref), tsv(e.Name), tsv(e.Kind), tsv(e.Status), tsv(e.WorkspaceLabel), tsv(e.TabLabel), tsv(e.Cwd)}, "\t"))
+	// Progressive discovery: the local rows are published before the
+	// enumeration, each remote machine's rows as it completes, all under one
+	// global deadline (DiscoverTimeoutMS without --timeout).
+	result := DiscoverSessions(DiscoverOptions{Env: env, Machines: machines, All: all, TimeoutMS: timeoutMS}, func(batch SessionResult) {
+		for _, failure := range batch.Failures {
+			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: find: machine '%s' unavailable: %s\n", failure.Machine, failure.Cause)
 		}
+		for _, e := range MatchEntries(batch.Entries, words) {
+			if jsonOutput {
+				_, _ = fmt.Fprintln(platform.Stdout, jsonjs.Stringify(entryJSON(e)))
+			} else {
+				_, _ = fmt.Fprintf(platform.Stdout, "%s\n", strings.Join([]string{tsv(e.Ref), tsv(e.Name), tsv(e.Kind), tsv(e.Status), tsv(e.WorkspaceLabel), tsv(e.TabLabel), tsv(e.Cwd)}, "\t"))
+			}
+		}
+	})
+	if result.ListCause != "" {
+		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: find: machine list failed: %s\n", result.ListCause)
 	}
 	for _, f := range result.Failures {
 		if f.Machine == sessionref.LocalMachine {
 			return 4
 		}
 	}
-	if len(matched) > 0 {
+	if len(MatchEntries(result.Entries, words)) > 0 {
 		return 0
 	}
 	return 1

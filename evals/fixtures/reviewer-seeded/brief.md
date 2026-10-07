@@ -8,8 +8,10 @@ Review `change.diff` against the supplied `base/` file. Report concrete defects 
 
 ## Decisions already made
 
-- Treat `change.diff` as a unified diff against `base/transfer.mjs`; the changed file path is `base/transfer.mjs` and post-change line numbers are unchanged by this patch.
-- `amount` is a finite number expressed in whole-or-fractional transfer units; valid transfers require an amount greater than zero.
+- Treat `change.diff` as a unified diff against `base/transfer.go`; the changed file path is `base/transfer.go` and post-change line numbers are unchanged by this patch.
+- The module is `reviewer-seeded` (Go 1.25, stdlib only); the entry point is `base.Transfer(Options)`, where `Options` carries `Actor *Actor`, `Account *Account`, `Amount float64`, and `Ledger Ledger`.
+- The immutable contract: `Actor` and `Account` are required; `Amount` is a finite number expressed in whole-or-fractional transfer units and a valid transfer requires an amount greater than zero; `Account.OwnerID` must equal `Actor.ID`; and a correct transfer calls `Ledger.Debit(Actor.ID, Amount)` then `Ledger.Credit(Account.ID, Amount)` with exactly the same amount.
+- Contract violations are returned errors (`base.ErrRequired`, `base.ErrAmount`, `base.ErrNotAuthorized`), not panics.
 - Report findings individually. A finding matches a seeded defect only when its location and failure mechanism identify the same defect; paraphrase is acceptable.
 - Use severity where P0 is catastrophic, P1 is high impact, P2 is moderate impact, and P3 is low impact. Do not claim execution without a captured command/test result.
 - Do not edit the fixture. No external service, credentials, or additional files are needed.

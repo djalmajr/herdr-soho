@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/djalmajr/herdr-soho/internal/collaboration"
+	"github.com/djalmajr/herdr-soho/internal/communication"
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
@@ -131,6 +133,7 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 		}
 	}
 	rc := 0
+	workspaceEnv := derivedWorkspaceEnv(ctx, env, cwd)
 	for _, agent := range argv {
 		report := core.LastReport(sd, agent)
 		// F11: a recorded compact phase outranks every other state, including a
@@ -147,6 +150,18 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 					rc = code
 				}
 				fmt.Fprint(platform.Stdout, out)
+				continue
+			}
+			// An active collaboration outranks the usual state, including a
+			// stale complete report: while its assignment is active the
+			// participants are still working, so the old report is an artifact
+			// only. An unreadable or unverifiable registration and an off or
+			// unreadable policy are visible (code 4), never the report's done.
+			if cs, ok := readCollaboration(sd, field(strings.Split(line, "\t"), 1), ctx, workspaceEnv); ok {
+				printCollaborationStatus(agent, cs, report)
+				if cs.code != 0 && (rc == 0 || WaitRank(cs.code) > WaitRank(rc)) {
+					rc = cs.code
+				}
 				continue
 			}
 		}
@@ -326,6 +341,133 @@ func compactPhaseStatusLine(rosterLine, sd, agent string, env platform.Env) (str
 		return fmt.Sprintf("%s\tcompact-unknown\t\t%s\t-\t-\n", agent, cause), 4, true
 	}
 }
+
+// collaborationState is the result of readCollaboration for one pane: the
+// line to print (collaborating, collaboration-unavailable or
+// collaboration-disabled), the exit code (0 active, 4 the two failures), the
+// assignment when active and the last event's delivery.
+type collaborationState struct {
+	state    string
+	code     int
+	cause    string
+	assign   *collaboration.Assignment
+	delivery string
+}
+
+// readCollaboration reports the active collaboration of the agent's roster
+// pane (if any): its participants verified against the live roster and
+// Herdr, and the worker_messages mode read from the single policy engine
+// (communication.Load, used only for the mode). env is a function so the
+// HERDR_WORKSPACE_ID derivation (at most one herdr call) happens only when
+// an active collaboration actually exists. ok is false when no active
+// collaboration hosts the pane: the usual state logic then stands, and an
+// agent without a pane never reaches the collaboration store.
+func readCollaboration(sd, pane string, ctx *core.Config, env func() platform.Env) (collaborationState, bool) {
+	if pane == "" {
+		return collaborationState{}, false
+	}
+	store := collaboration.Store{StateDir: sd}
+	a, err := store.ActiveFor(pane)
+	if err != nil {
+		return collaborationState{state: "collaboration-unavailable", code: 4, cause: err.Error()}, true
+	}
+	if a == nil {
+		return collaborationState{}, false
+	}
+	callerEnv := env()
+	if err := collaboration.CheckParticipants(*a, sd, callerEnv); err != nil {
+		// The assignment is kept in the state (and in the view exported for
+		// collect) when it was read: even a failing identity check or an off
+		// policy names the collaboration the pane is hosting.
+		return collaborationState{state: "collaboration-unavailable", code: 4, cause: err.Error(), assign: a}, true
+	}
+	pol, err := communication.Load(ctx, callerEnv)
+	if err != nil {
+		return collaborationState{state: "collaboration-disabled", code: 4, cause: err.Error(), assign: a}, true
+	}
+	if pol.Mode != communication.ModePolicy {
+		return collaborationState{state: "collaboration-disabled", code: 4, cause: "worker_messages is " + pol.Mode, assign: a}, true
+	}
+	return collaborationState{state: "collaborating", assign: a, delivery: lastEventDelivery(a)}, true
+}
+
+// lastEventDelivery names the delivery of the assignment's last event, or
+// none before any event exists.
+func lastEventDelivery(a *collaboration.Assignment) string {
+	if len(a.Events) == 0 {
+		return "none"
+	}
+	return a.Events[len(a.Events)-1].Delivery
+}
+
+// printCollaborationStatus prints the collaboration line in the JSON form
+// the decision asks for, with the stale report carried as an artifact only:
+// the active line names the assignment, phase, round, revision and the last
+// delivery; the failures carry the cause.
+func printCollaborationStatus(agent string, cs collaborationState, report string) {
+	switch cs.state {
+	case "collaborating":
+		statusJson(agent, "collaborating", report, "assignment", cs.assign.ID, "phase", cs.assign.Phase, "round", cs.assign.Round, "revision", cs.assign.Revision, "delivery", cs.delivery)
+	case "collaboration-unavailable":
+		statusJson(agent, "collaboration-unavailable", report, "cause", cs.cause)
+	default:
+		statusJson(agent, "collaboration-disabled", report, "cause", cs.cause)
+	}
+}
+
+// CollaborationView is the read-only collaboration inspection shared by
+// status, wait and collect: the active assignment of the agent's roster
+// pane (if any), with its participants verified against the live roster and
+// Herdr and the worker_messages mode read from the single policy engine
+// (communication.Load). The assignment is kept even when the state is a
+// failure, whenever it was read, so a caller can still name the
+// collaboration. env is a function so the HERDR_WORKSPACE_ID derivation
+// (at most one herdr call) happens only on first use.
+type CollaborationView struct {
+	State      string                    // "collaborating", "collaboration-unavailable" or "collaboration-disabled"
+	Code       int                       // 0 when collaborating, 4 for the two failures
+	Cause      string                    // the failure cause
+	Assignment *collaboration.Assignment // the valid assignment, whenever it was read
+	Delivery   string                    // the last event's delivery, or "none"
+}
+
+// CollaborationViewForPane exports readCollaboration for collect: the same
+// read-only inspection (Store.ActiveFor, CheckParticipants and
+// communication.Load for the mode only), never mutating collaboration
+// state. ok is false when no active collaboration hosts the pane: the
+// caller's usual logic then stands.
+func CollaborationViewForPane(sd, pane string, ctx *core.Config, env func() platform.Env) (CollaborationView, bool) {
+	cs, ok := readCollaboration(sd, pane, ctx, env)
+	if !ok {
+		return CollaborationView{}, false
+	}
+	return CollaborationView{State: cs.state, Code: cs.code, Cause: cs.cause, Assignment: cs.assign, Delivery: cs.delivery}, true
+}
+
+// DerivedWorkspaceEnv yields the env the collaboration helpers take: the
+// caller's env when it already carries HERDR_WORKSPACE_ID, else a clone with
+// the id derived once via core.WorkspaceID (like the rest of the CLI). The
+// caller's env is never mutated and the derivation runs at most once per
+// command, on first use.
+func DerivedWorkspaceEnv(ctx *core.Config, env platform.Env, cwd string) func() platform.Env {
+	if env.Get("HERDR_WORKSPACE_ID") != "" {
+		return func() platform.Env { return env }
+	}
+	var derived platform.Env
+	return func() platform.Env {
+		if derived == nil {
+			clone := env.Clone()
+			clone["HERDR_WORKSPACE_ID"] = core.WorkspaceID(ctx, env, cwd)
+			derived = clone
+		}
+		return derived
+	}
+}
+
+func derivedWorkspaceEnv(ctx *core.Config, env platform.Env, cwd string) func() platform.Env {
+	return DerivedWorkspaceEnv(ctx, env, cwd)
+}
+
 func markerRead(sd, agent, name string) string {
 	value, _ := platform.ReadTextFile(filepath.Join(sd, "wait", agent+"."+name))
 	return value

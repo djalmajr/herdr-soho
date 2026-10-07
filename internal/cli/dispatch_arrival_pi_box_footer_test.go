@@ -24,11 +24,8 @@ func piBoxWithFooter(boxLine string) string {
 		"↑160k ↓70k R8.8M CH99.9% 59.5%/262k (auto)       model-x • high\n"
 }
 
-// TestDispatchIdlePiInputRegionWithFooter pins composedPathSeenOutsideInput to
-// pi's real input region: with the two borders, "outside the input box" is
-// "outside the region between them" (the 2-line footer below the box counts
-// as outside), so a prompt typed in the box never closes the dispatch as
-// received; without the borders the last-3-lines heuristic stands.
+// A path in pi's current input can authorize one bounded Enter. History,
+// status footer and unrecognized layout alone never prove submission.
 func TestDispatchIdlePiInputRegionWithFooter(t *testing.T) {
 	base := time.Date(2026, 10, 1, 16, 35, 25, 0, time.Local)
 	began := time.Now()
@@ -62,6 +59,9 @@ func TestDispatchIdlePiInputRegionWithFooter(t *testing.T) {
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stdout: screen},
 			fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, ArgvPrefix: true},
 		)
+		// The region rules are kind-aware: the target's row is pi, so the
+		// borders (when present) are the recognized composer region.
+		arrivalRosterKind(t, f, "pi")
 		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "100"
 		return f
 	}
@@ -89,13 +89,13 @@ func TestDispatchIdlePiInputRegionWithFooter(t *testing.T) {
 			t.Fatalf("prompt attempts=%d, want no resend; calls=%#v", got, calls)
 		}
 	})
-	t.Run("the prompt in the history above the box closes received", func(t *testing.T) {
+	t.Run("the prompt in the history above the box keeps receipt uncertain", func(t *testing.T) {
 		composed := composedName()
 		screen := "history: Read the file " + composed + " in full and execute it.\n" +
 			piBoxWithFooter("continuing the previous step")
 		f := newFixture(t, screen)
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
-		if code != 0 || dispatchOutputStatus(t, out) != "submitted" {
+		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 		calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
@@ -109,7 +109,7 @@ func TestDispatchIdlePiInputRegionWithFooter(t *testing.T) {
 			t.Fatalf("prompt attempts=%d, want no resend; calls=%#v", got, calls)
 		}
 	})
-	t.Run("without the separators the last-3 heuristic still closes received", func(t *testing.T) {
+	t.Run("without the separators a path above the last three lines is uncertain", func(t *testing.T) {
 		composed := composedName()
 		screen := "old work output\n" +
 			"Read the file " + composed + " in full and execute it.\n" +
@@ -119,11 +119,17 @@ func TestDispatchIdlePiInputRegionWithFooter(t *testing.T) {
 			"line d\n"
 		f := newFixture(t, screen)
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
-		if code != 0 || dispatchOutputStatus(t, out) != "submitted" {
+		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
-	t.Run("without the separators the path in the last 3 lines follows the Enter path", func(t *testing.T) {
+	t.Run("without the separators the path in the last 3 lines keeps the delivery uncertain", func(t *testing.T) {
+		// Adapted contract: without pi's borders the screen carries no
+		// recognized composer for the pi target, and a path in the last 3
+		// lines may be a typed prompt — not positive proof. The dispatch
+		// sends no Enter (it would be an unconfirmed input) and no resend
+		// (the path is visible on the screen): it ends not-received and
+		// leaves the pane to be read.
 		composed := composedName()
 		screen := "h1\n" +
 			"h2\n" +
@@ -134,15 +140,18 @@ func TestDispatchIdlePiInputRegionWithFooter(t *testing.T) {
 		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 		}
-		if !strings.Contains(errText, "sat in the input box; sent Enter") {
-			t.Fatalf("the stuck-in-input path was not followed: stderr=%q", errText)
+		if !strings.Contains(errText, "after an unconfirmed input region") {
+			t.Fatalf("the uncertain cause is missing: stderr=%q", errText)
 		}
 		calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := countDispatchCalls(calls, "send-keys"); got != 1 {
-			t.Fatalf("send-keys calls=%d, want exactly one Enter; calls=%#v", got, calls)
+		if got := countDispatchCalls(calls, "send-keys"); got != 0 {
+			t.Fatalf("send-keys calls=%d, want none (an unconfirmed input gets no Enter); calls=%#v", got, calls)
+		}
+		if got := countDispatchCalls(calls, "prompt"); got != 1 {
+			t.Fatalf("prompt attempts=%d, want 1 (the visible path keeps the delivery uncertain, no resend); calls=%#v", got, calls)
 		}
 	})
 }

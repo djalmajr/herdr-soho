@@ -2,7 +2,6 @@ package text
 
 import (
 	"sort"
-	"strings"
 	"unicode"
 	"unicode/utf8"
 )
@@ -19,13 +18,14 @@ func ASCIILower(value string) string {
 }
 
 // JSLower matches String.prototype.toLowerCase, including full mappings and final sigma.
+// The mappings and the final-sigma context come from the generated Unicode
+// 17.0.0 tables (lowercase17_table.go), not from the Go standard library's
+// version-dependent Unicode data.
 func JSLower(value string) string {
 	runes := []rune(value)
 	var result []rune
 	for i, r := range runes {
 		switch r {
-		case '\u0130':
-			result = append(result, 'i', '\u0307')
 		case '\u03a3':
 			if hasCasedBefore(runes, i) && !hasCasedAfter(runes, i+1) {
 				result = append(result, '\u03c2')
@@ -33,7 +33,11 @@ func JSLower(value string) string {
 				result = append(result, '\u03c3')
 			}
 		default:
-			result = append(result, unicode.ToLower(r))
+			if mapped, ok := jslower17[r]; ok {
+				result = append(result, []rune(mapped)...)
+			} else {
+				result = append(result, r)
+			}
 		}
 	}
 	return string(result)
@@ -102,11 +106,11 @@ func hasCasedAfter(runes []rune, index int) bool {
 }
 
 func isCased(r rune) bool {
-	return unicode.Is(unicode.Lu, r) || unicode.Is(unicode.Ll, r) || unicode.Is(unicode.Lt, r) || unicode.Is(unicode.Other_Uppercase, r) || unicode.Is(unicode.Other_Lowercase, r)
+	return unicode.Is(cased17Table, r)
 }
 
 func isCaseIgnorable(r rune) bool {
-	return unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Lm, r) || unicode.Is(unicode.Sk, r) || strings.ContainsRune("'\u002e\u003a\u00ad\u00b7\u0387\u055f\u05f4\u2018\u2019\u2024\u2027\ufe13\ufe52\ufe55\uff07\uff0e\uff1a", r)
+	return unicode.Is(caseIgnorable17Table, r)
 }
 
 // ToWellFormedUTF8 replaces WTF-8 encodings of lone UTF-16 surrogates with U+FFFD,

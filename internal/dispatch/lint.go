@@ -159,15 +159,21 @@ func briefHeadingTitle(line string) (string, bool) {
 	return line[i:], true
 }
 
+// BriefSectionTitleMatches shares the lint and ownership heading rules,
+// including strict Portuguese boundaries and explicitly configured aliases.
+func BriefSectionTitleMatches(title, label string, aliases map[string][]string) bool {
+	return startsWithHeadingPrefix(title, briefSectionHeadings[label], false) ||
+		startsWithHeadingPrefix(title, briefSectionPortugueseHeadings[label], true) ||
+		startsWithHeadingPrefix(title, aliases[label], false)
+}
+
 func hasBriefSectionHeading(body, label string, aliases map[string][]string) bool {
 	for _, line := range strings.Split(body, "\n") {
 		title, ok := briefHeadingTitle(line)
 		if !ok {
 			continue
 		}
-		if startsWithHeadingPrefix(title, briefSectionHeadings[label], false) ||
-			startsWithHeadingPrefix(title, briefSectionPortugueseHeadings[label], true) ||
-			startsWithHeadingPrefix(title, aliases[label], false) {
+		if BriefSectionTitleMatches(title, label, aliases) {
 			return true
 		}
 	}

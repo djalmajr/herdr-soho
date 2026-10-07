@@ -184,7 +184,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		// No sign of the id on the visible screen: today's path presses nothing.
@@ -210,7 +210,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if enters := countEnters(t, f); enters != 0 {
@@ -235,7 +235,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if enters := countEnters(t, f); enters != 0 {
@@ -259,7 +259,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, assistantLine)
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if !<-done {
@@ -282,7 +282,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		// Exactly today's message: no new warning for the absent transcript.
-		want := "herdr-soho: send: local/w0test:p0a did not take the message (no sign of it in its state or screen); read its pane before sending again\n"
+		want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -306,7 +306,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if gets := countGets(t, f); gets != 6 {

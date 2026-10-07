@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
@@ -13,8 +14,15 @@ import (
 )
 
 type gridResult struct {
-	Ok      bool
+	Ok bool
+	// Changes lists the ids that a successful move re-idi'd: the old id and
+	// the actual returned id. It is an id-change list, not a move-success
+	// list: a successful move that keeps the same pane id appears only in
+	// Moved.
 	Changes [][2]string
+	// Moved lists, in move order, the pre-move id of every successful grid
+	// move, including moves that returned the same pane id.
+	Moved []string
 }
 
 func ratio4(n int) string { return fmt.Sprintf("%.4f", math.Round((1/float64(n))*10000)/10000) }
@@ -31,6 +39,7 @@ func buildGrid(tab string, cells []string, env platform.Env) gridResult {
 		idx += n
 	}
 	changes := [][2]string{}
+	moved := []string{}
 	note := func(i int, m herdr.PaneMoveResult) {
 		if m.Pane != "" && m.Pane != ids[i] {
 			changes = append(changes, [2]string{ids[i], m.Pane})
@@ -42,8 +51,9 @@ func buildGrid(tab string, cells []string, env platform.Env) gridResult {
 		i := heads[c]
 		m := moveInTab(ids[i], tab, "right", prev, ratio4(g.Cols-c+1), env)
 		if !m.Ok {
-			return gridResult{false, changes}
+			return gridResult{Ok: false, Changes: changes, Moved: moved}
 		}
+		moved = append(moved, ids[i])
 		note(i, m)
 		prev = ids[i]
 	}
@@ -54,41 +64,246 @@ func buildGrid(tab string, cells []string, env platform.Env) gridResult {
 			idx++
 			m := moveInTab(ids[idx], tab, "down", prev, ratio4(n-j+1), env)
 			if !m.Ok {
-				return gridResult{false, changes}
+				return gridResult{Ok: false, Changes: changes, Moved: moved}
 			}
+			moved = append(moved, ids[idx])
 			note(idx, m)
 			prev = ids[idx]
 		}
 	}
-	return gridResult{true, changes}
+	return gridResult{Ok: true, Changes: changes, Moved: moved}
 }
-func applyGrid(ctx *core.Config, tab string, cells []string, env platform.Env, cwd string) bool {
+
+// gridApply runs the grid moves and, after every successful move — even when
+// a later move fails — records the returned pane ids in the roster. It
+// reports the successful id changes, the pre-move id of every successful
+// move (including unchanged-id moves), and whether the whole grid completed.
+func gridApply(ctx *core.Config, tab string, cells []string, env platform.Env, cwd string) ([][2]string, []string, bool) {
 	r := buildGrid(tab, cells, env)
-	if !r.Ok {
-		return false
-	}
 	dir := core.StateDirPath(ctx, env, cwd)
 	for _, change := range r.Changes {
 		core.RosterReplacePane(dir, change[0], change[1])
 	}
-	return true
+	return r.Changes, r.Moved, r.Ok
 }
-func parkPanes(panes []string, env platform.Env) (bool, string) {
+func applyGrid(ctx *core.Config, tab string, cells []string, env platform.Env, cwd string) bool {
+	_, _, ok := gridApply(ctx, tab, cells, env, cwd)
+	return ok
+}
+
+// parkPanesTracked parks the panes in a temporary herd-park tab. It returns
+// the actual pane ids after every successful move (a move can re-id the
+// pane), the park tab, and whether all the moves succeeded. When dir is
+// non-empty every successful move is recorded in the roster before the next
+// one is attempted, so a later failure cannot leave stale ids in state.
+func parkPanesTracked(dir string, panes []string, env platform.Env) ([]string, string, bool) {
 	if len(panes) == 0 {
-		return false, ""
+		return []string{}, "", false
 	}
 	first := panes[0]
 	m := herdr.PaneMove([]string{first, "--new-tab", "--label", "herd-park", "--no-focus"}, env)
 	if !m.Ok || m.Tab == "" {
-		return false, ""
+		return append([]string(nil), panes...), "", false
+	}
+	parked := []string{first}
+	if m.Pane != "" && m.Pane != first {
+		if dir != "" {
+			core.RosterReplacePane(dir, first, m.Pane)
+		}
+		parked[0] = m.Pane
 	}
 	for _, pane := range panes[1:] {
-		r := herdr.PaneMove([]string{pane, "--tab", m.Tab, "--split", "down", "--target-pane", first, "--ratio", "0.5", "--no-focus"}, env)
+		r := herdr.PaneMove([]string{pane, "--tab", m.Tab, "--split", "down", "--target-pane", parked[0], "--ratio", "0.5", "--no-focus"}, env)
 		if !r.Ok {
-			return false, m.Tab
+			return parked, m.Tab, false
+		}
+		next := pane
+		if r.Pane != "" && r.Pane != pane {
+			if dir != "" {
+				core.RosterReplacePane(dir, pane, r.Pane)
+			}
+			next = r.Pane
+		}
+		parked = append(parked, next)
+	}
+	return parked, m.Tab, true
+}
+func parkPanes(panes []string, env platform.Env) (bool, string) {
+	_, tab, ok := parkPanesTracked("", panes, env)
+	return ok, tab
+}
+
+// callerContext resolves the caller's actual tab and pane and reports a
+// refusal reason. A non-empty refusal refuses the WHOLE regrid before any
+// pane move, pane close, tab create, or state mutation: an unresolvable
+// caller identity must never fall back to the stale inherited ids, and a
+// live roster can already hold the caller's actual pane in a herd tab
+// that the herd-tab rebuild would otherwise relocate.
+//
+// Fast path (no extra reads): the inherited HERDR_PANE_ID is live in this
+// workspace's pane list. Slow path: the native alias channel (herdr pane
+// current --current) still resolves the old id for the moved process and
+// reports the actual pane, tab, and workspace. The slow path requires a
+// nonempty workspace_id matching this state scope — missing scope is
+// uncertainty, not permission — and the resolved pane/tab must exist in
+// the live topology; a mismatch is refused instead of guessed. On success
+// the caller's stale roster row is re-identified to the actual pane id.
+func callerContext(ctx *core.Config, env platform.Env, live []any, dir, ws string) (tab, pane, refuse string) {
+	inherited := env.Get("HERDR_PANE_ID")
+	if inherited == "" {
+		return "", "", ""
+	}
+	for _, v := range live {
+		o, isObj := v.(*jsonjs.Object)
+		if !isObj {
+			continue
+		}
+		pid, _ := o.Get("pane_id")
+		if pid != inherited {
+			continue
+		}
+		if tid, _ := o.Get("tab_id"); tid != nil {
+			if t, ok := tid.(string); ok && t != "" {
+				return t, inherited, ""
+			}
 		}
 	}
-	return true, m.Tab
+	res := herdr.PaneCurrent(env)
+	if !res.Ok {
+		return "", "", refuseMessage("the inherited caller pane " + inherited + " is not live in workspace " + ws + " and herdr pane current --current could not resolve it")
+	}
+	if res.PaneID == "" || res.TabID == "" {
+		return "", "", refuseMessage("the resolved caller identity is incomplete (pane " + res.PaneID + ", tab " + res.TabID + ")")
+	}
+	if res.WorkspaceID == "" {
+		return "", "", refuseMessage("the resolved caller identity has no workspace scope (missing scope is uncertainty, not permission)")
+	}
+	if res.WorkspaceID != ws {
+		return "", "", refuseMessage("the caller resolves to workspace " + res.WorkspaceID + ", outside this state scope " + ws)
+	}
+	for _, v := range live {
+		o, isObj := v.(*jsonjs.Object)
+		if !isObj {
+			continue
+		}
+		pid, _ := o.Get("pane_id")
+		if pid != res.PaneID {
+			continue
+		}
+		if tid, _ := o.Get("tab_id"); tid != nil {
+			if t, ok := tid.(string); ok && t == res.TabID {
+				if dir != "" && inherited != res.PaneID {
+					core.RosterReplacePane(dir, inherited, res.PaneID)
+				}
+				return res.TabID, res.PaneID, ""
+			}
+		}
+	}
+	return "", "", refuseMessage("the resolved caller pane " + res.PaneID + " is not live in tab " + res.TabID + " of workspace " + ws)
+}
+
+// refuseMessage shapes the whole-command refusal: an explicit
+// identity/scope error that names what could not be verified and that the
+// regrid is refused before any pane move, pane close, tab create, or
+// state mutation.
+func refuseMessage(what string) string {
+	return "regrid: caller identity unresolved (" + what + "); refusing the whole regrid before any pane move, pane close, tab create or state change"
+}
+
+// withoutCaller drops the calling pane from a worker set: the caller is
+// never a worker to relocate, but the other genuine workers of the same tab
+// still count.
+func withoutCaller(panes []string, caller string) []string {
+	if caller == "" {
+		return panes
+	}
+	out := make([]string, 0, len(panes))
+	for _, p := range panes {
+		if p != caller {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// whereAfterFailedGrid splits the panes of a partially failed grid into the
+// ones already at the destination and the ones left at the source. The
+// destination side is: the panes placed before the grid, the pre-move id of
+// every successful grid move (unchanged-id moves included — r.Changes alone
+// is an id-change list, not a move-success list), and re-ided ones under
+// their new id.
+func whereAfterFailedGrid(panes, placed []string, changes [][2]string, moved []string) (atDest, atSource []string) {
+	placedSet := map[string]bool{}
+	for _, p := range placed {
+		placedSet[p] = true
+	}
+	newID := map[string]string{}
+	for _, ch := range changes {
+		newID[ch[0]] = ch[1]
+	}
+	movedSet := map[string]bool{}
+	for _, m := range moved {
+		movedSet[m] = true
+	}
+	for _, p := range panes {
+		if next, ok := newID[p]; ok {
+			atDest = append(atDest, next)
+		} else if movedSet[p] || placedSet[p] {
+			atDest = append(atDest, p)
+		} else {
+			atSource = append(atSource, p)
+		}
+	}
+	return atDest, atSource
+}
+
+// recoverParked makes a bounded best-effort attempt to move the still-parked
+// workers back into the surviving caller tab: one split move per worker, in
+// order, and it stops at the first failed move — no retries, and it never
+// closes or kills a worker. It records each successful move in the roster
+// and returns the actual ids of the workers it moved back.
+func recoverParked(dir, callerTab, callerPane string, stillParked []string, env platform.Env) []string {
+	recovered := []string{}
+	for _, p := range stillParked {
+		r := moveInTab(p, callerTab, "right", callerPane, "0.5", env)
+		if !r.Ok {
+			break
+		}
+		next := p
+		if r.Pane != "" && r.Pane != p {
+			if dir != "" {
+				core.RosterReplacePane(dir, p, r.Pane)
+			}
+			next = r.Pane
+		}
+		recovered = append(recovered, next)
+	}
+	return recovered
+}
+
+// regridPartialFailureMessage names, by actual pane id, which panes a
+// partially failed grid (and the bounded recovery that followed it) left at
+// the source and which it placed at the destination, so the error says
+// where the live workers actually are. recovered must hold the actual ids
+// of the first len(recovered) entries of the source side, in order.
+func regridPartialFailureMessage(what, destination, source string, panes, placed []string, changes [][2]string, moved []string, recovered []string) string {
+	atDest, atSource := whereAfterFailedGrid(panes, placed, changes, moved)
+	still := atSource[len(recovered):]
+	inCaller := append(append([]string{}, atDest...), recovered...)
+	message := fmt.Sprintf("regrid: %s failed", what)
+	if len(still) > 0 {
+		message += fmt.Sprintf("; %s are alive in tab %s", strings.Join(still, " "), source)
+	}
+	if len(inCaller) > 0 {
+		if len(still) > 0 {
+			message += " and"
+		} else {
+			message += ";"
+		}
+		message += fmt.Sprintf(" %s are alive in tab %s", strings.Join(inCaller, " "), destination)
+	}
+	message += "; the roster already holds their current pane ids"
+	return message
 }
 
 type RegridEntry struct {
@@ -124,16 +339,23 @@ func CmdRegrid(_ []string, ctx *core.Config, env platform.Env, cwd string) int {
 	focusBefore := UIFocusedPane(env)
 	live := herdr.PaneList(env, ws)
 	summary := []RegridEntry{}
-	if layout == "split" && env.Get("HERDR_TAB_ID") != "" && env.Get("HERDR_PANE_ID") != "" {
-		callerTab, callerPane := env.Get("HERDR_TAB_ID"), env.Get("HERDR_PANE_ID")
-		panes := rosterPanes(ctx, live, callerTab, env, cwd)
+	callerTab, callerPane, refuse := callerContext(ctx, env, live, dir, ws)
+	if refuse != "" {
+		dieRegrid(ctx, env, cwd, refuse)
+	}
+	if layout == "split" && callerTab != "" && callerPane != "" {
+		panes := withoutCaller(rosterPanes(ctx, live, callerTab, env, cwd), callerPane)
 		cap := SplitCap(ctx, env)
 	outer:
 		for _, e := range HerdTabEntries(ctx, env, cwd) {
-			if e.Tab == "" {
+			// The caller may itself live in a recorded herd tab: its workers
+			// are already in `panes` (the caller tab's set), so this tab must
+			// not also be pulled back into itself — that would append and move
+			// the same workers again (double park, wrong grid, wrong count).
+			if e.Tab == "" || e.Tab == callerTab {
 				continue
 			}
-			for _, hp := range rosterPanes(ctx, live, e.Tab, env, cwd) {
+			for _, hp := range withoutCaller(rosterPanes(ctx, live, e.Tab, env, cwd), callerPane) {
 				if !canPullBack(len(panes), cap) {
 					break outer
 				}
@@ -152,14 +374,20 @@ func CmdRegrid(_ []string, ctx *core.Config, env platform.Env, cwd string) int {
 		}
 		live = herdr.PaneList(env, ws)
 		if len(panes) >= 1 {
-			ok, park := parkPanes(panes, env)
+			parked, park, ok := parkPanesTracked(dir, panes, env)
 			if !ok {
 				dieRegrid(ctx, env, cwd, fmt.Sprintf("regrid: could not park the workers of tab %s in a temporary tab", callerTab))
 			}
-			if !applyGrid(ctx, callerTab, append([]string{callerPane}, panes...), env, cwd) {
-				dieRegrid(ctx, env, cwd, fmt.Sprintf("regrid: a move back into %s failed; remaining workers are alive in tab %s (label herd-park)", callerTab, park))
+			changes, moved, ok := gridApply(ctx, callerTab, append([]string{callerPane}, parked...), env, cwd)
+			if !ok {
+				_, stillParked := whereAfterFailedGrid(parked, nil, changes, moved)
+				recovered := recoverParked(dir, callerTab, callerPane, stillParked, env)
+				dieRegrid(ctx, env, cwd, regridPartialFailureMessage("a move back into "+callerTab, callerTab, park+" (label herd-park)", parked, nil, changes, moved, recovered))
 			}
-			summary = append(summary, RegridEntry{callerTab, "caller", len(panes) + 1, GridSizes(len(panes) + 1).Cols})
+			summary = append(summary, RegridEntry{callerTab, "caller", len(parked) + 1, GridSizes(len(parked) + 1).Cols})
+			// Parking and gridding can change the pane ids recorded in the
+			// roster. Rebuild against the topology after those moves.
+			live = herdr.PaneList(env, ws)
 		}
 	}
 	kept := ""
@@ -171,7 +399,7 @@ func CmdRegrid(_ []string, ctx *core.Config, env platform.Env, cwd string) int {
 		if label == "-" {
 			label = ""
 		}
-		panes := rosterPanes(ctx, live, e.Tab, env, cwd)
+		panes := withoutCaller(rosterPanes(ctx, live, e.Tab, env, cwd), callerPane)
 		if len(panes) < 1 {
 			continue
 		}
@@ -196,8 +424,9 @@ func CmdRegrid(_ []string, ctx *core.Config, env platform.Env, cwd string) int {
 				core.RosterReplacePane(dir, panes[0], m.Pane)
 				panes[0] = m.Pane
 			}
-			if !applyGrid(ctx, newtab, panes, env, cwd) {
-				dieRegrid(ctx, env, cwd, fmt.Sprintf("regrid: a move into %s failed; remaining workers are alive in tab %s", newtab, e.Tab))
+			changes, moved, ok := gridApply(ctx, newtab, panes, env, cwd)
+			if !ok {
+				dieRegrid(ctx, env, cwd, regridPartialFailureMessage("a move into "+newtab, newtab, e.Tab, panes, panes[:1], changes, moved, nil))
 			}
 			display := label
 			if display == "" {

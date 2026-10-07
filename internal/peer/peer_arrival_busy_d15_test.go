@@ -204,7 +204,7 @@ func TestSendArrivalBusyCodexStalled(t *testing.T) {
 		if code != 15 || out != "" {
 			t.Fatalf("a message still in the composer is not sent: code=%d out=%q", code, out)
 		}
-		want := "herdr-soho: send: windows/w0test:p0a did not take the message: it sits in its input box after one Enter; read its pane before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-29a25864.screen") + "\n"
+		want := "herdr-soho: send: windows/w0test:p0a did not confirm taking the message: the last read showed it in its input box after one Enter; delivery is uncertain; read its pane for #29a25864 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-29a25864.screen") + "\n"
 		if stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}

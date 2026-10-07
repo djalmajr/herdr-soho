@@ -90,7 +90,7 @@ func TestSendClaudeQueue(t *testing.T) {
 			t.Fatalf("no Enter may go to a busy claude with a queued message: %d enters", enters)
 		}
 	})
-	t.Run("claude working: the same screen without the queue line keeps today's behavior (Enter, then lost)", func(t *testing.T) {
+	t.Run("claude working: the same screen without the queue line keeps the lost 15 with no Enter (no recognized box)", func(t *testing.T) {
 		prompt := newPromptFixture(t)
 		pre := "✻ Cranking out changes…\n"
 		noQueue := claudeSendScreen(prompt, false)
@@ -100,16 +100,15 @@ func TestSendClaudeQueue(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: noQueue},
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stderr: notIdleErr, Code: 1},
 			{Argv: []string{"agent", "prompt", "w0test:p0a", prompt, "--wait", "--until", "working", "--until", "blocked", "--until", "idle", "--until", "done", "--timeout", "15000"}},
-			{Argv: []string{"agent", "send-keys", "w0test:p0a", "enter"}},
 		}
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
-		if enters := countEnters(t, f); enters != 1 {
-			t.Fatalf("today's behavior sends the box Enter once: %d enters", enters)
+		if enters := countEnters(t, f); enters != 0 {
+			t.Fatalf("no Enter goes to a claude screen without the recognized box: %d enters", enters)
 		}
 	})
 	t.Run("claude working: another recent error is not replaced by a visible read and exits 15 unverified", func(t *testing.T) {

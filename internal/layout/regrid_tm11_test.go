@@ -19,7 +19,7 @@ type tm11RegridGolden struct {
 }
 
 func TestTM11RegridCommandParity(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-regrid.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-regrid.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +79,27 @@ func TestTM11RegridCommandParity(t *testing.T) {
 				log.WriteByte('\n')
 			}
 			actualLog := strings.ReplaceAll(log.String(), cwd, "<ROOT>/repo")
-			if expected := want.Files["herdr.log"]; expected != nil && actualLog != *expected {
-				t.Fatalf("JS/Go call-log divergence for same scenario; Go=%q JS=%q", actualLog, *expected)
+			if expected := want.Files["herdr.log"]; expected != nil {
+				expectedLog := *expected
+				// Keep the frozen legacy capture intact. The caller grid now
+				// reads the topology once more before rebuilding herd tabs;
+				// the re-id regression separately verifies why it is needed.
+				lastCallerMove := ""
+				switch tc.golden {
+				case "pull":
+					lastCallerMove = "pane move p2 --tab t0 --split down --target-pane p1 --ratio 0.5000 --no-focus\n"
+				case "kept":
+					lastCallerMove = "pane move p2 --tab t0 --split right --target-pane C --ratio 0.5000 --no-focus\n"
+				}
+				if lastCallerMove != "" {
+					if strings.Count(expectedLog, lastCallerMove) != 1 {
+						t.Fatal("legacy capture must contain exactly one final caller move")
+					}
+					expectedLog = strings.Replace(expectedLog, lastCallerMove, lastCallerMove+"pane list --workspace ws\n", 1)
+				}
+				if actualLog != expectedLog {
+					t.Fatalf("Go call-log divergence after the explicit topology refresh; Go=%q expected=%q", actualLog, expectedLog)
+				}
 			}
 			if expected := want.Files["state/ws/agents.tsv"]; expected != nil {
 				actual, readErr := os.ReadFile(filepath.Join(state, "agents.tsv"))

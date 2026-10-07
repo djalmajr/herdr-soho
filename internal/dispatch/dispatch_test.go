@@ -3,7 +3,6 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -414,19 +413,25 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 			}
 		}
 	})
-	t.Run("compose: the prompt names the skill launcher instead of PATH", func(t *testing.T) {
+	t.Run("compose: the prompt names the native launcher binary instead of PATH", func(t *testing.T) {
 		role := filepath.Join(t.TempDir(), "implementer.md")
 		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRun `herdr-soho mutation-guard <copy>` before mutating that copy.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		skill := t.TempDir()
-		name := "herdr-soho"
-		if runtime.GOOS == "windows" {
-			name = "herdr-soho.cmd"
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
 		}
-		launcher := filepath.Join(skill, "scripts", name)
-		p := ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"HERDR_SOHO_SKILL_DIR": skill}, "codex", "", false)
-		want := "- Run every `herdr-soho` command this prompt names through the launcher at `" + launcher + "`, not through PATH.\n"
+		// The override is resolved through symlinks before use (the macOS
+		// /var -> /private/var link included): assert the resolved path.
+		resolved, err := filepath.EvalSymlinks(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The configured override is the native test binary; the skill
+		// directory in the env must play no part in the path.
+		p := ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"HERDR_SOHO_BIN": exe, "HERDR_SOHO_SKILL_DIR": t.TempDir()}, "codex", "", false)
+		want := "- Run every `herdr-soho` command this prompt names through the launcher at `" + resolved + "`, not through PATH.\n"
 		if !strings.Contains(p, want) {
 			t.Fatalf("composed prompt missed the launcher line:\n%s", p)
 		}
@@ -436,6 +441,41 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 		after := p[strings.Index(p, want)+len(want):]
 		if !strings.HasPrefix(after, "- Only you write this report,") {
 			t.Fatalf("launcher line must sit right before the standing rules:\n%s", after)
+		}
+		if strings.Contains(p, "scripts/herdr-soho") || strings.Contains(p, "scripts\\herdr-soho") {
+			t.Fatalf("composed prompt names a skill scripts launcher:\n%s", p)
+		}
+	})
+	t.Run("compose: an invalid HERDR_SOHO_BIN fails closed before the prompt exists", func(t *testing.T) {
+		role := filepath.Join(t.TempDir(), "implementer.md")
+		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRole.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			name string
+			bin  string
+			want string
+		}{
+			{name: "missing binary", bin: filepath.Join(t.TempDir(), "missing"), want: "HERDR_SOHO_BIN is missing or not a regular file"},
+			{name: "relative binary", bin: "herdr-soho", want: "HERDR_SOHO_BIN must be an absolute path"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var prompt string
+				func() {
+					defer func() {
+						r := recover()
+						if r == nil {
+							t.Fatalf("ComposePrompt returned a prompt for the invalid override %q; it must fail closed before the prompt", tc.bin)
+						}
+						exit, ok := r.(*platform.ExitError)
+						if !ok || exit.Code != 2 || !strings.Contains(exit.Msg, tc.want) {
+							t.Fatalf("composition panicked %#v; want ExitError code 2 naming %q", r, tc.want)
+						}
+					}()
+					prompt = ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"HERDR_SOHO_BIN": tc.bin}, "codex", "", false)
+				}()
+				_ = prompt
+			})
 		}
 	})
 }

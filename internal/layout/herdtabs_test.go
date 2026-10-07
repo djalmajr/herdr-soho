@@ -7,13 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
@@ -21,40 +21,36 @@ func parityTabFixture(t *testing.T, withTab bool) (platform.Env, *core.Config, s
 	t.Helper()
 	root := t.TempDir()
 	repo, home, conf := filepath.Join(root, "repo"), filepath.Join(root, "home"), filepath.Join(root, "conf")
-	state, tmp, bin, tabs := filepath.Join(root, "state"), filepath.Join(root, "tmp"), filepath.Join(root, "bin"), filepath.Join(root, "tabs")
-	for _, dir := range []string{repo, home, conf, state, tmp, bin, tabs, filepath.Join(state, "ws")} {
+	state, tmp, bin := filepath.Join(root, "state"), filepath.Join(root, "tmp"), filepath.Join(root, "bin")
+	for _, dir := range []string{repo, home, conf, state, tmp, bin, filepath.Join(state, "ws")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	script := `#!/bin/sh
-printf '%s\n' "$*" >> "$HA_LOG"
-T="$HA_TABS"
-P="$HA_PANES"
-case "$1 $2" in
-  "tab get")
-    if [ -f "$T/$3" ]; then
-      printf '{"result":{"tab":{"tab_id":"%s","label":"%s"}}}\n' "$3" "$(cat "$T/$3")"
-    else
-      printf '{"error":"tab_not_found"}\n'
-      exit 1
-    fi ;;
-  "tab rename")
-    shift 2; id="$1"; shift; printf '%s' "$*" > "$T/$id"; printf '{"result":{}}\n' ;;
-  "pane list") cat "$P" ;;
-  *) printf '{"error":"unexpected: %s"}\n' "$*" >&2; exit 1 ;;
-esac
-`
-	herdr := filepath.Join(bin, "herdr")
-	if err := os.WriteFile(herdr, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+	// The label command reads the same tab several times across the four
+	// steps; the per-call labels mirror the state the legacy sh TAB_FAKE kept in
+	// its per-tab files: t2 stays "herd" until the relabel renames it to
+	// "des" (its sixth read), t3 stays "" until the pin renames it to
+	// "nova aba" and "herd" after the --auto relabel (its sixth read).
+	rules := []fakecli.Rule{
+		{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"tab_id":"t1","label":"onda"}}}`},
+		{Argv: []string{"tab", "get", "t2"}, Call: 1, Stdout: `{"result":{"tab":{"tab_id":"t2","label":"herd"}}}`},
+		{Argv: []string{"tab", "get", "t2"}, Call: 2, Stdout: `{"result":{"tab":{"tab_id":"t2","label":"herd"}}}`},
+		{Argv: []string{"tab", "get", "t2"}, Call: 3, Stdout: `{"result":{"tab":{"tab_id":"t2","label":"herd"}}}`},
+		{Argv: []string{"tab", "get", "t2"}, Call: 4, Stdout: `{"result":{"tab":{"tab_id":"t2","label":"herd"}}}`},
+		{Argv: []string{"tab", "get", "t2"}, Call: 5, Stdout: `{"result":{"tab":{"tab_id":"t2","label":"herd"}}}`},
+		{Argv: []string{"tab", "get", "t2"}, Stdout: `{"result":{"tab":{"tab_id":"t2","label":"des"}}}`},
+		{Argv: []string{"tab", "get", "t3"}, Call: 1, Stdout: `{"result":{"tab":{"tab_id":"t3","label":""}}}`},
+		{Argv: []string{"tab", "get", "t3"}, Call: 2, Stdout: `{"result":{"tab":{"tab_id":"t3","label":""}}}`},
+		{Argv: []string{"tab", "get", "t3"}, Call: 3, Stdout: `{"result":{"tab":{"tab_id":"t3","label":"nova aba"}}}`},
+		{Argv: []string{"tab", "get", "t3"}, Call: 4, Stdout: `{"result":{"tab":{"tab_id":"t3","label":"nova aba"}}}`},
+		{Argv: []string{"tab", "get", "t3"}, Call: 5, Stdout: `{"result":{"tab":{"tab_id":"t3","label":"nova aba"}}}`},
+		{Argv: []string{"tab", "get", "t3"}, Stdout: `{"result":{"tab":{"tab_id":"t3","label":"herd"}}}`},
+		{Argv: []string{"tab", "rename"}, ArgvPrefix: true, Stdout: `{"result":{}}`},
+		{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[{"pane_id":"w1","tab_id":"t1"},{"pane_id":"w2","tab_id":"t1"},{"pane_id":"w3","tab_id":"t2"}]}}`},
+		{Argv: []string{"pane", "list"}, Stdout: `{"result":{"panes":[{"pane_id":"w1","tab_id":"t1"},{"pane_id":"w2","tab_id":"t1"},{"pane_id":"w3","tab_id":"t2"}]}}`},
 	}
 	if withTab {
-		for id, label := range map[string]string{"t1": "onda\n", "t2": "herd\n", "t3": ""} {
-			if err := os.WriteFile(filepath.Join(tabs, id), []byte(label), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
 		if err := os.WriteFile(filepath.Join(state, "ws", "herd-tab"), []byte("t1\nt2\nt3\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -63,18 +59,27 @@ esac
 		if err := os.WriteFile(filepath.Join(state, "ws", "agents.tsv"), []byte(rows), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		panes := `{"result":{"panes":[{"pane_id":"w1","tab_id":"t1"},{"pane_id":"w2","tab_id":"t1"},{"pane_id":"w3","tab_id":"t2"}]}}`
-		if err := os.WriteFile(filepath.Join(root, "panes.json"), []byte(panes), 0o600); err != nil {
-			t.Fatal(err)
-		}
 	}
 	if !withTab {
 		// Match makeTabFixture('no-tab'): no tabs, roster or pane-list file.
+		// The catch-all answers nothing: the no-tab path must not reach
+		// herdr at all (a call would exit 127 and the step would fail).
+		rules = []fakecli.Rule{{AnyArgs: true, Code: 127}}
 	}
-	pathValue := bin + string(os.PathListSeparator) + os.Getenv("PATH")
-	env := platform.Env{"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": conf, "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_TAB_ID": "caller", "HERDR_ENV": "1", "HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho", "TMPDIR": tmp, "PATH": pathValue, "HA_TABS": tabs, "HA_LOG": filepath.Join(root, "herdr.log"), "HA_PANES": filepath.Join(root, "panes.json")}
+	if _, err := fakecli.Install(t, bin, "herdr", rules); err != nil {
+		t.Fatal(err)
+	}
+	env := platform.Env{}
+	for _, entry := range fakecli.Env(testutil.CleanEnv(t), bin) {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			env[key] = value
+		}
+	}
+	env["HOME"], env["USERPROFILE"] = home, home
+	env["XDG_CONFIG_HOME"], env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = conf, state, "ws"
+	env["HERDR_TAB_ID"], env["HERDR_ENV"], env["TMPDIR"] = "caller", "1", tmp
 	ctx := labelContext(t, env)
-	return env, ctx, repo, filepath.Join(state, "ws", "herd-tab"), tabs
+	return env, ctx, repo, filepath.Join(state, "ws", "herd-tab"), filepath.Join(bin, "herdr.calls.jsonl")
 }
 
 func runTabLabelCaptured(args []string, ctx *core.Config, env platform.Env, cwd string) (code int, out, errOut string) {
@@ -96,11 +101,8 @@ func runTabLabelCaptured(args []string, ctx *core.Config, env platform.Env, cwd 
 }
 
 func TestParityTabLabelGoldenScenarios(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake herdr is the JS TAB_FAKE sh script, which a native Windows process cannot run")
-	}
 	t.Run("parity: tab-label (list, rename, --auto, unknown tab)", func(t *testing.T) { // JS: "parity: tab-label (list, rename, --auto, unknown tab)"
-		env, ctx, cwd, stateFile, tabs := parityTabFixture(t, true)
+		env, ctx, cwd, stateFile, logPath := parityTabFixture(t, true)
 		steps := []struct {
 			args []string
 			out  string
@@ -112,7 +114,8 @@ func TestParityTabLabelGoldenScenarios(t *testing.T) {
 		for i, step := range steps {
 			code, out, errOut := runTabLabelCaptured(step.args, ctx, env, cwd)
 			if code != 0 || out != step.out || errOut != "" {
-				t.Fatalf("step %d code=%d out=%q err=%q; want %q", i, code, out, errOut, step.out)
+				calls, _ := fakecli.ReadCalls(logPath)
+				t.Fatalf("step %d code=%d out=%q err=%q; want %q\ncalls=%#v", i, code, out, errOut, step.out, calls)
 			}
 		}
 		code, out, errOut := runTabLabelCaptured([]string{"--tab", "nope", "x"}, ctx, env, cwd)
@@ -124,11 +127,21 @@ func TestParityTabLabelGoldenScenarios(t *testing.T) {
 		if err != nil || string(got) != wantState {
 			t.Fatalf("herd-tab=%q err=%v, want %q", got, err, wantState)
 		}
-		for file, want := range map[string]string{"t1": "onda\n", "t2": "des", "t3": "herd"} {
-			got, err := os.ReadFile(filepath.Join(tabs, file))
-			if err != nil || string(got) != want {
-				t.Errorf("tab %s=%q err=%v want %q", file, got, err, want)
+		// The sh fake stored the renamed labels in per-tab files; the
+		// native fake records the exact rename argv instead: the labels
+		// that reached herdr are the same ones the files would carry.
+		calls, err := fakecli.ReadCalls(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var renames []string
+		for _, call := range calls {
+			if call.Argv[0] == "tab" && call.Argv[1] == "rename" {
+				renames = append(renames, strings.Join(call.Argv[2:], " "))
 			}
+		}
+		if !reflect.DeepEqual(renames, []string{"t3 nova aba", "t2 des", "t3 herd"}) {
+			t.Fatalf("rename argv = %v; want the t3 pin, the t2 relabel and the t3 auto label in the recorded order", renames)
 		}
 	})
 	t.Run("parity: tab-label with no herd tab at all", func(t *testing.T) { // JS: "parity: tab-label with no herd tab at all"

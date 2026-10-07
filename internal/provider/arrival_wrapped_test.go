@@ -56,10 +56,13 @@ func TestPromptEvidenceWrappedPiHistory(t *testing.T) {
 			t.Fatalf("the real consumed screen must prove the prompt:\n%s", consumedPiScreen)
 		}
 	})
-	t.Run("the real Steering queue line still proves the prompt", func(t *testing.T) {
+	t.Run("the real Steering queue line carrying the identity still proves the prompt", func(t *testing.T) {
+		// The capture's line clips the path to a shared machine directory and
+		// carries no dispatch identity, so it proves nothing on its own; a
+		// queue line showing the composed file's exact name keeps proving.
 		screen := "is a simple task. Let's just execute it as is.\n" +
 			" $ sleep 45 (timeout 60s)\n" +
-			" Steering: Read the file /var/folders/f2/r857c16x45z6p82wsq_0d_...\n" +
+			" Steering: Read the file '.../reports/build-2-20261001T999999-amend-probe-with-a-long-name.brief.md…' in full\n" +
 			" ↳ Option+Up to edit all queued messages\n" +
 			strings.Repeat("─", 66) + "\n" +
 			"\n" +

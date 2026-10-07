@@ -75,8 +75,9 @@ func TestProbeQueuedPromptSafety(t *testing.T) {
 			}
 		}
 	})
-	t.Run("own prompt in unwrapped history gets one bounded Enter", func(t *testing.T) { // JS: "wait: queued prompt leaves working and is retried with Enter when still in the input box"
-		got, marker, calls := runQueuedProbe(t, "Read the file /tmp/own current prompt.md\n", "123 - /tmp/own current prompt.md\n")
+	t.Run("own prompt in the recognized composer gets one bounded Enter", func(t *testing.T) { // Adapted contract: the queued retry needs a recognized composer holding the stored path (the claude box), not a plain history line.
+		box := claudeBoxScreen("", "❯ Read the file /tmp/own current prompt.md in full and execute it.", "  [Opus 5.5] 67% [main*]\n")
+		got, marker, calls := runQueuedProbe(t, box, "123 - /tmp/own current prompt.md\n")
 		if got != "working" {
 			t.Fatalf("probe=%s", got)
 		}
@@ -130,7 +131,9 @@ func runQueuedProbe(t *testing.T, screen, marker string, secondProbe ...bool) (s
 		if err := os.WriteFile(prompt, []byte("brief"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		screen = "Read the file " + prompt + " in full and execute it.\n"
+		// Adapted contract: the screen is the recognized claude composer
+		// holding the resolved prompt path.
+		screen = claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n")
 	}
 	if err := os.WriteFile(filepath.Join(state, "agents.tsv"), []byte("# name\t pane\t kind\t role\nworker\tp0a\tclaude\timplementer\n"), 0600); err != nil {
 		t.Fatal(err)

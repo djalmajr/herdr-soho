@@ -3,13 +3,10 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -32,61 +29,8 @@ type tm11SpawnGolden struct {
 	Steps []tm11SpawnStep    `json:"steps"`
 }
 
-const tm11SpawnFakeHerdr = `#!/bin/sh
-printf '%s\n' "$*" >> "$HA_LOG"
-target="${3:-}"
-mode=$(cat "$HA_MODE" 2>/dev/null || echo idle)
-case "$1 $2" in
-  "--version"*) echo 'herdr 1.0.0' ;;
-  "status server"*) echo 'server 1.0.0' ;;
-  "agent get")
-    case "$target" in
-      gone|dead) echo '{"error":{"code":"agent_not_found","message":"gone"}}' >&2; exit 1 ;;
-    esac
-    case "$mode" in
-      working) echo "{\"result\":{\"agent\":{\"name\":\"$target\",\"agent_status\":\"working\"}}}" ;;
-      blocked) echo "{\"result\":{\"agent\":{\"name\":\"$target\",\"agent_status\":\"blocked\"}}}" ;;
-      gone|gone-until-start) echo '{"error":{"code":"agent_not_found","message":"gone"}}' >&2; exit 1 ;;
-      *) echo "{\"result\":{\"agent\":{\"name\":\"$target\",\"agent_status\":\"idle\"}}}" ;;
-    esac ;;
-  "agent list")
-    if [ -f "$HA_LIVE" ]; then cat "$HA_LIVE"; else echo '{"result":{"agents":[]}}'; fi ;;
-  "agent start")
-    case "$mode" in
-      busy2)
-        n=$(cat "$HA_STARTN" 2>/dev/null || echo 0)
-        n=$((n + 1)); echo "$n" > "$HA_STARTN"
-        if [ "$n" -le 2 ]; then
-          echo '{"error":{"code":"agent_pane_busy","message":"shell not ready"}}' >&2
-          exit 1
-        fi ;;
-      notready) echo 'agent_not_ready: login prompt' >&2; exit 1 ;;
-      gone-until-start) echo idle > "$HA_MODE" ;; # the old worker is gone; the new one lives
-    esac
-    echo '{"result":{"started":true}}' ;;
-  "agent read") cat "$HA_SCREEN" ;;
-  "pane list")
-    if [ -f "$HA_PANES" ]; then cat "$HA_PANES"; else echo '{"result":{"panes":[]}}'; fi ;;
-  "pane layout")
-    if [ -f "$HA_LAYOUT" ]; then cat "$HA_LAYOUT"; else echo '{"error":"no layout"}' >&2; exit 1; fi ;;
-  "tab create") echo '{"result":{"tab":{"tab_id":"t-herd","label":"herd"},"root_pane":{"pane_id":"p-new"}}}' ;;
-  "tab get") echo '{"result":{"tab":{"tab_id":"t-herd","label":"herd"},"root_pane":{"pane_id":"p-root"}}}' ;;
-  "tab rename") echo '{"result":{}}' ;;
-  "agent rename") echo '{"result":{}}' ;;
-  *) echo "unexpected: $*" >&2; exit 1 ;;
-esac
-`
-
-const tm11SpawnFakeGrok = `#!/bin/sh
-[ "${1:-}" = models ] && printf '%s\n' grok-4.7
-`
-
-const tm11SpawnFakeAgy = `#!/bin/sh
-[ "${1:-}" = models ] && printf 'gemini-2.5 (latest)\n'
-`
-
 func TestTM11SpawnCommandParity(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-spawn.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-spawn.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +38,6 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 	if err := json.Unmarshal(data, &goldens); err != nil {
 		t.Fatal(err)
 	}
-	goBinary := tm11BuildSpawnBinary(t)
 	t.Run(`JS: "parity spawn: planner is 12, a sub-orchestrator outside a lane is 3"`, func(t *testing.T) {
 		golden := tm11RequireSpawnGolden(t, goldens, "errors")
 		f := newTM11SpawnFixture(t, nil)
@@ -179,7 +122,7 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 	})
 	t.Run(`JS: "parity spawn: fresh worker, lane reuse, kind mismatch, lane-kind reuse"`, func(t *testing.T) {
 		golden := tm11RequireSpawnGolden(t, goldens, "kind")
-		f := newTM11SpawnShellFixture(t, goBinary)
+		f := newTM11SpawnFixture(t, nil)
 		f.runStepsPrepared(t, golden, func(i int) {
 			switch i {
 			case 0, 2:
@@ -204,7 +147,7 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 	})
 	t.Run(`JS: "parity spawn: busy 10, gone recreated, worker cap 8, locked 5, lane kind, lanes=off reuse"`, func(t *testing.T) {
 		golden := tm11RequireSpawnGolden(t, goldens, "lane-states")
-		f := newTM11SpawnShellFixture(t, goBinary)
+		f := newTM11SpawnFixture(t, nil)
 		f.runStepsPreparedChecked(t, golden, func(i int) {
 			status := "idle"
 			live := `{"result":{"agents":[]}}`
@@ -243,7 +186,7 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 	})
 	t.Run(`JS: "parity spawn: config layers (user vs project vs env, kind/model/effort precedence)"`, func(t *testing.T) {
 		golden := tm11RequireSpawnGolden(t, goldens, "layers")
-		f := newTM11SpawnShellFixture(t, goBinary)
+		f := newTM11SpawnFixture(t, nil)
 		f.runStepsPreparedChecked(t, golden, func(i int) {
 			delete(f.env, "HERDR_SOHO_LANE_BUILD_KIND")
 			user, project := "", ""
@@ -308,13 +251,11 @@ func tm11RequireSpawnGolden(t *testing.T, goldens map[string]tm11SpawnGolden, na
 }
 
 type tm11SpawnFixture struct {
-	env       platform.Env
-	cwd       string
-	state     string
-	bin       string
-	herdrLog  string
-	shellFake bool
-	cliBinary string
+	env      platform.Env
+	cwd      string
+	state    string
+	bin      string
+	herdrLog string
 }
 
 func newTM11SpawnFixture(t *testing.T, herdrRules []fakecli.Rule) *tm11SpawnFixture {
@@ -368,72 +309,6 @@ func newTM11SpawnFixture(t *testing.T, herdrRules []fakecli.Rule) *tm11SpawnFixt
 	clean["HERDR_SOHO_WAIT_POLL_MS"] = "1"
 	clean = withFakeCLI(clean, bin)
 	return &tm11SpawnFixture{env: clean, cwd: cwd, state: filepath.Join(state, "ws"), bin: bin, herdrLog: filepath.Join(bin, "herdr.log")}
-}
-
-func newTM11SpawnShellFixture(t *testing.T, cliBinary string) *tm11SpawnFixture {
-	t.Helper()
-	f := newTM11SpawnFixture(t, nil)
-	root := filepath.Dir(f.cwd)
-	for key, value := range map[string]string{
-		"HA_LOG":    f.herdrLog,
-		"HA_MODE":   filepath.Join(f.bin, "mode"),
-		"HA_LIVE":   filepath.Join(f.bin, "live.json"),
-		"HA_SCREEN": filepath.Join(f.bin, "screen"),
-		"HA_PANES":  filepath.Join(f.bin, "panes.json"),
-		"HA_LAYOUT": filepath.Join(f.bin, "layout.json"),
-		"HA_STARTN": filepath.Join(f.bin, "start-n"),
-	} {
-		f.env[key] = value
-	}
-	f.env["TMPDIR"] = filepath.Join(root, "tmp")
-	f.env["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing", "herdr.sock")
-	f.env["PATH"] = f.bin + string(os.PathListSeparator) + os.Getenv("PATH")
-	if node, err := exec.LookPath("node"); err == nil {
-		f.env["HERDR_SOHO_JS_RUNTIME"] = node
-	}
-	if err := os.MkdirAll(f.env["TMPDIR"], 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(f.cwd, "AGENTS.md"), []byte("# Agent instructions\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for path, value := range map[string]string{
-		f.env["HA_MODE"]:   "idle\n",
-		f.env["HA_LIVE"]:   `{"result":{"agents":[]}}` + "\n",
-		f.env["HA_SCREEN"]: "plain screen\n",
-	} {
-		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for name, source := range map[string]string{"herdr": tm11SpawnFakeHerdr, "grok": tm11SpawnFakeGrok, "agy": tm11SpawnFakeAgy, "pi": "#!/bin/sh\nexit 0\n"} {
-		path := filepath.Join(f.bin, name)
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(source), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	f.shellFake = true
-	f.cliBinary = cliBinary
-	return f
-}
-
-func tm11BuildSpawnBinary(t *testing.T) string {
-	t.Helper()
-	_, source, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate spawn parity test source")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
-	path := filepath.Join(t.TempDir(), "herdr-soho")
-	cmd := exec.Command("go", "build", "-o", path, "./cmd/herdr-soho")
-	cmd.Dir = root
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build Go CLI: %s: %v", output, err)
-	}
-	return path
 }
 
 func tm11SpawnRules(extra ...fakecli.Rule) []fakecli.Rule {
@@ -533,30 +408,11 @@ func tm11NormalizeReuseSpawn(out, want string) string {
 
 func (f *tm11SpawnFixture) runStep(t *testing.T, args []string) (int, string, string) {
 	t.Helper()
-	if !f.shellFake {
-		return runIn(t, args, f.env, f.cwd)
-	}
-	cmd := exec.Command(f.cliBinary, args...)
-	cmd.Dir = f.cwd
-	cmd.Env = f.env.List()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
-	if err == nil {
-		return 0, stdout.String(), stderr.String()
-	}
-	if exit, ok := err.(*exec.ExitError); ok {
-		return exit.ExitCode(), stdout.String(), stderr.String()
-	}
-	t.Fatalf("run Go CLI: %v", err)
-	return 0, "", ""
+	return runIn(t, args, f.env, f.cwd)
 }
 
 func (f *tm11SpawnFixture) clearHerdrCalls() error {
 	path := filepath.Join(f.bin, "herdr.calls.jsonl")
-	if f.shellFake {
-		path = f.herdrLog
-	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -564,13 +420,6 @@ func (f *tm11SpawnFixture) clearHerdrCalls() error {
 }
 
 func (f *tm11SpawnFixture) herdrCallLog() (string, error) {
-	if f.shellFake {
-		b, err := os.ReadFile(f.herdrLog)
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return string(b), err
-	}
 	calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
 	if os.IsNotExist(err) {
 		return "", nil
@@ -592,15 +441,6 @@ func tm11SpawnReset(t *testing.T, f *tm11SpawnFixture) {
 		t.Fatal(err)
 	}
 	_ = os.Remove(filepath.Join(f.state, "herd-tab"))
-	if f.shellFake {
-		if err := os.WriteFile(f.env["HA_MODE"], []byte("idle\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(f.env["HA_LIVE"], []byte(`{"result":{"agents":[]}}`+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		_ = os.Remove(f.env["HA_STARTN"])
-	}
 }
 
 func tm11SpawnSeed(t *testing.T, f *tm11SpawnFixture, rows [][4]string, live string) {
@@ -648,21 +488,6 @@ func tm11SpawnWriteConfig(t *testing.T, f *tm11SpawnFixture, user, project strin
 
 func tm11SpawnInstallStateRules(t *testing.T, f *tm11SpawnFixture, status string, liveOverride ...string) {
 	t.Helper()
-	if f.shellFake {
-		live := `{"result":{"agents":[]}}`
-		if len(liveOverride) > 0 {
-			live = liveOverride[0]
-		} else if b, err := os.ReadFile(f.env["HA_LIVE"]); err == nil {
-			live = string(b)
-		}
-		if err := os.WriteFile(f.env["HA_MODE"], []byte(status+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(f.env["HA_LIVE"], []byte(live), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
 	live := `{"result":{"agents":[]}}`
 	if len(liveOverride) > 0 {
 		live = liveOverride[0]

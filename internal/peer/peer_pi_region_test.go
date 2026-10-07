@@ -83,27 +83,35 @@ func TestPiSendScreenMarkers(t *testing.T) {
 			t.Fatal("the empty box must not hold the id")
 		}
 	})
-	t.Run("pi: a marker in the box is still in the screen and the box", func(t *testing.T) {
+	t.Run("pi: a marker in the box blocks the screen proof; only the header licenses the Enter", func(t *testing.T) {
 		if !messageStillInScreen("pi", screen("#"+id), endLine, id) {
 			t.Fatal("the id in the box must block the screen proof")
 		}
 		if !messageStillInScreen("pi", screen(endLine), endLine, id) {
 			t.Fatal("the end line in the box must block the screen proof")
 		}
-		if !idInInputBox("pi", screen("#"+id), id) {
-			t.Fatal("the id in the box must license the Enter")
+		// A bare #id without the header is uncertainty, not permission to
+		// press Enter; the header of this message licenses it.
+		if idInInputBox("pi", screen("#"+id), id) {
+			t.Fatal("a bare #id without the header must not license the Enter")
+		}
+		if !idInInputBox("pi", screen(PeerPrefix+" #"+id+" Message from another agent"), id) {
+			t.Fatal("the header in the box must license the Enter")
+		}
+		if idInInputBox("pi", screen("> "+PeerPrefix+" #"+id+" Message from another agent"), id) {
+			t.Fatal("a quoted header in the box is payload, not the typed header")
 		}
 	})
-	t.Run("pi without borders keeps the whole-screen behavior", func(t *testing.T) {
+	t.Run("pi without borders keeps the whole-screen screen proof but presses no Enter", func(t *testing.T) {
 		noBorders := "history " + endLine + " and #" + id + "\n"
 		if !messageStillInScreen("pi", noBorders, endLine, id) {
 			t.Fatal("without two borders the whole visible screen still counts")
 		}
-		if !idInInputBox("pi", noBorders, id) {
-			t.Fatal("without two borders the last 15 lines still count")
+		if idInInputBox("pi", noBorders, id) {
+			t.Fatal("without two borders there is no recognized composer: no Enter")
 		}
 	})
-	t.Run("claude reads the box between its borders; without borders the last 15 lines keep counting", func(t *testing.T) {
+	t.Run("claude reads the box between its borders; without borders no Enter goes", func(t *testing.T) {
 		// A claude with two borders has a box between them, like pi: the
 		// marker in the history above the top border is taken, not held, so
 		// it does not block the proof — the whole-screen expectation no
@@ -114,17 +122,18 @@ func TestPiSendScreenMarkers(t *testing.T) {
 		// The marker is on screen but above the last 15 lines: no Enter.
 		pushedDown := screen("") + strings.Repeat("chrome\n", 15)
 		if idInInputBox("claude", pushedDown, id) {
-			t.Fatal("the last 15 lines of a non-pi screen do not hold the id")
+			t.Fatal("a claude screen without the recognized box presses no Enter")
 		}
-		if !idInInputBox("claude", "tail #"+id+"\n", id) {
-			t.Fatal("the id in the last 15 lines of a non-pi screen still counts")
+		// An unrecognized screen is not a composer: the marker alone is not
+		// permission to press Enter.
+		if idInInputBox("claude", "tail #"+id+"\n", id) {
+			t.Fatal("an unrecognized screen is not a composer: no Enter")
 		}
-		// A claude without borders keeps the last 15 lines as its box: a
-		// marker pushed above them does not hold, even though it is on
-		// screen.
+		// A claude without borders stays conservative for the screen proof,
+		// but there is no recognized composer to license the Enter.
 		pushedNoBorders := "history " + endLine + " and #" + id + "\n" + strings.Repeat("chrome\n", 15)
 		if idInInputBox("claude", pushedNoBorders, id) {
-			t.Fatal("without borders the last 15 lines are the box and do not hold a pushed-up marker")
+			t.Fatal("without borders there is no recognized composer: no Enter")
 		}
 	})
 }

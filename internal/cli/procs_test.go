@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,6 +27,168 @@ type procsFixture struct {
 	state      string
 	fakeDir    string
 	configFile string
+	sleepExe   string
+	shExe      string
+}
+
+// The fixture processes are the test binary itself, re-executed in a
+// fixture role: no shell, no external sleep, no interpreter. The copies
+// are named sleep and sh, so the process table prints the same command
+// base names the old fixtures printed. The role rides in test-private
+// environment (argv carries only the test flag), and the fakecli config
+// marker is stripped from the re-execution (a re-executed test binary
+// that inherits it would dispatch as the fake instead of the role).
+const (
+	procsHelperRoleEnv = "HERDR_PROCS_HELPER_ROLE"
+	procsHelperArg1Env = "HERDR_PROCS_HELPER_ARG1"
+	procsHelperArg2Env = "HERDR_PROCS_HELPER_ARG2"
+)
+
+// TestProcFixtureHelper is the re-executed helper entry: when the role env
+// is set the fixture role runs and the process exits; in the main test run
+// the env is unset and the function returns without running anything.
+func TestProcFixtureHelper(t *testing.T) {
+	role := os.Getenv(procsHelperRoleEnv)
+	if role == "" {
+		return
+	}
+	os.Exit(runProcsHelperRole(role, os.Getenv(procsHelperArg1Env), os.Getenv(procsHelperArg2Env)))
+}
+
+// runProcsHelperRole runs one fixture role inside the re-executed test
+// binary. The roles keep the default signal handling, so a real SIGTERM
+// kills them and SIGKILL stops them.
+func runProcsHelperRole(role, childExe, kidFile string) (code int) {
+	// stripFakeEnv removes the fakecli config marker: the re-executed test
+	// binary must not dispatch as the fake CLI.
+	stripFakeEnv := func() []string {
+		items := os.Environ()
+		out := items[:0]
+		for _, item := range items {
+			if strings.HasPrefix(item, "HERDR_SOHO_FAKECLI_CONFIG=") {
+				continue
+			}
+			out = append(out, item)
+		}
+		return out
+	}
+	switch role {
+	case "sleeper":
+		// A long-lived process that dies from the default SIGTERM: the
+		// owned stand-in for the old `sleep 300`.
+		blockForever()
+	case "tree":
+		// A parent that owns exactly one sleeper child and waits on it:
+		// the owned stand-in for `sh -c "sleep 300 & wait"`. The parent
+		// dies from the default SIGTERM and it exits when its child stops
+		// (Wait returns), as the shell tree did, and the child reparents.
+		cmd := exec.Command(childExe, "-test.run=^TestProcFixtureHelper$")
+		items := stripFakeEnv()
+		items = append(items, procsHelperRoleEnv+"=sleeper")
+		cmd.Env = items
+		if err := cmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture tree: start child: %v\n", err)
+			return 1
+		}
+		if err := os.WriteFile(kidFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
+			_ = cmd.Process.Kill()
+			fmt.Fprintf(os.Stderr, "fixture tree: kid file: %v\n", err)
+			return 1
+		}
+		_ = cmd.Wait()
+	default:
+		fmt.Fprintf(os.Stderr, "fixture: unknown role %q\n", role)
+		return 127
+	}
+	return 0
+}
+
+// blockForever blocks the process for the rest of its life inside a real
+// blocking syscall (a read on a pipe whose write end this process keeps
+// open, so the read never returns and never reaches EOF): a Go process
+// whose only goroutine is parked in select{} is a self-declared deadlock,
+// and a timer sleep does not hold a syscall thread either. The default
+// SIGTERM and SIGKILL still stop the process while it is blocked.
+func blockForever() {
+	r, w, err := os.Pipe()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fixture: pipe: %v\n", err)
+		os.Exit(1)
+	}
+	_ = w // held open for the life of the process: the read never returns.
+	buf := make([]byte, 1)
+	_, _ = r.Read(buf)
+	os.Exit(1) // unreachable: the read blocks until a signal stops the process
+}
+
+// helperExe places an independent copy of the test binary under dir/name
+// so ps prints name as the command base name, exactly like the old sleep/
+// sh fixtures did: a hard link when supported (Unix), a byte copy
+// otherwise, and on Windows always a byte copy. A loaded parent image can
+// keep a hard-linked fixture in use on Windows Server CI; an independent
+// copy leaves fixture cleanup independent of the parent's lifetime.
+func helperExe(t *testing.T, dir, name string) string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locating the test binary: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	target := filepath.Join(dir, name)
+	if runtime.GOOS == "windows" {
+		// A loaded parent image can prevent hard-link cleanup on Windows.
+		// Keep this fixture independent of the running parent image.
+		if data, readErr := os.ReadFile(exe); readErr != nil {
+			t.Fatalf("reading the test binary: %v", readErr)
+		} else if writeErr := os.WriteFile(target, data, 0o700); writeErr != nil {
+			t.Fatalf("writing the fixture copy: %v", writeErr)
+		}
+		return target
+	}
+	if err := os.Link(exe, target); err != nil {
+		data, readErr := os.ReadFile(exe)
+		if readErr != nil {
+			t.Fatalf("reading the test binary: %v", readErr)
+		}
+		if writeErr := os.WriteFile(target, data, 0o700); writeErr != nil {
+			t.Fatalf("writing the fixture copy: %v", writeErr)
+		}
+	}
+	return target
+}
+
+// spawnHelper starts the test binary in a fixture role under the test's
+// env and owns the process for the whole test (killed and reaped in the
+// cleanup, also when an assertion failed), so the test never leaves a
+// process behind and never touches one it did not start.
+func spawnHelper(t *testing.T, env platform.Env, exe string, role string, args ...string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(exe, "-test.run=^TestProcFixtureHelper$")
+	items := env.List()
+	out := items[:0]
+	for _, item := range items {
+		// The re-executed test binary must not dispatch as the fake CLI.
+		if strings.HasPrefix(item, "HERDR_SOHO_FAKECLI_CONFIG=") {
+			continue
+		}
+		out = append(out, item)
+	}
+	items = out
+	items = append(items, procsHelperRoleEnv+"="+role)
+	for i, a := range args {
+		items = append(items, fmt.Sprintf("HERDR_PROCS_HELPER_ARG%d=%s", i+1, a))
+	}
+	cmd.Env = items
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting the %s fixture: %v", role, err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd
 }
 
 func newProcsFixture(t *testing.T) *procsFixture {
@@ -58,11 +222,10 @@ func newProcsFixture(t *testing.T) *procsFixture {
 	}
 	env = withFakeCLI(env, fakeDir)
 	// withFakeCLI narrows PATH to the fake dir; the registry helpers read
-	// ps from PATH, so the system directories come back in (the fake herdr
-	// still wins: its dir is first).
-	if p := os.Getenv("PATH"); p != "" {
-		env["PATH"] = fakeDir + string(os.PathListSeparator) + p
-	}
+	// ps from PATH, so a ps-only directory comes back (the fake herdr
+	// still wins: its dir is first). Nothing else is resolvable: no shell,
+	// no interpreter, no sleep.
+	env["PATH"] = fakeDir + string(os.PathListSeparator) + psOnlyDir(t)
 	oldDisk, oldSwap := platform.DiskFree, platform.SwapUsage
 	platform.DiskFree = func(string) (int64, int64, bool) {
 		return int64(60) * 1024 * 1024 * 1024, int64(100) * 1024 * 1024 * 1024, true
@@ -71,7 +234,33 @@ func newProcsFixture(t *testing.T) *procsFixture {
 		return int64(30) * 1024 * 1024 * 1024, int64(100) * 1024 * 1024 * 1024, true
 	}
 	t.Cleanup(func() { platform.DiskFree, platform.SwapUsage = oldDisk, oldSwap })
-	return &procsFixture{env: env, cwd: cwd, state: state, fakeDir: fakeDir, configFile: filepath.Join(fakeDir, "herdr.json")}
+	return &procsFixture{env: env, cwd: cwd, state: state, fakeDir: fakeDir, configFile: filepath.Join(fakeDir, "herdr.json"), sleepExe: helperExe(t, fakeDir, "sleep"), shExe: helperExe(t, fakeDir, "sh")}
+}
+
+// psOnlyDir returns a directory holding only a link to the system ps: the
+// tail of the restricted PATH the fixture env carries (no shell,
+// interpreter or sleep resolvable; ps is the only native command the
+// production reads use).
+func psOnlyDir(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return t.TempDir()
+	} // Native kernel APIs do not need ps.
+	path, err := exec.LookPath("ps")
+	if err != nil {
+		t.Fatalf("locate the system ps: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(path, filepath.Join(dir, "ps")); err != nil {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("reading the system ps: %v", readErr)
+		}
+		if writeErr := os.WriteFile(filepath.Join(dir, "ps"), data, 0o755); writeErr != nil {
+			t.Fatalf("copying the system ps: %v", writeErr)
+		}
+	}
+	return dir
 }
 
 func (f *procsFixture) run(t *testing.T, argv ...string) (int, string, string) {
@@ -110,36 +299,20 @@ func (f *procsFixture) writeProcs(t *testing.T, rows ...core.ProcRow) {
 
 func (f *procsFixture) registryPath() string { return filepath.Join(f.state, "procs.tsv") }
 
-// sleeper starts a real sleep the test itself owns (killed in the cleanup,
-// also when an assertion failed) and returns its pid.
+// sleeper starts a real long-lived process the test itself owns (killed
+// in the cleanup, also when an assertion failed) and returns its pid. The
+// process is the test binary re-executed as a sleeper, so it dies from a
+// real SIGTERM and the process table prints sleep as the base name.
 func (f *procsFixture) sleeper(t *testing.T) int {
 	t.Helper()
-	path, err := exec.LookPath("sleep")
-	if err != nil {
-		t.Skip("sleep is not available on PATH")
-	}
-	cmd := exec.Command(path, "300")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
+	cmd := spawnHelper(t, f.env, f.sleepExe, "sleeper")
 	return cmd.Process.Pid
 }
 
 // sleeperGone is a sleeper the test killed and reaped: the pid is gone.
 func (f *procsFixture) sleeperGone(t *testing.T) int {
 	t.Helper()
-	path, err := exec.LookPath("sleep")
-	if err != nil {
-		t.Skip("sleep is not available on PATH")
-	}
-	cmd := exec.Command(path, "300")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
+	cmd := spawnHelper(t, f.env, f.sleepExe, "sleeper")
 	pid := cmd.Process.Pid
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
@@ -148,37 +321,62 @@ func (f *procsFixture) sleeperGone(t *testing.T) int {
 	return pid
 }
 
-// treeProc starts sh -c "sleep 300 & wait" (exactly one descendant) and
-// returns the sh pid and the descendant pid.
+// treeProc starts a re-executed parent (named sh) that owns exactly one
+// sleeper child (named sleep), and returns the parent pid and the
+// descendant pid. The parent is the owned stand-in for
+// `sh -c "sleep 300 & wait"`: it exits when its child stops. The child is
+// owned through its exact pid (the parent may die before the test ends):
+// the cleanup kills it and confirms the absence.
 func (f *procsFixture) treeProc(t *testing.T) (parent, child int) {
 	t.Helper()
-	if path, err := exec.LookPath("sh"); err == nil {
-		cmd := exec.Command(path, "-c", "sleep 300 & wait")
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-		})
-		parent = cmd.Process.Pid
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			if _, name, ok := platform.ProcInfo(parent, f.env); !ok {
-				t.Fatalf("the sh %d is already gone (name %q)", parent, name)
-			}
-			kids, err := procDescendantsForTest(parent, f.env)
-			if err == nil && len(kids) == 1 {
-				return parent, kids[0]
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("the sh %d never forked its child (last: %v, %v)", parent, kids, err)
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX pid/ppid snapshot contract; native Windows tree tests are in internal/platform")
 	}
-	t.Skip("sh is not available on PATH")
-	return 0, 0
+	kidFile := filepath.Join(t.TempDir(), "kid")
+	cmd := spawnHelper(t, f.env, f.shExe, "tree", f.sleepExe, kidFile)
+	parent = cmd.Process.Pid
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, name, ok := platform.ProcInfo(parent, f.env); !ok {
+			t.Fatalf("the sh %d is already gone (name %q)", parent, name)
+		}
+		kids, err := procDescendantsForTest(parent, f.env)
+		if err == nil && len(kids) == 1 {
+			child = kids[0]
+		}
+		if child != 0 {
+			ownedStarted, ownedName, verified := platform.ProcInfo(child, f.env)
+			if !verified {
+				t.Fatal("fixture child identity is unreadable")
+			}
+			t.Cleanup(func() {
+				currentStarted, currentName, live := platform.ProcInfo(child, f.env)
+				if !live || currentStarted != ownedStarted || currentName != ownedName {
+					return
+				}
+				// The child is owned (spawned by the fixture parent): the
+				// cleanup kills it and confirms the absence. It may already
+				// be stopped (the release, or the parent reaping it).
+				p, err := os.FindProcess(child)
+				if err != nil || p.Kill() != nil {
+					return
+				}
+				until := time.Now().Add(5 * time.Second)
+				for procAlive(t, f.env, child) {
+					if time.Now().After(until) {
+						t.Error("the fixture child survived the cleanup kill")
+						return
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+			})
+			return parent, child
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the sh %d never forked its child (last: %v, %v)", parent, kids, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // procDescendantsForTest reads the pid/ppid snapshot the same way the
@@ -333,7 +531,7 @@ func TestProcsListStates(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("output = %q; want three lines", out)
 	}
-	if !strings.HasPrefix(lines[0], strconv.Itoa(running)+"  sleep  worker  0m  running") {
+	if !strings.HasPrefix(lines[0], strconv.Itoa(running)+"  "+filepath.Base(f.sleepExe)+"  worker  0m  running") {
 		t.Fatalf("line 1 = %q; want the running state", lines[0])
 	}
 	if !strings.HasPrefix(lines[1], strconv.Itoa(gone)+"  sleep  worker  0m  gone") {
@@ -347,12 +545,15 @@ func TestProcsListStates(t *testing.T) {
 // A ps that fails every identity query must never read as gone: the
 // state column shows the unknown read, and nothing is dropped.
 func TestProcsListUnknownState(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("failed ps read injection is Unix-specific; Windows handle failure controls are in internal/platform")
+	}
 	f := newProcsFixture(t)
 	pid := f.sleeper(t)
 	f.writeProcs(t, core.ProcRow{Pid: pid, Started: "Sat Oct  3 00:00:00 2026", Name: "sleep", Owner: "worker", Pane: "p-worker", Created: core.FrictionISO(platform.Now())})
 	// The fake ps fails every query: the fixture's PATH puts the fake dir
 	// first, so the registry helpers resolve it before the system ps.
-	if err := os.WriteFile(filepath.Join(f.fakeDir, "ps"), []byte("#!/bin/sh\nexit 9\n"), 0o700); err != nil {
+	if _, err := fakecli.Install(t, f.fakeDir, "ps", []fakecli.Rule{{AnyArgs: true, Code: 9}}); err != nil {
 		t.Fatal(err)
 	}
 	code, out, errOut := f.run(t, "procs")
@@ -603,7 +804,7 @@ func TestProcsNowrite(t *testing.T) {
 		if code != 0 || errOut != "" {
 			t.Fatalf("procs under NOWRITE: code=%d err=%q", code, errOut)
 		}
-		if !strings.HasPrefix(out, strconv.Itoa(pid)+"  sleep  worker  0m  running") {
+		if !strings.HasPrefix(out, strconv.Itoa(pid)+"  "+name+"  worker  0m  running") {
 			t.Fatalf("output = %q", out)
 		}
 	})

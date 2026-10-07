@@ -10,12 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/djalmajr/herdr-soho/internal/collaboration"
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/provider"
 	"github.com/djalmajr/herdr-soho/internal/reportscan"
+	"github.com/djalmajr/herdr-soho/internal/startup"
 	"github.com/djalmajr/herdr-soho/internal/taskreport"
 )
 
@@ -253,32 +255,54 @@ func retryNotReceived(sd, agent, marker string, ctx *core.Config, env platform.E
 	}
 	now := platform.Now().Unix()
 	screen := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
-	var inInput *bool
-	if MarkerHasPromptPath(marker) {
-		v := QueuedPromptSitsInInput(marker, screen, sd, agent)
-		inInput = &v
-	}
-	if inInput != nil && !*inInput {
+	// The retry Enter needs the same composer proof as the dispatch: a
+	// recognized composer (the roster kind) holding the stored composed
+	// path, and no known trust/approval/question UI. A missing
+	// identity/path or an unrecognized screen keeps the delivery uncertain
+	// without keys — the marker stays, and only positive evidence settles
+	// it.
+	inInput := inputRegionHolds(rosterKind(sd, agent), screen, QueuedPromptPath(marker, sd, agent))
+	if !inInput {
 		return "not-received"
 	}
 	if now-lastEpoch < window {
 		return "working"
 	}
-	markerInInput := PromptSitsInInput(screen)
-	if inInput != nil {
-		markerInInput = *inInput
-	}
-	if attempts < enterRetryLimit && markerInInput {
+	if attempts < enterRetryLimit && provider.DialogUI(rosterKind(sd, agent), screen) == "" {
 		next := attempts + 1
-		herdr.AgentSendKeys(agent, "enter", env)
 		writeWaitFile(sd, agent, "enter-retry", fmt.Sprintf("%d %d\n", next, now))
-		sendWarning(fmt.Sprintf("prompt to '%s' was still in its input box; sent Enter again (%d of %d)", agent, next, enterRetryLimit))
+		if herdr.AgentSendKeys(agent, "enter", env) {
+			sendWarning(fmt.Sprintf("prompt to '%s' was still in its input box; sent Enter again (%d of %d)", agent, next, enterRetryLimit))
+			return "working"
+		}
+		// A failed transport call still consumes the bounded attempt and
+		// starts its retry interval; it does not prove that a key landed.
+		sendWarning(fmt.Sprintf("prompt to '%s' was still in its input box; Enter retry %d of %d did not send", agent, next, enterRetryLimit))
 		return "working"
 	}
 	return "not-received"
 }
 
 func intPtr(value int) *int { return &value }
+
+// inputRegionHolds reports whether the screen authorizes a retry Enter for
+// the stored composed path: a recognized composer (the roster kind) holding
+// the exact path, and no known trust/approval/question UI. A missing
+// identity/path, an unknown kind, or an unrecognized screen is not positive
+// proof — the delivery keeps uncertain without keys.
+func inputRegionHolds(kind, screen, composed string) bool {
+	if composed == "" || provider.DialogUI(kind, screen) != "" {
+		return false
+	}
+	region, recognized := provider.ComposerRegion(kind, screen)
+	return recognized && provider.ComposerHoldsPath(region, composed)
+}
+
+// rosterKind reports the agent's provider kind from the roster (field 2),
+// or "" when the roster does not say.
+func rosterKind(sd, agent string) string {
+	return field(strings.Split(core.RosterLine(sd, agent), "\t"), 2)
+}
 
 func ProbeAgent(sd, agent, report string, ctx *core.Config, env platform.Env) string {
 	grace, _ := strconv.ParseFloat(core.Cfg(ctx, "settled_grace", "45", env), 64)
@@ -306,6 +330,24 @@ func ProbeAgent(sd, agent, report string, ctx *core.Config, env platform.Env) st
 	}
 	if st.State == "unavailable" {
 		return "unavailable\t" + st.Cause
+	}
+	// The cursor/Windows startup guard (issue #59): the verified workspace
+	// trust dialog takes no approval key — not the auto-approve default and
+	// not the not-received Enter retry — whatever herdr classifies the
+	// state (native idle or blocked). It sits after the authoritative
+	// finished-report early return and the gone/unavailable handling, and
+	// before the not-received Enter retry and the blocked-branch auto
+	// approve; it returns the existing blocked result (the wait prints the
+	// dialog and exits 7). A launch-only or blank screen does not block the
+	// wait: the guard acts only on the active dialog, so no TUI banner is
+	// demanded and ordinary in-progress output is never inferred away.
+	probeKind := field(strings.Split(core.RosterLine(sd, agent), "\t"), 2)
+	if startup.Enabled(probeKind) {
+		cursorScreen, cursorScreenOK := herdr.AgentReadOK(env, agent, "visible", intPtr(40))
+		if ev := startup.Evaluate(probeKind, startup.CurrentPlatform(), st.State, cursorScreen, cursorScreenOK); ev.Verdict == startup.VerdictBlocked || ev.Reason == startup.ReasonScreenIncomplete {
+			sendWarning(fmt.Sprintf("agent '%s' is on the cursor workspace trust dialog; no approval key is sent — read the pane and answer it yourself (herdr agent send-keys %s <keys>)", agent, agent))
+			return "blocked"
+		}
 	}
 	queuedText, queuedExists := readWaitFile(sd, agent, "queued")
 	queuedPending, queuedTerminal := false, false
@@ -508,8 +550,12 @@ func ProbeAgent(sd, agent, report string, ctx *core.Config, env platform.Env) st
 	}
 	if queuedPending {
 		recent := herdr.AgentRead(env, agent, "recent-unwrapped", intPtr(40))
-		inInput := QueuedPromptSitsInInput(queuedText, recent, sd, agent)
 		promptPath := QueuedPromptPath(queuedText, sd, agent)
+		// The queued retry Enter needs the same composer proof as the
+		// dispatch: a recognized composer holding the stored path, and no
+		// known dialog UI. Unrecognized screens keep the delivery uncertain
+		// without keys.
+		inInput := inputRegionHolds(rosterKind(sd, agent), recent, promptPath)
 		if promptPath == "" {
 			promptPath = "-"
 		}
@@ -540,10 +586,16 @@ func ProbeAgent(sd, agent, report string, ctx *core.Config, env platform.Env) st
 		if now-last < promptWindow(ctx, env) {
 			return "working"
 		}
-		if attempts < enterRetryLimit {
-			herdr.AgentSendKeys(agent, "enter", env)
-			writeWaitFile(sd, agent, "enter-retry", fmt.Sprintf("%d %d\n", attempts+1, now))
-			sendWarning(fmt.Sprintf("prompt to '%s' was still in its input box; sent Enter again (%d of %d)", agent, attempts+1, enterRetryLimit))
+		if attempts < enterRetryLimit && provider.DialogUI(rosterKind(sd, agent), recent) == "" {
+			next := attempts + 1
+			writeWaitFile(sd, agent, "enter-retry", fmt.Sprintf("%d %d\n", next, now))
+			if herdr.AgentSendKeys(agent, "enter", env) {
+				sendWarning(fmt.Sprintf("prompt to '%s' was still in its input box; sent Enter again (%d of %d)", agent, next, enterRetryLimit))
+				return "working"
+			}
+			// Failed calls consume the attempt and its interval too, without
+			// claiming that the key reached the agent.
+			sendWarning(fmt.Sprintf("prompt to '%s' was still in its input box; Enter retry %d of %d did not send", agent, next, enterRetryLimit))
 			return "working"
 		}
 		return "not-received"
@@ -591,10 +643,45 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 	remaining := append([]string(nil), agents...)
 	last := map[string]string{}
 	rc := 0
+	workspaceEnv := derivedWorkspaceEnv(ctx, env, cwd)
+	// The phase last announced per agent, so a phase change is reported once
+	// and a stable phase is not repeated on every poll.
+	seenCollab := map[string]string{}
 	for {
 		pending := []string{}
 		for _, agent := range remaining {
 			report := core.LastReport(sd, agent)
+			// An active collaboration owns the pane: the stale report is an
+			// artifact only, and the probe is skipped — no retry, no provider
+			// resume, no keys or prompts sent while the pane is idle.
+			if cs, ok := readCollaboration(sd, field(strings.Split(core.RosterLine(sd, agent), "\t"), 1), ctx, workspaceEnv); ok {
+				switch {
+				case cs.state == "collaboration-unavailable" || cs.state == "collaboration-disabled":
+					// The active assignment cannot be verified, or the policy is
+					// off or unreadable: terminal, like unavailable — a stale
+					// report never becomes done.
+					printCollaborationStatus(agent, cs, report)
+					if WaitRank(cs.code) > WaitRank(rc) {
+						rc = cs.code
+					}
+					continue
+				case cs.assign.Phase == collaboration.AwaitingOrchestrator || cs.assign.Phase == collaboration.Escalated:
+					// Actionable: the orchestrator has to decide; the wait ends
+					// here with 10, not with the timeout.
+					printCollaborationStatus(agent, cs, report)
+					return 10
+				default:
+					// preparing, reviewing and fixing stay pending under the
+					// existing timeout; each phase change is reported once.
+					if seenCollab[agent] != cs.assign.Phase {
+						printCollaborationStatus(agent, cs, report)
+						seenCollab[agent] = cs.assign.Phase
+					}
+					last[agent] = "collaborating"
+					pending = append(pending, agent)
+				}
+				continue
+			}
 			state := ProbeAgent(sd, agent, report, ctx, env)
 			tag := strings.SplitN(state, "\t", 2)[0]
 			switch tag {

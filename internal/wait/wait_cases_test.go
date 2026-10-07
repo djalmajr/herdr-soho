@@ -246,7 +246,9 @@ func TestWaitJavaScriptRetryCases(t *testing.T) {
 		platform.Now = func() time.Time { return fixed }
 		t.Cleanup(func() { platform.Now = oldNow })
 		prompt := "/tmp/worker-brief.md"
-		f := newQueuedProbeFixture(t, "idle", "5", "Read the file "+prompt+" in full and execute it.\n", map[string]string{"not-received": "2000000000 5 " + prompt + "\n"})
+		// Adapted contract: the retry needs a recognized composer holding
+		// the stored path — the claude box, not a plain history line.
+		f := newQueuedProbeFixture(t, "idle", "5", claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{"not-received": "2000000000 5 " + prompt + "\n"})
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
 		if got := f.probe(""); got != "working" {
 			t.Fatalf("fresh marker = %q, want wait", got)
@@ -301,7 +303,9 @@ func TestWaitTM4RemainingRetryAndApprovalCases(t *testing.T) {
 		platform.Now = func() time.Time { return fixed }
 		t.Cleanup(func() { platform.Now = oldNow })
 		prompt := "/tmp/worker-brief.md"
-		f := newQueuedProbeFixture(t, "idle", "5", "Welcome to the worker\n> Read the file "+prompt+" in full and execute it.\n", map[string]string{"not-received": "1999998800 5 " + prompt + "\n"})
+		// Adapted contract: the retry needs a recognized composer holding
+		// the stored path — the claude box, not a plain "> " marker line.
+		f := newQueuedProbeFixture(t, "idle", "5", "Welcome to the worker\n"+claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{"not-received": "1999998800 5 " + prompt + "\n"})
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "600"
 		enterCount := func() int {
 			count := 0
@@ -402,7 +406,9 @@ func TestWaitTM4RetryThenDoneCase(t *testing.T) {
 		platform.Now = func() time.Time { return fixed }
 		t.Cleanup(func() { platform.Now = oldNow })
 		prompt := "/tmp/worker-brief.md"
-		f := newQueuedProbeFixture(t, "idle", "5", "Welcome to the worker\n> Read the file "+prompt+" in full and execute it.\n", map[string]string{"not-received": "1999998800 5 " + prompt + "\n"})
+		// Adapted contract: the retry needs a recognized composer holding
+		// the stored path — the claude box, not a plain "> " marker line.
+		f := newQueuedProbeFixture(t, "idle", "5", "Welcome to the worker\n"+claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{"not-received": "1999998800 5 " + prompt + "\n"})
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "600"
 		if got := f.probe(""); got != "working" || !hasCall(f.calls(), "agent send-keys worker enter") {
 			t.Fatalf("retry did not keep the probe working with one Enter: state=%q calls=%#v", got, f.calls())

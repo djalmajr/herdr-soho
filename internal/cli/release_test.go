@@ -279,3 +279,19 @@ func TestReleaseRosterAndOptionGuards(t *testing.T) { // JS: "release: guards â€
 		t.Fatalf("unknown option status=%d stderr=%q calls=%#v", unknown.code, unknown.stderr, unknown.calls)
 	}
 }
+
+func TestReleaseGoneAgentRemovesRosterEntry(t *testing.T) {
+	f := newReleaseFixture(t, "", `{"error":{"code":"agent_not_found","message":"gone"}}`)
+	got := f.run(t, "worker", "--close")
+	if got.code != 0 || !strings.Contains(got.stdout, "released worker") {
+		t.Fatalf("gone release: code=%d out=%q stderr=%q", got.code, got.stdout, got.stderr)
+	}
+	if row := core.RosterLine(f.state, "worker"); row != "" {
+		t.Fatalf("gone worker retained in roster: %q", row)
+	}
+	for _, c := range got.calls {
+		if len(c.Argv) > 1 && c.Argv[0] == "agent" && (c.Argv[1] == "prompt" || c.Argv[1] == "send-keys") {
+			t.Fatalf("gone worker received input: %#v", c)
+		}
+	}
+}

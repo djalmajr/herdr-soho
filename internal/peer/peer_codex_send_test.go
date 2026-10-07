@@ -119,7 +119,7 @@ func TestSendCodexHistory(t *testing.T) {
 		if code != 15 || out != "" {
 			t.Fatalf("a message still in the composer is not sent: code=%d out=%q", code, out)
 		}
-		want := "herdr-soho: send: local/w0test:p0a did not take the message (no sign of it in its state or screen); read its pane before sending again\n"
+		want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #b8ba14bf or a reply before sending again\n"
 		if stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}

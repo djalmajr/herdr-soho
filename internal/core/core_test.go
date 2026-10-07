@@ -20,6 +20,15 @@ func TestMain(m *testing.M) {
 func fixture(t *testing.T) (platform.Env, string) {
 	t.Helper()
 	root := t.TempDir()
+	// Canonicalize the existing temporary root before deriving any
+	// fixture path: the platform's git and filepath.EvalSymlinks report
+	// the canonical form (on Windows the long path behind the short 8.3
+	// alias), while t.TempDir can hand back the short alias; one shared
+	// form keeps expected and actual paths comparable on every platform.
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("canonicalize the fixture root: %v", err)
+	}
 	repo := filepath.Join(root, "repo")
 	home := filepath.Join(root, "home")
 	conf := filepath.Join(root, "conf")
@@ -38,9 +47,45 @@ func fixture(t *testing.T) (platform.Env, string) {
 	env := platform.Env{
 		"HOME": home, "XDG_CONFIG_HOME": conf, "HERDR_SOHO_DIR": state,
 		"HERDR_SOHO_SKILL_DIR": skillDir, "HERDR_WORKSPACE_ID": "ws",
-		"PATH": os.Getenv("PATH"),
+		// Restricted PATH: the production code under test resolves git
+		// from the environment, and nothing else; a directory holding
+		// only the system git keeps the env hermetic (no shell, no
+		// interpreter, no sleep resolvable).
+		"PATH": gitOnlyDir(t),
 	}
 	return env, repo
+}
+
+// gitOnlyDir returns a directory holding only a link to the system git:
+// the restricted PATH tail the fixture envs carry (git is a known native
+// binary the production root/ignore paths resolve; nothing else is
+// resolvable on the PATH). The link is staged under the platform-native
+// name: on Windows FindExecutable only tries the PATHEXT extensions (the
+// bare name is never attempted), so the fixture must hold git.exe there,
+// and on Unix it holds git. The FindExecutable PATHEXT contract is left
+// unchanged; only the staged name follows it.
+func gitOnlyDir(t *testing.T) string {
+	t.Helper()
+	path, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("locate the system git: %v", err)
+	}
+	name := "git"
+	if runtime.GOOS == "windows" {
+		name = "git.exe"
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, name)
+	if err := os.Symlink(path, target); err != nil {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("reading the system git: %v", readErr)
+		}
+		if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
+			t.Fatalf("copying the system git: %v", writeErr)
+		}
+	}
+	return dir
 }
 
 func testSkillDir(t *testing.T) string {
@@ -476,18 +521,18 @@ func TestSessionWithoutWorkspace(t *testing.T) {
 
 func TestSessionPathUsesHerdrFallback(t *testing.T) {
 	// JS: "session path falls back to the workspace herdr reports"
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX command fixture")
-	}
 	env, cwd := fixture(t)
 	delete(env, "HERDR_WORKSPACE_ID")
 	env["HERDR_ENV"] = "1"
+	// The shared fakecli herdr answers the workspace query (no shell
+	// script behind the name): the re-executed test binary dispatches as
+	// the fake on every platform.
 	bin := t.TempDir()
-	write(t, filepath.Join(bin, "herdr"), "#!/bin/sh\nprintf '{\"result\":{\"pane\":{\"workspace_id\":\"ws-from-herdr\"}}}'\n")
-	if err := os.Chmod(filepath.Join(bin, "herdr"), 0o700); err != nil {
+	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{AnyArgs: true, Stdout: `{"result":{"pane":{"workspace_id":"ws-from-herdr"}}}`}}); err != nil {
 		t.Fatal(err)
 	}
 	env["PATH"] = bin + string(os.PathListSeparator) + env.Get("PATH")
+	env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
 	ctx := LoadConfig(env, cwd)
 	want := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws-from-herdr", "session.conf")
 	if got := SessionConfPath(&ctx, env, cwd); got != want {

@@ -15,11 +15,36 @@ import (
 )
 
 // procStartRe splits one `ps -o lstart=,state=,comm=` line: the raw lstart
-// field (day space-padded, LC_ALL=C abbreviations), the single-letter
-// state and the rest of the line, the comm. The lstart is stored exactly
-// as the system prints it, so two reads of the same process compare
-// equal.
-var procStartRe = regexp.MustCompile(`^([A-Z][a-z]{2} [A-Z][a-z]{2}  ?\d{1,2} \d{2}:\d{2}:\d{2} \d{4})\s+([A-Za-z])\s+(.+)$`)
+// field (day space-padded, LC_ALL=C abbreviations), the state (the base
+// letter plus the modifier flags ps appends, e.g. Ss, S+, R+, SN, S<,
+// Sl) and the rest of the line, the comm. The lstart is stored exactly as
+// the system prints it, so two reads of the same process compare equal.
+var procStartRe = regexp.MustCompile(`^([A-Z][a-z]{2} [A-Z][a-z]{2}  ?\d{1,2} \d{2}:\d{2}:\d{2} \d{4})\s+([A-Za-z][A-Za-z+<]*)\s+(.+)$`)
+
+// procStateGone reports whether a ps state token is the zombie base state
+// (with or without the modifier flags ps appends, e.g. Z+, Zs): a dead
+// process left unreaped is not running, and a flagged zombie must not
+// appear running or survive the cleanup poll.
+func procStateGone(state string) bool {
+	return strings.HasPrefix(state, "Z")
+}
+
+// procStateRunning reports whether a ps state token's base letter is a
+// live state (R, S, D, T, W, X, I, U, or the tracing-stop t; the modifier
+// letters ps appends, s + n < l, do not change the liveness). Any other
+// base letter — or an empty token — is not a positive running read: the
+// caller confirms the line against the kernel, and an unknown state never
+// reads as running.
+func procStateRunning(state string) bool {
+	if state == "" {
+		return false
+	}
+	switch state[0] {
+	case 'R', 'S', 'D', 'T', 'W', 'X', 'I', 'U', 't':
+		return true
+	}
+	return false
+}
 
 // procLocale returns env with LC_ALL=C, so ps prints the date fields in
 // the fixed English abbreviated form the parser expects.
@@ -58,8 +83,11 @@ func SameStarted(a, b string) bool {
 // (LC_ALL=C, a 5 s ceiling): only that pid, never a command-line listing
 // (it may carry credentials). started is the start time exactly as the
 // system prints it, name the base name of the command. The liveness is
-// the three-way read: when ps exits non-zero, is missing or times out, or
-// the line does not parse, the absence is confirmed with kill(pid, 0) —
+// the three-way read: the state is the base letter plus the modifier
+// flags ps appends (Ss, S+, R+, SN, S<, Sl), and a zombie base state (Z,
+// with or without flags) is gone. When ps exits non-zero, is missing or
+// times out, the line does not parse, or the state base letter is not a
+// known live or zombie state, the read is confirmed with kill(pid, 0) —
 // ESRCH is the proven absence, any other result (nil or EPERM among them)
 // is unknown. A zombie (a dead process left unreaped by its parent) is
 // not running.
@@ -72,10 +100,13 @@ func procInfoFull(pid int, env Env) (string, string, ProcLiveness) {
 	if m == nil {
 		return "", "", procKernelGone(pid)
 	}
-	if m[2] == "Z" {
+	switch {
+	case procStateGone(m[2]):
 		return "", "", ProcGone
+	case procStateRunning(m[2]):
+		return m[1], basePath(m[3]), ProcRunning
 	}
-	return m[1], basePath(m[3]), ProcRunning
+	return "", "", procKernelGone(pid)
 }
 
 // procKernelGone confirms a failed ps read against the kernel: kill(pid,
@@ -89,18 +120,32 @@ func procKernelGone(pid int) ProcLiveness {
 	return ProcUnknown
 }
 
+// ReadProcFull reads one pid's start time, command base name and the
+// three-way liveness in one snapshot (the single by-pid ps read): started
+// is the start time exactly as the system prints it and name the base
+// name of the command, both empty unless the pid reads as running. The
+// three-way result tells a proven absence (the pid does not exist or is a
+// zombie) from an unreadable read (the ps failed, or its line did not
+// parse, and the kernel did not report the absence): the procs add path
+// refuses the first (exit 2) and reports the second (exit 4) instead of
+// collapsing both into the dead-process refusal, and the one snapshot
+// never races a second read to name the first read's failure.
+func ReadProcFull(pid int, env Env) (string, string, ProcLiveness) {
+	return procInfoFull(pid, env)
+}
+
 // ProcInfo reads the start time and the command base name of one pid.
 // ok is true only for a running pid: a proven absence and an unreadable
-// read both read as not running (the three-way result is ReadProc).
+// read both read as not running (the three-way result is ReadProcFull).
 func ProcInfo(pid int, env Env) (string, string, bool) {
-	started, name, live := procInfoFull(pid, env)
+	started, name, live := ReadProcFull(pid, env)
 	return started, name, live == ProcRunning
 }
 
 // ReadProc reads one pid's start time and liveness as the three-way
 // result the registry and stop paths need.
 func ReadProc(pid int, env Env) (string, ProcLiveness) {
-	started, _, live := procInfoFull(pid, env)
+	started, _, live := ReadProcFull(pid, env)
 	return started, live
 }
 
@@ -145,12 +190,14 @@ var (
 // ceiling): only those fields, never a command line. The lstart is
 // re-joined with single spaces, a normalization that is stable for the
 // life of the process, so two reads of the same process compare equal.
-// The read is three-way: a parsed line says running or gone (a zombie is
-// not running); when ps exits non-zero, is missing, times out, or the
-// table carries no line for this pid, the absence is confirmed with
-// kill(pid, 0) — ESRCH is gone, anything else is unknown. A pid whose
-// line does not print a start time or a parent (a reduced table) reads
-// both as unknown and keeps only the state.
+// The read is three-way: a parsed line says running or gone (the state is
+// the base letter plus the modifier flags ps appends, and a zombie base
+// state, with or without flags, is not running); when ps exits non-zero,
+// is missing, times out, the table carries no line for this pid, or the
+// state base letter is not a known live or zombie state, the read is
+// confirmed with kill(pid, 0) — ESRCH is gone, anything else is unknown.
+// A pid whose line does not print a start time or a parent (a reduced
+// table) reads both as unknown and keeps only the state.
 func procReadIdentityReal(pid int, env Env) (procIdentity, ProcLiveness) {
 	r := RunCli("ps", []string{"-o", "lstart=,ppid=,state=", "-p", strconv.Itoa(pid)}, RunOptions{Env: procLocale(env), TimeoutMs: 5000})
 	if r.NotFound || r.TimedOut || r.Error != "" || r.Status == nil || *r.Status != 0 {
@@ -169,10 +216,13 @@ func procReadIdentityReal(pid int, env Env) (procIdentity, ProcLiveness) {
 			if linePid, err := strconv.Atoi(fields[0]); err != nil || linePid != pid {
 				continue
 			}
-			if state == "Z" {
+			switch {
+			case procStateGone(state):
 				return procIdentity{}, ProcGone
+			case procStateRunning(state):
+				return procIdentity{}, ProcRunning
 			}
-			return procIdentity{}, ProcRunning
+			return procIdentity{}, procKernelGone(pid)
 		}
 		ppid, err := strconv.Atoi(fields[len(fields)-2])
 		if err != nil {
@@ -183,10 +233,13 @@ func procReadIdentityReal(pid int, env Env) (procIdentity, ProcLiveness) {
 			ppid:      ppid,
 			ppidKnown: true,
 		}
-		if state == "Z" {
+		switch {
+		case procStateGone(state):
 			return id, ProcGone
+		case procStateRunning(state):
+			return id, ProcRunning
 		}
-		return id, ProcRunning
+		return procIdentity{}, procKernelGone(pid)
 	}
 	return procIdentity{}, procKernelGone(pid)
 }
@@ -429,20 +482,32 @@ func procStillRunning(pids []int, env Env) []int {
 }
 
 // procAliveStates reports, from one `ps -o pid=,state=` call, which of the
-// pids is still running; a zombie (a dead process left unreaped) is not
-// running. ps exits non-zero when some of the pids are not there, but the
-// printed lines are still the answer: an unprinted pid is gone. When ps
-// itself fails (missing, timeout), every pid reads as alive: a stop is
-// never claimed on a doubt.
+// pids is still running; a zombie base state (with or without the
+// modifier flags ps appends, Z+, Zs) is not running, and any other state,
+// including one this parser does not know, keeps the pid alive: a stop is
+// never claimed on a doubt. When ps itself is missing or times out, every
+// pid reads as alive (the conservative behavior). When ps ran but failed
+// (non-zero status, an error, or a missing status), its stdout — empty or
+// partial — is not liveness proof and is not parsed: every pid is
+// confirmed against the kernel instead, and only ESRCH establishes gone;
+// an existing or denied (EPERM) pid stays alive or uncertain. A normal
+// non-zero empty ps, the one where every queried pid genuinely exited,
+// still reads as gone, because the kernel confirms each absence.
 func procAliveStates(pids []int, env Env) map[int]bool {
 	out := map[int]bool{}
 	if len(pids) == 0 {
 		return out
 	}
 	r := RunCli("ps", []string{"-o", "pid=,state=", "-p", strings.Join(mapInts(pids), ",")}, RunOptions{Env: procLocale(env), TimeoutMs: 2000})
-	if r.NotFound || r.TimedOut || r.Error != "" {
+	if r.NotFound || r.TimedOut {
 		for _, p := range pids {
 			out[p] = true
+		}
+		return out
+	}
+	if r.Error != "" || r.Status == nil || *r.Status != 0 {
+		for _, p := range pids {
+			out[p] = procKernelGone(p) != ProcGone
 		}
 		return out
 	}
@@ -455,7 +520,7 @@ func procAliveStates(pids []int, env Env) map[int]bool {
 		if err != nil {
 			continue
 		}
-		out[pid] = fields[1] != "Z"
+		out[pid] = !procStateGone(fields[1])
 	}
 	return out
 }
