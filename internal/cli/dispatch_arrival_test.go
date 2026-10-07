@@ -31,6 +31,7 @@ func newDispatchArrivalFixture(t *testing.T, initialMode string, initialSeq, nex
 	if recent == "$CURRENT_PATHS" {
 		recent = dispatchPromptEvidence(root)
 	}
+	recent = strings.ReplaceAll(recent, "$ROOT", root)
 	state, roles, bin := filepath.Join(root, "state"), filepath.Join(root, "roles"), filepath.Join(root, "bin")
 	for _, dir := range []string{filepath.Join(state, "ws", "wait"), filepath.Join(state, "ws", "briefs"), filepath.Join(state, "ws", "reports"), roles, bin} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -124,6 +125,29 @@ func dispatchOutputStatus(t *testing.T, out string) string {
 	return status
 }
 
+// pinComposedStamp pins platform.Now to a real-time clock starting at
+// 2026-09-29T00:00:00 UTC and returns the composed brief's stamp, stable for
+// at least 300 ms ahead: the dispatch that runs right after composes
+// worker-<stamp>.md. The clock must keep advancing for the wait deadlines —
+// a fixed clock spins the arrival loops forever.
+func pinComposedStamp(t *testing.T) string {
+	t.Helper()
+	oldNow := platform.Now
+	base := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
+	began := time.Now()
+	platform.Now = func() time.Time { return base.Add(time.Since(began)) }
+	t.Cleanup(func() { platform.Now = oldNow })
+	stamp := ""
+	for {
+		cur := core.NowStamp(platform.Now())
+		if cur == stamp && core.NowStamp(platform.Now().Add(300*time.Millisecond)) == stamp {
+			return stamp
+		}
+		stamp = cur
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestDispatchArrivalPortedCases(t *testing.T) {
 	fixedNow := platform.Now
 	clock := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
@@ -165,9 +189,12 @@ func TestDispatchArrivalPortedCases(t *testing.T) {
 		}
 	})
 	t.Run(`arrival: a working target with a truncated queued prompt counts as queued`, func(t *testing.T) {
-		// JS: "arrival: working target with no prompt evidence is not-received and sends no key" (the queued-proof side)
-		// The queue shows the dispatched prompt with the path cut, so the full path never appears.
-		f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\nRead the file "+filepath.Join("state", "ws", "briefs", "work")+"…\n", "0")
+		// The queue shows the dispatched prompt with the leading directories
+		// clipped: the file's exact name stays whole and proves the prompt.
+		// The old generic fragment (a shared directory plus a name prefix)
+		// no longer proves it.
+		stamp := pinComposedStamp(t)
+		f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\nRead the file '.../briefs/worker-"+stamp+".md…' in full\n", "0")
 		code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || dispatchOutputStatus(t, out) != "queued" || !strings.Contains(errText, "prompt queued: 'worker' is working") {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
@@ -191,6 +218,108 @@ func TestDispatchArrivalPortedCases(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(f.state, "ws", "wait", "worker.not-received")); err != nil {
 			t.Fatalf("not-received marker missing: %v", err)
+		}
+	})
+	t.Run(`arrival: a working target with a generic or old queue line stays not-received`, func(t *testing.T) {
+		// The queue shows only lines from other dispatches: the queue chrome
+		// without a file, a shared directory plus a name prefix (the old
+		// generic fragment), and an old brief's clipped name. None of them
+		// identifies this prompt, so the delivery stays uncertain: no queued
+		// receipt, no key, no resend.
+		pinComposedStamp(t)
+		recent := "old work output\n" +
+			"Steering: Read the file /var/folders/f2/r857c16x45z6p82wsq_0d_...\n" +
+			"\t↳ Read the file in full and execute it\n" +
+			"Read the file '.../briefs/work…' in full\n" +
+			"Read the file '.../briefs/worker-19990101T000000.md…' in full\n"
+		f := newDispatchArrivalFixture(t, "working", 5, 5, recent, "0")
+		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
+		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+		calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range calls {
+			if len(call.Argv) > 1 && call.Argv[1] == "send-keys" {
+				t.Fatalf("occupied target got a key: %#v", call.Argv)
+			}
+		}
+	})
+	t.Run(`arrival: a working target with a longer same-prefix filename stays not-received`, func(t *testing.T) {
+		// The recent screen shows this prompt's path as a prefix of a longer
+		// file name: the entrypoint whole-path check must not prove the
+		// shorter composed path from the longer one.
+		stamp := pinComposedStamp(t)
+		recent := "old work output\nRead the file $ROOT/state/ws/briefs/worker-" + stamp + ".md-other in full\n"
+		f := newDispatchArrivalFixture(t, "working", 5, 5, recent, "0")
+		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
+		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+	t.Run(`arrival: a working target with a longer brief-suffix filename stays not-received`, func(t *testing.T) {
+		// The shared rule also receives normal .md composed names. Adding
+		// .brief.md creates another filename, not an alternative identity.
+		stamp := pinComposedStamp(t)
+		recent := "old work output\nRead the file $ROOT/state/ws/briefs/worker-" + stamp + ".md.brief.md in full\n"
+		f := newDispatchArrivalFixture(t, "working", 5, 5, recent, "0")
+		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
+		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+		calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range calls {
+			if len(call.Argv) > 1 && call.Argv[1] == "send-keys" {
+				t.Fatalf("occupied target got a key: %#v", call.Argv)
+			}
+		}
+	})
+	t.Run(`arrival: a working target with quoted prose naming a longer same-prefix file stays not-received`, func(t *testing.T) {
+		// Quoted prose that names a longer same-prefix file is not this
+		// prompt's queue or path evidence.
+		stamp := pinComposedStamp(t)
+		recent := "old work output\nThe note says: \"Read the file $ROOT/state/ws/briefs/worker-" + stamp + ".md-other in full and execute it\"\n"
+		f := newDispatchArrivalFixture(t, "working", 5, 5, recent, "0")
+		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
+		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+	t.Run(`arrival: a working target with quoted prose naming the exact full path stays not-received`, func(t *testing.T) {
+		// Quoted prose that names this prompt's exact full path is not a
+		// prompt or queue line: the entrypoint must not prove the prompt
+		// from a mention of it.
+		stamp := pinComposedStamp(t)
+		recent := "old work output\nThe note says: \"Read the file $ROOT/state/ws/briefs/worker-" + stamp + ".md in full and execute it\"\n"
+		f := newDispatchArrivalFixture(t, "working", 5, 5, recent, "0")
+		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
+		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+		calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range calls {
+			if len(call.Argv) > 1 && call.Argv[1] == "send-keys" {
+				t.Fatalf("occupied target got a key: %#v", call.Argv)
+			}
+		}
+	})
+	t.Run(`arrival: a working target with quoted prose naming the exact clipped file stays not-received`, func(t *testing.T) {
+		// Quoted prose carrying the exact clipped basename is not a queue
+		// line: the queue rule must not prove the prompt from a mention of it.
+		stamp := pinComposedStamp(t)
+		recent := "old work output\nThey asked: \"Read the file '.../briefs/worker-" + stamp + ".md…' in full\"\n"
+		f := newDispatchArrivalFixture(t, "working", 5, 5, recent, "0")
+		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
+		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
+			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
 	t.Run(`arrival: amend ignores a generic marker from the previous prompt`, func(t *testing.T) {
@@ -235,11 +364,36 @@ func TestDispatchArrivalPortedCases(t *testing.T) {
 		}
 	})
 	t.Run(`arrival: an input-box prompt sends Enter before stale auth becomes not-received`, func(t *testing.T) { // Mutation captured: checking stale auth before the input box omits the required Enter.
-		screen := "Error: Incorrect API key\nRead the file /already/on/screen\n"
+		// Adapted contract: the first Enter needs a recognized composer
+		// holding the exact composed path. The screen is the codex composer
+		// with the exact path plus the auth error line, and the auth cause
+		// stays stale (present before the send): the Enter is sent, the
+		// arrival never comes, and the dispatch ends not-received after the
+		// Enter — never "after its block on a provider auth error".
+		oldNow := platform.Now
+		base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.Local)
+		began := time.Now()
+		platform.Now = func() time.Time { return base.Add(time.Since(began)) }
+		t.Cleanup(func() { platform.Now = oldNow })
+		composedName := func() string {
+			stamp := ""
+			for {
+				cur := core.NowStamp(platform.Now())
+				if cur != stamp {
+					stamp = cur
+					continue
+				}
+				if core.NowStamp(platform.Now().Add(300*time.Millisecond)) == stamp {
+					return filepath.Join("$ROOT", "state", "ws", "briefs", "worker-"+stamp+".md")
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}
+		screen := "Error: Incorrect API key\n› Read the file " + composedName() + " in full and execute it.\n"
 		f := newDispatchArrivalFixture(t, "blocked", 7, 7, "Error: Incorrect API key\n", "0",
-			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, ArgvPrefix: true, Stdout: screen},
-			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, ArgvPrefix: true, Stdout: screen},
-			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 3, ArgvPrefix: true, Stdout: screen},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, ArgvPrefix: true, Stdout: "boot\n"},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: screen},
+			fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, ArgvPrefix: true},
 		)
 		code, _, stderr := f.run(t, "worker", f.brief, "--no-wait")
 		calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
@@ -258,6 +412,7 @@ func TestDispatchArrivalPortedCases(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 1, "old output\n", "0",
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, Stdout: "boot before\n", ArgvPrefix: true},
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, Stdout: "boot redraw\n", ArgvPrefix: true},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: "›\n"},
 		)
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
@@ -277,12 +432,13 @@ func TestDispatchArrivalPortedCases(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 1, "old output\n", "0",
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, Stdout: "screen before\n", ArgvPrefix: true},
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, Stdout: "screen redraw\n", ArgvPrefix: true},
-			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 3, Stdout: "screen before\n", ArgvPrefix: true},
-			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 4, Stdout: "screen after resend\n", ArgvPrefix: true},
-			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped"}, Call: 3, Stdout: "$CURRENT_PATHS", ArgvPrefix: true},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 3, Stdout: "›\n", ArgvPrefix: true},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 4, Stdout: "›\n", ArgvPrefix: true},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: "›\n"},
 			fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: `{"result":{"agent":{"agent_status":"idle","state_change_seq":1}}}`},
 			fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 4, Stdout: `{"result":{"agent":{"agent_status":"idle","state_change_seq":1}}}`},
-			fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 5, Stdout: `{"result":{"agent":{"agent_status":"working","state_change_seq":2}}}`},
+			fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 5, Stdout: `{"result":{"agent":{"agent_status":"idle","state_change_seq":1}}}`},
+			fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 6, Stdout: `{"result":{"agent":{"agent_status":"working","state_change_seq":2}}}`},
 		)
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || dispatchOutputStatus(t, out) != "submitted" || !strings.Contains(out, `"resent":true`) {
@@ -375,12 +531,14 @@ func TestDispatchArrivalPortedCases(t *testing.T) {
 	})
 	t.Run(`arrival (e): screen changed and composed prompt path visible outside last 3 lines -> received without resend`, func(t *testing.T) {
 		// JS: "arrival (e): screen changed and composed prompt path visible outside last 3 lines -> received without resend"
+		// The frozen title records the legacy contract. A history echo alone
+		// now keeps delivery uncertain, with no Enter or repeated prompt.
 		f := newDispatchArrivalFixture(t, "idle", 1, 1, "$CURRENT_PATHS", "0",
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, Stdout: "boot\n", ArgvPrefix: true},
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, Stdout: "screen changed\n", ArgvPrefix: true},
 		)
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
-		if code != 0 || dispatchOutputStatus(t, out) != "submitted" {
+		if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 		calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
@@ -496,10 +654,25 @@ func altScreenVisible(stamp string) string {
 		"   ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                            126.3K (48%)  ctrl+p commands\n"
 }
 
+// altScreenProseVisible mirrors the real opencode alt screen whose box holds
+// earlier steps and then a line of prose that quotes the composed prompt: the
+// marker sits mid-sentence, so no box line opens with the anchored prompt.
+func altScreenProseVisible(stamp string) string {
+	briefs := filepath.Join("$ROOT", "state", "ws", "briefs") + string(filepath.Separator)
+	return "  ┃  [✓] earlier step\n" +
+		"     ▣  Build · Qwen3.8-27B NVFP4 (ai01) · 23m 14s\n" +
+		"  ┃\n" +
+		"  ┃  The note says: \"Read the file " + briefs + "worker-\n" +
+		"  ┃  " + stamp + ".md in full and execute it.\"\n" +
+		"  ┃\n" +
+		"   ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                            126.3K (48%)  ctrl+p commands\n"
+}
+
 // runAltScreenDispatch runs a dispatch to a working target whose recent read
 // Herdr refuses (agent_not_idle), with the clock at 2026-09-30 12:54:55 so the
-// composed prompt is worker-20260930T125455.md.
-func runAltScreenDispatch(t *testing.T, screenStamp string) (int, string, string, time.Duration) {
+// composed prompt is worker-20260930T125455.md; screen builds the visible
+// screen from the given stamp.
+func runAltScreenDispatch(t *testing.T, screen func(stamp string) string, screenStamp string) (int, string, string, time.Duration) {
 	t.Helper()
 	base := time.Date(2026, 9, 30, 12, 54, 55, 0, time.Local)
 	began := time.Now()
@@ -509,7 +682,7 @@ func runAltScreenDispatch(t *testing.T, screenStamp string) (int, string, string
 	notIdle := `{"error":{"code":"agent_not_idle","message":"cannot read 40 lines while worker is working: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source visible"}}`
 	f := newDispatchArrivalFixture(t, "working", 5, 5, "", "2",
 		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped"}, ArgvPrefix: true, Code: 1, Stderr: notIdle},
-		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: altScreenVisible(screenStamp)},
+		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: screen(screenStamp)},
 	)
 	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
 	start := time.Now()
@@ -521,7 +694,7 @@ func runAltScreenDispatch(t *testing.T, screenStamp string) (int, string, string
 // refuses a recent read of a working full-screen TUI, so the evidence comes
 // from the visible screen, with the wrapped path joined back.
 func TestDispatchWorkingAltScreenTargetShowsThePromptOnTheVisibleScreen(t *testing.T) {
-	code, out, errText, elapsed := runAltScreenDispatch(t, "20260930T125455")
+	code, out, errText, elapsed := runAltScreenDispatch(t, altScreenVisible, "20260930T125455")
 	if code != 0 || dispatchOutputStatus(t, out) != "queued" || strings.Contains(errText, "not confirmed") {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 	}
@@ -538,7 +711,18 @@ func TestDispatchWorkingAltScreenTargetShowsThePromptOnTheVisibleScreen(t *testi
 // line holds only `…/briefs/worker-`, shared by every brief of the agent; an
 // earlier brief still on screen is not this prompt.
 func TestDispatchWorkingAltScreenEarlierBriefIsNotThisPrompt(t *testing.T) {
-	code, out, errText, _ := runAltScreenDispatch(t, "19990101T000000")
+	code, out, errText, _ := runAltScreenDispatch(t, altScreenVisible, "19990101T000000")
+	if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
+		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
+	}
+}
+
+// TestDispatchWorkingAltScreenBoxProseQuotingExactFileIsNotThisPrompt: the
+// visible screen's box carries earlier steps and prose quoting the exact
+// composed prompt; no box line opens with the anchored prompt, so the box
+// reassembles no path and the delivery stays not-received.
+func TestDispatchWorkingAltScreenBoxProseQuotingExactFileIsNotThisPrompt(t *testing.T) {
+	code, out, errText, _ := runAltScreenDispatch(t, altScreenProseVisible, "20260930T125455")
 	if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 	}

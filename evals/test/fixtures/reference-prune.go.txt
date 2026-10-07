@@ -1,0 +1,120 @@
+// Package src implements the backup pruning contract of the
+// implementer-prune fixture. This durable control is the reference
+// implementation the hidden probes measure; it is stored as data beside the
+// historical Node controls and is never shipped to a prepared worker.
+package src
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"time"
+)
+
+// backupNameRE mirrors the legacy backup file pattern: a 16-digit sequence
+// and a 17-character UTC timestamp.
+var backupNameRE = regexp.MustCompile(`^backup-([0-9]{16})-([0-9]{8}T[0-9]{6}[0-9]{3}Z)[.]json$`)
+
+// maxSafeKeep is Number.MAX_SAFE_INTEGER, the legacy safe-integer bound.
+const maxSafeKeep = 9007199254740991
+
+// Options selects one prune request.
+type Options struct {
+	// Dir names the directory that holds the backup files.
+	Dir string
+	// Keep is the number of newest backups to retain; it must hold a safe
+	// integer greater than or equal to 1.
+	Keep float64
+	// Now is the caller's current wall clock; it must be a nonzero time.
+	// Validation only: the pruning order never uses the clock.
+	Now time.Time
+}
+
+// PruneBackups removes the oldest backup files beyond the newest Keep
+// backups and returns the number of files removed. Only regular files that
+// match the backup pattern are touched; temporary files, directories and
+// symlinks are ignored. Invalid arguments and duplicated sequences fail
+// before any mutation.
+func PruneBackups(o Options) (int, error) {
+	if o.Dir == "" {
+		return 0, errors.New("dir must be a non-empty path")
+	}
+	keep, err := validateKeep(o.Keep)
+	if err != nil {
+		return 0, err
+	}
+	if o.Now.IsZero() {
+		return 0, errors.New("now must be a valid time")
+	}
+	directory, err := os.Stat(o.Dir)
+	if err != nil {
+		return 0, fmt.Errorf("dir must name an existing directory: %v", err)
+	}
+	if !directory.IsDir() {
+		return 0, errors.New("dir must name an existing directory")
+	}
+	backups, err := collectBackups(o.Dir)
+	if err != nil {
+		return 0, err
+	}
+	removeCount := 0
+	if len(backups) > keep {
+		removeCount = len(backups) - keep
+	}
+	for _, backup := range backups[:removeCount] {
+		if err := os.Remove(filepath.Join(o.Dir, backup.name)); err != nil {
+			return 0, fmt.Errorf("remove %s: %v", backup.name, err)
+		}
+	}
+	return removeCount, nil
+}
+
+// backup is one collected backup file ordered by sequence.
+type backup struct {
+	name     string
+	sequence int64
+}
+
+// collectBackups lists the directory, keeps the regular backup files in
+// ascending sequence order, and refuses a duplicated sequence before any
+// caller can mutate anything.
+func collectBackups(dir string) ([]backup, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	backups := make([]backup, 0, len(entries))
+	seen := make(map[int64]bool, len(entries))
+	for _, entry := range entries {
+		match := backupNameRE.FindStringSubmatch(entry.Name())
+		if match == nil || !entry.Type().IsRegular() {
+			continue
+		}
+		sequence, err := strconv.ParseInt(match[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		if seen[sequence] {
+			return nil, fmt.Errorf("duplicate backup sequence: %s", match[1])
+		}
+		seen[sequence] = true
+		backups = append(backups, backup{name: entry.Name(), sequence: sequence})
+	}
+	sort.Slice(backups, func(i, j int) bool { return backups[i].sequence < backups[j].sequence })
+	return backups, nil
+}
+
+// validateKeep mirrors Number.isSafeInteger(keep) && keep >= 1 for the
+// float64 wire type: a finite, integer-valued value within the safe integer
+// range.
+func validateKeep(keep float64) (int, error) {
+	if math.IsNaN(keep) || math.IsInf(keep, 0) || keep < 1 || keep > maxSafeKeep || keep != math.Trunc(keep) {
+		return 0, errors.New("keep must be an integer greater than or equal to 1")
+	}
+	return int(keep), nil
+}

@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/djalmajr/herdr-soho/internal/peer"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
@@ -27,6 +28,7 @@ var boardFilterFields = []string{"ref", "name", "kind", "status", "title", "work
 // BoardState holds the team board's view: every agent of every machine,
 // grouped by machine and workspace, refreshed in place.
 type BoardState struct {
+	ViewState    SessionViewState
 	Entries      []PickerEntry
 	Query        string
 	Selected     int
@@ -36,19 +38,42 @@ type BoardState struct {
 	LastEntry    PickerEntry
 	Copied       *string
 	Exit         string
-	EscPending   bool
-	CSIPending   bool
-	UpdatedAt    string
+	TerminalKeys // shared raw-input decoder (EscPending/CSIPending)
+	// NavPending is true while a navigation is in flight: Enter and
+	// Ctrl+Enter are rejected and the frozen target stays in NavTarget.
+	NavPending bool
+	NavTarget  PickerEntry
+	NavFailure *PickerFailure // action feedback survives refresh publications
+	// CopyNotice is the last c-copy confirmation ("Copied <ref>") shown in
+	// the modal's bottom status area: it is set only after the copy
+	// operation returned, it survives the progressive refresh
+	// publications (the updates replace the list, never this field), and
+	// a started navigation clears it so the navigation status takes over.
+	CopyNotice string
+	UpdatedAt  string
 	// FinishedMachines lists the new load's machines whose find terminated
 	// (success or failure, with or without rows); the loader fills it.
 	FinishedMachines []string
-	selectedRef      string
-	refreshing       bool
-	refreshOld       []PickerEntry
+	// flavorPicker keeps the picker command's legacy (non-TTY) display
+	// contract when the picker routes into the board runtime: every pane
+	// in the discovery's arrival order, the picker filter fields and the
+	// "pane" nouns, instead of the board's agents-only legacy list.
+	flavorPicker bool
+	// FrameWidth/FrameHeight is the last drawn frame of the owned popup;
+	// the page keys move by one row window of that frame, measured with
+	// the shared renderer viewport math.
+	FrameWidth           int
+	FrameHeight          int
+	Mouse                *mouseNegotiation // the TTY's temporary SGR mouse negotiation
+	selectedRef          string
+	refreshing           bool
+	refreshOld           []PickerEntry
+	viewPreferencePath   string
+	viewPreferenceFailed bool
 }
 
 func NewBoardState() *BoardState {
-	return &BoardState{Entries: []PickerEntry{}, Failures: []PickerFailure{}}
+	return &BoardState{Entries: []PickerEntry{}, Failures: []PickerFailure{}, ViewState: SessionViewState{View: sessionViewTable, Sort: sessionSortPane}}
 }
 
 // boardAgents keeps only the panes that have an agent (kind not null), in
@@ -94,18 +119,39 @@ func boardAgents(entries []PickerEntry) []PickerEntry {
 	return out
 }
 
+// visible is the list the popup shows in the state's mode. The enhanced
+// (production) runtime shows the unified sessions - every pane, the
+// unknown/empty/"-" kinds as terminals - filtered by scope, status and
+// the text query and ordered by the view state. Disabled, it keeps the
+// legacy list of the running command: the picker's every-pane arrival
+// order (flavorPicker) or the board's agents-only board order.
 func (s *BoardState) visible() []PickerEntry {
+	if s.ViewState.Enabled {
+		return sessionVisibleEntries(sessionFilterEntries(s.Entries, s.Query, s.ViewState), s.ViewState)
+	}
+	if s.flavorPicker {
+		return filterPickerEntries(s.Entries, s.Query, pickerFilterFields)
+	}
 	return filterPickerEntries(boardAgents(s.Entries), s.Query, boardFilterFields)
 }
 
 func (s *BoardState) clamp() {
-	n := len(s.visible())
-	if s.Selected > n-1 {
-		s.Selected = n - 1
+	s.Selected = visibleIndex(len(s.visible()), s.Selected)
+}
+
+// visibleIndex clamps an index into a visible list of length n without
+// ever returning a negative index (an empty list clamps to 0).
+func visibleIndex(n, idx int) int {
+	if n <= 0 {
+		return 0
 	}
-	if s.Selected < 0 {
-		s.Selected = 0
+	if idx < 0 {
+		return 0
 	}
+	if idx > n-1 {
+		return n - 1
+	}
+	return idx
 }
 
 // pinnedIndex is the visible index of the pinned ref while a generation is
@@ -139,6 +185,80 @@ func (s *BoardState) pinnedIndex() int {
 // footer says so; ↑/↓ pick a new ref.
 func (s *BoardState) pinnedMissing() bool {
 	return s.refreshing && s.selectedRef != "" && s.pinnedIndex() < 0
+}
+
+// pageMove moves the selection by one viewport page of selectable entries,
+// clamped: the page is the shared renderer viewport math for the last
+// drawn frame (sessionSelectableWindow), so the table's fixed header and
+// the tree's group headings are accounted for and a tiny frame keeps at
+// least one entry. It is an explicit movement, so it re-pins the new row
+// safely; a missing pin never navigates to an implicit neighbor - the up
+// side re-pins the first visible row and the down side the last, like the
+// arrows do.
+func (s *BoardState) pageMove(dir int) {
+	s.syncSelectedToPin()
+	list := s.visible()
+	n := len(list)
+	if n == 0 {
+		return
+	}
+	if s.pinnedMissing() {
+		if dir < 0 {
+			s.Selected = 0
+		} else {
+			s.Selected = n - 1
+		}
+		s.selectedRef = pickerString(list[s.Selected]["ref"])
+		return
+	}
+	frameWidth, frameHeight := s.FrameWidth, s.FrameHeight
+	if frameWidth <= 0 || frameHeight <= 0 {
+		// No frame drawn yet: the bounded default viewport.
+		frameWidth, frameHeight = 80, 24
+	}
+	page := sessionSelectableWindow(unifiedSessionOptions(s, ""), frameWidth, frameHeight)
+	if page < 1 {
+		page = 1
+	}
+	if dir < 0 {
+		s.Selected -= page
+	} else {
+		s.Selected += page
+	}
+	if s.Selected < 0 {
+		s.Selected = 0
+	}
+	if s.Selected > n-1 {
+		s.Selected = n - 1
+	}
+	s.selectedRef = pickerString(list[s.Selected]["ref"])
+}
+
+// wheelMove moves the selection three entries per wheel notch, clamped: a
+// vertical SGR report is an explicit movement, so it re-pins the new row
+// safely; a missing pin re-pins the first (up) or the last (down)
+// visible row instead of an implicit neighbor. It copies and focuses
+// nothing.
+func (s *BoardState) wheelMove(steps int) {
+	s.syncSelectedToPin()
+	list := s.visible()
+	n := len(list)
+	if n == 0 {
+		return
+	}
+	if s.pinnedMissing() {
+		if steps < 0 {
+			s.Selected = 0
+		} else {
+			s.Selected = n - 1
+		}
+		s.selectedRef = pickerString(list[s.Selected]["ref"])
+		return
+	}
+	s.Selected += steps
+	s.clamp()
+	list = s.visible()
+	s.selectedRef = pickerString(list[s.Selected]["ref"])
 }
 
 // BoardTitle strips the leading "<role>: " prefix the CLI puts on pane
@@ -193,15 +313,24 @@ func BoardEntryLine(entry PickerEntry, width int) string {
 	return line
 }
 
-// boardTotals renders the board's top line: the total agent count, the
+// boardTotals renders the board's top line: the session count (agents,
+// or sessions when the unified list carries terminal panes), the
 // per-status counts (working, blocked, idle, done, when present) and the
 // local time (HH:MM:SS) of the last completed update, when there is one.
 func boardTotals(agents []PickerEntry, updatedAt string) string {
+	terminals := 0
 	counts := map[string]int{}
 	for _, entry := range agents {
 		counts[StripPickerControls(pickerString(entry["status"]))]++
+		if !sessionAgentOf(entry) {
+			terminals++
+		}
 	}
-	line := fmt.Sprintf("%d agents", len(agents))
+	noun := "agents"
+	if terminals > 0 {
+		noun = "sessions"
+	}
+	line := fmt.Sprintf("%d %s", len(agents), noun)
 	for _, status := range []string{"working", "blocked", "idle", "done"} {
 		if counts[status] > 0 {
 			line += fmt.Sprintf(" · %d %s", counts[status], status)
@@ -275,23 +404,37 @@ func RenderBoard(state *BoardState, width int) string {
 
 func (s *BoardState) ApplyKey(key string) string {
 	switch key {
-	case "enter":
-		if s.Exit != "" {
-			return s.Exit
+	case "enter", "ctrl-enter":
+		// Enter navigates and focuses the selected pane (Ctrl+Enter stays
+		// the undocumented compatibility alias); neither copies. The loop
+		// runs the existing NavigateSelection safety checks and closes
+		// only on a verified successful navigation.
+		return s.startNavigation()
+	case "c":
+		// c copies the selected pane's full reference in the list focus
+		// and keeps the modal open (the loop confirms it in the status
+		// area); in the enhanced search focus the same key - bare or the
+		// kitty encoded printable c - is ordinary search text. The copy is
+		// gated while a navigation is pending, when the visible list is
+		// empty and when the pinned selected ref left the load; an entry
+		// without a reference fabricates nothing.
+		if s.NavPending || s.Exit != "" {
+			return ""
 		}
 		if s.pinnedMissing() {
-			// The pinned ref left the visible list while the load is still
-			// running: copy nothing and close nothing; ↑/↓ pick a new ref.
+			return ""
+		}
+		if s.ViewState.Enabled && s.ViewState.SearchFocused {
+			s.applyBoardChar("c")
 			return ""
 		}
 		list := s.visible()
 		if len(list) == 0 {
 			return ""
 		}
-		idx := min(s.Selected, len(list)-1)
+		idx := visibleIndex(len(list), s.Selected)
 		if s.refreshing && s.selectedRef != "" {
-			// The pinned ref is in the visible list: always copy it, resolved
-			// by ref - never by the numeric index.
+			// Resolve the pinned ref by ref, never by the numeric index.
 			for i, entry := range list {
 				if pickerString(entry["ref"]) == s.selectedRef {
 					idx = i
@@ -300,17 +443,30 @@ func (s *BoardState) ApplyKey(key string) string {
 			}
 		}
 		entry := list[idx]
+		payload := PickerCopyPayload(entry)
+		if payload == "" {
+			return ""
+		}
 		s.LastEntry = entry
-		copied := PickerCopyPayload(entry)
-		s.Copied = &copied
-		s.Exit = "copy"
+		s.Copied = &payload
 		return "copy"
 	case "esc", "ctrl-c":
 		if s.Exit == "" {
 			s.Exit = "esc"
 		}
 		return s.Exit
+	case "tab":
+		// The enhanced popup toggles the search/list focus; the legacy input
+		// ignores the key, as before.
+		if s.ViewState.Enabled {
+			s.ViewState.SearchFocused = !s.ViewState.SearchFocused
+		}
+		return ""
 	case "backspace":
+		if s.ViewState.Enabled {
+			// Backspace edits in search focus; Tab returns to the list.
+			s.ViewState.SearchFocused = true
+		}
 		s.Query = jsSlice(s.Query, jsLength(s.Query)-1)
 		s.clamp()
 		return ""
@@ -346,83 +502,187 @@ func (s *BoardState) ApplyKey(key string) string {
 			s.selectedRef = pickerString(s.visible()[s.Selected]["ref"])
 		}
 		return ""
+	case "page-up":
+		s.pageMove(-1)
+		return ""
+	case "page-down":
+		s.pageMove(1)
+		return ""
+	case "wheel-up":
+		s.wheelMove(-3)
+		return ""
+	case "wheel-down":
+		s.wheelMove(3)
+		return ""
 	case "update":
 		return "update"
 	default:
 		if jsLength(key) == 1 {
 			r, _ := utf8.DecodeRuneInString(key)
 			if r >= 0x20 && r != 0x7f {
-				if r == 'r' && s.Query == "" {
-					return "update"
-				}
-				s.Query += key
-				s.clamp()
+				return s.applyBoardChar(key)
 			}
 		}
 		return ""
 	}
 }
 
+// startNavigation begins the focus navigation of the selected row: it
+// freezes the target (NavPending, NavTarget) so Enter and Ctrl+Enter are
+// rejected while the navigation is in flight and a second trigger is a
+// no-op; with a missing pinned ref there is no target row to navigate.
+// The loop runs the existing NavigateSelection safety checks and closes
+// only on a verified successful navigation.
+func (s *BoardState) startNavigation() string {
+	if s.NavPending || s.Exit != "" {
+		return ""
+	}
+	if s.pinnedMissing() {
+		// The pinned ref left the visible list while the load is still
+		// running: there is no target row to navigate.
+		return ""
+	}
+	list := s.visible()
+	if len(list) == 0 {
+		return ""
+	}
+	idx := visibleIndex(len(list), s.Selected)
+	if s.refreshing && s.selectedRef != "" {
+		// Resolve the pinned ref by ref, never by the numeric index.
+		for i, entry := range list {
+			if pickerString(entry["ref"]) == s.selectedRef {
+				idx = i
+				break
+			}
+		}
+	}
+	entry := list[idx]
+	s.LastEntry = entry
+	s.NavPending = true
+	s.NavTarget = entry
+	return "navigate"
+}
+
+// applyBoardChar applies one printable character. r refreshes the board
+// in the enhanced list focus, or with an empty legacy query. List focus also interprets the
+// p/w/s/v sort/view keys and the f/t scope/status filters; everything
+// else enters the search with the character. The legacy input and the
+// search focus append the character to the query.
+func (s *BoardState) applyBoardChar(key string) string {
+	if key == "r" && ((s.ViewState.Enabled && !s.ViewState.SearchFocused) || (!s.ViewState.Enabled && s.Query == "")) {
+		return "update"
+	}
+	if s.ViewState.Enabled {
+		if !s.ViewState.SearchFocused {
+			if s.applySortOrViewKey(key) {
+				return ""
+			}
+			if s.applyScopeOrStatusKey(key) {
+				return ""
+			}
+		}
+		s.ViewState.SearchFocused = true
+	}
+	s.Query += key
+	s.clamp()
+	return ""
+}
+
+// applyScopeOrStatusKey interprets one enhanced list-focus f/t filter key:
+// it cycles the scope (all/agents/terminals) or the status (all/working/
+// blocked/idle/done/unknown) filter and keeps the selection on the full
+// ref of the row selected before the change; when that ref leaves the
+// list the clamped row is re-pinned instead. While a refresh is running
+// and the pinned ref is already missing, the filter change must not
+// silently adopt a row: only an explicit arrow, page or wheel re-pins. It
+// reports false when the key is not a filter key.
+func (s *BoardState) applyScopeOrStatusKey(key string) bool {
+	s.syncSelectedToPin()
+	pre := s.visible()
+	ref := ""
+	if len(pre) > 0 {
+		ref = pickerString(pre[visibleIndex(len(pre), s.Selected)]["ref"])
+	}
+	switch key {
+	case "f":
+		s.ViewState.Scope = sessionScopeCycle(s.ViewState.Scope)
+	case "t":
+		s.ViewState.Status = sessionStatusCycle(s.ViewState.Status)
+	default:
+		return false
+	}
+	if s.pinnedMissing() {
+		// The pinned ref left the visible list while the load is still
+		// running: keep the filter change, adopt no row.
+		return true
+	}
+	list := s.visible()
+	s.Selected = visibleIndex(len(list), sessionKeepSelection(list, s.Selected, ref))
+	if len(list) > 0 {
+		s.selectedRef = pickerString(list[s.Selected]["ref"])
+	}
+	return true
+}
+
+// applySortOrViewKey interprets one enhanced list-focus p/w/s/v key: it
+// changes the sort or the presentation and keeps the selection on the full
+// ref of the row selected before the change. While a refresh is running
+// and the pinned ref is already missing, the change must not silently
+// adopt a row: only an explicit arrow, page or wheel re-pins. It reports
+// false when the key is not a sort/view key.
+func (s *BoardState) applySortOrViewKey(key string) bool {
+	s.syncSelectedToPin()
+	pre := s.visible()
+	ref := ""
+	if len(pre) > 0 {
+		ref = pickerString(pre[visibleIndex(len(pre), s.Selected)]["ref"])
+	}
+	switch key {
+	case "p":
+		sessionApplySort(&s.ViewState, sessionSortPane)
+	case "w":
+		sessionApplySort(&s.ViewState, sessionSortWorkspace)
+	case "s":
+		sessionApplySort(&s.ViewState, sessionSortStatus)
+	case "v":
+		sessionToggleView(&s.ViewState)
+		s.rememberSessionView()
+	default:
+		return false
+	}
+	if s.pinnedMissing() {
+		// The pinned ref left the visible list while the load is still
+		// running: keep the sort/view change, adopt no row.
+		return true
+	}
+	s.Selected = visibleIndex(len(s.visible()), sessionKeepSelection(s.visible(), s.Selected, ref))
+	return true
+}
+
+// FeedChunk parses raw input with the shared decoder and applies keys in
+// order; it stops at the first action, like the terminal loop. Both the
+// legacy encodings (CR, 0x03, 0x08/0x7f, 0x12, bare ESC, CSI A/B) and the
+// enhanced ones enabled by the keyboard-protocol push (CSI 13u, CSI 27u,
+// CSI 99;5u, CSI 114;5u, CSI 13;5u, CSI 27;5;13~) are recognized; query
+// replies, key-release events and unknown CSI are ignored, and a pending
+// sequence is bounded.
 func (s *BoardState) FeedChunk(chunk string) string {
 	for _, r := range chunk {
-		ch := string(r)
-		if s.CSIPending {
-			s.CSIPending = !(r >= 0x40 && r <= 0x7e)
-			if r >= 0x40 && r <= 0x7e {
-				if r == 'A' {
-					s.ApplyKey("up")
-				}
-				if r == 'B' {
-					s.ApplyKey("down")
-				}
-			}
-			if s.Exit != "" {
-				return s.Exit
-			}
+		key := s.TerminalKeys.Feed(r)
+		if key == "" {
 			continue
 		}
-		if s.EscPending {
-			s.EscPending = false
-			if r == '[' {
-				s.CSIPending = true
-				continue
-			}
-			s.ApplyKey("esc")
-			return s.Exit
-		}
-		switch r {
-		case 0x1b:
-			s.EscPending = true
-		case '\r', '\n':
-			s.ApplyKey("enter")
-			if s.Exit != "" {
-				return s.Exit
-			}
-		case 0x7f, 0x08:
-			s.ApplyKey("backspace")
-		case 0x03:
-			s.ApplyKey("ctrl-c")
-			return s.Exit
-		case 0x12:
-			if action := s.ApplyKey("update"); action != "" {
-				return action
-			}
-		default:
-			if r >= 0x20 && r != 0x7f {
-				if action := s.ApplyKey(ch); action != "" {
-					return action
-				}
-			}
+		if action := s.ApplyKey(key); action != "" {
+			return action
 		}
 	}
 	return s.Exit
 }
 
 func (s *BoardState) FlushEsc() string {
-	if !s.EscPending {
+	if s.TerminalKeys.FlushEsc() == "" {
 		return ""
 	}
-	s.EscPending = false
 	s.ApplyKey("esc")
 	return s.Exit
 }
@@ -436,49 +696,48 @@ func cloneBoardState(source *BoardState) *BoardState {
 	return &clone
 }
 
-// loadBoardEntries runs one board refresh (local find, machine list, one
-// find per enabled machine) onto a fresh state, publishing after each
-// phase, like the picker's load.
-func loadBoardEntries(ctx contextpkg.Context, state *BoardState, exe string, env platform.Env, platformName string, publish func()) {
+// loadBoardEntries runs one board refresh through the shared discovery
+// engine: the local snapshot publishes before the machine enumeration and
+// the remote snapshots, at most four remote queries run concurrently, and
+// one global deadline covers the whole refresh. It publishes after the
+// initial state, after every per-machine batch (filling FinishedMachines
+// with the machines whose batch terminated, success or failure), and once
+// the discovery has settled, like the picker's load.
+func loadBoardEntries(ctx contextpkg.Context, state *BoardState, env platform.Env, platformName string, publish func()) {
 	state.LoadingLocal = true
 	state.Loading = 1
 	publish()
-	local, err := runLocalFind(ctx, exe, env, platformName)
-	state.Loading = 0
-	state.LoadingLocal = false
-	state.FinishedMachines = append(state.FinishedMachines, "local")
-	if err != nil {
-		state.Failures = append(state.Failures, PickerFailure{Label: "local", Cause: err.Error()})
-		publish()
-		return
-	}
-	state.Entries = appendUniquePicker(state.Entries, local)
-	publish()
-	state.Loading = 1
-	publish()
-	machines, err := runMachineList(ctx, env, platformName)
-	state.Loading = 0
-	if err != nil {
-		state.Failures = append(state.Failures, PickerFailure{Label: "máquinas", Cause: err.Error()})
-		publish()
-		return
-	}
-	if len(machines) == 0 {
-		publish()
-		return
-	}
-	state.Loading = len(machines)
-	publish()
-	runRemoteFinds(ctx, exe, env, platformName, machines, func(machine string, entries []PickerEntry, err error) {
-		state.Loading--
-		state.FinishedMachines = append(state.FinishedMachines, machine)
-		if err != nil {
-			state.Failures = append(state.Failures, PickerFailure{Label: machine, Cause: err.Error()})
-		} else {
+	final := peer.DiscoverSessions(peer.DiscoverOptions{
+		Env:         env,
+		All:         true,
+		TimeoutMS:   pickerDiscoveryTimeoutMS,
+		Concurrency: peer.DiscoverMaxConcurrency,
+		Context:     ctx,
+		Run:         pickerDiscoveryRun(env, platformName),
+	}, func(batch peer.SessionResult) {
+		if entries := pickerEntriesFromBatch(batch); len(entries) > 0 {
 			state.Entries = appendUniquePicker(state.Entries, entries)
+		}
+		for _, failure := range batch.Failures {
+			state.Failures = append(state.Failures, PickerFailure{Label: failure.Machine, Cause: failure.Cause})
+		}
+		for _, machine := range batchMachines(batch) {
+			state.FinishedMachines = append(state.FinishedMachines, machine)
+		}
+		if state.LoadingLocal {
+			// The first batch is always the local snapshot; after it the
+			// machine list and the remote queries are in flight.
+			state.LoadingLocal = false
+			state.Loading = 1
 		}
 		publish()
 	})
+	if final.ListCause != "" {
+		state.Failures = append(state.Failures, PickerFailure{Label: "máquinas", Cause: final.ListCause})
+	}
+	state.LoadingLocal = false
+	state.Loading = 0
+	publish()
 }
 
 // applyBoardUpdate merges one publication of the load generation into the
@@ -490,7 +749,7 @@ func loadBoardEntries(ctx contextpkg.Context, state *BoardState, exe string, env
 // gone. The selected ref is pinned across the whole generation and falls
 // to the first row only once the load is complete and the ref is gone.
 func applyBoardUpdate(state, update *BoardState) {
-	query, exit, copied, lastEntry, escPending, csiPending := state.Query, state.Exit, state.Copied, state.LastEntry, state.EscPending, state.CSIPending
+	query, exit, copied, lastEntry, keys, navPending, navTarget := state.Query, state.Exit, state.Copied, state.LastEntry, state.TerminalKeys, state.NavPending, state.NavTarget
 	if !state.refreshing {
 		// First publication of the generation: keep the previous list and
 		// the selected ref before anything is replaced.
@@ -506,7 +765,10 @@ func applyBoardUpdate(state, update *BoardState) {
 		// The load is complete: only the new result - no old rows survive.
 		state.Entries = append([]PickerEntry(nil), update.Entries...)
 	}
-	state.Failures = update.Failures
+	state.Failures = append([]PickerFailure(nil), update.Failures...)
+	if state.NavFailure != nil {
+		state.Failures = append(state.Failures, *state.NavFailure)
+	}
 	state.Loading = update.Loading
 	state.LoadingLocal = update.LoadingLocal
 	if ref := state.selectedRef; ref != "" {
@@ -518,7 +780,7 @@ func applyBoardUpdate(state, update *BoardState) {
 		}
 		// If the ref is not there yet, the selection stays where it is.
 	}
-	state.Query, state.Exit, state.Copied, state.LastEntry, state.EscPending, state.CSIPending = query, exit, copied, lastEntry, escPending, csiPending
+	state.Query, state.Exit, state.Copied, state.LastEntry, state.TerminalKeys, state.NavPending, state.NavTarget = query, exit, copied, lastEntry, keys, navPending, navTarget
 	state.clamp()
 	if update.UpdatedAt == "" {
 		return
@@ -574,8 +836,27 @@ func requestBoardUpdate(updateReq chan<- struct{}) {
 	}
 }
 
-func redrawBoard(w io.Writer, state *BoardState, width int) {
-	redrawArea(w, RenderBoard(state, width))
+// redrawSession draws one frame of the owned popup from the shared
+// runtime state and records the drawn frame (the page keys measure their
+// step against it with the shared renderer viewport math). When the mouse
+// negotiation has settled without being able to deliver the wheel, the
+// frame says so honestly instead of pretending the control works.
+func redrawSession(w io.Writer, state *BoardState, width int) {
+	width, height := modalDimensions(w, width)
+	state.FrameWidth, state.FrameHeight = width, height
+	notice := ""
+	switch {
+	case state.NavPending:
+		// The navigation status supersedes every earlier feedback.
+		notice = "Focusing selected pane… Esc cancels"
+	case state.CopyNotice != "":
+		notice = state.CopyNotice
+	case state.viewPreferenceFailed:
+		notice = "View changed here, but could not be saved"
+	case state.Mouse != nil && state.Mouse.decided && !state.Mouse.wheelAvailable():
+		notice = "mouse wheel unavailable: SGR mouse modes unconfirmed"
+	}
+	redrawModal(w, renderSessionModal(state, width, height, notice))
 }
 
 func RunBoard(env platform.Env, platformName, executable string) (code int) {
@@ -584,20 +865,34 @@ func RunBoard(env platform.Env, platformName, executable string) (code int) {
 	if info, err := stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
 		isTTY = true
 	}
-	return withPickerTerminal(isTTY, func() (func() error, error) { return setPickerRaw(stdin) }, stdout, func() int {
-		return runBoardLoop(env, platformName, executable, stdin, stdout, isTTY)
-	})
-}
-
-func runBoardLoop(env platform.Env, platformName, executable string, stdin, stdout *os.File, isTTY bool) int {
 	shutdownSignals := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignals, pickerShutdownSignals()...)
 	defer signal.Stop(shutdownSignals)
-	return runBoardLoopWithSignals(env, platformName, executable, stdin, stdout, isTTY, shutdownSignals)
+	state := newSessionState(env, platformName, isTTY)
+	return withPickerTerminalMouse(isTTY, func() (func() error, error) { return setPickerRaw(stdin) }, stdout, state, func() int {
+		return runSessionLoopWithSignals(env, platformName, executable, stdin, stdout, isTTY, shutdownSignals, false, state)
+	})
 }
 
+// runBoardLoopWithSignals is the board command's entry into the one
+// board-derived session runtime; it is a thin adapter, not a second
+// loop.
 func runBoardLoopWithSignals(env platform.Env, platformName, executable string, stdin, stdout *os.File, isTTY bool, shutdownSignals <-chan os.Signal) int {
-	state := NewBoardState()
+	return runSessionLoopWithSignals(env, platformName, executable, stdin, stdout, isTTY, shutdownSignals, false, NewBoardState())
+}
+
+// runSessionLoopWithSignals is the one production session-list runtime:
+// the board-derived loop that both public commands route into. It owns
+// the progressive discovery with per-batch publications, the automatic
+// ten-second refresh coalesced to one load, the pinned-ref selection
+// safety, the task-title search and detail, the status totals and the
+// unified session display (every pane, the unknown/empty/"-" kinds as
+// terminals, the scope/status filters, the page and wheel navigation and
+// the temporary SGR mouse tracking negotiated by the caller). flavorPicker
+// keeps the picker command's non-TTY display contract.
+func runSessionLoopWithSignals(env platform.Env, platformName, executable string, stdin, stdout *os.File, isTTY bool, shutdownSignals <-chan os.Signal, flavorPicker bool, state *BoardState) int {
+	state.flavorPicker = flavorPicker
+	state.ViewState.Enabled = isTTY
 	state.LoadingLocal = true
 	state.Loading = 1
 	if isTTY {
@@ -609,7 +904,7 @@ func runBoardLoopWithSignals(env platform.Env, platformName, executable string, 
 			width = n
 		}
 	}
-	redrawBoard(stdout, state, width)
+	redrawSession(stdout, state, width)
 	loadCtx, cancelLoad := contextpkg.WithCancel(contextpkg.Background())
 	updates := make(chan *BoardState, 16)
 	updateReq := make(chan struct{}, 1)
@@ -628,7 +923,7 @@ func runBoardLoopWithSignals(env platform.Env, platformName, executable string, 
 					return
 				}
 			}
-			loadBoardEntries(loadCtx, loaded, executable, env, platformName, publish)
+			loadBoardEntries(loadCtx, loaded, env, platformName, publish)
 			loaded.UpdatedAt = boardNow().Format("15:04:05")
 			select {
 			case updates <- cloneBoardState(loaded):
@@ -666,10 +961,35 @@ func runBoardLoopWithSignals(env platform.Env, platformName, executable string, 
 	}()
 	refresh := time.NewTicker(boardRefreshInterval)
 	defer refresh.Stop()
+	// One in-flight navigation at a time; its context is cancelled when
+	// the loop exits for any reason.
+	navResults := make(chan NavigationResult, 1)
+	var navCancelActive contextpkg.CancelFunc
+	defer func() {
+		if navCancelActive != nil {
+			navCancelActive()
+		}
+	}()
 	var escTimer <-chan time.Time
+	var resize <-chan time.Time
+	lastWidth, lastHeight := modalDimensions(stdout, width)
+	if isTTY {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		resize = ticker.C
+	}
 	var updateChannel <-chan *BoardState = updates
 	for {
 		select {
+		case <-resize:
+			cols, rows := modalDimensions(stdout, width)
+			if cols != lastWidth || rows != lastHeight {
+				lastWidth, lastHeight = cols, rows
+				redrawSession(stdout, state, width)
+			}
+			if state.pollMouse(stdout) {
+				redrawSession(stdout, state, width)
+			}
 		case <-shutdownSignals:
 			state.ApplyKey("esc")
 		case <-refresh.C:
@@ -680,7 +1000,7 @@ func runBoardLoopWithSignals(env platform.Env, platformName, executable string, 
 				continue
 			}
 			applyBoardUpdate(state, update)
-			redrawBoard(stdout, state, width)
+			redrawSession(stdout, state, width)
 		case item := <-input:
 			if item.err != nil {
 				if item.err == io.EOF {
@@ -693,21 +1013,57 @@ func runBoardLoopWithSignals(env platform.Env, platformName, executable string, 
 				}
 				return 1
 			}
-			action := state.FeedChunk(item.value)
+			// The DECRQM answers of the mouse negotiation arrive on this
+			// same reader: poll the bounded decision right after they
+			// pass through the decoder, and only while the popup is
+			// still open (an exit must not be followed by an enable).
+			if state.Exit == "" && state.pollMouse(stdout) {
+				redrawSession(stdout, state, width)
+			}
+			// Protocol parameters and replies are not visible changes. Decode
+			// before applying so a nine-mode query does not redraw the whole
+			// modal for every reply byte and delay its own bounded handshake.
+			key := state.TerminalKeys.Feed([]rune(item.value)[0])
+			action := ""
+			if key != "" {
+				action = state.ApplyKey(key)
+			}
 			if action == "copy" {
-				CopyText(*state.Copied, env, platformName)
-				if state.LastEntry != nil {
-					bin := env.Get("HERDR_BIN_PATH")
-					if bin == "" {
-						bin = "herdr"
+				// c copied without closing: the payload goes to the
+				// clipboard and the confirmation is set only after CopyText
+				// returned - a native tool acknowledged the write, the OSC
+				// 52 fallback is described honestly because its delivery
+				// cannot be acknowledged. No Herdr notification call: the
+				// modal stays open, the status area carries the feedback and
+				// the frame is redrawn so the confirmation is visible; the
+				// input loop keeps running for the next key.
+				state.CopyNotice = copyNoticeFor(CopyText(*state.Copied, env, platformName), *state.Copied)
+				redrawSession(stdout, state, width)
+			}
+			if action == "navigate" {
+				state.CopyNotice = "" // the navigation takes over the status area
+				redrawSession(stdout, state, width)
+				navCtx, navCancel := contextpkg.WithCancel(contextpkg.Background())
+				navCancelActive = navCancel
+				target := state.NavTarget
+				go func() {
+					res := NavigateSelection(navCtx, target, env, platformName)
+					select {
+					case navResults <- res:
+					case <-navCtx.Done():
 					}
-					_ = pickerRun(contextpkg.Background(), bin, []string{"notification", "show", "herdr-soho", "--body", "copied " + StripPickerControls(pickerString(state.LastEntry["ref"])), "--sound", "none"}, env, platformName, 30_000, "")
-				}
+				}()
 			}
 			if action == "update" {
 				requestBoardUpdate(updateReq)
-				redrawBoard(stdout, state, width)
+				redrawSession(stdout, state, width)
 				break
+			}
+			// The answers of this chunk have just passed the decoder:
+			// the bounded decision can happen before the next input or
+			// tick, still inside the one input loop.
+			if state.Exit == "" && state.pollMouse(stdout) {
+				redrawSession(stdout, state, width)
 			}
 			if action != "" {
 				break
@@ -717,19 +1073,71 @@ func runBoardLoopWithSignals(env platform.Env, platformName, executable string, 
 			} else {
 				escTimer = nil
 			}
-			redrawBoard(stdout, state, width)
+			if key != "" {
+				redrawSession(stdout, state, width)
+			}
 		case <-escTimer:
 			if state.FlushEsc() != "" {
 				break
 			}
-			redrawBoard(stdout, state, width)
+			redrawSession(stdout, state, width)
+
+		case res := <-navResults:
+			navCancelActive = nil
+			if res.OK && res.Remote {
+				bin := env.Get("HERDR_BIN_PATH")
+				if bin == "" {
+					bin = "herdr"
+				}
+				_ = pickerRun(contextpkg.Background(), bin, []string{"notification", "show", "herdr-soho", "--body", res.Note, "--sound", "none"}, env, platformName, 30_000, "")
+			}
+			boardNavApplyResult(state, res)
+			redrawSession(stdout, state, width)
 		}
 		if state.Exit != "" {
 			break
 		}
 	}
-	if state.Exit == "copy" || state.Exit == "esc" {
+	if state.Exit == "copy" || state.Exit == "esc" || state.Exit == "navigate" {
 		return 0
 	}
 	return 1
+}
+
+// pollMouse runs the bounded SGR mouse negotiation inside the one input
+// loop (the DECRQM answers arrive on the same reader the keys arrive
+// on): it writes nothing once decided and is a no-op off the TTY. It
+// reports whether it just decided, so the caller can redraw the honest
+// wheel guidance.
+func (s *BoardState) pollMouse(w io.Writer) bool {
+	if s.Mouse == nil {
+		return false
+	}
+	return s.Mouse.poll(w)
+}
+
+// copyNoticeFor is the modal status-area confirmation of one c copy: the
+// concise "Copied <ref>" when the clipboard tool acknowledged the write,
+// and the honest OSC 52 wording when only the fallback ran, whose
+// delivery cannot be acknowledged.
+func copyNoticeFor(result ClipboardResult, payload string) string {
+	if result.Path == "osc52" {
+		return "Copied via OSC 52 (unconfirmed): " + payload
+	}
+	return "Copied " + payload
+}
+
+// boardNavApplyResult folds one navigation outcome into the board state:
+// a success closes; a failure stays visible with the query, selection and
+// pinned ref preserved (an actionable modal) and nothing copied.
+func boardNavApplyResult(state *BoardState, res NavigationResult) {
+	machine := pickerString(state.NavTarget["machine"])
+	state.NavPending = false
+	state.NavTarget = nil
+	if res.OK {
+		state.Exit = "navigate"
+		return
+	}
+	state.NavFailure = &PickerFailure{Label: machine, Cause: res.Cause}
+	state.Failures = append(state.Failures, *state.NavFailure)
 }

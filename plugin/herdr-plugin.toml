@@ -1,4 +1,4 @@
-# herdr-soho optional plugin — read-only actions, the session picker, the team board and the team panel.
+# herdr-soho optional plugin — read-only actions, the unified session picker and the team panel.
 # Manifest contract: https://herdr.dev/docs/plugins/
 # Every command runs the `herdr-soho` binary (the Go CLI), which must be
 # on the Herdr server's PATH. The read-only actions (team, roster, doctor)
@@ -7,15 +7,15 @@
 # HERDR_BIN_PATH, and opens the team panel over the focused pane (`plugin
 # pane open`). The panel itself runs the herdr-soho reads (explain, roster,
 # doctor, friction, gc) with HERDR_SOHO_NOWRITE=1; only `x` and `g`, after
-# their confirmation, run a release or `gc --yes`. The `pick` and `board`
-# actions open their own panes. Nothing the plugin does writes to the
+# their confirmation, run a release or `gc --yes`. The `pick` action opens
+# the unified session popup. Nothing the plugin does writes to the
 # focused project without a confirmation (no .gitignore entry, no state
 # directory).
 id = "djalmajr.herdr-soho"
 name = "herdr-soho"
 version = "0.3.0"
 min_herdr_version = "0.9.1"
-description = "Read-only actions (team, roster, doctor) around the focused workspace — the team panel shows who is running, what it does, the doctor, the resources and the friction — plus a session picker (pick) and a team board (board). The actions run the herdr-soho binary in read-only mode — it must be on the Herdr server's PATH — and only write after the panel's explicit confirmations (x, g)."
+description = "Read-only actions (team, roster, doctor) around the focused workspace — the team panel shows who is running, what it does, the doctor, the resources and the friction — plus a unified session picker (pick) with scope/status filters and table/tree views. The actions run the herdr-soho binary in read-only mode — it must be on the Herdr server's PATH — and only write after the panel's explicit confirmations (x, g)."
 platforms = ["linux", "macos", "windows"]
 
 [[actions]]
@@ -42,16 +42,11 @@ command = ["herdr-soho", "plugin", "bridge", "team"]
 [[panes]]
 id = "picker"
 title = "herdr-soho: find a session"
-placement = "overlay"
+placement = "popup"
+width = "80%"
+height = "80%"
 platforms = ["linux", "macos", "windows"]
 command = ["herdr-soho", "plugin", "picker"]
-
-[[panes]]
-id = "board"
-title = "herdr-soho: teams"
-placement = "overlay"
-platforms = ["linux", "macos", "windows"]
-command = ["herdr-soho", "plugin", "board"]
 
 [[panes]]
 id = "team"
@@ -69,14 +64,7 @@ command = ["herdr-soho", "plugin", "team", "--view", "doctor"]
 
 [[actions]]
 id = "pick"
-title = "Find a session and copy its reference"
-description = "Opens the session picker over the focused pane: type to filter the panes of the local server and of the enabled machines (CLI `find --json`), Enter copies the selected reference to the clipboard and closes, Esc or Ctrl-C close without copying."
+title = "Sessions: search, copy or focus"
+description = "Opens a centered session popup at 80% of the terminal width and height. All panes, agents or terminals can be filtered by status and task. Table and tree views group by machine and workspace; v switches views, f/t filter, p/w/s sort, and Tab switches search/list focus. Arrow keys, PgUp/PgDn and the mouse wheel select items. It refreshes every 10 s or with r/Ctrl-R. With the list focused, c copies only machine/pane and shows status-bar feedback without closing. Enter focuses the selection; Esc or Ctrl-C close."
 contexts = ["workspace"]
 command = ["herdr-soho", "plugin", "bridge", "pick"]
-
-[[actions]]
-id = "board"
-title = "Teams: every agent on every machine"
-description = "Opens the team board over the focused pane: every agent of every machine (local first, the enabled machines appended as they arrive), grouped by workspace with the orchestrators first, showing each agent's state and task. It refreshes every 10 s and with r; Enter copies the selected session reference to the clipboard."
-contexts = ["workspace"]
-command = ["herdr-soho", "plugin", "bridge", "board"]

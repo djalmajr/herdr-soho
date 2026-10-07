@@ -52,8 +52,13 @@ func procsList(ctx *core.Config, env platform.Env, cwd string) int {
 // procsAdd registers one pid. The owner is the roster agent of
 // HERDR_PANE_ID (or "-"); --agent takes the name, and a name outside the
 // roster exits 3. Refusals exit 2 and write nothing: a pid that is not a
-// positive integer, pid 1, this process, the invoking process, or one that
-// is not running.
+// positive integer, pid 1, this process, the invoking process, or a
+// proven-gone pid (the absence is kernel-confirmed). A pid whose identity
+// the single snapshot read could not resolve (the ps query failed, or its
+// line did not parse, and the kernel did not report the absence) is not
+// refused as a dead process: it exits 4 with a clear diagnostic and is
+// not registered — a failed read is not an absence, and no second read
+// races the first to name its failure.
 func procsAdd(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	var pidArg, agent string
 	agentSeen := false
@@ -101,9 +106,15 @@ func procsAdd(argv []string, ctx *core.Config, env platform.Env, cwd string) int
 	if agentSeen && core.RosterLine(sd, agent) == "" {
 		core.DieFriction(fmt.Sprintf("procs add: agent '%s' is not in the roster (state dir: %s)", agent, sd), 3, frictionLogPath, "procs")
 	}
-	started, name, ok := platform.ProcInfo(pid, env)
-	if !ok {
+	started, name, live := platform.ReadProcFull(pid, env)
+	switch live {
+	case platform.ProcGone:
 		return refuse("no process with that pid is running")
+	case platform.ProcUnknown:
+		// The one snapshot did not resolve the pid: the ps query failed
+		// (or its line did not parse) and the kernel did not report the
+		// absence. It is a friction, not the dead-process refusal.
+		core.DieFriction(fmt.Sprintf("procs add: the identity of pid %s is unreadable (the system state read failed and the kernel did not report it gone); not registered", pidArg), 4, frictionLogPath, "procs")
 	}
 	pane := env.Get("HERDR_PANE_ID")
 	owner := "-"

@@ -67,17 +67,18 @@ func TestPromptEvidencePiInputBoxWholeLine(t *testing.T) {
 			t.Fatalf("a path joined from box lines inside the pi region must not prove the prompt:\n%s", screen)
 		}
 	})
-	t.Run("a truncated queue line inside the box is not proof via the queue rules", func(t *testing.T) {
+	t.Run("a truncated queue line with the identity inside the box is not proof via the queue rules", func(t *testing.T) {
 		// The whole-line rule cannot match a truncated path, so only the
-		// fragment/radical queue rules could count this line.
-		screen := piBoxScreen("Read the file /tmp/herdr-soho/ws/reports/build-2026… in full")
+		// queue identity rule could count this line; the region exclusion
+		// is what keeps it out.
+		screen := piBoxScreen("Read the file …/reports/build-20261001T161714.brief.md in full")
 		if PromptEvidence(screen, composed) {
 			t.Fatalf("a truncated typed line in the box must not prove the prompt:\n%s", screen)
 		}
 	})
 	t.Run("control: the same truncated queue line in the history above the box is proof", func(t *testing.T) {
 		sep := strings.Repeat("─", 66)
-		screen := "Read the file /tmp/herdr-soho/ws/reports/build-2026… in full\n" +
+		screen := "Read the file …/reports/build-20261001T161714.brief.md in full\n" +
 			sep + "\n" +
 			"\n" +
 			sep + "\n" +

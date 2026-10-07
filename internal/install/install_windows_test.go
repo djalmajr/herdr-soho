@@ -1,148 +1,106 @@
 //go:build windows
 
+// Windows-specific proof for the replacement path. os.Rename on Windows is
+// MoveFileEx with MOVEFILE_REPLACE_EXISTING (internal/syscall/windows.
+// Rename), so it replaces a normal existing destination; these tests prove
+// that replacement succeeds with static payloads, and that a destination
+// held open by a running process makes the rename fail cleanly — the core
+// surfaces the error, keeps the old bytes intact, and removes its temp
+// files. No Go toolchain is needed at test time: the fixture is the
+// re-executed native test binary itself (its own bytes are the installed
+// artifact), not a program built by the test. The generic tests in
+// install_test.go also run on Windows for the shared contracts.
 package install
 
 import (
-	"crypto/sha256"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
+	"bytes"
+	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
-	"sync"
 	"testing"
+	"time"
 )
 
-func TestInstallPS1HappyPathVersionAndInstallDir(t *testing.T) {
-	// Mutation captured: ignoring -InstallDir installs outside the requested user directory.
-	result := runPowerShellInstaller(t, psFixtureOptions{})
-	if result.code != 0 || !strings.Contains(result.stdout, "herdr-soho test-version") || !strings.Contains(result.stdout, "Add "+result.installDir+" to your user PATH") {
-		t.Fatalf("installer status=%d stdout=%q stderr=%q", result.code, result.stdout, result.stderr)
-	}
-	if _, err := os.Stat(filepath.Join(result.installDir, "herdr-soho.exe")); err != nil {
-		t.Fatalf("installed executable missing: %v", err)
-	}
-}
-
-func TestInstallPS1ExplicitVersionAndRejectsBadDownloads(t *testing.T) {
-	// Mutation captured: skipping version routing or checksum validation accepts the wrong release bytes.
-	result := runPowerShellInstaller(t, psFixtureOptions{version: "v1.2.3"})
-	if result.code != 0 || !strings.Contains(strings.Join(result.paths, "\n"), "/download/v1.2.3/"+psAssetName()) {
-		t.Fatalf("installer status=%d stdout=%q stderr=%q paths=%v", result.code, result.stdout, result.stderr, result.paths)
-	}
-	for _, test := range []struct {
-		name    string
-		options psFixtureOptions
-		want    string
-	}{
-		{name: "wrong checksum", options: psFixtureOptions{badChecksum: true}, want: "sha256 mismatch"},
-		{name: "missing artifact", options: psFixtureOptions{missingAsset: true}, want: "404"},
-		{name: "missing checksum entry", options: psFixtureOptions{missingEntry: true}, want: "no unique entry"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			result := runPowerShellInstaller(t, test.options)
-			if result.code == 0 || !strings.Contains(strings.ToLower(result.stderr), strings.ToLower(test.want)) {
-				t.Fatalf("installer status=%d stdout=%q stderr=%q", result.code, result.stdout, result.stderr)
-			}
-			if _, err := os.Stat(filepath.Join(result.installDir, "herdr-soho.exe")); !os.IsNotExist(err) {
-				t.Fatalf("failed install left executable: %v", err)
-			}
-		})
-	}
-}
-
-type psFixtureOptions struct {
-	version      string
-	badChecksum  bool
-	missingAsset bool
-	missingEntry bool
-}
-
-type psInstallerResult struct {
-	code       int
-	stdout     string
-	stderr     string
-	installDir string
-	paths      []string
-}
-
-func psAssetName() string {
-	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
-		panic("unsupported test host architecture: " + runtime.GOARCH)
-	}
-	return fmt.Sprintf("herdr-soho_windows_%s.exe", runtime.GOARCH)
-}
-
-func runPowerShellInstaller(t *testing.T, options psFixtureOptions) psInstallerResult {
+// testBinaryBytes reads the running test binary. On Windows it is a native
+// PE executable, so its bytes can be installed as the artifact and then
+// launched to hold its file open — without building anything.
+func testBinaryBytes(t *testing.T) []byte {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", ".."))
+	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	installDir := filepath.Join(t.TempDir(), "custom bin")
-	goSource := filepath.Join(t.TempDir(), "fake.go")
-	goBinary := filepath.Join(t.TempDir(), "herdr-soho.exe")
-	source := `package main
-import ("fmt"; "os")
-func main() { if len(os.Args) != 2 || os.Args[1] != "--version" { os.Exit(2) }; fmt.Println("herdr-soho test-version") }
-`
-	if err := os.WriteFile(goSource, []byte(source), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	build := exec.Command("go", "build", "-o", goBinary, goSource)
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build fake executable: %v\n%s", err, output)
-	}
-	binary, err := os.ReadFile(goBinary)
+	data, err := os.ReadFile(exe)
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := fmt.Sprintf("%x", sha256.Sum256(binary))
-	if options.badChecksum {
-		digest = strings.Repeat("0", 64)
-	}
-	var paths []string
-	var pathsMu sync.Mutex
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pathsMu.Lock()
-		paths = append(paths, r.URL.Path)
-		pathsMu.Unlock()
-		if strings.HasSuffix(r.URL.Path, "/SHA256SUMS") {
-			entry := ""
-			if !options.missingEntry {
-				entry = digest + "  " + psAssetName() + "\n"
+	return data
+}
+
+// TestMain doubles as the re-executed helper. Launched with -install.hold
+// as the installed destination, the process blocks until killed, keeping
+// its executable image file open share-read only; that is what makes
+// MoveFileEx replacement of the same path fail on Windows.
+func TestMain(m *testing.M) {
+	for _, arg := range os.Args {
+		if arg == "-install.hold" {
+			for {
+				time.Sleep(time.Hour) // keep a timer live, avoiding a Go deadlock exit
 			}
-			_, _ = w.Write([]byte(entry))
-			return
 		}
-		if strings.HasSuffix(r.URL.Path, "/"+psAssetName()) && !options.missingAsset {
-			_, _ = w.Write(binary)
-			return
-		}
-		http.NotFound(w, r)
+	}
+	os.Exit(m.Run())
+}
+
+// Replacement of an existing destination through os.Rename
+// (MoveFileEx REPLACE_EXISTING), with static payloads and no toolchain.
+func TestInstallWindowsReplacesExistingDestination(t *testing.T) {
+	first := testBinaryBytes(t)
+	got := runCore(t, fixtureOptions{payload: first})
+	if got.err != nil {
+		t.Fatalf("first install: %v", got.err)
+	}
+	second := []byte("static replacement payload v2\n")
+	again := runCore(t, fixtureOptions{payload: second, installDir: got.installDir})
+	if again.err != nil {
+		t.Fatalf("replace install: %v", again.err)
+	}
+	installed, err := os.ReadFile(again.res.Destination)
+	if err != nil || !bytes.Equal(installed, second) {
+		t.Fatalf("destination not replaced: len=%d err=%v", len(installed), err)
+	}
+	assertNoTempFiles(t, got.installDir)
+}
+
+// A destination whose bytes are a running executable is locked by the
+// loader (share-read only). The replacement must fail cleanly: the error
+// surfaces, the old bytes are intact, and the temp files are removed.
+func TestInstallWindowsLockedDestinationFailsWithoutDamage(t *testing.T) {
+	exe := testBinaryBytes(t)
+	got := runCore(t, fixtureOptions{payload: exe})
+	if got.err != nil {
+		t.Fatalf("first install: %v", got.err)
+	}
+	destination := got.res.Destination
+	// The installed file is a copy of the test binary; re-executing it in
+	// hold mode locks the destination the same way a running install does.
+	cmd := exec.Command(destination, "-install.hold")
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start installed executable: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	})
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(root, "install.ps1"), "-InstallDir", installDir)
-	if options.version != "" {
-		cmd.Args = append(cmd.Args, "-Version", options.version)
+	again := runCore(t, fixtureOptions{payload: testBinaryBytes(t), installDir: got.installDir})
+	if again.err == nil {
+		t.Fatal("replacing a locked destination succeeded; os.Rename (MoveFileEx) must fail while the file is held open, so the error must surface")
 	}
-	cmd.Env = append(os.Environ(), "HERDR_SOHO_RELEASE_BASE="+server.URL)
-	var stdout, stderr strings.Builder
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err = cmd.Run()
-	code := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			code = exitErr.ExitCode()
-		} else {
-			t.Fatalf("start install.ps1: %v", err)
-		}
+	t.Logf("replacement error (expected sharing violation): %v", again.err)
+	installed, err := os.ReadFile(destination)
+	if err != nil || !bytes.Equal(installed, exe) {
+		t.Fatalf("locked destination changed: len=%d err=%v", len(installed), err)
 	}
-	pathsMu.Lock()
-	defer pathsMu.Unlock()
-	return psInstallerResult{code: code, stdout: stdout.String(), stderr: stderr.String(), installDir: installDir, paths: paths}
+	assertNoTempFiles(t, got.installDir)
 }

@@ -20,8 +20,7 @@ labels: herdr-soho
 ## Environment
 
 ```
-<paste `herdr-soho env` output (includes the `runtime: node <version>` or
-`runtime: bun <version>` line)>
+<paste `herdr-soho env` output (includes the `runtime: go <version>` line)>
 <paste `herdr-soho config` output>
 ```
 

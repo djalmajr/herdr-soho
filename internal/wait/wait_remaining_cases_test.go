@@ -14,9 +14,9 @@ import (
 )
 
 func TestWaitRemainingQueuedAndRetryCases(t *testing.T) {
-	t.Run("wait: queued prompt path is recognized from recent unwrapped output", func(t *testing.T) { // JS: "wait: queued prompt path is recognized from recent unwrapped output"
+	t.Run("wait: queued prompt path is recognized from the recent unwrapped composer", func(t *testing.T) { // Adapted contract: the queued retry needs a recognized composer holding the stored path (the claude box), not a plain history line.
 		prompt := "/tmp/worker-brief.md"
-		f := newQueuedProbeFixture(t, "idle", "5", "Read the file "+prompt+" in full and execute it.\n", map[string]string{"queued": "1 5 " + prompt + "\n"})
+		f := newQueuedProbeFixture(t, "idle", "5", claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{"queued": "1 5 " + prompt + "\n"})
 		if got := f.probe(""); got != "working" {
 			t.Fatalf("queued prompt probe = %q, want working while retry is sent", got)
 		}
@@ -76,21 +76,25 @@ func TestWaitRemainingQueuedAndRetryCases(t *testing.T) {
 			}
 		}
 	})
-	t.Run("wait: the same seq and an epoch-only marker keep the retry", func(t *testing.T) { // JS: "wait: the same seq and an epoch-only marker keep the retry"
+	t.Run("wait: the same seq and an epoch-only marker without a stored path keep the marker without keys", func(t *testing.T) { // Adapted contract: a missing stored path keeps the delivery uncertain without keys.
 		fixed := time.Unix(2_000_000_000, 0)
 		oldNow := platform.Now
 		platform.Now = func() time.Time { return fixed }
 		t.Cleanup(func() { platform.Now = oldNow })
 		prompt := "/tmp/worker-brief.md"
-		f := newQueuedProbeFixture(t, "idle", "5", "Read the file "+prompt+" in full and execute it.\n", map[string]string{
+		// Adapted contract: the marker carries no stored path (epoch only,
+		// no last-report to resolve one), so the identity/path is missing:
+		// the delivery keeps uncertain without keys — even on a recognized
+		// composer holding a different prompt — and the marker stays.
+		f := newQueuedProbeFixture(t, "idle", "5", claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{
 			"not-received": "1999999900\n", "enter-retry": "1 1999999900\n",
 		})
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
-		if got := f.probe(""); got != "working" {
-			t.Fatalf("same-seq retry=%q", got)
+		if got := f.probe(""); got != "not-received" {
+			t.Fatalf("pathless marker probe=%q, want not-received without keys", got)
 		}
-		if !hasCall(f.calls(), "agent send-keys worker enter") {
-			t.Fatalf("epoch-only marker did not retry: %#v", f.calls())
+		if hasCall(f.calls(), "agent send-keys worker enter") {
+			t.Fatalf("epoch-only marker sent a key: %#v", f.calls())
 		}
 		if _, err := os.Stat(f.marker("not-received")); err != nil {
 			t.Fatalf("retry marker removed: %v", err)

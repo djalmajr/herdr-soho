@@ -33,6 +33,9 @@ func TestDispatchIdlePiPromptSittingInTheInputBox(t *testing.T) {
 		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stdout: screen},
 		fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, ArgvPrefix: true},
 	)
+	// The region rules are kind-aware: the target's row is pi, so the box
+	// (and only the box) is the recognized composer.
+	arrivalRosterKind(t, f, "pi")
 	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "100"
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	if code != 15 || dispatchOutputStatus(t, out) != "not-received" {

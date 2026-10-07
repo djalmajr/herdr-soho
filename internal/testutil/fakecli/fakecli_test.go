@@ -92,6 +92,10 @@ func TestFakeCLIEnvironmentIsolationAndOptInSystemPath(t *testing.T) {
 	if valueFor(controlled, "KEEP") != "yes" {
 		t.Fatalf("non-PATH environment lost: %#v", controlled)
 	}
+	raceEnv := Env([]string{"GORACE=exitcode=73 halt_on_error=1 atexit_sleep_ms=1000"}, dir)
+	if got := valueFor(raceEnv, "GORACE"); got != "exitcode=73 halt_on_error=1 atexit_sleep_ms=0" {
+		t.Fatalf("fake CLI changed race detection options: %q", got)
+	}
 	if valueFor(env, "HERDR_ENV") != "" || valueFor(env, "HERDR_SOHO_DIR") != "" {
 		t.Fatalf("inherited Herdr session reached fake CLI: %#v", env)
 	}

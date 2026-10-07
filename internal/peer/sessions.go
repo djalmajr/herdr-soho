@@ -1,9 +1,11 @@
 package peer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -12,6 +14,13 @@ import (
 )
 
 const SnapshotTimeoutMS = 30_000
+
+// DiscoverTimeoutMS is the default global deadline for DiscoverSessions; it
+// covers the local snapshot, the machine list and every remote query.
+const DiscoverTimeoutMS = 30_000
+
+// DiscoverMaxConcurrency bounds the number of concurrent remote queries.
+const DiscoverMaxConcurrency = 4
 
 var matchFields = []string{"ref", "machine", "workspace_id", "workspace_label", "tab_id", "tab_label", "pane_id", "name", "kind", "status", "cwd", "title"}
 
@@ -37,8 +46,15 @@ type MachineFailure struct {
 }
 
 type SessionResult struct {
+	// Machine identifies a published batch even when it contains no panes.
+	// The final aggregate leaves it empty.
+	Machine  string
 	Entries  []SessionEntry
 	Failures []MachineFailure
+	// ListCause is set on the final result when the machine list (the
+	// enumeration behind All) failed; it stays empty on per-machine batches
+	// and when the enumeration succeeds or was not requested.
+	ListCause string
 }
 
 type Machine struct {
@@ -49,6 +65,156 @@ type Machine struct {
 type SnapshotOptions struct {
 	Env       platform.Env
 	TimeoutMS int
+	Context   context.Context
+	Run       func(string, []string, platform.RunOptions) platform.RunResult
+}
+
+// DiscoverOptions selects the machines of a progressive discovery and its
+// global deadline. Machines already contains the remote labels the caller
+// resolved (explicit --machine values and the machine of a reference); All
+// additionally enumerates the enabled machines. The deadline counts from the
+// call to DiscoverSessions and covers every subprocess of the discovery.
+type DiscoverOptions struct {
+	Env         platform.Env
+	Machines    []string
+	All         bool
+	TimeoutMS   int
+	Concurrency int
+	Context     context.Context
+	Run         func(string, []string, platform.RunOptions) platform.RunResult
+}
+
+// DiscoverSessions fetches the local sessions first, before any enumeration,
+// so a slow machine list never delays the local rows. It then queries the
+// remote machines (the ones already in options.Machines plus, with All, the
+// enabled ones) with at most DiscoverMaxConcurrency concurrent subprocesses.
+// The global deadline, DiscoverTimeoutMS when options.TimeoutMS is not a
+// positive value, covers the local snapshot, the machine list and every
+// remote query; each subprocess gets the smaller of SnapshotTimeoutMS and
+// the time still left, and a machine not started by the deadline reports a
+// deadline cause instead of being silently dropped. publish is called
+// serially on the calling goroutine, once per machine (local first, then the
+// remotes in completion order) with that machine's batch; the final result
+// aggregates every batch and carries the enumeration failure, if any.
+func DiscoverSessions(options DiscoverOptions, publish func(SessionResult)) SessionResult {
+	budget := options.TimeoutMS
+	if budget <= 0 {
+		budget = DiscoverTimeoutMS
+	}
+	concurrency := options.Concurrency
+	if concurrency <= 0 || concurrency > DiscoverMaxConcurrency {
+		concurrency = DiscoverMaxConcurrency
+	}
+	parent := options.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, time.Duration(budget)*time.Millisecond)
+	defer cancel()
+	options.Context = ctx
+	deadline, _ := ctx.Deadline()
+	final := SessionResult{Entries: []SessionEntry{}, Failures: []MachineFailure{}}
+	record := func(batch SessionResult) {
+		final.Entries = append(final.Entries, batch.Entries...)
+		final.Failures = append(final.Failures, batch.Failures...)
+		if publish != nil {
+			publish(batch)
+		}
+	}
+	local := machineBatch(sessionref.LocalMachine, options, deadline)
+	record(local)
+	machines := discoverMachineList(options.Machines)
+	if options.All {
+		remaining := deadline.Sub(time.Now())
+		if ctx.Err() != nil && remaining > 0 {
+			final.ListCause = "discovery canceled"
+		} else if remaining <= 0 {
+			final.ListCause = "deadline reached before listing machines"
+		} else {
+			list, cause := listMachines(discoverCallTimeout(remaining), SnapshotOptions{Env: options.Env, Context: ctx, Run: options.Run})
+			if cause != "" {
+				final.ListCause = cause
+			} else {
+				for _, m := range list {
+					if m.Enabled && !contains(machines, m.Label) {
+						machines = append(machines, m.Label)
+					}
+				}
+			}
+		}
+	}
+	remotes := machines[1:]
+	if len(remotes) > 0 {
+		results := make(chan SessionResult, len(remotes))
+		tasks := make(chan string, len(remotes))
+		for i := 0; i < concurrency; i++ {
+			go func() {
+				for machine := range tasks {
+					results <- machineBatch(machine, options, deadline)
+				}
+			}()
+		}
+		for _, machine := range remotes {
+			tasks <- machine
+		}
+		close(tasks)
+		for i := 0; i < len(remotes); i++ {
+			record(<-results)
+		}
+	}
+	return final
+}
+
+// discoverMachineList normalizes the requested machines: the local machine
+// first, duplicates dropped, the remaining order preserved.
+func discoverMachineList(machines []string) []string {
+	out := []string{sessionref.LocalMachine}
+	seen := map[string]bool{sessionref.LocalMachine: true}
+	for _, machine := range machines {
+		if machine == "" || seen[machine] {
+			continue
+		}
+		seen[machine] = true
+		out = append(out, machine)
+	}
+	return out
+}
+
+// discoverCallTimeout bounds one subprocess of a discovery: the smaller of
+// SnapshotTimeoutMS and the whole remaining deadline, and never below 1 ms.
+func discoverCallTimeout(remaining time.Duration) int {
+	ms := int(remaining / time.Millisecond)
+	if ms < 1 {
+		ms = 1
+	}
+	if ms > SnapshotTimeoutMS {
+		ms = SnapshotTimeoutMS
+	}
+	return ms
+}
+
+// machineBatch fetches one machine's sessions under the discovery deadline:
+// a machine not started by the deadline reports a deadline cause without
+// spawning a subprocess.
+func machineBatch(machine string, options DiscoverOptions, deadline time.Time) SessionResult {
+	if options.Context != nil && options.Context.Err() != nil && time.Now().Before(deadline) {
+		return SessionResult{Machine: machine, Failures: []MachineFailure{{Machine: machine, Cause: "discovery canceled"}}}
+	}
+	remaining := deadline.Sub(time.Now())
+	if remaining <= 0 {
+		return SessionResult{Machine: machine, Entries: []SessionEntry{}, Failures: []MachineFailure{{Machine: machine, Cause: "deadline reached before querying"}}}
+	}
+	snapshot, cause := oneSnapshot(machine, SnapshotOptions{Env: options.Env, TimeoutMS: discoverCallTimeout(remaining), Context: options.Context, Run: options.Run})
+	result := SessionResult{Machine: machine, Entries: []SessionEntry{}, Failures: []MachineFailure{}}
+	if cause != "" {
+		result.Failures = append(result.Failures, MachineFailure{Machine: machine, Cause: cause})
+		return result
+	}
+	result.Entries = SessionEntries(snapshot, machine)
+	if result.Entries == nil {
+		result.Entries = []SessionEntry{}
+	}
+	return result
 }
 
 func valueString(v any) string {
@@ -208,7 +374,7 @@ func oneSnapshot(machine string, opts SnapshotOptions) (any, string) {
 	if timeout == 0 {
 		timeout = SnapshotTimeoutMS
 	}
-	r := platform.RunCli("herdr", append(sessionref.HerdrMachineArgs(machine), "api", "snapshot"), platform.RunOptions{Env: opts.Env, TimeoutMs: timeout})
+	r := runSessionCli(opts, append(sessionref.HerdrMachineArgs(machine), "api", "snapshot"), timeout)
 	if r.NotFound {
 		return nil, "herdr CLI not found in PATH"
 	}
@@ -242,6 +408,14 @@ func oneSnapshot(machine string, opts SnapshotOptions) (any, string) {
 	return snapshot, ""
 }
 
+func runSessionCli(opts SnapshotOptions, args []string, timeout int) platform.RunResult {
+	run := opts.Run
+	if run == nil {
+		run = platform.RunCli
+	}
+	return run("herdr", args, platform.RunOptions{Env: opts.Env, Context: opts.Context, TimeoutMs: timeout})
+}
+
 func FetchSessions(machines []string, opts SnapshotOptions) SessionResult {
 	out := SessionResult{Entries: []SessionEntry{}, Failures: []MachineFailure{}}
 	for _, machine := range machines {
@@ -260,12 +434,16 @@ func MachineList(opts SnapshotOptions) ([]Machine, string) {
 	if timeout == 0 {
 		timeout = SnapshotTimeoutMS
 	}
-	r := platform.RunCli("herdr", []string{"machine", "list", "--json"}, platform.RunOptions{Env: opts.Env, TimeoutMs: timeout})
+	return listMachines(timeout, opts)
+}
+
+func listMachines(timeoutMS int, opts SnapshotOptions) ([]Machine, string) {
+	r := runSessionCli(opts, []string{"machine", "list", "--json"}, timeoutMS)
 	if r.NotFound {
 		return nil, "herdr CLI not found in PATH"
 	}
 	if r.TimedOut {
-		return nil, fmt.Sprintf("herdr machine list timed out after %ss", numberSeconds(timeout))
+		return nil, fmt.Sprintf("herdr machine list timed out after %ss", numberSeconds(timeoutMS))
 	}
 	status := 1
 	if r.Status != nil {

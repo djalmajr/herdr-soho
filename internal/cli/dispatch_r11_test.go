@@ -340,7 +340,7 @@ func newR11Fixture(t *testing.T, tc r11Case) *r11Fixture {
 		t.Fatal(err)
 	}
 	model, kind, family := "grok-4.7", "grok", "xai"
-	if tc.question {
+	if tc.question || tc.input {
 		model, kind, family = "gpt-5", "codex", "openai"
 	}
 	roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\tmode\targs\teffort\nworker\tw0test:p0a\t" + kind + "\timplementer\t" + family + "\t0\t\tnow\t" + model + "\ttask\timplementer\tbuild\t\t\n"
@@ -360,7 +360,10 @@ func newR11Fixture(t *testing.T, tc r11Case) *r11Fixture {
 	if tc.authScreen {
 		screen = "Reading " + composed + "\n.\n.\n.\n" + tc.post
 	} else if tc.input {
-		screen = initial + "> Read the file /x/brief.md in full and execute it.\n"
+		// Adapted contract: the first Enter needs a recognized composer
+		// holding the exact composed path — the codex composer line with the
+		// real brief path, not a foreign-path marker line.
+		screen = initial + "› Read the file " + composed + " in full and execute it.\n"
 	} else if tc.report && tc.promptEcho {
 		screen = initial + "prompt received: ok\n"
 	} else if tc.appendAuth {
@@ -379,8 +382,21 @@ func newR11Fixture(t *testing.T, tc r11Case) *r11Fixture {
 		return `{"result":{"agent":{"agent_status":"` + currentMode + `"` + seqField + `}}}`
 	}
 	initialSeq := tc.seq
+	// Auth attribution requires actual receipt first. These frames used to
+	// pass on a path in scrollback; explicitly model a new accepted turn
+	// followed by the fixture's final idle/done state instead of that echo.
+	acceptedReceipt := !tc.report && !tc.input && tc.check != "0" && (tc.authScreen || tc.promptEcho || tc.appendAuth)
+	if acceptedReceipt && initialSeq == "" {
+		initialSeq = "1"
+	}
 	stateInitial := stateJSON(mode, initialSeq)
 	statePost := stateJSON(mode, initialSeq)
+	stateAfterPrompt, stateAfterArrival := stateInitial, stateInitial
+	if acceptedReceipt {
+		statePost = stateJSON(mode, "2")
+		stateAfterPrompt = stateJSON("blocked", "2")
+		stateAfterArrival = statePost
+	}
 	if tc.input {
 		statePost = stateJSON("blocked", "2")
 	}
@@ -412,8 +428,10 @@ func newR11Fixture(t *testing.T, tc r11Case) *r11Fixture {
 		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped", "--lines", "40"}, Call: 2, Stdout: recent},
 		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped", "--lines", "40"}, Stdout: recent},
 		fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 1, Stdout: stateInitial},
-		fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: stateInitial},
-		fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: stateInitial},
+		fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 2, Stdout: stateAfterPrompt},
+		fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 3, Stdout: stateAfterArrival},
+	)
+	rules = append(rules,
 		fakecli.Rule{Argv: []string{"agent", "get", "worker"}, ArgvPrefix: true, Stdout: statePost},
 		fakecli.Rule{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Stdout: "{\"result\":{\"submitted\":true}}", Delay: boolInt(tc.report) * 100},
 		fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, ArgvPrefix: true},

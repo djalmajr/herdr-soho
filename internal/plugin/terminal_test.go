@@ -32,7 +32,7 @@ func TestPickerTerminalModeRestoresAfterEscapeAndPanic(t *testing.T) {
 			if !restored {
 				t.Fatal("raw terminal mode was not restored")
 			}
-			if screen.String() != "\x1b[?25h" {
+			if screen.String() != "\x1b[>1u\x1b[<u\x1b[?25h" {
 				t.Fatalf("cursor restore=%q", screen.String())
 			}
 		})

@@ -31,7 +31,7 @@ type tm5ProbeGolden struct {
 
 func readProbeGoldens(t *testing.T) map[string]tm5ProbeGolden {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-setup-probe.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-setup-probe.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

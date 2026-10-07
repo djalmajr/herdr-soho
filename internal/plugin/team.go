@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -69,6 +70,8 @@ type teamLoadResult struct {
 	explainFailure  string
 	workers         []string
 	rosterFailure   string
+	collaborations  map[string]teamCollaboration
+	statusFailure   string
 	doctorLines     []string
 	doctorFailure   string
 	gcLines         []string
@@ -96,6 +99,8 @@ type TeamState struct {
 	explainFailure string
 	workers        []string
 	rosterFailure  string
+	collaborations map[string]teamCollaboration
+	statusFailure  string
 	selected       int
 	// confirmed release, shown in the equipe view until the view changes
 	releaseAgent   string
@@ -222,6 +227,28 @@ func teamCall(ctx contextpkg.Context, exe string, env platform.Env, platformName
 	return teamCallResult(args, run)
 }
 
+type teamCollaboration struct {
+	Agent      string `json:"agent"`
+	Status     string `json:"status"`
+	Assignment string `json:"assignment"`
+	Phase      string `json:"phase"`
+	Round      int    `json:"round"`
+	Revision   string `json:"revision"`
+	Delivery   string `json:"delivery"`
+	Cause      string `json:"cause"`
+}
+
+func teamCollaborationRows(lines []string) map[string]teamCollaboration {
+	rows := make(map[string]teamCollaboration)
+	for _, line := range lines {
+		var row teamCollaboration
+		if json.Unmarshal([]byte(line), &row) == nil && row.Agent != "" && (row.Status == "collaborating" || strings.HasPrefix(row.Status, "collaboration-")) {
+			rows[row.Agent] = row
+		}
+	}
+	return rows
+}
+
 func teamCallResult(args []string, run platform.RunResult) ([]string, string) {
 	what := args[0]
 	if run.TimedOut {
@@ -237,7 +264,7 @@ func teamCallResult(args []string, run platform.RunResult) ([]string, string) {
 	if run.Status != nil {
 		code = *run.Status
 	}
-	if code == 0 {
+	if code == 0 || (what == "status" && code >= 0) {
 		// Split first, then strip per line: StripPickerControls flattens
 		// newlines, so stripping the whole blob would destroy the table
 		// structure (the roster's blank-line sections and its rows).
@@ -248,6 +275,12 @@ func teamCallResult(args []string, run platform.RunResult) ([]string, string) {
 		}
 		for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
 			out = out[:len(out)-1]
+		}
+		if code == 4 {
+			return out, "status has unavailable or disabled participants; inspect their causes"
+		}
+		if code != 0 {
+			return out, fmt.Sprintf("status has participants requiring attention (exit %d); inspect their causes", code)
 		}
 		return out, ""
 	}
@@ -276,6 +309,8 @@ func loadTeamView(ctx contextpkg.Context, exe string, env platform.Env, platform
 		lines, failure := call([]string{"roster"}, true)
 		result.workers = teamWorkers(lines)
 		result.rosterFailure = failure
+		statusLines, statusFailure := call([]string{"status"}, true)
+		result.collaborations, result.statusFailure = teamCollaborationRows(statusLines), statusFailure
 	case teamLoadView2:
 		result.doctorLines, result.doctorFailure = call([]string{"doctor"}, true)
 	case teamLoadView3:
@@ -301,6 +336,7 @@ func applyTeamLoad(state *TeamState, result teamLoadResult) {
 		}
 		state.explainLines, state.explainFailure = result.explainLines, result.explainFailure
 		state.workers, state.rosterFailure = result.workers, result.rosterFailure
+		state.collaborations, state.statusFailure = result.collaborations, result.statusFailure
 		if state.selected >= len(state.workers) {
 			state.selected = len(state.workers) - 1
 		}
@@ -556,7 +592,17 @@ func (s *TeamState) renderContent(width int) ([]string, string) {
 						cursor = ">"
 					}
 					content = append(content, displaySlice(cursor+" "+StripPickerControls(worker), width))
+					if c, ok := s.collaborations[teamAgent(worker)]; ok {
+						text := fmt.Sprintf("  %s · %s · rodada %d · versão %s · entrega %s", c.Assignment, c.Phase, c.Round, c.Revision, c.Delivery)
+						if c.Status != "collaborating" {
+							text = "  " + c.Status + ": " + c.Cause
+						}
+						content = append(content, teamWrap(StripPickerControls(text), width)...)
+					}
 				}
+			}
+			if s.statusFailure != "" {
+				content = append(content, teamWrap(StripPickerControls(s.statusFailure), width)...)
 			}
 			if s.releaseAgent != "" {
 				content = append(content, "")
@@ -891,6 +937,11 @@ func (s *TeamState) ApplyKey(key string) string {
 	case "x":
 		if s.subview == "" && s.view == teamViewTeam && len(s.workers) > 0 {
 			if agent := teamAgent(s.workers[s.selected]); agent != "" {
+				if _, active := s.collaborations[agent]; active {
+					s.releaseAgent = agent
+					s.releaseFailure = "colaboração ativa ou estado indisponível: o orquestrador deve inspecionar e finalizar antes de release"
+					return ""
+				}
 				s.subview = "confirm-release"
 				s.confirmAgent = agent
 				s.confirmArmAt = teamNow().Add(teamConfirmQuiet)

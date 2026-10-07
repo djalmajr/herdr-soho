@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -43,6 +42,7 @@ func teamPanelFixture(t *testing.T) (platform.Env, string, string) {
 	cli, err := fakecli.InstallWithOptions(t, dir, "cli", []fakecli.Rule{
 		{Argv: []string{"explain"}, Stdout: teamExplainFixture},
 		{Argv: []string{"roster"}, Stdout: teamRosterFixture},
+		{Argv: []string{"status"}, Stdout: "worker-1\tworking\t-\nworker-2\tidle\t-\n"},
 		{Argv: []string{"doctor"}, Stdout: "doctor-ok\n"},
 		{Argv: []string{"friction", "--summary"}, Stdout: "friction-ok\n"},
 		{Argv: []string{"gc"}, Stdout: "gc dry-run ok\npressure 12%\n"},
@@ -89,24 +89,37 @@ func teamStartWithPipes(t *testing.T, env platform.Env, cliPath string, args []s
 	}
 	output, err := os.CreateTemp(t.TempDir(), "team-panel-")
 	if err != nil {
+		_ = input.Close()
+		_ = writer.Close()
 		t.Fatal(err)
 	}
 	oldIn, oldOut := os.Stdin, os.Stdout
 	os.Stdin, os.Stdout = input, output
+	loopDone := make(chan struct{})
 	t.Cleanup(func() {
+		_ = writer.Close()
+		select {
+		case <-loopDone:
+		case <-time.After(20 * time.Second):
+			t.Error("team panel did not stop during cleanup")
+			return // keep its descriptors and global stream references alive
+		}
 		os.Stdin, os.Stdout = oldIn, oldOut
 		_ = input.Close()
-		_ = writer.Close()
 		_ = output.Close()
 	})
 	finished := make(chan int, 1)
-	go func() { finished <- RunTeam(env, platform.Current(), cliPath, args) }()
+	go func() {
+		defer close(loopDone)
+		finished <- RunTeam(env, platform.Current(), cliPath, args)
+	}()
 	return writer, output, finished
 }
 
 func teamReadOutput(output *os.File) string {
-	_, _ = output.Seek(0, io.SeekStart)
-	data, _ := io.ReadAll(output)
+	// A separate descriptor must read the capture: seeking the writer's
+	// descriptor can overwrite a redraw in progress and erase its footer.
+	data, _ := os.ReadFile(output.Name())
 	return string(data)
 }
 
@@ -179,7 +192,12 @@ func teamWaitForLastFrame(t *testing.T, output *os.File, cond func(frame string)
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		if cond(teamLastFrame(teamReadOutput(output))) {
+		data := teamReadOutput(output)
+		start := strings.LastIndex(data, "\x1b[H")
+		// A partial redraw may omit the confirmation footer simply because
+		// it has not been written yet. Only a finished frame proves cancel.
+		complete := start >= 0 && strings.Contains(data[start:], "\x1b[J")
+		if complete && cond(teamLastFrame(data)) {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -315,7 +333,7 @@ func TestTeamPanelReadsCarryNowriteCwdAndTargetIDs(t *testing.T) {
 	_ = writer.Close()
 	teamWaitExit(t, finished, 0)
 	calls := teamCalls(t, cli)
-	wantArgv := [][]string{{"explain"}, {"roster"}, {"doctor"}, {"gc"}, {"friction", "--summary"}}
+	wantArgv := [][]string{{"explain"}, {"roster"}, {"status"}, {"doctor"}, {"gc"}, {"friction", "--summary"}}
 	if len(calls) != len(wantArgv) {
 		t.Fatalf("CLI calls=%#v want %d reads", calls, len(wantArgv))
 	}

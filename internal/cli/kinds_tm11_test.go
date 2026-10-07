@@ -27,7 +27,7 @@ type tm11Golden struct {
 }
 
 func TestTM11KindsCommandParity(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-kinds.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-kinds.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

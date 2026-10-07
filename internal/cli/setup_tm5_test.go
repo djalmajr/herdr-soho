@@ -34,7 +34,7 @@ type setupTM5Golden struct {
 
 func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-setup-probe.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-setup-probe.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +110,12 @@ func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 		if platform.Current() == "win32" {
 			program += ".cmd"
 		}
+		// The setup guidance now names the native executable (platform.LauncherPath
+		// of the running test binary, no HERDR_SOHO_BIN override), not the
+		// obsolete scripts launcher; both map to the golden's PROG token.
+		launcher := platform.LauncherPath(env)
+		stdoutText = strings.ReplaceAll(stdoutText, launcher, "PROG")
+		stderrText = strings.ReplaceAll(stderrText, launcher, "PROG")
 		stdoutText = strings.ReplaceAll(stdoutText, program, "PROG")
 		stderrText = strings.ReplaceAll(stderrText, program, "PROG")
 		stdoutText = normalizeGoldenRootPathSeparators(stdoutText)
@@ -279,10 +285,10 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		beforeTracked, _ := os.ReadFile(tracked)
-		entry := filepath.Join(env.Get("HERDR_SOHO_SKILL_DIR"), "scripts", "herdr-soho")
-		if platform.Current() == "win32" {
-			entry += ".cmd"
-		}
+		// The setup guidance names the native executable (the running test
+		// binary; no HERDR_SOHO_BIN override in this fixture env), not the
+		// obsolete skill scripts launcher.
+		entry := platform.LauncherPath(env)
 		run := func() string {
 			t.Helper()
 			oldOut, oldErr := platform.Stdout, platform.Stderr

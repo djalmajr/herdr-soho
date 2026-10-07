@@ -1,0 +1,8 @@
+# Keep embedded skill resources identical across native checkouts.
+/skills/herdr-soho/*.md text eol=lf
+/skills/herdr-soho/config.defaults text eol=lf
+/skills/herdr-soho/references/*.md text eol=lf
+/skills/herdr-soho/roles/*.md text eol=lf
+/skills/herdr-soho/templates/*.md text eol=lf
+# A unified diff prefixes Go's tab indentation with a required context space.
+/evals/fixtures/reviewer-seeded/change.diff whitespace=-space-before-tab

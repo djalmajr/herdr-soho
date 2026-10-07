@@ -21,6 +21,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/djalmajr/herdr-soho/skills/herdr-soho"
 )
 
 // Env is an explicit environment passed to platform helpers and commands.
@@ -366,19 +368,28 @@ func SkillDir(env Env) string {
 // SkillDirSource returns the skill directory and its origin: "HERDR_SOHO_SKILL_DIR"
 // for the configured value, "executable" for a skill tree beside the executable,
 // "home" for <home>/.agents/skills/herdr-soho or <home>/.claude/skills/herdr-soho
-// (tried in that order; <home> is HOME, USERPROFILE on Windows). It dies with the
-// same message as before when no source holds a skill.
+// (tried in that order; <home> is HOME, USERPROFILE on Windows), "bundled" for
+// the embedded skill materialized into the cache derived from the env. It dies
+// with the same message as before when no source holds a skill and no usable
+// cache can be derived from the env.
 func SkillDirSource(env Env) (string, string) {
 	dir, source := SkillDirSourceOrEmpty(env)
-	if dir == "" {
-		Die("cannot find skill directory; set HERDR_SOHO_SKILL_DIR", 2)
+	if dir != "" {
+		return dir, source
 	}
-	return dir, source
+	if env.Get("HERDR_SOHO_NOWRITE") != "1" && env.Get("HERDR_AGENTS_NOWRITE") != "1" {
+		if dir, err := skill.Materialize(bundledSkillCacheBase(env)); err == nil {
+			return dir, "bundled"
+		}
+	}
+	Die("cannot find skill directory; set HERDR_SOHO_SKILL_DIR", 2)
+	return "", ""
 }
 
 // SkillDirSourceOrEmpty is SkillDirSource without the Die: it returns ("", "")
 // when no source holds a skill, for callers that must not die on a project
-// without an installed skill.
+// without an installed skill. It is strictly read-only: the bundled lookup
+// finds a completed bundle but never creates or repairs the cache.
 func SkillDirSourceOrEmpty(env Env) (string, string) {
 	if configured := env.Get("HERDR_SOHO_SKILL_DIR"); configured != "" {
 		return configured, "HERDR_SOHO_SKILL_DIR"
@@ -403,17 +414,139 @@ func SkillDirSourceOrEmpty(env Env) (string, string) {
 			}
 		}
 	}
+	// The bundled fallback is read-only: an already materialized, verified
+	// bundle in the env-derived cache. A missing or corrupt cache is not a
+	// skill source; SkillDirSource (and only it) materializes.
+	if cache := bundledSkillCacheBase(env); cache != "" {
+		if dir, err := skill.Cached(cache); err == nil {
+			return dir, "bundled"
+		}
+	}
 	return "", ""
 }
 
-// LauncherPath is the skill launcher the worker runs from: scripts/herdr-soho,
-// scripts/herdr-soho.cmd on Windows, beside the skill entry.
-func LauncherPath(env Env) string {
-	name := "herdr-soho"
-	if Current() == "win32" {
-		name += ".cmd"
+// bundledSkillCacheBase derives the absolute cache base from the explicit
+// env only: XDG_CACHE_HOME (absolute) on POSIX, otherwise HOME/.cache;
+// LOCALAPPDATA (absolute) on Windows, otherwise USERPROFILE/AppData/Local.
+// There is no process-global fallback (no os.UserCacheDir): when the passed
+// env holds no usable absolute value there is no cache, so nothing is
+// written. A relative configured value is refused, not used.
+func bundledSkillCacheBase(env Env) string {
+	if runtime.GOOS == "windows" {
+		if v := env.Get("LOCALAPPDATA"); v != "" {
+			if filepath.IsAbs(v) {
+				return v
+			}
+			return ""
+		}
+		if v := env.Get("USERPROFILE"); v != "" && filepath.IsAbs(v) {
+			return filepath.Join(v, "AppData", "Local")
+		}
+		return ""
 	}
-	return filepath.Join(SkillDir(env), "scripts", name)
+	if v := env.Get("XDG_CACHE_HOME"); v != "" {
+		if filepath.IsAbs(v) {
+			return v
+		}
+		return ""
+	}
+	if v := env.Get("HOME"); v != "" && filepath.IsAbs(v) {
+		return filepath.Join(v, ".cache")
+	}
+	return ""
+}
+
+// LauncherPath is the native herdr-soho executable the worker runs from:
+// the absolute HERDR_SOHO_BIN override when one is configured, otherwise the
+// currently running executable. It never returns the skill scripts launcher
+// (scripts/herdr-soho or scripts/herdr-soho.cmd) and never searches or
+// executes Node, Bun or Bash; the dispatch instruction's "launcher" phrase
+// names this native binary.
+//
+// A configured override must be an absolute path to a regular executable
+// native binary (Mach-O, ELF or PE); a missing path, a directory, a relative
+// name, a script, a shebang file or a .cmd batch dies with code 2 instead of
+// falling back. Symlinks are resolved before validation, and candidates are
+// validated by stat and header bytes only: they are never executed.
+func LauncherPath(env Env) string {
+	if bin := strings.TrimSpace(env.Get("HERDR_SOHO_BIN")); bin != "" {
+		return validatedNativeBinary(bin)
+	}
+	executable, err := currentExecutable()
+	if err != nil {
+		Die("cannot resolve the current executable; set HERDR_SOHO_BIN", 2)
+	}
+	return executable
+}
+
+// validatedNativeBinary enforces the override contract and returns the
+// symlink-resolved path of the accepted binary. Every refusal Dies with the
+// fail-closed code 2 error; there is no fallback.
+func validatedNativeBinary(bin string) string {
+	if !filepath.IsAbs(bin) {
+		Die("HERDR_SOHO_BIN must be an absolute path: "+bin, 2)
+	}
+	resolved := bin
+	if target, err := filepath.EvalSymlinks(bin); err == nil {
+		resolved = target
+	}
+	info, err := os.Stat(resolved)
+	if err != nil || !info.Mode().IsRegular() {
+		Die("HERDR_SOHO_BIN is missing or not a regular file: "+bin, 2)
+	}
+	if Current() != "win32" && info.Mode()&0o111 == 0 {
+		Die("HERDR_SOHO_BIN is not executable: "+bin, 2)
+	}
+	header, err := readNativeBinaryHeader(resolved)
+	if err != nil || !isNativeExecutableHeader(header) {
+		Die("HERDR_SOHO_BIN is not a native binary (script, shebang or unknown format): "+bin, 2)
+	}
+	return resolved
+}
+
+// readNativeBinaryHeader returns the first 4 KiB of file: enough for the
+// Mach-O and ELF header words and for a PE "MZ" header whose e_lfanew
+// offset points within the first page, as in every real binary.
+func readNativeBinaryHeader(file string) ([]byte, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data := make([]byte, 0x1000)
+	n, err := io.ReadFull(f, data)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
+	return data[:n], nil
+}
+
+// isNativeExecutableHeader reports whether data begins with a recognized
+// native executable header: Mach-O (single-arch or universal, either byte
+// order), ELF, or PE ("MZ" plus the "PE\x00\x00" signature at e_lfanew).
+// Scripts, shebang files, .cmd batch files and other text fail it.
+func isNativeExecutableHeader(data []byte) bool {
+	if len(data) >= 4 {
+		words := [][]byte{
+			{0xFE, 0xED, 0xFA, 0xCE}, // Mach-O 32 (MH_MAGIC)
+			{0xCE, 0xFA, 0xED, 0xFE}, // Mach-O 32 swapped (MH_CIGAM)
+			{0xFE, 0xED, 0xFA, 0xCF}, // Mach-O 64 (MH_MAGIC_64)
+			{0xCF, 0xFA, 0xED, 0xFE}, // Mach-O 64 swapped (MH_CIGAM_64)
+			{0xCA, 0xFE, 0xBA, 0xBE}, // Mach-O universal (FAT_MAGIC)
+			{0xBE, 0xBA, 0xFE, 0xCA}, // Mach-O universal swapped (FAT_CIGAM)
+			{0x7F, 'E', 'L', 'F'},    // ELF
+		}
+		for _, word := range words {
+			if bytes.Equal(data[:4], word) {
+				return true
+			}
+		}
+	}
+	if len(data) >= 0x40 && data[0] == 'M' && data[1] == 'Z' {
+		off := int(data[0x3C]) | int(data[0x3D])<<8 | int(data[0x3E])<<16 | int(data[0x3F])<<24
+		return off+4 <= len(data) && bytes.Equal(data[off:off+4], []byte{'P', 'E', 0, 0})
+	}
+	return false
 }
 
 func skillDirFromExecutable(executable string) string {

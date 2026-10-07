@@ -169,7 +169,7 @@ func TestParityLayoutPlanSixFixturesByteForByte(t *testing.T) {
 		{"fx-empate", doc(pane("C", 0, 0, 107, 57), pane("A", 107, 0, 106, 57)), "A", ""},
 		{"fx-3x2", doc(pane("C", 0, 0, 71, 57), pane("A", 71, 0, 71, 29), pane("B", 71, 29, 71, 28), pane("D", 142, 0, 71, 29), pane("E", 142, 29, 71, 28)), "A B D E", "6"},
 	}
-	goldenPath := filepath.Join(testSkillDir(t), "scripts", "test", "golden", "parity-layout.json")
+	goldenPath := filepath.Join("..", "testdata", "legacy", "parity-layout.json")
 	data, err := os.ReadFile(goldenPath)
 	if err != nil {
 		t.Fatal(err)

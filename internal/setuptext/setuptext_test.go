@@ -5,20 +5,33 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"github.com/djalmajr/herdr-soho/internal/jsonjs"
+	"github.com/djalmajr/herdr-soho/internal/testutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf16"
-
-	"github.com/djalmajr/herdr-soho/internal/testutil"
 )
 
 func ptr(value string) *string { return &value }
+
+// nativeHookShape guards the generated command's portability as a class: it
+// must be exactly the three-token PATH command `herdr-soho hook <sub>`, with
+// no shell engine, no absolute personal path and no shell expansion.
+func nativeHookShape(t *testing.T, event, command, sub string) {
+	t.Helper()
+	fields := strings.Fields(command)
+	if len(fields) != 3 || fields[0] != "herdr-soho" || fields[1] != "hook" || fields[2] != sub {
+		t.Fatalf("%s hook %q is not the native 'herdr-soho hook %s' PATH command", event, command, sub)
+	}
+	for _, hostile := range []string{"sh -c", "bash -c", "node", "bun", "/Users/", `C:\\Users`, "/home/", "$HOME", "${", "scripts/"} {
+		if strings.Contains(command, hostile) {
+			t.Fatalf("%s hook %q carries a shell engine or personal path: %q", event, command, hostile)
+		}
+	}
+}
 func TestSetupTextCases(t *testing.T) {
 	t.Run(`// JS: "setupBlock: markers, heading, no absolute path (test-setup.sh rule)"`, func(t *testing.T) {
 		block := SetupBlock()
@@ -27,7 +40,7 @@ func TestSetupTextCases(t *testing.T) {
 		}
 	})
 	t.Run(`// JS: "setupBlock: exact text (neutral block: flow + brief contract, config for the rest)"`, func(t *testing.T) {
-		data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-setup.json"))
+		data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-setup.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -51,36 +64,94 @@ func TestSetupTextCases(t *testing.T) {
 			t.Fatalf("setup block differs from parity golden: got %q, want %v", SetupBlock(), want)
 		}
 	})
-	t.Run("setupHookReminder: exact text, no trailing newline", func(t *testing.T) { // JS: "setupHookReminder: exact text, no trailing newline"
-		if strings.HasSuffix(SetupHookReminder(), "\n") || !strings.Contains(SetupHookReminder(), "HERDR_ENV") {
-			t.Fatal("reminder literal changed")
+	t.Run("setupHookReminder: exact portable PATH command, no trailing newline", func(t *testing.T) { // JS: "setupHookReminder: exact text, no trailing newline"
+		if SetupHookReminder() != "herdr-soho hook reminder" || strings.Contains(SetupHookReminder(), "\n") {
+			t.Fatalf("reminder literal changed: %q", SetupHookReminder())
+		}
+		nativeHookShape(t, "UserPromptSubmit", SetupHookReminder(), "reminder")
+	})
+	t.Run("setupHookDoctor: exact portable PATH command, no trailing newline", func(t *testing.T) { // JS: "setupHookDoctor: exact text, no trailing newline"
+		if SetupHookDoctor() != "herdr-soho hook doctor" || strings.Contains(SetupHookDoctor(), "\n") {
+			t.Fatalf("doctor hook literal changed: %q", SetupHookDoctor())
+		}
+		nativeHookShape(t, "SessionStart", SetupHookDoctor(), "doctor")
+	})
+	t.Run("previous herdr-soho shell hooks are the exact pre-native commands, kept inert", func(t *testing.T) {
+		// Pinned in the test, not derived from the implementation: if the
+		// recognized previous commands drift from the exact pre-native text,
+		// a settings file written by the old setup stops being recognized and
+		// the merge stacks.
+		wantPreviousReminder := `sh -c '[ "${HERDR_ENV:-}" = 1 ] && echo "herdr-soho: this project routes non-trivial work through /herdr-soho — surveys go to a scouter, slices to workers; the orchestrator keeps only one-or-two-file changes."; true'`
+		wantPreviousDoctor := `sh -c '[ "${HERDR_ENV:-}" = 1 ] || exit 0; for script in "${CLAUDE_PROJECT_DIR:-$PWD}/.agents/skills/herdr-soho/scripts/herdr-soho" "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/skills/herdr-soho/scripts/herdr-soho" "$HOME/.agents/skills/herdr-soho/scripts/herdr-soho" "$HOME/.claude/skills/herdr-soho/scripts/herdr-soho"; do [ -f "$script" ] || continue; sh "$script" doctor 2>/dev/null | grep -E "^warn" | sed "s/^warn */herdr-soho doctor: /"; exit 0; done; echo "herdr-soho doctor: skill script not found"; true'`
+		if PreviousHookReminder() != wantPreviousReminder {
+			t.Fatalf("previous reminder drifted: %q", PreviousHookReminder())
+		}
+		if PreviousHookDoctor() != wantPreviousDoctor {
+			t.Fatalf("previous doctor drifted: %q", PreviousHookDoctor())
 		}
 	})
-	t.Run("setupHookDoctor: exact text, no trailing newline", func(t *testing.T) { // JS: "setupHookDoctor: exact text, no trailing newline"
-		if strings.HasSuffix(SetupHookDoctor(), "\n") || !strings.Contains(SetupHookDoctor(), "herdr-soho/scripts/herdr-soho") {
-			t.Fatal("doctor hook literal changed")
-		}
-	})
-	t.Run("setupHookDoctor runs the first available launcher from the four candidates", func(t *testing.T) { // JS: "setupHookDoctor runs the first available launcher from the four candidates"
-		if _, err := exec.LookPath("sh"); err != nil {
-			if runtime.GOOS == "windows" {
-				t.Skip("SessionStart hook execution requires sh from Git Bash or WSL on Windows")
+	t.Run("the generated hooks replace the sh execution without any shell availability skip", func(t *testing.T) { // replaces "setupHookDoctor runs the first available launcher from the four candidates"
+		// The obsolete shell execution of the four skill script candidates is
+		// gone: the generated command is the native binary on PATH, so no sh
+		// lookup, fixture launcher or platform skip is needed or allowed.
+		for _, command := range []string{SetupHookReminder(), SetupHookDoctor()} {
+			if strings.Contains(command, "sh") || strings.Contains(command, "bash") || strings.Contains(command, "node") || strings.Contains(command, "bun") || strings.Contains(command, "/Users/") || strings.Contains(command, `C:\\`) || strings.Contains(command, "$HOME") || strings.Contains(command, "${") {
+				t.Fatalf("generated hook %q is not a plain PATH command without an engine or personal path", command)
 			}
-			t.Fatalf("sh unavailable: %v", err)
 		}
-		root := t.TempDir()
-		launcher := filepath.Join(root, ".agents", "skills", "herdr-soho", "scripts", "herdr-soho")
-		if err := os.MkdirAll(filepath.Dir(launcher), 0755); err != nil {
+		// The exact previous herdr-soho hook is merged away like the current
+		// one: the merged file keeps the foreign command in order, carries
+		// exactly the native command, and a second merge is a no-op.
+		seed, err := json.Marshal(map[string]any{"hooks": map[string]any{
+			"UserPromptSubmit": []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": PreviousHookReminder()}}}, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "echo my own reminder"}}}},
+			"SessionStart":     []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": PreviousHookDoctor()}}}, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "bash something-else.sh"}}}},
+		}})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(launcher, []byte("#!/bin/sh\necho warn first-candidate\n"), 0755); err != nil {
+		first := SettingsHooksResult(ptr(string(seed)))
+		if first == nil {
+			t.Fatal("merge refused the previous herdr-soho hooks")
+		}
+		second := SettingsHooksResult(first)
+		if second == nil || *second != *first {
+			t.Fatalf("rerun not stable: %v / %v", first, second)
+		}
+		var doc struct {
+			Hooks map[string][]struct {
+				Hooks []struct {
+					Command string `json:"command"`
+				} `json:"hooks"`
+			} `json:"hooks"`
+		}
+		if err := json.Unmarshal([]byte(*first), &doc); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command("sh", "-c", SetupHookDoctor())
-		cmd.Env = append(testutil.CleanEnv(t), "HERDR_ENV=1", "CLAUDE_PROJECT_DIR="+root, "HOME="+root)
-		output, err := cmd.CombinedOutput()
-		if err != nil || string(output) != "herdr-soho doctor: first-candidate\n" {
-			t.Fatalf("hook output=%q err=%v", output, err)
+		for _, event := range []struct {
+			name    string
+			entries []struct {
+				Hooks []struct {
+					Command string `json:"command"`
+				} `json:"hooks"`
+			}
+			foreign, native string
+		}{{"UserPromptSubmit", doc.Hooks["UserPromptSubmit"], "echo my own reminder", "herdr-soho hook reminder"}, {"SessionStart", doc.Hooks["SessionStart"], "bash something-else.sh", "herdr-soho hook doctor"}} {
+			if len(event.entries) != 2 {
+				t.Fatalf("%s entries=%d, want the foreign command plus the native one: %s", event.name, len(event.entries), *first)
+			}
+			var got []string
+			for _, entry := range event.entries {
+				if len(entry.Hooks) != 1 {
+					t.Fatalf("%s entry holds %d commands, want 1: %s", event.name, len(entry.Hooks), *first)
+				}
+				got = append(got, entry.Hooks[0].Command)
+			}
+			if got[0] != event.foreign || got[1] != event.native {
+				t.Fatalf("%s order=%v, want foreign then native: %s", event.name, got, *first)
+			}
+			if strings.Contains(*first, "sh -c ") && !strings.Contains(*first, `\"bash something-else.sh\"`) {
+				t.Fatalf("previous shell hook survived the merge: %s", *first)
+			}
 		}
 	})
 	t.Run("setupBlockResult: absent and empty files", func(t *testing.T) { // JS: "setupBlockResult: absent and empty files"
@@ -222,7 +293,7 @@ func TestSetupTextCases(t *testing.T) {
 		if err := json.Unmarshal([]byte(*first), &doc); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(*first, "sh -c herdr-soho setup") || !strings.Contains(*first, "herdr-soho: this project routes") || !strings.Contains(*first, "herdr-soho/scripts/herdr-soho") {
+		if !strings.Contains(*first, "sh -c herdr-soho setup") || !strings.Contains(*first, `"herdr-soho hook reminder"`) || !strings.Contains(*first, `"herdr-soho hook doctor"`) {
 			t.Fatalf("unexpected merged commands: %s", *first)
 		}
 	})
@@ -255,7 +326,7 @@ func TestSetupTextCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := SettingsHooksResult(ptr(string(seed)))
-		if got == nil || !strings.Contains(*got, "my-herdr-agents-thing run") || !strings.Contains(*got, "echo herdr-agents legacy cleanup") || !strings.Contains(*got, "herdr-soho: this project routes") || !strings.Contains(*got, "herdr-soho/scripts/herdr-soho") {
+		if got == nil || !strings.Contains(*got, "my-herdr-agents-thing run") || !strings.Contains(*got, "echo herdr-agents legacy cleanup") || !strings.Contains(*got, `"herdr-soho hook reminder"`) || !strings.Contains(*got, `"herdr-soho hook doctor"`) {
 			t.Fatalf("user commands not preserved: %v", got)
 		}
 	})
@@ -274,13 +345,24 @@ func TestSetupTextDifferential(t *testing.T) {
 		Input    *string `json:"input"`
 		Expected *string `json:"expected"`
 	}
-	data, err := os.ReadFile("testdata/setuptext.json")
+	data, err := os.ReadFile("../testdata/legacy/setuptext.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var rows []row
 	if err = json.Unmarshal(data, &rows); err != nil {
 		t.Fatal(err)
+	}
+	// The frozen parity oracle keeps the exact pre-native hook commands as
+	// the expected hook outputs (raw for reminder/doctor rows and
+	// JSON-quoted inside the hooks-result documents). The testutil oracle
+	// adapter rewrites only those exact strings to the approved native
+	// literals. The seed inputs and every other expectation are untouched.
+	for i := range rows {
+		if rows[i].Expected != nil {
+			adapted := testutil.ApplyHookOracle(*rows[i].Expected).(string)
+			rows[i].Expected = &adapted
+		}
 	}
 	for i, r := range rows {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {

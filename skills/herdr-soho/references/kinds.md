@@ -1,8 +1,6 @@
 # Herdr kinds and model families
 
-`herdr agent start --kind <kind>` launches the agent CLI with that name. Run
-`herdr agent` to list the kinds your installed Herdr supports. The family
-column is what the reviewer-vs-implementer rule compares.
+`herdr agent start --kind <kind>` launches the agent CLI with that name. Run `herdr agent` to list the kinds your installed Herdr supports. The family column is what the reviewer-vs-implementer rule compares.
 
 | Kind | Executable | Family | Effort ceiling | Effort flag | Model flag | `approvals: full` |
 |---|---|---|---|---|---|---|
@@ -16,129 +14,58 @@ column is what the reviewer-vs-implementer rule compares.
 | `opencode` | `opencode` | by model | — | not mapped on the TUI (`--variant` is only in `opencode run`) | `-m <provider/model>` | `--auto` (edits: not mapped) |
 | `copilot` | `copilot` | mixed | — | not mapped | not mapped | not mapped |
 
-`approvals: edits` maps to claude `--permission-mode acceptEdits`, codex
-`-s workspace-write -a on-request`, grok `--permission-mode acceptEdits`,
-agy `--mode accept-edits`, cursor `--trust --auto-review`. `pi` and
-`opencode` have no edits mode: spawn warns, the mode is a no-op (pi) or
-refused in the mapping (opencode).
+`approvals: edits` maps to claude `--permission-mode acceptEdits`, codex `-s workspace-write -a on-request`, grok `--permission-mode acceptEdits`, agy `--mode accept-edits`, cursor `--trust --auto-review`. `pi` and `opencode` have no edits mode: spawn warns, the mode is a no-op (pi) or refused in the mapping (opencode).
 
-Not bypassed by the skill (pass after `--` if you accept it): Codex
-`--dangerously-bypass-hook-trust`; first-visit workspace-trust dialogs.
+Not bypassed by the skill (pass after `--` if you accept it): Codex `--dangerously-bypass-hook-trust`; first-visit workspace-trust dialogs.
 
 ## Codex sandbox limits (`-s workspace-write`)
 
-Both `edits` (`-s workspace-write -a on-request`) and `full`
-(`-s workspace-write -a never`) run the Codex worker in the
-`workspace-write` sandbox, which allows the repo root, `/tmp` and
-`$TMPDIR` but:
+Both `edits` (`-s workspace-write -a on-request`) and `full` (`-s workspace-write -a never`) run the Codex worker in the `workspace-write` sandbox, which allows the repo root, `/tmp` and `$TMPDIR` but:
 
-- **cannot write under `.git`** — `git mv` and `git checkout -- <file>`
-  fail on `.git/index.lock`;
-- **has no network** — binding a local port included: a test that starts
-  a local server fails with `Operation not permitted`;
-- **cannot run a browser e2e on macOS, even with network** — Chromium dies
-  with `bootstrap_check_in … MachPortRendezvousServer … Permission denied
-  (1100)`, and a tool that writes under `~/Library/Preferences` (a dev
-  server's registry) fails with `EPERM`. `network_access=true` does not
-  lift either: browser e2e runs outside the sandbox (the orchestrator) or
-  on another kind.
+- **cannot write under `.git`** — `git mv` and `git checkout -- <file>` fail on `.git/index.lock`;
+- **has no network** — binding a local port included: a test that starts a local server fails with `Operation not permitted`;
+- **cannot run a browser e2e on macOS, even with network** — Chromium dies with `bootstrap_check_in … MachPortRendezvousServer … Permission denied (1100)`, and a tool that writes under `~/Library/Preferences` (a dev server's registry) fails with `EPERM`. `network_access=true` does not lift either: browser e2e runs outside the sandbox (the orchestrator) or on another kind.
 
-The composed prompt of a codex worker says so: two notes, absent when the
-opening args grant the access (`danger-full-access` or
-`--dangerously-bypass-approvals-and-sandbox` drop both; an arg ending in
-`network_access=true`, such as `-c sandbox_workspace_write.network_access=true`,
-drops the network note) — the worker must not run
-`git mv`, `git checkout`, `git add` or `git commit` (renames and restores
-go to the report; the orchestrator runs them), and it marks network tests
-`[partial]` (the orchestrator runs them). The Herdr control socket is a
-local port: from a sandboxed codex pane every `herdr` call fails with
-`Operation not permitted`, so a nested orchestrator must not be a
-sandboxed codex. Grant network only to the readers that need it:
-`role.<role>.args=-c sandbox_workspace_write.network_access=true` (with
-`lanes=off`) or `lane.<name>.args=-c …` (lanes on — a lane session is
-shared by every role in it); `args.codex=-c
-sandbox_workspace_write.network_access=true` applies it to every codex
-worker.
+The composed prompt of a codex worker says so: Git/network notes, absent when the opening args grant the access (`danger-full-access` or `--dangerously-bypass-approvals-and-sandbox` drop both; an arg ending in `network_access=true`, such as `-c sandbox_workspace_write.network_access=true`, drops the network note) — the worker must not run `git mv`, `git checkout`, `git add` or `git commit` (renames and restores go to the report; the orchestrator runs them), and it marks network tests `[partial]` (the orchestrator runs them). The Herdr control socket is a local port: from a sandboxed codex pane every `herdr` call fails with `Operation not permitted`, so a nested orchestrator must not be a sandboxed codex. Grant network only to the readers that need it: `role.<role>.args=-c sandbox_workspace_write.network_access=true` (with `lanes=off`) or `lane.<name>.args=-c …` (lanes on — a lane session is shared by every role in it); `args.codex=-c sandbox_workspace_write.network_access=true` applies it to every codex worker.
 
 ## Cursor: the strict model list, with one pass-through
 
-The model spec of a cursor spawn is strict: `resolveModel` dies 2 before a
-pane is created when the spec matches no id of
-`cursor-agent --list-models` (the CLI rejects ids absent from the list,
-including unsupported parameterized ids). The step that appends the effort
-suffix (`<id>-<effort>`) is a second query of the list: when it does not
-confirm the resolved id, the model passes through **unchanged** with the
-warning `cursor model '<m>' not in --list-models; passing it through
-unchanged` instead of failing the spawn; the intermediate warning is
-`cursor has no '<m>-<effort>'; using '<m>' (effort = model default)`. A
-model that already ends in an effort suffix is used as-is; a different
-suffix is ignored with
-`cursor model '<m>' already encodes effort '<e>'; --effort <f> ignored`.
+The model spec of a cursor spawn is strict: `resolveModel` dies 2 before a pane is created when the spec matches no id of `cursor-agent --list-models` (the CLI rejects ids absent from the list, including unsupported parameterized ids). The step that appends the effort suffix (`<id>-<effort>`) is a second query of the list: when it does not confirm the resolved id, the model passes through **unchanged** with the warning `cursor model '<m>' not in --list-models; passing it through unchanged` instead of failing the spawn; the intermediate warning is `cursor has no '<m>-<effort>'; using '<m>' (effort = model default)`. A model that already ends in an effort suffix is used as-is; a different suffix is ignored with `cursor model '<m>' already encodes effort '<e>'; --effort <f> ignored`.
 
-Validated on 2026-09-20 with a read-only scouter brief on every kind above
-except `gemini` and `copilot` (not installed on the test machine). The
-generic kinds (`pi`, `opencode`) are verified from their `--help` output
-only (2026-09-23): the skill never runs them against real providers in
-tests.
+### Windows startup evidence
 
-Kinds `herdr agent start` also accepts that this skill does not map yet
-(`omp`, `kilo`, `kimi`, `qwen`, `droid`, `amp`, `kiro`, `devin`, `cline`,
-`hermes`, `letta`, `mastracode`, `qodercli`, `maki`, `muse`): family unknown, no
-model/effort/approvals flag translation — the same-family check is skipped
-for them.
+On Windows, a native `interactive_ready=true` signal can coexist with an undrawn Cursor TUI or an active workspace-trust dialog. Spawn also assesses the visible screen: an empty, unreadable or launch-only screen remains unverified during the startup observation window, while an active trust dialog is blocked. A final blocked or unverified assessment returns `blocked_at_startup` (exit 7), preserves the pane for inspection and includes `startup_evidence` with its state, reason and source. Other kinds and platforms retain their existing readiness contract.
 
-The script's family table is in `scripts/lib/kinds.mjs` (`kindFamily`;
-`agentFamily` adds the model-id inference for multi-model harnesses such
-as cursor, pi and opencode). For those kinds the family comes from the model
-id, in order: (1) a segment that is a family name (`anthropic`, `openai`,
-`xai`, `google`, `alibaba`) sets the family (`openrouter/anthropic/claude-x-1` →
-anthropic); (2) else the LAST segment matches the id patterns (`claude-*`,
-`gpt-*`/`*codex*`, `grok-*`, `gemini-*`, `qwen*` → alibaba) — `my-provider/gpt-5` → openai,
-`applianceai01/qwen3.8-27b` → alibaba;
-(3) else unknown. The provider name never decides the family:
-`custom-grok-gateway/my-model` is unknown, not xai. Extend it when you add
-a kind with a stable model family.
+A short Windows Cursor viewport can clip the trust question while retaining its choices and navigation hint. Such startup evidence is unverified with reason `screen-incomplete`; spawn and dispatch refuse input, and wait will not retry or auto-approve that fragment. Enlarge the panel and inspect the complete question before answering it.
 
-Grok effort levels verified on 2026-09-21 (grok 1.0.40, models `grok-4.7`,
-`grok-4.7-build-fast`, `grok-4.6`): `--reasoning-effort xhigh` is accepted
-by all three; `extra-high`, `x-high`, `extra_high` are rejected with
-"use one of: xhigh, high, medium, low". Which assistant runs which role is
-a per-user or per-project choice in the configuration, not a ranking of
-providers (see SKILL.md, "Which assistant for which work").
+Dispatch checks the same boundary before sending a brief or amendment, including when arrival checks are disabled. Wait does not send retry or auto-approval keys into an active Cursor workspace-trust dialog. Read the visible pane and resolve the startup condition explicitly before retrying; these checks do not grant trust. A successful non-interactive `setup --probe` checks a different execution mode and does not establish that the interactive TUI drew.
+
+Validated on 2026-09-20 with a read-only scouter brief on every kind above except `gemini` and `copilot` (not installed on the test machine). The generic kinds (`pi`, `opencode`) are verified from their `--help` output only (2026-09-23): the skill never runs them against real providers in tests.
+
+Kinds `herdr agent start` also accepts that this skill does not map yet (`omp`, `kilo`, `kimi`, `qwen`, `droid`, `amp`, `kiro`, `devin`, `cline`, `hermes`, `letta`, `mastracode`, `qodercli`, `maki`, `muse`): family unknown, no model/effort/approvals flag translation — the same-family check is skipped for them.
+
+The native family table is in `internal/kinds/kinds.go` (`KindFamily`; `AgentFamily` adds the model-id inference for multi-model harnesses such as cursor, pi and opencode). For those kinds the family comes from the model id, in order: (1) a segment that is a family name (`anthropic`, `openai`, `xai`, `google`, `alibaba`) sets the family (`openrouter/anthropic/claude-x-1` → anthropic); (2) else the LAST segment matches the id patterns (`claude-*`, `gpt-*`/`*codex*`, `grok-*`, `gemini-*`, `qwen*` → alibaba) — `my-provider/gpt-5` → openai, `custom/qwen-model` → alibaba; (3) else unknown. The provider name never decides the family: `custom-grok-gateway/my-model` is unknown, not xai. Extend it when you add a kind with a stable model family.
+
+Grok effort levels verified on 2026-09-21 (grok 1.0.40, models `grok-4.7`, `grok-4.7-build-fast`, `grok-4.6`): `--reasoning-effort xhigh` is accepted by all three; `extra-high`, `x-high`, `extra_high` are rejected with "use one of: xhigh, high, medium, low". Which assistant runs which role is a per-user or per-project choice in the configuration, not a ranking of providers (see SKILL.md, "Which assistant for which work").
+
+## Windows Codex runtime gates
+
+A sandboxed Codex worker on Windows may be unable to locate or execute a required Node/Bun runtime even when the host shell can run it. `approvals=full` still selects `workspace-write`; it is not proof of runtime availability inside the worker sandbox. Initial briefs and amendments include a Windows runtime note for sandboxed Codex. Network access alone does not remove this note; native full sandbox bypass does.
+
+To request capability evidence, add a `## Runtime capability probe` section to the brief and name the required version commands, such as `node --version` or `bun --version`. The worker runs each required probe once in its actual sandbox and records the exact command, exit result and output. A missing or denied runtime is a constraint, not a reason to repeat the same failed command, install a runtime, or change the sandbox. A host PATH check cannot substitute for this evidence.
+
+The orchestrator runs blocked gates externally against the same source revision and sends the command, source hash, result and log in an amendment. The reviewer checks that evidence before reporting the gate resolved. Any gate still marked `[partial]` keeps `verdict_effective=fail`; an apparent static pass does not erase missing verification. Prefer this evidence workflow to changing trust or sandbox settings solely to make a review pass.
 
 ## Generic kinds (pi, opencode)
 
-Herdr also accepts `--kind pi|opencode`. The skill supports them as
-**generic** kinds: it knows the executable, the "by model" family, and how
-to pass model, effort and approvals — but ships **no default model** for
-them (there is no `model.pi.*` or `model.opencode.*` in
-`config.defaults`). You choose the model (a `provider/id`) in your user or
-project config; with none set, the CLI uses its own default. Flags verified
-2026-09-23 (pi 0.84.2, opencode 1.18.29):
+Herdr also accepts `--kind pi|opencode`. The skill supports them as **generic** kinds: it knows the executable, the "by model" family, and how to pass model, effort and approvals — but ships **no default model** for them (there is no `model.pi.*` or `model.opencode.*` in `config.defaults`). You choose the model (a `provider/id`) in your user or project config; with none set, the CLI uses its own default. Flags verified 2026-09-23 (pi 0.84.2, opencode 1.18.29):
 
-- `pi`: `--model <provider/id>` (optional `:<thinking>` suffix),
-  `--thinking off|minimal|low|medium|high|xhigh|max`, `-p/--print`,
-  `--no-session`. It has no tool-approval dialog; restrict tools with
-  `--tools`/`--exclude-tools`. Compaction summarizes with the same model:
-  keep pi's `compaction.reserveTokens` at or above the model's `maxTokens`
-  plus a margin, or a compaction near the context limit fails
-  (`generation hit the token cap`, then a context-length error). A pi
-  already open keeps the value it started with; reopen it to pick up a new
-  setting. Provider errors such as `402 Insufficient account funds` with
-  `Retrying (n/m)` on the screen mean the worker is not making progress.
-- `opencode`: the TUI takes `-m provider/model` and `--auto` (approves
-  permissions not explicitly denied). `--variant` (provider effort) exists
-  only on `opencode run`, so the TUI maps no effort: spawn warns, it does
-  not fail. It draws on the alternate screen: while it works, Herdr refuses
-  a `recent` read (`agent_not_idle`), so the skill reads its visible screen
-  instead; the dispatch finds its prompt there with the wrapped path joined
-  back from opencode's message box.
+- `pi`: `--model <provider/id>` (optional `:<thinking>` suffix), `--thinking off|minimal|low|medium|high|xhigh|max`, `-p/--print`, `--no-session`. It has no tool-approval dialog; restrict tools with `--tools`/`--exclude-tools`. Compaction summarizes with the same model: keep pi's `compaction.reserveTokens` at or above the model's `maxTokens` plus a margin, or a compaction near the context limit fails (`generation hit the token cap`, then a context-length error). A pi already open keeps the value it started with; reopen it to pick up a new setting. Provider errors such as `402 Insufficient account funds` with `Retrying (n/m)` on the screen mean the worker is not making progress.
+- `opencode`: the TUI takes `-m provider/model` and `--auto` (approves permissions not explicitly denied). `--variant` (provider effort) exists only on `opencode run`, so the TUI maps no effort: spawn warns, it does not fail. It draws on the alternate screen: while it works, Herdr refuses a `recent` read (`agent_not_idle`), so the skill reads its visible screen instead; the dispatch finds its prompt there with the wrapped path joined back from opencode's message box.
 
 ### Configuration examples (fictional names)
 
-User config (`~/.config/herdr-soho/config`) or project file
-(`.agents/herdr-soho.conf`) — one model and effort per kind, plus a whole
-lane on a generic kind:
+User config (`~/.config/herdr-soho/config`) or project file (`.agents/herdr-soho.conf`) — one model and effort per kind, plus a whole lane on a generic kind:
 
 ```ini
 # model per kind (provider/id) and effort (ladder: low|medium|high|xhigh|max)
@@ -151,27 +78,18 @@ lane.build.model=my-provider/my-model
 lane.build.effort=high
 ```
 
-`setup --lane build=pi:my-provider/my-model:high` writes the same lane keys
-in one call. Spawn per kind:
+`setup --lane build=pi:my-provider/my-model:high` writes the same lane keys in one call. Spawn per kind:
 
 ```bash
 $S spawn implementer --kind pi
 $S spawn implementer --kind opencode
 ```
 
-What `--approvals full` changes per kind: `pi` — nothing (pi has no
-approval prompts; its tools run as-is, and `edits` is a no-op with a
-warning); `opencode` — `--auto` (`edits` is not mapped; warning). With
-`ask`, pi does not prompt at all, and opencode asks per its permission
-policy.
+What `--approvals full` changes per kind: `pi` — nothing (pi has no approval prompts; its tools run as-is, and `edits` is a no-op with a warning); `opencode` — `--auto` (`edits` is not mapped; warning). With `ask`, pi does not prompt at all, and opencode asks per its permission policy.
 
 ### Custom OpenAI-compatible providers
 
-`pi` — `~/.pi/agent/models.json` (the key from an environment variable.
-`xhigh`/`max` appear only when the model declares a `thinkingLevelMap`; the
-budgets come from `thinkingBudgets` in `~/.pi/agent/settings.json`, and
-`maxTokens` must leave room above the largest budget you use — see
-[Reasoning models on your own server](#reasoning-models-on-your-own-server)):
+`pi` — `~/.pi/agent/models.json` (the key from an environment variable. `xhigh`/`max` appear only when the model declares a `thinkingLevelMap`; the budgets come from `thinkingBudgets` in `~/.pi/agent/settings.json`, and `maxTokens` must leave room above the largest budget you use — see [Reasoning models on your own server](#reasoning-models-on-your-own-server)):
 
 ```json
 {
@@ -199,10 +117,7 @@ budgets come from `thinkingBudgets` in `~/.pi/agent/settings.json`, and
 }
 ```
 
-`opencode` — `opencode.json` (the key from an environment variable via
-`{env:VAR}`; the TUI has no effort flag, so a reasoning budget goes in the
-model's `options`, which an OpenAI-compatible provider passes in the request
-body):
+`opencode` — `opencode.json` (the key from an environment variable via `{env:VAR}`; the TUI has no effort flag, so a reasoning budget goes in the model's `options`, which an OpenAI-compatible provider passes in the request body):
 
 ```json
 {
@@ -229,107 +144,33 @@ body):
 
 ### Caveats
 
-- **Family is by model.** `family_check` does not know the family of a
-  `provider/id` unless the id is recognizable — a family segment
-  (`anthropic/...`) or a last segment matching a known id pattern
-  (`*/gpt-*`); the provider name itself never counts. When it is not
-  recognizable, the same-family reviewer rule is skipped, so pick the
-  reviewer's family by hand.
-- **Effort the CLI does not support** (opencode's TUI) is dropped with a
-  warning; pi accepts the whole ladder up to `max`.
-- **Confirm the model on screen after `spawn`**: these CLIs print the
-  resolved model/provider, and a typo in the `provider/id` is only visible
-  there (or when the first prompt fails).
+- **Family is by model.** `family_check` does not know the family of a `provider/id` unless the id is recognizable — a family segment (`anthropic/...`) or a last segment matching a known id pattern (`*/gpt-*`); the provider name itself never counts. When it is not recognizable, the same-family reviewer rule is skipped, so pick the reviewer's family by hand.
+- **Effort the CLI does not support** (opencode's TUI) is dropped with a warning; pi accepts the whole ladder up to `max`.
+- **Confirm the model on screen after `spawn`**: these CLIs print the resolved model/provider, and a typo in the `provider/id` is only visible there (or when the first prompt fails).
 
 ### Reasoning models on your own server
 
-Traps seen when a generic kind runs a reasoning model served by your own
-OpenAI-compatible endpoint (for example vLLM with a reasoning parser). CLI
-flags and config fields change often: confirm them with `--help` rather than
-trusting a version named here.
+Traps seen when a generic kind runs a reasoning model served by your own OpenAI-compatible endpoint (for example vLLM with a reasoning parser). CLI flags and config fields change often: confirm them with `--help` rather than trusting a version named here.
 
-- **Leave room for the answer.** The request's `max_tokens` covers reasoning,
-  the answer and the tool calls. With a reasoning budget close to it (31744
-  of 32768) the answer and the tool calls come out truncated. Rule:
-  `maxTokens` (pi) or `limit.output` (opencode) at least the budget of the
-  level you use + 8192; for a 31744 budget, 40960.
-- **Reasoning knobs.** Such servers often have no `reasoning_effort`; the
-  reasoning is controlled per request with
-  `chat_template_kwargs.enable_thinking` (on/off) and `thinking_token_budget`.
-  With nothing in the request the usual default is *thinking on, no budget*,
-  bounded only by `max_tokens`. In pi set `compat.supportsReasoningEffort:
-  false`, `compat.supportsThinkingTokenBudget: true` and the
-  `compat.thinkingFormat` your model's chat template uses, so each effort
-  level becomes a budget from `thinkingBudgets`. In opencode put
-  `thinking_token_budget` in the model's `options` (above); without it the
-  server default applies and the skill's effort is dropped with a warning.
-- **Keys by reference.** `"apiKey": "$MY_API_KEY"` in pi and
-  `"apiKey": "{env:MY_API_KEY}"` in opencode — never the literal key in the
-  file.
-- **Small writes.** Models whose tool calls are parsed from XML-like markup
-  can print the closing tags of a large single write as plain text; the CLI
-  takes it as the final answer, no tool runs and the worker stops with
-  `settled-no-report` (tool-call markup on screen). Ask in the brief for one
-  file per tool call and at most a few hundred lines per call.
-- **A dead provider looks like a finished worker.** The wait reports it as
-  `provider-error` (exit 14) with the screen line as the cause (for example
-  `Request timed out`, `Retry failed after N attempts`, `Connection error`,
-  `503: {…}`, `401`, `Incorrect API key`, or a revoked refresh token; the
-  exact patterns are in `scripts/lib/provider.mjs`) when no capacity marker
-  is on the line. A terminal authentication failure is reported on the first
-  observation; other provider errors require two matching observations. A
-  plain 503 is not retried; only the capacity markers below
-  are. A running worker keeps the provider address it started with: after
-  changing the endpoint in the CLI's config, release the old worker
-  (`release <name> --close --force`) and spawn a new one.
-- **A server at capacity refuses at once.** A gateway that serves a fixed
-  number of concurrent requests per model answers the rest at once instead
-  of queueing them, usually with an error whose type names a capacity limit
-  (`"type":"…capacity…"`), `overloaded`, or status 529 (exact patterns in
-  `scripts/lib/provider.mjs`). When the worker's
-  last error line carries one of those markers, the wait treats it as
-  transient: it sends the worker "continue" up to
-  `provider_retries` times, `provider_retry_delay` seconds apart, and only
-  then reports `capacity` (exit 14). Give pi room of its own too —
-  `"retry": { "maxRetries": 8, "baseDelayMs": 5000 }` in
-  `~/.pi/agent/settings.json` (the default is 3 tries from 2 s) — and count
-  the live workers on that server across **every** workspace against its
-  limit before opening another.
-- **First open in a new folder (pi).** pi asks to trust a folder the first
-  time it opens there; `spawn` waits on that dialog (exit 7). For temporary
-  worktrees, use an already trusted folder or accept once by hand.
-- **Stale local state after a self-update (opencode).** opencode updates
-  itself; afterwards an existing repository may fail with `Unexpected server
-  error` in the TUI or `no such column: …` in `opencode run` while a fresh
-  folder works. That is local state, not the binary or the config: move
-  `~/.opencode`, `~/.config/opencode`, `~/.local/share/opencode`,
-  `~/.local/state/opencode` and `~/.cache/opencode` to a backup, reinstall,
-  redo the provider and `herdr integration install opencode`. `herdr agent
-  start --kind opencode` then stops timing out at startup.
-- **Context.** Long slices fill these CLIs' context fast (tens of millions of
-  input tokens over a slice); keep briefs short and clear the session
-  between slices (`/new` in pi; for opencode, `release <name> --close` and
-  spawn again).
-- **pi or opencode?** In one side-by-side run (same task, same self-hosted
-  reasoning model, run in parallel) opencode finished about 30% sooner, while
-  pi's diff followed the specification more closely and flagged an edge case
-  the reviewer later confirmed. One run is a hint, not a benchmark.
+- **Leave room for the answer.** The request's `max_tokens` covers reasoning, the answer and the tool calls. With a reasoning budget close to it (31744 of 32768) the answer and the tool calls come out truncated. Rule: `maxTokens` (pi) or `limit.output` (opencode) at least the budget of the level you use + 8192; for a 31744 budget, 40960.
+- **Reasoning knobs.** Such servers often have no `reasoning_effort`; the reasoning is controlled per request with `chat_template_kwargs.enable_thinking` (on/off) and `thinking_token_budget`. With nothing in the request the usual default is *thinking on, no budget*, bounded only by `max_tokens`. In pi set `compat.supportsReasoningEffort: false`, `compat.supportsThinkingTokenBudget: true` and the `compat.thinkingFormat` your model's chat template uses, so each effort level becomes a budget from `thinkingBudgets`. In opencode put `thinking_token_budget` in the model's `options` (above); without it the server default applies and the skill's effort is dropped with a warning.
+- **Keys by reference.** `"apiKey": "$MY_API_KEY"` in pi and `"apiKey": "{env:MY_API_KEY}"` in opencode — never the literal key in the file.
+- **Small writes.** Models whose tool calls are parsed from XML-like markup can print the closing tags of a large single write as plain text; the CLI takes it as the final answer, no tool runs and the worker stops with `settled-no-report` (tool-call markup on screen). Ask in the brief for one file per tool call and at most a few hundred lines per call.
+- **A dead provider looks like a finished worker.** The wait reports it as `provider-error` (exit 14) with the screen line as the cause (for example `Request timed out`, `Retry failed after N attempts`, `Connection error`, `503: {…}`, `401`, `Incorrect API key`, or a revoked refresh token; the exact patterns are in `internal/provider/provider.go`) when no capacity marker is on the line. A terminal authentication failure is reported on the first observation; other provider errors require two matching observations. A plain 503 is not retried; only the capacity markers below are. A running worker keeps the provider address it started with: after changing the endpoint in the CLI's config, release the old worker (`release <name> --close --force`) and spawn a new one.
+- **A server at capacity refuses at once.** A gateway that serves a fixed number of concurrent requests per model answers the rest at once instead of queueing them, usually with an error whose type names a capacity limit (`"type":"…capacity…"`), `overloaded`, or status 529 (exact patterns in `internal/provider/provider.go`). When the worker's last error line carries one of those markers, the wait treats it as transient: it sends the worker "continue" up to `provider_retries` times, `provider_retry_delay` seconds apart, and only then reports `capacity` (exit 14). Give pi room of its own too — `"retry": { "maxRetries": 8, "baseDelayMs": 5000 }` in `~/.pi/agent/settings.json` (the default is 3 tries from 2 s) — and count the live workers on that server across **every** workspace against its limit before opening another.
+- **First open in a new folder (pi).** pi asks to trust a folder the first time it opens there; `spawn` waits on that dialog (exit 7). For temporary worktrees, use an already trusted folder or accept once by hand.
+- **Stale local state after a self-update (opencode).** opencode updates itself; afterwards an existing repository may fail with `Unexpected server error` in the TUI or `no such column: …` in `opencode run` while a fresh folder works. That is local state, not the binary or the config: move `~/.opencode`, `~/.config/opencode`, `~/.local/share/opencode`, `~/.local/state/opencode` and `~/.cache/opencode` to a backup, reinstall, redo the provider and `herdr integration install opencode`. `herdr agent start --kind opencode` then stops timing out at startup.
+- **Context.** Long slices fill these CLIs' context fast (tens of millions of input tokens over a slice); keep briefs short and clear the session between slices (`/new` in pi; for opencode, `release <name> --close` and spawn again).
+- **pi or opencode?** In one side-by-side run (same task, same self-hosted reasoning model, run in parallel) opencode finished about 30% sooner, while pi's diff followed the specification more closely and flagged an edge case the reviewer later confirmed. One run is a hint, not a benchmark.
 
 ### Harnesses evaluated and not supported
 
 - `omp` — not supported.
-- `fx` — Herdr has no `fx` kind; running it would need a per-pane workaround
-  (no `agent prompt`, reported state that outlives the process). Revisit if
-  Herdr gains a native kind.
+- `fx` — Herdr has no `fx` kind; running it would need a per-pane workaround (no `agent prompt`, reported state that outlives the process). Revisit if Herdr gains a native kind.
 
 ## Probing a kind (`setup --probe`)
 
-`setup --probe [--kind K --model M] [--timeout SECONDS]` answers "is this
-kind/model actually usable right now?" with one tiny non-interactive prompt
-per kind/model — no pane, no Herdr, no TTY, short timeout
-(`HERDR_SOHO_PROBE_TIMEOUT` or `--timeout`, whole seconds ≥ 1,
-default 20 s; 0 is a usage error). Flags confirmed with each
-CLI's `--help` on 2026-09-23:
+`setup --probe [--kind K --model M] [--timeout SECONDS]` answers "is this kind/model actually usable right now?" with one tiny non-interactive prompt per kind/model — no pane, no Herdr, no TTY, short timeout (`HERDR_SOHO_PROBE_TIMEOUT` or `--timeout`, whole seconds ≥ 1, default 20 s; 0 is a usage error). Flags confirmed with each CLI's `--help` on 2026-09-23:
 
 | Kind | Probe command | Notes |
 |---|---|---|
@@ -342,43 +183,16 @@ CLI's `--help` on 2026-09-23:
 | `pi` | `pi -p --no-session <prompt> --model M` | `--no-session` keeps the probe ephemeral |
 | `opencode` | `opencode run <prompt> -m M` | non-interactive run |
 
-Result per kind/model: `ready` (exit 0), `no-auth` (a login message — the
-user should log in before the probe is retried), `quota` (the same provider
-messages the wait detects, reusing that detection), or `error` (a timeout
-is an error). The `cause` never copies CLI text: it is a fixed category —
-`not installed`, `timeout after <N>s`, `not authenticated`, `quota
-exhausted` (with `; renews <date/time>` only when the renewal line carries
-a clock time, ISO date, or duration), or `exit <code>`; credential-shaped
-fragments are redacted (`redact_secrets`, including `sk-`/`pk-`/`rk-`
-hyphen keys). The CLI output itself is never printed. Without `--kind` it
-probes every known kind with the model `spawn` would use
-(`model.<kind>.worker`, then `model.<kind>`, else the CLI's own default;
-the rows carry `source: "configured"`), plus up to 5 own models of each
-installed `pi`/`opencode` from `--detect` (`source: "custom"`, in detect
-order; the rest are listed in `skipped_custom` as `{kind, id}` and
-probeable with `--kind K --model provider/model`). `recommended_reviewer`
-reports the first ready kind from another family than the build one (codex
-before claude). A missing executable is `error` with cause `not installed`.
+Result per kind/model: `ready` (exit 0), `no-auth` (a login message — the user should log in before the probe is retried), `quota` (the same provider messages the wait detects, reusing that detection), or `error` (a timeout is an error). The `cause` never copies CLI text: it is a fixed category — `not installed`, `timeout after <N>s`, `not authenticated`, `quota exhausted` (with `; renews <date/time>` only when the renewal line carries a clock time, ISO date, or duration), or `exit <code>`; credential-shaped fragments are redacted (`redact_secrets`, including `sk-`/`pk-`/`rk-` hyphen keys). The CLI output itself is never printed. Without `--kind` it probes every known kind with the model `spawn` would use (`model.<kind>.worker`, then `model.<kind>`, else the CLI's own default; the rows carry `source: "configured"`), plus up to 5 own models of each installed `pi`/`opencode` from `--detect` (`source: "custom"`, in detect order; the rest are listed in `skipped_custom` as `{kind, id}` and probeable with `--kind K --model provider/model`). `recommended_reviewer` reports the first ready kind from another family than the build one (codex before claude). A missing executable is `error` with cause `not installed`.
 
 ## Custom providers: where `setup --detect` reads them
 
-For the generic kinds, `setup --detect` lists the models the user declared
-in their own provider files, as `custom_models` (`provider/model`, with the
-highest declared reasoning level when there is one). Only ids and levels
-are read; `apiKey`, headers and env values never leave the files:
+For the generic kinds, `setup --detect` lists the models the user declared in their own provider files, as `custom_models` (`provider/model`, with the highest declared reasoning level when there is one). Only ids and levels are read; `apiKey`, headers and env values never leave the files:
 
-- **pi** — `~/.pi/agent/models.json`: `providers.<name>.models[].id`, max
-  level from the model's `thinkingLevelMap` (the highest non-null
-  `low|medium|high|xhigh|max`).
-- **opencode** — `opencode.json`: the project file first (its entries win on
-  duplicate ids), then `$OPENCODE_CONFIG`, then
-  `${XDG_CONFIG_HOME:-~/.config}/opencode/opencode.json`, then
-  `~/.opencode/opencode.json`; models are `provider.<name>.models.<id>`.
-  opencode declares no per-model reasoning ladder, so `max_effort` is `""`.
+- **pi** — `~/.pi/agent/models.json`: `providers.<name>.models[].id`, max level from the model's `thinkingLevelMap` (the highest non-null `low|medium|high|xhigh|max`).
+- **opencode** — `opencode.json`: the project file first (its entries win on duplicate ids), then `$OPENCODE_CONFIG`, then `${XDG_CONFIG_HOME:-~/.config}/opencode/opencode.json`, then `~/.opencode/opencode.json`; models are `provider.<name>.models.<id>`. opencode declares no per-model reasoning ladder, so `max_effort` is `""`.
 
-Malformed files degrade to an empty list (not a failure). The probe and
-spawn pass a `provider/model` straight through to the CLI's model flag;
-`$S model pi my-provider/my-model` shows how it would resolve.
+Malformed files degrade to an empty list (not a failure). The probe and spawn pass a `provider/model` straight through to the CLI's model flag; `$S model pi my-provider/my-model` shows how it would resolve.
 
 ## Install notes
 
@@ -390,7 +204,7 @@ herdr integration install codex
 # The official `herdr` skill lives at skills/herdr in herdrdev/herdr and is
 # the same text the binary prints with `herdr --skill`. Install it globally
 # and update it together with Herdr:
-bunx skills add herdrdev/herdr --skill herdr -g -y
-bunx skills update herdr -g          # after `herdr update`
+# Follow Herdr's official skill installation instructions.
+# Compare the installed skill with `herdr --skill` after updating Herdr.
 # Offline fallback: herdr --skill > ~/.agents/skills/herdr/SKILL.md
 ```

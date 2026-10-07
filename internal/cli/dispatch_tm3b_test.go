@@ -519,6 +519,7 @@ func TestDispatchTM3bAmendCommandCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(h.ws, "wait", "build.question"), []byte("old\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+
 		amend := filepath.Join(h.root, "amend.md")
 		if err := os.WriteFile(amend, []byte("# Amend — use the right flag\nDo X.\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -651,12 +652,50 @@ func TestDispatchTM3bStrictLintOverlapAndMarkerCases(t *testing.T) {
 		if code, _, _ := h.run(t, "build", h.brief, "--no-wait"); code != 0 {
 			t.Fatalf("initial dispatch code=%d", code)
 		}
-		amend := filepath.Join(h.root, "amend.md")
-		if err := os.WriteFile(amend, []byte("# Amend\n## Owned files\ninternal/a.go\n"), 0o600); err != nil {
+		pending := filepath.Join(h.ws, "briefs", "other-pending.md")
+		if err := os.MkdirAll(filepath.Dir(pending), 0o700); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.WriteFile(pending, []byte("# Brief\n## Owned files\n- internal/a.go\n# Report contract\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		otherReport := filepath.Join(h.ws, "reports", "other-pending.md")
+		if err := os.WriteFile(filepath.Join(h.ws, "last-report-other"), []byte(otherReport+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rosterPath := filepath.Join(h.ws, "agents.tsv")
+		roster, err := os.ReadFile(rosterPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows := strings.Split(strings.TrimSpace(string(roster)), "\n")
+		var workerDir string
+		for _, row := range rows {
+			cols := strings.Split(row, "\t")
+			if len(cols) > 6 && cols[0] == "build" {
+				workerDir = cols[6]
+			}
+		}
+		other := "other\tw0test:p0b\tcodex\timplementer\topenai\t0\t" + workerDir + "\tnow\tgpt-5\ttask\timplementer\n"
+		if err := os.WriteFile(rosterPath, append(roster, []byte(other)...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		amend := filepath.Join(h.root, "amend.md")
+		if err := os.WriteFile(amend, []byte("# Amend\n## Owned files\n- internal/a.go\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var positive bytes.Buffer
+		oldErr := platform.Stderr
+		platform.Stderr = &positive
+		warnOwnedOverlap(amend, "implementer", "build", h.ws, h.ctx, h.env, h.root, workerDir)
+		platform.Stderr = oldErr
+		if !strings.Contains(positive.String(), "is still editing") {
+			t.Fatalf("overlap subject is not an effective positive control: %q", positive.String())
+		}
+
 		code, _, stderr := h.run(t, "build", amend, "--amend", "--no-wait")
-		if code != 0 || strings.Contains(stderr, "owns files") {
+		if code != 0 || strings.Contains(stderr, "owns files") || strings.Contains(stderr, "is still editing") {
 			t.Fatalf("amend overlap check code=%d stderr=%s", code, stderr)
 		}
 	})

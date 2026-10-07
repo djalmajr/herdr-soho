@@ -24,7 +24,7 @@ type waitStatusFixture struct {
 }
 
 func TestParityWaitQuotaGolden(t *testing.T) { // JS: "parity wait: quota (test-quota.sh)"
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-wait.json"))
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-wait.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

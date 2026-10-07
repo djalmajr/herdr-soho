@@ -53,8 +53,12 @@ func TestStatusParityRemainingCases(t *testing.T) {
 		rows := "worker\tp0a\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\tresearcher\tbuild\n"
 		f := newWaitStatusFixture(t, rows, []fakecli.Rule{{Argv: []string{"agent", "list"}, Stdout: `{"result":{"agents":[{"name":"worker","pane_id":"p0a","agent_status":"working"},{"name":"outside","pane_id":"p1a","agent_status":"idle"}]}}`}})
 		code, out, stderr := f.runCommand(t, "roster")
-		if code != 0 || stderr != "" || !strings.Contains(out, "NAME") || !strings.Contains(out, "# other live agents") || !strings.Contains(out, "outside") || !strings.Contains(out, "worker") {
+		if code != 0 || stderr != "" || !strings.Contains(out, "NAME") || !strings.Contains(out, "# other live agents in workspace ws") || strings.Contains(out, "outside") || !strings.Contains(out, "worker") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+		}
+		code, out, stderr = f.runCommand(t, "roster", "--scope", "server")
+		if code != 0 || stderr != "" || !strings.Contains(out, "outside") || !strings.Contains(out, "worker") {
+			t.Fatalf("explicit server scope lost its inventory: code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})
 	t.Run("parity: friction empty and seeded", func(t *testing.T) { // JS: "parity: friction empty and seeded"
@@ -692,10 +696,16 @@ func TestWaitFullRankCommandCase(t *testing.T) {
 
 func TestWaitRetryThenDoneCommandCase(t *testing.T) {
 	t.Run("wait: the retry Enter unblocks the worker and the wait settles done", func(t *testing.T) { // JS: "wait: the retry Enter unblocks the worker and the wait settles done"
-		row := "worker\tp0a\tgrok\timplementer\txai\t\t\t\tgrok-4.7\t\timplementer\tbuild\n"
+		// Adapted contract: the retry Enter needs a recognized composer
+		// (the roster kind, claude) holding the stored path — the marker
+		// carries the path and seq, and the screen is the claude box with
+		// the exact prompt.
+		row := "worker\tp0a\tclaude\timplementer\tanthropic\t\t\t\tgrok-4.7\t\timplementer\tbuild\n"
+		sep := strings.Repeat("─", 66)
+		box := "Welcome to the worker\n" + sep + "\n❯ Read the file /tmp/worker-brief.md in full and execute it.\n" + sep + "\n  [Opus 5.5] 67% [main*]\n"
 		f := newWaitStatusFixture(t, row, []fakecli.Rule{
 			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"idle","state_change_seq":5}}}`, Delay: 30},
-			{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped", "--lines", "40"}, Stdout: "Welcome to the worker\n> Read the file /tmp/worker-brief.md in full and execute it.\n"},
+			{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped", "--lines", "40"}, Stdout: box},
 			{Argv: []string{"agent", "send-keys", "worker", "enter"}},
 		})
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
@@ -703,7 +713,7 @@ func TestWaitRetryThenDoneCommandCase(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "last-report-worker"), []byte(report+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(f.state, "wait", "worker.not-received"), []byte(fmt.Sprintf("%d\n", time.Now().Unix()-120)), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(f.state, "wait", "worker.not-received"), []byte(fmt.Sprintf("%d 5 /tmp/worker-brief.md\n", time.Now().Unix()-120)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		stop, exited := make(chan struct{}), make(chan struct{})

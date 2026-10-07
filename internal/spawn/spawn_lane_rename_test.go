@@ -64,7 +64,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		if !strings.Contains(string(roster), "review\tw0test:p0a") || strings.Contains(string(roster), "review-2") {
 			t.Fatalf("roster=%q", roster)
 		}
-		want := "herdr-soho: warning: reusing idle lane 'review' worker 'review-2' as reviewer, renamed to 'review'; its session already holds earlier briefs"
+		want := "herdr-soho: warning: reusing idle lane 'review' worker 'review-2' as reviewer, renamed to 'review'; existing session context is retained"
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("stderr=%q want %q", stderr, want)
 		}
@@ -97,7 +97,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		if !strings.Contains(string(roster), "review-2\tw0test:p0a") || strings.Contains(string(roster), "review\tw0test:p0a") {
 			t.Fatalf("roster=%q", roster)
 		}
-		want := "herdr-soho: warning: reusing idle lane 'review' worker 'review' as reviewer, renamed to 'review-2'; its session already holds earlier briefs"
+		want := "herdr-soho: warning: reusing idle lane 'review' worker 'review' as reviewer, renamed to 'review-2'; existing session context is retained"
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("stderr=%q want %q", stderr, want)
 		}
@@ -121,7 +121,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 		if !strings.Contains(stdout, `"name": "review-2"`) {
 			t.Fatalf("JSON=%q", stdout)
 		}
-		want := "herdr-soho: warning: reusing idle lane 'review' worker 'review-2' as reviewer; its session already holds earlier briefs"
+		want := "herdr-soho: warning: reusing idle lane 'review' worker 'review-2' as reviewer; existing session context is retained"
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("stderr=%q want %q", stderr, want)
 		}

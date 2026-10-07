@@ -109,18 +109,15 @@ func writeHooksSection(root string, env platform.Env) {
 	settings := filepath.Join(root, ".claude", "settings.json")
 	setupWriteHooks(settings)
 	_, _ = fmt.Fprintf(platform.Stdout, "hooks written: %s (UserPromptSubmit reminder, SessionStart doctor)\n", settings)
-	candidates := []string{
-		filepath.Join(root, ".agents", "skills", "herdr-soho", "scripts", "herdr-soho"),
-		filepath.Join(root, ".claude", "skills", "herdr-soho", "scripts", "herdr-soho"),
-		filepath.Join(platform.HomeDir(platform.Current(), env), ".agents", "skills", "herdr-soho", "scripts", "herdr-soho"),
-		filepath.Join(platform.HomeDir(platform.Current(), env), ".claude", "skills", "herdr-soho", "scripts", "herdr-soho"),
+	// The generated hooks are the portable PATH commands 'herdr-soho hook
+	// reminder' / 'herdr-soho hook doctor': they resolve the native binary
+	// through PATH at hook time. Check that PATH with the shared platform
+	// resolution over the explicit env (never the deleted skill scripts
+	// paths, never the process-global HOME). Resolution only: the binary
+	// is not executed here and PATH is not modified.
+	if _, found := platform.FindExecutable("herdr-soho", env, platform.Current()); !found {
+		core.Warn("SessionStart hook cannot resolve herdr-soho in PATH; add the native herdr-soho binary to PATH so the generated hooks ('herdr-soho hook reminder', 'herdr-soho hook doctor') can run", "", "setup")
 	}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
-			return
-		}
-	}
-	core.Warn("SessionStart hook cannot resolve herdr-soho; install the skill under the project's or user's .agents/skills or .claude/skills directory", "", "setup")
 }
 
 func CmdSetup(args []string, ctx *core.Config, env platform.Env, cwd string) {

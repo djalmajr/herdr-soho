@@ -1,215 +1,682 @@
-//go:build !windows
-
-// The install.sh tests need a POSIX sh; install.ps1 has its own tests in
+// Tests for the install core run on every platform against real temp files
+// and httptest servers: no sh, no PowerShell, no host-only build tags. The
+// Windows-specific locking and replacement proofs live in
 // install_windows_test.go.
-
 package install
 
 import (
+	"context"
 	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
-func TestInstallSHappyPathAndInstallDir(t *testing.T) {
-	// Mutation captured: installing outside HERDR_SOHO_INSTALL_DIR breaks the installed-path contract.
-	result := runInstaller(t, fixtureOptions{})
-	if result.code != 0 || !strings.Contains(result.stdout, "herdr-soho test-version") || !strings.Contains(result.stdout, "Add "+result.installDir+" to your PATH") {
-		t.Fatalf("installer status=%d stdout=%q stderr=%q", result.code, result.stdout, result.stderr)
+// fakeBinary is the static payload served as the release artifact. It is
+// arbitrary bytes, not a program: the core installs these bytes exactly and
+// has no path to execute them (the core never launches the downloaded
+// file, and the tests never do either).
+const fakeBinary = "herdr-soho fake release payload\n"
+
+// hermeticTransport refuses every host other than the exact httptest
+// listener. Environment proxies do not constrain the httptest clients, so
+// the gate lives in the transport itself: even a broken core validation
+// guard cannot push a test onto a real network.
+type hermeticTransport struct {
+	allowed string
+	base    http.RoundTripper
+}
+
+type refusingTransport struct{}
+
+func (refusingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("test network refused")
+}
+
+func noNetworkClient() *http.Client {
+	return &http.Client{Transport: refusingTransport{}}
+}
+
+func (t *hermeticTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host != t.allowed {
+		return nil, fmt.Errorf("hermetic test transport: refusing host %q (only %q)", req.URL.Host, t.allowed)
 	}
-	installed, err := os.ReadFile(filepath.Join(result.installDir, "herdr-soho"))
-	if err != nil || string(installed) != fakeBinary {
-		t.Fatalf("installed binary=%q err=%v", installed, err)
-	}
-	if !strings.Contains(strings.Join(result.paths, "\n"), "/latest/download/"+assetName()) {
-		t.Fatalf("download paths=%v", result.paths)
+	return t.base.RoundTrip(req)
+}
+
+// hermeticClient returns a client that only reaches the exact httptest
+// listener; Proxy is nil so environment proxies are never consulted.
+func hermeticClient(server *httptest.Server) *http.Client {
+	return &http.Client{
+		Transport: &hermeticTransport{
+			allowed: server.Listener.Addr().String(),
+			base:    &http.Transport{Proxy: nil},
+		},
 	}
 }
 
-func TestInstallSExplicitVersionUsesMatchingRelease(t *testing.T) {
-	// Mutation captured: routing --version to latest downloads the wrong release path.
-	result := runInstaller(t, fixtureOptions{version: "v1.2.3"})
-	if result.code != 0 || !strings.Contains(strings.Join(result.paths, "\n"), "/download/v1.2.3/"+assetName()) {
-		t.Fatalf("installer status=%d stdout=%q stderr=%q paths=%v", result.code, result.stdout, result.stderr, result.paths)
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func artifactNameFor(osName, arch string) string {
+	name := "herdr-soho_" + osName + "_" + arch
+	if osName == "windows" {
+		name += ".exe"
+	}
+	return name
+}
+
+func destinationName(osName string) string {
+	if osName == "windows" {
+		return "herdr-soho.exe"
+	}
+	return "herdr-soho"
+}
+
+type fixtureOptions struct {
+	// Target platform for the download. Empty os/arch let the core default
+	// to the test host, mirroring runtime.GOOS/GOARCH.
+	os   string
+	arch string
+
+	version    string
+	installDir string
+	// base overrides the release base entirely (for example to exercise
+	// credentials or a missing scheme); otherwise the httptest server URL
+	// plus baseSuffix is used.
+	base       string
+	baseSuffix string
+
+	// payload overrides the served artifact bytes; defaults to fakeBinary.
+	payload []byte
+	// sumsBody overrides the served SHA256SUMS content verbatim.
+	sumsBody      string
+	missingAsset  bool
+	missingSums   bool
+	missingEntry  bool
+	badChecksum   bool
+	upperChecksum bool
+}
+
+type coreResult struct {
+	res        Result
+	err        error
+	requests   []string
+	installDir string
+	base       string
+	artifact   string
+}
+
+func runCore(t *testing.T, options fixtureOptions) coreResult {
+	t.Helper()
+	targetOS := options.os
+	if targetOS == "" {
+		targetOS = runtime.GOOS
+	}
+	arch := options.arch
+	if arch == "" {
+		arch = runtime.GOARCH
+	}
+	installDir := options.installDir
+	if installDir == "" {
+		installDir = filepath.Join(t.TempDir(), "bin")
+	}
+	artifact := artifactNameFor(targetOS, arch)
+	payload := options.payload
+	if payload == nil {
+		payload = []byte(fakeBinary)
+	}
+	digest := sha256Hex(payload)
+	sums := options.sumsBody
+	if sums == "" {
+		switch {
+		case options.badChecksum:
+			sums = strings.Repeat("0", 64) + "  " + artifact + "\n"
+		case options.upperChecksum:
+			sums = strings.ToUpper(digest) + "  " + artifact + "\n"
+		case options.missingEntry:
+			sums = ""
+		default:
+			sums = digest + "  " + artifact + "\n"
+		}
+	}
+	var requestsMu sync.Mutex
+	var requests []string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestsMu.Lock()
+		requests = append(requests, r.URL.Path)
+		requestsMu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/SHA256SUMS"):
+			if options.missingSums {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = io.WriteString(w, sums)
+		case strings.HasSuffix(r.URL.Path, "/"+artifact):
+			if options.missingAsset {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write(payload)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	base := options.base
+	if base == "" {
+		base = server.URL + options.baseSuffix
+	}
+	res, err := Run(context.Background(), Options{
+		Architecture: options.arch,
+		Client:       hermeticClient(server),
+		InstallDir:   installDir,
+		OS:           options.os,
+		ReleaseBase:  base,
+		Version:      options.version,
+	})
+	requestsMu.Lock()
+	defer requestsMu.Unlock()
+	return coreResult{
+		res:        res,
+		err:        err,
+		requests:   append([]string(nil), requests...),
+		installDir: installDir,
+		base:       base,
+		artifact:   artifact,
 	}
 }
 
-func TestInstallSRejectsWrongShaWithoutReplacingExistingBinary(t *testing.T) {
-	// Mutation captured: skipping the digest comparison replaces a working install with untrusted bytes.
-	dir := t.TempDir()
-	old := []byte("existing binary")
-	if err := os.WriteFile(filepath.Join(dir, "herdr-soho"), old, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	result := runInstaller(t, fixtureOptions{installDir: dir, badChecksum: true})
-	got, err := os.ReadFile(filepath.Join(dir, "herdr-soho"))
-	if result.code == 0 || !strings.Contains(result.stderr, "sha256 mismatch") || err != nil || string(got) != string(old) {
-		t.Fatalf("installer status=%d stderr=%q existing=%q err=%v", result.code, result.stderr, got, err)
-	}
-	entries, readErr := os.ReadDir(dir)
-	if readErr != nil {
-		t.Fatal(readErr)
+// assertNoTempFiles fails if the installer left a .herdr-soho.* file in dir
+// (a missing dir is fine: nothing was created at all).
+func assertNoTempFiles(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatalf("reading %s: %v", dir, err)
 	}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), ".herdr-soho.") {
-			t.Fatalf("installer left temporary file %q", entry.Name())
+			t.Fatalf("installer left temporary file %q in %s", entry.Name(), dir)
 		}
 	}
 }
 
-func TestInstallSRejectsMissingArtifactAndMissingChecksumEntry(t *testing.T) {
-	// Mutation captured: accepting a missing asset or checksum row creates a false successful install.
+// assertDirAbsent fails if dir was created before the validation error.
+func assertDirAbsent(t *testing.T, dir string) {
+	t.Helper()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("install dir %s was created before validation: %v", dir, err)
+	}
+}
+
+// assertDirExact fails if dir holds entries other than the given names.
+func assertDirExact(t *testing.T, dir string, names ...string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, entry := range entries {
+		got = append(got, entry.Name())
+	}
+	if strings.Join(got, ",") != strings.Join(names, ",") {
+		t.Fatalf("dir %s entries=%v want %v", dir, got, names)
+	}
+}
+
+// Port of TestInstallSHappyPathAndInstallDir: the core installs the exact
+// served bytes into the requested directory under the latest release path
+// and records the resulting path, digest, and URL. Empty OS/Architecture
+// prove the host defaults.
+func TestInstallHappyPathInstallsLatestRelease(t *testing.T) {
+	got := runCore(t, fixtureOptions{})
+	if got.err != nil {
+		t.Fatalf("install: %v", got.err)
+	}
+	destination := filepath.Join(got.installDir, destinationName(runtime.GOOS))
+	wantPaths := []string{"/latest/download/" + got.artifact, "/latest/download/SHA256SUMS"}
+	if len(got.requests) != len(wantPaths) || got.requests[0] != wantPaths[0] || got.requests[1] != wantPaths[1] {
+		t.Fatalf("download paths=%v want %v", got.requests, wantPaths)
+	}
+	installed, err := os.ReadFile(destination)
+	if err != nil || string(installed) != fakeBinary {
+		t.Fatalf("installed binary=%q err=%v", installed, err)
+	}
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(destination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0o755 {
+			t.Fatalf("destination mode=%v want 0755", fi.Mode().Perm())
+		}
+	}
+	if got.res.Artifact != got.artifact {
+		t.Errorf("result artifact=%q want %q", got.res.Artifact, got.artifact)
+	}
+	if got.res.Destination != destination {
+		t.Errorf("result destination=%q want %q", got.res.Destination, destination)
+	}
+	if got.res.Digest != sha256Hex([]byte(fakeBinary)) {
+		t.Errorf("result digest=%q want %q", got.res.Digest, sha256Hex([]byte(fakeBinary)))
+	}
+	if got.res.ReleaseURL != got.base+"/latest/download" {
+		t.Errorf("result release URL=%q", got.res.ReleaseURL)
+	}
+	assertDirExact(t, got.installDir, destinationName(runtime.GOOS))
+}
+
+// Port of TestInstallSExplicitVersionUsesMatchingRelease: an explicit
+// version downloads from /download/<version>, like the old installers.
+func TestInstallExplicitVersionUsesMatchingRelease(t *testing.T) {
+	got := runCore(t, fixtureOptions{version: "v1.2.3"})
+	if got.err != nil {
+		t.Fatalf("install: %v", got.err)
+	}
+	want := []string{"/download/v1.2.3/" + got.artifact, "/download/v1.2.3/SHA256SUMS"}
+	if len(got.requests) != len(want) || got.requests[0] != want[0] || got.requests[1] != want[1] {
+		t.Fatalf("download paths=%v want %v", got.requests, want)
+	}
+	if got.res.ReleaseURL != got.base+"/download/v1.2.3" {
+		t.Errorf("result release URL=%q", got.res.ReleaseURL)
+	}
+}
+
+// Port of TestInstallSRejectsWrongShaWithoutReplacingExistingBinary: a
+// wrong digest must not touch the installed binary and must clean up the
+// temp files.
+func TestInstallRejectsWrongShaWithoutReplacingExistingBinary(t *testing.T) {
+	dir := t.TempDir()
+	old := []byte("existing binary")
+	destination := filepath.Join(dir, destinationName(runtime.GOOS))
+	if err := os.WriteFile(destination, old, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	beforeInfo, err := os.Stat(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := runCore(t, fixtureOptions{installDir: dir, badChecksum: true})
+	if got.err == nil || !strings.Contains(got.err.Error(), "sha256 mismatch") {
+		t.Fatalf("install err=%v", got.err)
+	}
+	after, err := os.ReadFile(destination)
+	if err != nil || string(after) != string(old) {
+		t.Fatalf("existing binary changed: %q err=%v", after, err)
+	}
+	if fi, statErr := os.Stat(destination); statErr != nil {
+		t.Fatal(statErr)
+	} else if fi.Mode() != beforeInfo.Mode() {
+		t.Errorf("existing mode changed: %v; before %v", fi.Mode(), beforeInfo.Mode())
+	}
+	assertNoTempFiles(t, dir)
+}
+
+// Port of TestInstallSRejectsMissingArtifactAndMissingChecksumEntry, plus
+// the missing SHA256SUMS case: every failed download leaves no destination
+// and no temp files, and the SHA256SUMS is only requested after the
+// artifact.
+func TestInstallRejectsMissingDownloads(t *testing.T) {
+	hostOS := runtime.GOOS
 	for _, test := range []struct {
 		name    string
 		options fixtureOptions
 		want    string
+		reqs    int
 	}{
-		{name: "asset missing", options: fixtureOptions{missingAsset: true}, want: "failed to download"},
-		{name: "checksum entry missing", options: fixtureOptions{missingEntry: true}, want: "no unique entry"},
+		{name: "asset missing", options: fixtureOptions{missingAsset: true}, want: "failed to download", reqs: 1},
+		{name: "checksum entry missing", options: fixtureOptions{missingEntry: true}, want: "no unique entry", reqs: 2},
+		{name: "checksum file missing", options: fixtureOptions{missingSums: true}, want: "failed to download SHA256SUMS", reqs: 2},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			result := runInstaller(t, test.options)
-			if result.code == 0 || !strings.Contains(result.stderr, test.want) {
-				t.Fatalf("installer status=%d stderr=%q", result.code, result.stderr)
+			got := runCore(t, test.options)
+			if got.err == nil || !strings.Contains(got.err.Error(), test.want) {
+				t.Fatalf("install err=%v", got.err)
 			}
-			if _, err := os.Stat(filepath.Join(result.installDir, "herdr-soho")); !os.IsNotExist(err) {
+			if len(got.requests) != test.reqs {
+				t.Fatalf("requests=%v want %d", got.requests, test.reqs)
+			}
+			if _, err := os.Stat(filepath.Join(got.installDir, destinationName(hostOS))); !os.IsNotExist(err) {
 				t.Fatalf("failed install left destination: %v", err)
 			}
+			assertNoTempFiles(t, got.installDir)
 		})
 	}
 }
 
-const fakeBinary = "#!/bin/sh\n[ \"${1:-}\" = \"--version\" ] || exit 2\nprintf '%s\\n' 'herdr-soho test-version'\n"
-
-type fixtureOptions struct {
-	version      string
-	installDir   string
-	badChecksum  bool
-	missingAsset bool
-	missingEntry bool
-	// upperChecksum writes the digest in uppercase; baseSuffix is appended to
-	// the release base URL.
-	upperChecksum bool
-	baseSuffix    string
+// Port of TestInstallSAcceptsAnUppercaseChecksum: an uppercase SHA256SUMS
+// line verifies, and the recorded digest is canonical lowercase.
+func TestInstallAcceptsAnUppercaseChecksum(t *testing.T) {
+	got := runCore(t, fixtureOptions{upperChecksum: true})
+	if got.err != nil {
+		t.Fatalf("install: %v", got.err)
+	}
+	if got.res.Digest != sha256Hex([]byte(fakeBinary)) {
+		t.Errorf("result digest=%q want canonical lowercase %q", got.res.Digest, sha256Hex([]byte(fakeBinary)))
+	}
 }
 
-type installerResult struct {
-	code       int
-	stdout     string
-	stderr     string
-	installDir string
-	paths      []string
+// Digest row rules: exactly one valid 64-hex row for the artifact, the
+// optional '*' marker, CRLF tolerance, and malformed or duplicate rows
+// rejected without touching the destination.
+func TestInstallDigestEntryRules(t *testing.T) {
+	hostOS := runtime.GOOS
+	artifact := artifactNameFor(hostOS, runtime.GOARCH)
+	digest := sha256Hex([]byte(fakeBinary))
+	for _, test := range []struct {
+		name string
+		sums string
+		want string // error substring; empty means success
+	}{
+		{name: "star marker", sums: digest + " *" + artifact + "\n"},
+		{name: "crlf line", sums: digest + "  " + artifact + "\r\n"},
+		{name: "duplicate", sums: digest + "  " + artifact + "\n" + digest + "  " + artifact + "\n", want: "no unique entry"},
+		{name: "duplicate with marker", sums: digest + "  " + artifact + "\n" + digest + " *" + artifact + "\n", want: "no unique entry"},
+		{name: "digest too short", sums: digest[:63] + "  " + artifact + "\n", want: "no unique entry"},
+		{name: "digest too long", sums: digest + "a" + "  " + artifact + "\n", want: "no unique entry"},
+		{name: "non-hex digest", sums: "z" + digest[1:] + "  " + artifact + "\n", want: "no unique entry"},
+		{name: "extra field", sums: digest + "  " + artifact + " extra\n", want: "no unique entry"},
+		{name: "wrong filename", sums: digest + "  herdr-soho_other\n", want: "no unique entry"},
+		{name: "other file lines ignored", sums: "not-a-digest  herdr-soho_other\n" + digest + "  " + artifact + "\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := runCore(t, fixtureOptions{sumsBody: test.sums})
+			if test.want == "" {
+				if got.err != nil {
+					t.Fatalf("install: %v", got.err)
+				}
+				if got.res.Digest != digest {
+					t.Errorf("result digest=%q want %q", got.res.Digest, digest)
+				}
+				return
+			}
+			if got.err == nil || !strings.Contains(got.err.Error(), test.want) {
+				t.Fatalf("install err=%v", got.err)
+			}
+			if _, err := os.Stat(filepath.Join(got.installDir, destinationName(hostOS))); !os.IsNotExist(err) {
+				t.Fatalf("failed install left destination: %v", err)
+			}
+			assertNoTempFiles(t, got.installDir)
+		})
+	}
 }
 
-func assetName() string {
-	os := runtime.GOOS
-	if os == "windows" {
-		os = "windows"
+// Invalid tags are rejected before any network or filesystem mutation.
+func TestInstallRejectsInvalidVersion(t *testing.T) {
+	for _, version := range []string{
+		"1.2.3",    // no leading v
+		"V1.2.3",   // uppercase V
+		"v..",      // path traversal dots
+		"v1..2",    // dots in the middle
+		"v1.2/3",   // slash
+		"v1.2.3 ",  // trailing space
+		"v1.2.3\n", // newline
+		"vé1.2.3",  // non-ASCII
+		"v1.2.3?x", // query character
+	} {
+		t.Run(version, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "bin")
+			got := runCore(t, fixtureOptions{version: version, installDir: dir})
+			if got.err == nil {
+				t.Fatalf("version %q accepted", version)
+			}
+			if len(got.requests) != 0 {
+				t.Fatalf("version %q reached the network: %v", version, got.requests)
+			}
+			assertDirAbsent(t, dir)
+		})
 	}
-	arch := runtime.GOARCH
-	if arch != "amd64" && arch != "arm64" {
-		panic("unsupported test host architecture: " + arch)
-	}
-	suffix := ""
-	if os == "windows" {
-		suffix = ".exe"
-	}
-	return fmt.Sprintf("herdr-soho_%s_%s%s", os, arch, suffix)
 }
 
-func runInstaller(t *testing.T, options fixtureOptions) installerResult {
-	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
+// Valid tag edges: release characters only, and no ".." anywhere.
+func TestInstallAcceptsReleaseCharacterVersions(t *testing.T) {
+	// "v" alone passes the rule stated for the core (begin with v, release
+	// characters only, no ".."); install.ps1 additionally required at least
+	// one character after v.
+	for _, version := range []string{"v", "v1.2.3-rc.1_2"} {
+		t.Run(version, func(t *testing.T) {
+			got := runCore(t, fixtureOptions{version: version})
+			if got.err != nil {
+				t.Fatalf("version %q rejected: %v", version, got.err)
+			}
+			if got.res.ReleaseURL != got.base+"/download/"+version {
+				t.Errorf("result release URL=%q", got.res.ReleaseURL)
+			}
+		})
+	}
+}
+
+// Invalid release bases are rejected before any network or filesystem
+// mutation: whitespace anywhere, credentials, a query, a fragment, and a
+// non-http(s) or missing scheme.
+func TestInstallRejectsInvalidReleaseBase(t *testing.T) {
+	for _, test := range []struct{ name, base, want string }{
+		{"space", "https://example.com/releases/a b", "contains whitespace"},
+		{"newline", "https://example.com/releases/a\nb", "contains whitespace"},
+		{"tab", "https://example.com/releases/a\tb", "contains whitespace"},
+		{"credentials", "http://user:pass@example.com/releases", "contains credentials"},
+		{"query", "https://example.com/releases?tag=v1", "contains a query"},
+		{"fragment", "https://example.com/releases#sha256", "contains a fragment"},
+		{"ftp scheme", "ftp://example.com/releases", "must be http or https"},
+		{"missing scheme", "example.com/releases", "must be http or https"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "bin")
+			got := runCore(t, fixtureOptions{base: test.base, installDir: dir})
+			if got.err == nil || !strings.Contains(got.err.Error(), test.want) {
+				t.Fatalf("base %q: install err=%v", test.base, got.err)
+			}
+			if len(got.requests) != 0 {
+				t.Fatalf("base %q reached the network: %v", test.base, got.requests)
+			}
+			assertDirAbsent(t, dir)
+		})
+	}
+}
+
+// A trailing slash in the base is trimmed so the download paths match the
+// old installers exactly.
+func TestInstallTrimsTrailingSlashFromBase(t *testing.T) {
+	got := runCore(t, fixtureOptions{baseSuffix: "/"})
+	if got.err != nil {
+		t.Fatalf("install: %v", got.err)
+	}
+	trimmed := strings.TrimRight(got.base, "/")
+	if got.res.ReleaseURL != trimmed+"/latest/download" {
+		t.Errorf("result release URL=%q want %q", got.res.ReleaseURL, trimmed+"/latest/download")
+	}
+	if want := "/latest/download/" + got.artifact; got.requests[0] != want {
+		t.Fatalf("download paths=%v want %v", got.requests, want)
+	}
+}
+
+// The core requires an explicit InstallDir; platform defaults and
+// environment resolution belong to the root CLI.
+func TestInstallRequiresExplicitInstallDir(t *testing.T) {
+	_, err := Run(context.Background(), Options{OS: "linux", Architecture: "amd64", Client: noNetworkClient()})
+	if err == nil || !strings.Contains(err.Error(), "InstallDir") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// Unsupported OS/arch values are rejected before any network or filesystem
+// mutation.
+func TestInstallRejectsUnsupportedPlatform(t *testing.T) {
+	for _, test := range []struct{ os, arch, want string }{
+		{"freebsd", "amd64", "unsupported operating system: freebsd"},
+		{"darwin", "riscv64", "unsupported architecture: riscv64"},
+	} {
+		t.Run(test.os+"/"+test.arch, func(t *testing.T) {
+			_, err := Run(context.Background(), Options{
+				Client:       noNetworkClient(),
+				OS:           test.os,
+				Architecture: test.arch,
+				InstallDir:   t.TempDir(),
+				ReleaseBase:  "https://example.com/releases",
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+// The artifact follows the requested platform, not the test host: this
+// proves the core downloads for the target and never needs the host to be
+// that platform.
+func TestInstallTargetsRequestedPlatform(t *testing.T) {
+	for _, test := range []struct{ os, arch string }{
+		{"windows", "amd64"},
+		{"linux", "arm64"},
+		{"darwin", "amd64"},
+	} {
+		t.Run(test.os+"/"+test.arch, func(t *testing.T) {
+			got := runCore(t, fixtureOptions{os: test.os, arch: test.arch})
+			if got.err != nil {
+				t.Fatalf("install: %v", got.err)
+			}
+			artifact := artifactNameFor(test.os, test.arch)
+			if want := "/latest/download/" + artifact; got.requests[0] != want {
+				t.Fatalf("download paths=%v want %v", got.requests, want)
+			}
+			installed, err := os.ReadFile(filepath.Join(got.installDir, destinationName(test.os)))
+			if err != nil || string(installed) != fakeBinary {
+				t.Fatalf("installed=%q err=%v", installed, err)
+			}
+			if got.res.Artifact != artifact {
+				t.Errorf("result artifact=%q want %q", got.res.Artifact, artifact)
+			}
+		})
+	}
+}
+
+// The old ps1 fixture installed into a directory with a space; the core
+// must not assume shell quoting.
+func TestInstallInstallDirMayContainSpaces(t *testing.T) {
+	got := runCore(t, fixtureOptions{installDir: filepath.Join(t.TempDir(), "custom bin")})
+	if got.err != nil {
+		t.Fatalf("install: %v", got.err)
+	}
+	installed, err := os.ReadFile(got.res.Destination)
+	if err != nil || string(installed) != fakeBinary {
+		t.Fatalf("installed=%q err=%v", installed, err)
+	}
+	assertNoTempFiles(t, got.installDir)
+}
+
+// Replacement of a pre-existing destination: the old installers replaced
+// the installed binary in place (mv -f / File.Replace); the core must do
+// the same and carry the POSIX executable mode over.
+func TestInstallReplacesExistingDestination(t *testing.T) {
+	dir := t.TempDir()
+	old := []byte("old installed binary")
+	destination := filepath.Join(dir, destinationName(runtime.GOOS))
+	if err := os.WriteFile(destination, old, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	installDir := options.installDir
-	if installDir == "" {
-		installDir = filepath.Join(t.TempDir(), "custom-bin")
+	got := runCore(t, fixtureOptions{installDir: dir})
+	if got.err != nil {
+		t.Fatalf("install: %v", got.err)
 	}
-	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(fakeBinary)))
-	if options.badChecksum {
-		digest = strings.Repeat("0", 64)
+	installed, err := os.ReadFile(destination)
+	if err != nil || string(installed) != fakeBinary {
+		t.Fatalf("installed=%q err=%v", installed, err)
 	}
-	if options.missingEntry {
-		digest = strings.Repeat("0", 64)
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(destination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0o755 {
+			t.Fatalf("destination mode=%v want 0755", fi.Mode().Perm())
+		}
 	}
-	if options.upperChecksum {
-		digest = strings.ToUpper(digest)
-	}
-	var paths []string
-	var pathsMu sync.Mutex
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pathsMu.Lock()
-		paths = append(paths, r.URL.Path)
-		pathsMu.Unlock()
-		if strings.HasSuffix(r.URL.Path, "/SHA256SUMS") {
-			entry := ""
-			if !options.missingEntry {
-				entry = digest + "  " + assetName() + "\n"
+	assertNoTempFiles(t, dir)
+}
+
+// A cancelled context aborts the download and every temp file is removed;
+// an already-cancelled context fails before any filesystem or network
+// mutation.
+func TestInstallCancellationCleansUpTempFiles(t *testing.T) {
+	t.Run("mid-download cancel", func(t *testing.T) {
+		hostOS := runtime.GOOS
+		artifact := artifactNameFor(hostOS, runtime.GOARCH)
+		digest := sha256Hex([]byte(fakeBinary))
+		started := make(chan struct{})
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/SHA256SUMS"):
+				_, _ = io.WriteString(w, digest+"  "+artifact+"\n")
+			case strings.HasSuffix(r.URL.Path, "/"+artifact):
+				select {
+				case <-started:
+				default:
+					close(started)
+				}
+				_, _ = io.WriteString(w, "partial-bytes")
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
+				<-r.Context().Done()
+			default:
+				http.NotFound(w, r)
 			}
-			_, _ = w.Write([]byte(entry))
-			return
+		}))
+		t.Cleanup(server.Close)
+		installDir := filepath.Join(t.TempDir(), "bin")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			_, err := Run(ctx, Options{Client: hermeticClient(server), InstallDir: installDir, ReleaseBase: server.URL})
+			done <- err
+		}()
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("artifact download did not start")
 		}
-		if strings.HasSuffix(r.URL.Path, "/"+assetName()) && !options.missingAsset {
-			_, _ = w.Write([]byte(fakeBinary))
-			return
+		time.Sleep(100 * time.Millisecond) // let the client read the partial body
+		cancel()
+		err := <-done
+		if err == nil {
+			t.Fatal("cancel did not fail the install")
 		}
-		http.NotFound(w, r)
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err=%v want context.Canceled in the chain", err)
+		}
+		if _, statErr := os.Stat(filepath.Join(installDir, destinationName(hostOS))); !os.IsNotExist(statErr) {
+			t.Fatalf("cancel left destination: %v", statErr)
+		}
+		assertNoTempFiles(t, installDir)
 	})
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-
-	cmd := exec.Command("sh", filepath.Join(root, "install.sh"))
-	if options.version != "" {
-		cmd.Args = append(cmd.Args, "--version", options.version)
-	}
-	cmd.Env = append(os.Environ(), "HERDR_SOHO_RELEASE_BASE="+server.URL+options.baseSuffix, "HERDR_SOHO_INSTALL_DIR="+installDir, "HOME="+t.TempDir(), "PATH=/usr/bin:/bin")
-	var stdout, stderr strings.Builder
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err = cmd.Run()
-	code := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			code = exitErr.ExitCode()
-		} else {
-			t.Fatalf("start install.sh: %v", err)
+	t.Run("already cancelled", func(t *testing.T) {
+		installDir := filepath.Join(t.TempDir(), "bin")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := Run(ctx, Options{InstallDir: installDir, Client: noNetworkClient()})
+		if err == nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("err=%v", err)
 		}
-	}
-	pathsMu.Lock()
-	defer pathsMu.Unlock()
-	return installerResult{code: code, stdout: stdout.String(), stderr: stderr.String(), installDir: installDir, paths: paths}
-}
-
-func TestInstallSAcceptsAnUppercaseChecksum(t *testing.T) {
-	// Mutation captured: comparing the digest case-sensitively rejects a valid
-	// SHA256SUMS written in uppercase (sha256sum and shasum print lowercase).
-	result := runInstaller(t, fixtureOptions{upperChecksum: true})
-	if result.code != 0 || !strings.Contains(result.stdout, "herdr-soho test-version") {
-		t.Fatalf("installer status=%d stdout=%q stderr=%q", result.code, result.stdout, result.stderr)
-	}
-}
-
-func TestInstallSRejectsWhitespaceInTheReleaseBase(t *testing.T) {
-	// Mutation captured: a guard that matches a backslash-n instead of a real
-	// newline lets a newline or tab reach mkdir and curl.
-	for name, suffix := range map[string]string{"space": "/a b", "newline": "/a\nb", "tab": "/a\tb"} {
-		t.Run(name, func(t *testing.T) {
-			result := runInstaller(t, fixtureOptions{baseSuffix: suffix})
-			if result.code != 2 || !strings.Contains(result.stderr, "release base URL contains whitespace") {
-				t.Fatalf("installer status=%d stderr=%q", result.code, result.stderr)
-			}
-			if _, err := os.Stat(result.installDir); !os.IsNotExist(err) {
-				t.Fatalf("install dir was created before the guard: %v", err)
-			}
-		})
-	}
+		assertDirAbsent(t, installDir)
+	})
 }

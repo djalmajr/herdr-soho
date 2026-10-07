@@ -31,9 +31,10 @@ var piSteerT1Screen = " Teste do orquestrador, sem relação com a sua fatia: ro
 
 // workingPiScreen models the real pi shape of a working target: the given box
 // line between the Working border and the '─' border, the 2-line footer below.
-// history keeps the lines above the Working border (a real queue line like the
-// one in pi-steer-t1.txt would itself be arrival proof, so a negative test
-// needs neutral history here).
+// history keeps the lines above the Working border. The neutral history is what
+// the box exclusion is measured against: the real pi-steer-t1 queue line is
+// identity-less and proves nothing, so a positive proof must come from a line
+// carrying the composed file's identity.
 func workingPiScreen(history, box string) string {
 	sep := strings.Repeat("─", 66)
 	return history + "\n" +
@@ -103,26 +104,47 @@ func TestPromptEvidenceWorkingPiBox(t *testing.T) {
 		lines = append(lines[:11], append([]string{box}, lines[11:]...)...)
 		return strings.Join(lines, "\n")
 	}
-	t.Run("the verbatim real screen with the path typed in the box still proves, via its real queue line", func(t *testing.T) {
-		// Control: the box line must not flip the result either way. The file
-		// keeps proving through its own `Steering:` queue line in the history
-		// (above the region), so a future region bounds mistake that would
-		// swallow the history fails here.
-		if !PromptEvidence(realScreenWith(prompt), composed) {
-			t.Fatalf("the real screen's queue line must keep proving the prompt:\n%s", realScreenWith(prompt))
+	t.Run("the real screen proves from a queue line with the identity; the typed box line never does", func(t *testing.T) {
+		// Control: the box line must not flip the result either way. The
+		// verbatim capture's queue line carries no dispatch identity, so the
+		// proof must come from a queue line that shows the composed file in
+		// the history above the region; a future region bounds mistake that
+		// would swallow the history fails here.
+		lines := strings.Split(piSteerT1Screen, "\n")
+		lines[8] = " Steering: Read the file …/reports/build-3-20261001T165751.brief.md in full"
+		withIdentity := strings.Join(lines, "\n")
+		if !PromptEvidence(withIdentity, composed) {
+			t.Fatalf("the identity queue line in the history must prove the prompt:\n%s", withIdentity)
+		}
+		typedOnly := realScreenWith(prompt)
+		if PromptEvidence(typedOnly, composed) {
+			t.Fatalf("the identity-less queue line and the typed box line must not prove the prompt:\n%s", typedOnly)
 		}
 	})
 	t.Run("the real pi-steer-t1 screen with the path in the history above the Working border is proof", func(t *testing.T) {
+		// The line opens with the prompt marker: a history line carrying the
+		// whole path is the prompt itself; quoted prose mentioning it later
+		// in a sentence is not (the anchoring contract).
 		lines := strings.Split(piSteerT1Screen, "\n")
-		lines[3] = " The orchestrator is requesting a test: " + prompt
+		lines[3] = " " + prompt
 		if !PromptEvidence(strings.Join(lines, "\n"), composed) {
 			t.Fatalf("the whole path in the history above the Working border must prove the prompt:\n%s", strings.Join(lines, "\n"))
 		}
 	})
-	// Note: the verbatim pi-steer-t1 screen never becomes a negative fixture:
-	// its history carries a real `Steering: Read the file …` queue line, which
-	// QueuedPromptEvidence proves unconditionally (chrome rule), so the file
-	// keeps proving the arrival of any dispatch. The box exclusion itself is
+	t.Run("prose quoting the exact path in the history is not proof", func(t *testing.T) {
+		// The captured UI shape keeps its prose framing; the exact composed
+		// path mid-sentence is a mention, not the prompt line, so it must
+		// not prove the prompt.
+		lines := strings.Split(piSteerT1Screen, "\n")
+		lines[3] = " The orchestrator is requesting a test: \"" + prompt + "\""
+		if PromptEvidence(strings.Join(lines, "\n"), composed) {
+			t.Fatalf("quoted prose with the exact path must not prove the prompt:\n%s", strings.Join(lines, "\n"))
+		}
+	})
+	// Note: the verbatim pi-steer-t1 screen is a negative fixture: its history
+	// carries a real `Steering: Read the file …` queue line clipped to a shared
+	// machine directory, and QueuedPromptEvidence needs the dispatch identity,
+	// so the file proves the arrival of no dispatch. The box exclusion itself is
 	// what the neutral-history screens below and the mutation prove: with the
 	// border rule off, the typed box line proves the path over the whole
 	// screen; with it on, the box line never contributes.
@@ -133,17 +155,20 @@ func TestPromptEvidenceWorkingPiBox(t *testing.T) {
 		}
 	})
 	t.Run("the same path in the history above the Working border is proof", func(t *testing.T) {
-		screen := workingPiScreen("history: "+prompt, "continuing the previous step")
+		// The history line opens with the prompt marker (anchored contract);
+		// the region bounds must not swallow the history above the border.
+		screen := workingPiScreen(prompt, "continuing the previous step")
 		if !PromptEvidence(screen, composed) {
 			t.Fatalf("the whole path in the history above the Working border must prove the prompt:\n%s", screen)
 		}
 	})
-	t.Run("the real screen keeps proving from its own queue line", func(t *testing.T) {
+	t.Run("the real screen's identity-less queue line does not prove a dispatch it does not identify", func(t *testing.T) {
 		// pi-steer-t1.txt carries a real "Steering: Read the file …" queue line
-		// in the history: it is proof on its own, not the box line (the real
-		// capture's box was empty, so nothing can come from it).
-		if !PromptEvidence(piSteerT1Screen, "/var/folders/f2/r857c16x45z6p82wsq_0d_v00000gp/T/herdr-soho/w14/reports/build-2-20261001T999999-amend-probe-with-a-long-name.brief.md") {
-			t.Fatalf("the real screen's queue line must keep proving the prompt:\n%s", piSteerT1Screen)
+		// clipped to a shared machine directory: it carries no dispatch identity,
+		// so under the identity rule it proves nothing — an old or unrelated
+		// queued brief keeps the delivery uncertain, never a queued receipt.
+		if PromptEvidence(piSteerT1Screen, "/var/folders/f2/r857c16x45z6p82wsq_0d_v00000gp/T/herdr-soho/w14/reports/build-2-20261001T999999-amend-probe-with-a-long-name.brief.md") {
+			t.Fatalf("the identity-less queue line must not prove a dispatch it does not identify:\n%s", piSteerT1Screen)
 		}
 	})
 }

@@ -26,7 +26,7 @@ const (
 )
 
 const nowriteRosterHeader = "NAME                 ROLE               KIND     PANE     TAB              STATE     REPORT           CWD TASK\n"
-const nowriteRosterTail = "\n# other live agents (not spawned by this skill)\n\nlayout=split reuse_workers=on multi_role=on auto_approve=off\n"
+const nowriteRosterTail = "\n# other live agents in workspace ws (not spawned by this skill)\n\nlayout=split reuse_workers=on multi_role=on auto_approve=off\n"
 
 const nowriteRosterRow = "worker               implementer        grok     p-worker -                gone      ready            /tmp/work -\n"
 
@@ -275,7 +275,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 // command runs (nothing is written).
 func TestNowriteRejectsWritingInvocations(t *testing.T) {
 	nr := newNowriteReads(t, true)
-	const messagePrefix = "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes; rejected: "
+	const messagePrefix = "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "
 	const messageTail = " — unset HERDR_SOHO_NOWRITE to write\n"
 	cases := []struct {
 		name     string

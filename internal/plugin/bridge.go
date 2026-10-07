@@ -15,9 +15,7 @@ const (
 	herdrTimeoutMs    = 30_000
 )
 
-var pickOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "picker", "--placement", "overlay", "--focus"}
-
-var boardOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "board", "--placement", "overlay", "--focus"}
+var pickOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "picker", "--focus"}
 
 var teamOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "team", "--placement", "overlay", "--focus"}
 
@@ -25,7 +23,8 @@ var teamDoctorOpenArgs = []string{"plugin", "pane", "open", "--plugin", "djalmaj
 
 func PickerArguments() []string { return append([]string(nil), pickOpenArgs...) }
 
-func BoardArguments() []string { return append([]string(nil), boardOpenArgs...) }
+// BoardArguments remains a compatibility alias for the unified picker.
+func BoardArguments() []string { return append([]string(nil), pickOpenArgs...) }
 
 func TeamArguments() []string { return append([]string(nil), teamOpenArgs...) }
 
@@ -56,15 +55,12 @@ type Result struct {
 }
 
 // Bridge runs one plugin action using the Herdr-focused pane as its
-// target. Every action opens one of the plugin panes (pick, board, team or
-// team-doctor); the bridge no longer runs the CLI with its output going to
-// the Herdr log.
+// target. The unified picker uses the native popup placement from its
+// manifest; team views use overlays. Output belongs to the interactive
+// surface rather than the Herdr log.
 func Bridge(action string, env platform.Env, platformName, executable string) (Result, error) {
-	if action == "pick" {
+	if action == "pick" || action == "board" {
 		return bridgePaneOpen(env, platformName, pickOpenArgs)
-	}
-	if action == "board" {
-		return bridgePaneOpen(env, platformName, boardOpenArgs)
 	}
 	if action == "team" || action == "roster" {
 		return bridgePaneOpen(env, platformName, teamOpenArgs)
@@ -76,7 +72,7 @@ func Bridge(action string, env platform.Env, platformName, executable string) (R
 }
 
 // bridgePaneOpen validates the focused target like the read-only actions
-// and then opens one of the plugin panes (picker or board) over it.
+// and then opens the requested interactive surface over it.
 func bridgePaneOpen(env platform.Env, platformName string, openArgs []string) (Result, error) {
 	ctx, err := parseContext(env)
 	if err != nil {

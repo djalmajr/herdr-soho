@@ -17,7 +17,8 @@ func TestPromptEvidenceJoinsTheBoxWrappedPath(t *testing.T) {
 		{"a box that wrapped at a space", "  ┃  Read the file /work/state/ws/briefs/worker-2026\n  ┃  0930T125455.md in full\n", true},
 		{"an earlier brief of the same agent in the box", wrapped("19990101T000000"), false},
 		{"the shared prefix alone in the box", "  ┃  Read the file /work/state/ws/briefs/worker-\n", false},
-		{"a truncated queue line outside a box keeps the fragment rule", "  ↳ Read the file /work/state/ws/briefs/worker-2026…\n", true},
+		{"a truncated queue line with an incomplete name outside a box is not proof", "  ↳ Read the file /work/state/ws/briefs/worker-2026…\n", false},
+		{"a queue line with the file identity outside a box is proof", "  ↳ Read the file …/briefs/worker-20260930T125455.md…\n", true},
 		{"an empty screen", "", false},
 	}
 	for _, tc := range cases {

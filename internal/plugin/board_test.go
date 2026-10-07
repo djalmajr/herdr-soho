@@ -60,6 +60,32 @@ func boardEnv(t *testing.T, dir, herdr string) platform.Env {
 	return env
 }
 
+// boardSnapshotRow is one agent pane of a fake `herdr api snapshot` answer.
+type boardSnapshotRow struct {
+	paneID string
+	name   string
+	agent  string
+	status string
+	title  string
+}
+
+// boardSnapshotJSON renders one `herdr api snapshot` answer: the given rows
+// as agents and panes under one workspace.
+func boardSnapshotJSON(wsID, wsLabel string, rows []boardSnapshotRow) string {
+	agents := make([]string, 0, len(rows))
+	panes := make([]string, 0, len(rows))
+	for _, row := range rows {
+		agent := fmt.Sprintf(`{"pane_id":%q,"name":%q,"agent":%q,"agent_status":%q`, row.paneID, row.name, row.agent, row.status)
+		if row.title != "" {
+			agent = fmt.Sprintf(`%s,"title":%q`, agent, row.title)
+		}
+		agents = append(agents, agent+"}")
+		panes = append(panes, fmt.Sprintf(`{"pane_id":%q,"workspace_id":%q,"tab_id":%q}`, row.paneID, wsID, wsID+":t1"))
+	}
+	return fmt.Sprintf(`{"result":{"snapshot":{"workspaces":[{"workspace_id":%q,"label":%q}],"tabs":[{"tab_id":%q}],"agents":[%s],"panes":[%s]}}}`,
+		wsID, wsLabel, wsID+":t1", strings.Join(agents, ","), strings.Join(panes, ","))
+}
+
 func TestBoardOrderGroupsAndOrchestratorFirst(t *testing.T) {
 	// Machines arrive with the remote first; local must still come first,
 	// workspaces sort by workspace_label, and within a workspace the
@@ -317,46 +343,45 @@ func TestBoardPendingMachineKeepsAllOldRows(t *testing.T) {
 	if got := boardRefs(s.Entries); len(got) != 2 || got[0] != "middle/a" || got[1] != "middle/b" {
 		t.Fatalf("pending machine rows=%v want both old rows of the middle machine", got)
 	}
-	s.ApplyKey("enter")
+	s.ApplyKey("c")
 	if got := pickerString(s.LastEntry["ref"]); got != "middle/b" {
-		t.Fatalf("Enter copied %q want middle/b (the second pending row)", got)
+		t.Fatalf("c copied %q want middle/b (the second pending row)", got)
 	}
 }
 
-// TestBoardEmptyGenerationDropsOldRefsAtCompletion: the second load's finds
-// all succeed without agents. A machine is current once its find terminates
-// (with or without rows), so its old rows drop out as it finishes - not only
-// at the end - and the complete load publishes only the new (empty) result:
-// the old refs are gone and the selection falls to the top.
+// The second load's snapshots all succeed without agents. Each answered
+// machine drops its old rows even while another machine is still loading.
+// The complete empty generation leaves no old refs and resets selection.
 func TestBoardEmptyGenerationDropsOldRefsAtCompletion(t *testing.T) {
-	env, exeA, _, release := boardStreamFixture(t, "middle/w1:p1", "middle")
+	envA, _, release, logA, _ := boardStreamFixture(t, "middle/w1:p1", "middle")
 	live := NewBoardState()
-	gateA := boardRemoteGate(t, release, "a", []string{"slow", "fast", "middle"}, live)
-	loadBoardEntries(contextpkg.Background(), live, exeA, env, platform.Current(), gateA)
+	gateA := boardRemoteGate(t, release, "a", []string{"slow", "fast", "middle"}, live, logA)
+	loadBoardEntries(contextpkg.Background(), live, envA, platform.Current(), gateA)
 	if len(live.visible()) == 0 {
 		t.Fatalf("the first load left the board empty: %#v", live.Entries)
 	}
 	live.Selected = 1 // a non-top row (the board lists local first)
-	exeEmpty, err := fakecli.Install(t, filepath.Dir(exeA), "empty", []fakecli.Rule{{AnyArgs: true, Stdout: ""}})
+	dir := t.TempDir()
+	empty := boardSnapshotJSON("w1", "alpha", nil)
+	exeEmpty, err := fakecli.Install(t, dir, "herdr-empty", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Stdout: empty},
+		{Argv: []string{"--machine", "slow", "api", "snapshot"}, Stdout: empty},
+		{Argv: []string{"--machine", "fast", "api", "snapshot"}, Stdout: empty},
+		{Argv: []string{"--machine", "middle", "api", "snapshot"}, Stdout: empty},
+		{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"slow","enabled":true},{"label":"fast","enabled":true},{"label":"middle","enabled":true}]`},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	loaded := NewBoardState()
-	pubs := 0
-	loadBoardEntries(contextpkg.Background(), loaded, exeEmpty, env, platform.Current(), func() {
-		pubs++
+	loadBoardEntries(contextpkg.Background(), loaded, boardEnv(t, dir, exeEmpty), platform.Current(), func() {
 		applyBoardUpdate(live, cloneBoardState(loaded))
-		// Completion is recorded per machine, not by the presence of rows:
-		// a finished machine must not keep its old rows mid-reload.
-		finished := cloneBoardState(loaded).FinishedMachines
-		for _, machine := range finished {
-			for _, entry := range live.Entries {
-				if pickerString(entry["machine"]) == machine {
-					t.Fatalf("publication %d: machine %q finished the empty load but its old row %q remains (rows=%v)", pubs, machine, pickerString(entry["ref"]), boardRefs(live.Entries))
-				}
-			}
-		}
 	})
+	// Every machine has answered by now, though the loop has not yet
+	// attached UpdatedAt. A successful empty answer must remove stale refs.
+	if got := len(boardRefs(live.Entries)); got != 0 {
+		t.Fatalf("answered empty machines kept %d stale rows: %v", got, boardRefs(live.Entries))
+	}
 	loaded.UpdatedAt = boardNow().Format("15:04:05")
 	applyBoardUpdate(live, cloneBoardState(loaded))
 	if len(live.Entries) != 0 {
@@ -468,18 +493,18 @@ func boardCursorLines(render string) int {
 	return n
 }
 
-// TestBoardEnterDoesNotCopyDifferentSessionWhileSelectedRefGone is the
+// TestBoardCDoesNotCopyDifferentSessionWhileSelectedRefGone is the
 // review's probe: with middle/b selected, middle's find finishes without it
-// and slow is still pending, so the numeric index points at slow/c; Enter
+// and slow is still pending, so the numeric index points at slow/c; c
 // must not copy that other session and the board stays open.
-func TestBoardEnterDoesNotCopyDifferentSessionWhileSelectedRefGone(t *testing.T) {
+func TestBoardCDoesNotCopyDifferentSessionWhileSelectedRefGone(t *testing.T) {
 	s := boardPinnedMissingFixture(t)
-	action := s.ApplyKey("enter")
+	action := s.ApplyKey("c")
 	if action == "copy" {
-		t.Fatalf("Enter copied %q while the pinned ref middle/b is gone (action=%s)", pickerString(s.LastEntry["ref"]), action)
+		t.Fatalf("c copied %q while the pinned ref middle/b is gone (action=%s)", pickerString(s.LastEntry["ref"]), action)
 	}
 	if s.Copied != nil || s.Exit != "" {
-		t.Fatalf("the board copied (Copied!=nil) or closed (exit=%q) although Enter must do nothing here", s.Exit)
+		t.Fatalf("the board copied (Copied!=nil) or closed (exit=%q) although c must do nothing here", s.Exit)
 	}
 	if got := boardRefs(s.Entries); len(got) != 2 || got[0] != "local/a" || got[1] != "slow/c" {
 		t.Fatalf("merged rows=%v want local/a + slow/c (middle finished without middle/b)", got)
@@ -516,10 +541,10 @@ func TestBoardPinnedMissingShowsNoCursorAndFooter(t *testing.T) {
 	}
 }
 
-// TestBoardPinnedMissingArrowRepinsAndEnterCopies: ↑/↓ in the
+// TestBoardPinnedMissingArrowRepinsAndCCopies: ↑/↓ in the
 // pinned-missing state pick a visible row (↑ the first, ↓ the last) and it
-// becomes the new pinned ref; Enter then copies that row, resolved by ref.
-func TestBoardPinnedMissingArrowRepinsAndEnterCopies(t *testing.T) {
+// becomes the new pinned ref; c then copies that row, resolved by ref.
+func TestBoardPinnedMissingArrowRepinsAndCCopies(t *testing.T) {
 	s := boardPinnedMissingFixture(t)
 	// visible = [local/a, slow/c]; ↓ picks the last row (slow/c), which is
 	// the first-and-only candidate from the cursor's point of view... and
@@ -544,11 +569,11 @@ func TestBoardPinnedMissingArrowRepinsAndEnterCopies(t *testing.T) {
 	if got := pickerString(s2.visible()[s2.Selected]["ref"]); got != "local/a" {
 		t.Fatalf("down picked %q want the first visible row local/a", got)
 	}
-	if action := s2.ApplyKey("enter"); action != "copy" {
-		t.Fatalf("Enter after re-pinning returned %q want copy", action)
+	if action := s2.ApplyKey("c"); action != "copy" {
+		t.Fatalf("c after re-pinning returned %q want copy", action)
 	}
 	if got := pickerString(s2.LastEntry["ref"]); got != "local/a" {
-		t.Fatalf("Enter copied %q want local/a (the row picked by ↓)", got)
+		t.Fatalf("c copied %q want local/a (the row picked by ↓)", got)
 	}
 	// On the two-row fixture: ↑ picks the first row, ↓ picks the last.
 	if action := s.ApplyKey("up"); action != "" {
@@ -557,8 +582,8 @@ func TestBoardPinnedMissingArrowRepinsAndEnterCopies(t *testing.T) {
 	if got := pickerString(s.visible()[s.Selected]["ref"]); got != "local/a" {
 		t.Fatalf("up picked %q want the first visible row local/a", got)
 	}
-	if action := s.ApplyKey("enter"); action != "copy" || pickerString(s.LastEntry["ref"]) != "local/a" {
-		t.Fatalf("Enter after ↑ returned %q/%q want copy local/a", action, pickerString(s.LastEntry["ref"]))
+	if action := s.ApplyKey("c"); action != "copy" || pickerString(s.LastEntry["ref"]) != "local/a" {
+		t.Fatalf("c after ↑ returned %q/%q want copy local/a", action, pickerString(s.LastEntry["ref"]))
 	}
 }
 
@@ -610,44 +635,40 @@ func TestBoardRefreshKeyRules(t *testing.T) {
 
 func TestBoardLoadMachineFailureBecomesStatusLine(t *testing.T) {
 	dir := t.TempDir()
-	local := `{"ref":"local/w1:p1","machine":"local","workspace_id":"w1","workspace_label":"appliance","tab_id":"w1:t1","pane_id":"w1:p1","name":"orchestrator","kind":"claude","status":"working","title":"orchestrator: run"}` + "\n"
-	cli, err := fakecli.Install(t, dir, "herdr-soho", []fakecli.Rule{
-		{Argv: []string{"find", "--json"}, Stdout: local},
-		{Argv: []string{"find", "--json", "--machine", "win"}, Code: 1, Stderr: "boom"},
+	local := boardSnapshotJSON("w1", "appliance", []boardSnapshotRow{{paneID: "w1:p1", name: "orchestrator", agent: "claude", status: "working", title: "orchestrator: run"}})
+	herdr, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Stdout: local},
+		{Argv: []string{"--machine", "win", "api", "snapshot"}, Code: 1, Stderr: "boom"},
+		{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"win","enabled":true}]`},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	herdr, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"win","enabled":true}]`}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	state := NewBoardState()
-	loadBoardEntries(contextpkg.Background(), state, cli, boardEnv(t, dir, herdr), "darwin", func() {})
-	if len(state.Failures) != 1 || state.Failures[0].Label != "win" || state.Failures[0].Cause != "exit 1: boom" {
+	loadBoardEntries(contextpkg.Background(), state, boardEnv(t, dir, herdr), "darwin", func() {})
+	if len(state.Failures) != 1 || state.Failures[0].Label != "win" || state.Failures[0].Cause != "boom" {
 		t.Fatalf("failures=%#v", state.Failures)
 	}
 	if len(state.Entries) != 1 || pickerString(state.Entries[0]["ref"]) != "local/w1:p1" {
 		t.Fatalf("entries=%#v", state.Entries)
 	}
-	if !strings.Contains(RenderBoard(state, 100), "máquina win: falhou (exit 1: boom)") {
+	if !strings.Contains(RenderBoard(state, 100), "máquina win: falhou (boom)") {
 		t.Fatalf("board render without the failure line:\n%s", RenderBoard(state, 100))
 	}
 }
 
 func TestBoardRefreshDuringLoadWaitsAndRunsOnce(t *testing.T) {
 	dir := t.TempDir()
-	local := `{"ref":"local/w1:p1","machine":"local","workspace_id":"w1","workspace_label":"alpha","tab_id":"w1:t1","pane_id":"local/w1:p1","name":"orchestrator","kind":"claude","status":"working","title":"orchestrator: run"}` + "\n" +
-		`{"ref":"local/w1:p2","machine":"local","workspace_id":"w1","workspace_label":"alpha","tab_id":"w1:t1","pane_id":"local/w1:p2","name":"implementer-1","kind":"codex","status":"idle","title":"implementer: task"}` + "\n"
-	m := `{"ref":"m/p9","machine":"m","workspace_id":"w9","workspace_label":"pinar","tab_id":"w9:t1","pane_id":"m/p9","name":"researcher","kind":"grok","status":"working","title":"research: x"}` + "\n"
-	cli, err := fakecli.Install(t, dir, "herdr-soho", []fakecli.Rule{
-		{Argv: []string{"find", "--json"}, Stdout: local, Delay: 400},
-		{Argv: []string{"find", "--json", "--machine", "m"}, Stdout: m, Delay: 400},
+	local := boardSnapshotJSON("w1", "alpha", []boardSnapshotRow{
+		{paneID: "w1:p1", name: "orchestrator", agent: "claude", status: "working", title: "orchestrator: run"},
+		{paneID: "w1:p2", name: "implementer-1", agent: "codex", status: "idle", title: "implementer: task"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	herdr, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"m","enabled":true}]`}})
+	m := boardSnapshotJSON("w9", "pinar", []boardSnapshotRow{{paneID: "p9", name: "researcher", agent: "grok", status: "working", title: "research: x"}})
+	herdr, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Stdout: local, Delay: 400},
+		{Argv: []string{"--machine", "m", "api", "snapshot"}, Stdout: m, Delay: 400},
+		{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"m","enabled":true}]`},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,16 +695,16 @@ func TestBoardRefreshDuringLoadWaitsAndRunsOnce(t *testing.T) {
 	})
 	shutdown := make(chan os.Signal, 1)
 	finished := make(chan int, 1)
-	go func() { finished <- runBoardLoopWithSignals(env, "darwin", cli, input, output, false, shutdown) }()
+	go func() { finished <- runBoardLoopWithSignals(env, "darwin", herdr, input, output, false, shutdown) }()
 
-	findCalls := func() int {
-		calls, err := fakecli.ReadCalls(filepath.Join(dir, "herdr-soho.calls.jsonl"))
+	snapshotCalls := func() int {
+		calls, err := fakecli.ReadCalls(filepath.Join(dir, "herdr.calls.jsonl"))
 		if err != nil {
 			return 0
 		}
 		n := 0
 		for _, call := range calls {
-			if reflect.DeepEqual(call.Argv, []string{"find", "--json"}) {
+			if reflect.DeepEqual(call.Argv, []string{"api", "snapshot"}) {
 				n++
 			}
 		}
@@ -697,9 +718,9 @@ func TestBoardRefreshDuringLoadWaitsAndRunsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The in-flight load is not started again; the queued refresh runs
-	// exactly once after it ends: local finds go 1 -> 2, and stop there.
+	// exactly once after it ends: local snapshots go 1 -> 2, and stop there.
 	deadline := time.Now().Add(30 * time.Second) // generous: Windows process starts can be slow
-	for time.Now().Before(deadline) && findCalls() < 2 {
+	for time.Now().Before(deadline) && snapshotCalls() < 2 {
 		select {
 		case code := <-finished:
 			t.Fatalf("board exited while refreshing, code=%d", code)
@@ -707,15 +728,15 @@ func TestBoardRefreshDuringLoadWaitsAndRunsOnce(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if findCalls() != 2 {
-		t.Fatalf("local finds after a refresh during a load=%d want 2 (one coalesced, no duplicate)", findCalls())
+	if snapshotCalls() != 2 {
+		t.Fatalf("local snapshots after a refresh during a load=%d want 2 (one coalesced, no duplicate)", snapshotCalls())
 	}
 	time.Sleep(300 * time.Millisecond) // the single r is consumed: nothing more follows
-	if findCalls() != 2 {
-		t.Fatalf("local finds settled at %d want 2 (the queued refresh must not stack)", findCalls())
+	if snapshotCalls() != 2 {
+		t.Fatalf("local snapshots settled at %d want 2 (the queued refresh must not stack)", snapshotCalls())
 	}
 	data, _ := os.ReadFile(output.Name())
-	if !strings.Contains(string(data), "3 agents · 2 working · 1 idle · 09:45:30") || !strings.Contains(string(data), "m · pinar (w9)") {
+	if !strings.Contains(string(data), "3 agents · 2 working · 1 idle · 09:45:30") || !strings.Contains(string(data), "m/pinar/-") || !strings.Contains(string(data), "researcher") {
 		t.Fatalf("board after the coalesced refresh missing the fresh data in:\n%s", data)
 	}
 	if _, err := writer.Write([]byte("\x1b")); err != nil {
@@ -760,7 +781,9 @@ func TestBridgeBoardOpensBoardPane(t *testing.T) {
 	if err != nil || len(calls) != 2 {
 		t.Fatalf("herdr calls=%#v err=%v", calls, err)
 	}
-	want := []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "board", "--placement", "overlay", "--focus"}
+	// The board action is the compatibility alias of the unified picker:
+	// the supplied bridge opens the picker entrypoint for both.
+	want := []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "picker", "--focus"}
 	if !reflect.DeepEqual(calls[1].Argv, want) {
 		t.Fatalf("pane open argv=%#v want %#v", calls[1].Argv, want)
 	}
@@ -777,84 +800,92 @@ func TestBridgeUnknownActionListsBoard(t *testing.T) {
 	}
 }
 
-// boardStreamFixture installs two fake herdr-soho CLIs (one per load
-// generation, "a" and "b") plus the fake herdr machine list. Each remote
-// find of a generation blocks on its own release file (a WaitFile gate named
+// boardStreamFixture installs two fake herdr CLIs (one per load generation,
+// "a" and "b"); the machine list is the same for both. Each remote snapshot
+// of a generation blocks on its own release file (a WaitFile gate named
 // after the generation and the machine), so the test - not the wall clock -
 // fixes each load's arrival order. Load b's middle row uses the ref and name
-// given by the test.
-func boardStreamFixture(t *testing.T, middleBRef, middleBName string) (platform.Env, string, string, func(string, string) error) {
+// given by the test. It returns each generation's environment (HERDR_BIN_PATH
+// selects the generation's fake) and its call log.
+func boardStreamFixture(t *testing.T, middleBRef, middleBName string) (platform.Env, platform.Env, func(string, string) error, string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	gates := filepath.Join(dir, "gates")
 	if err := os.MkdirAll(gates, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	local := `{"ref":"local/w1:p1","machine":"local","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","name":"local","kind":"codex","status":"idle"}` + "\n"
+	localRows := []boardSnapshotRow{{paneID: "w1:p1", name: "local", agent: "codex", status: "idle"}}
 	mkRules := func(load string) []fakecli.Rule {
-		rules := []fakecli.Rule{{Argv: []string{"find", "--json"}, Stdout: local}}
+		rules := []fakecli.Rule{{Argv: []string{"api", "snapshot"}, Stdout: boardSnapshotJSON("w1", "alpha", localRows)}}
 		for _, machine := range []string{"slow", "fast", "middle"} {
 			ref, name := machine+"/w1:p1", machine
 			if machine == "middle" && load == "b" {
 				ref, name = middleBRef, middleBName
 			}
-			row := fmt.Sprintf(`{"ref":"%s","machine":"%s","workspace_id":"w1","tab_id":"w1:t1","pane_id":"%s","name":"%s","kind":"codex","status":"idle"}`+"\n", ref, machine, ref, name)
-			rules = append(rules, fakecli.Rule{Argv: []string{"find", "--json", "--machine", machine}, WaitFile: filepath.Join(gates, load+"-"+machine), Stdout: row})
+			row := boardSnapshotRow{paneID: strings.TrimPrefix(ref, machine+"/"), name: name, agent: "codex", status: "idle"}
+			rules = append(rules, fakecli.Rule{
+				Argv:     []string{"--machine", machine, "api", "snapshot"},
+				WaitFile: filepath.Join(gates, load+"-"+machine),
+				Stdout:   boardSnapshotJSON("w1", "alpha", []boardSnapshotRow{row}),
+			})
 		}
+		rules = append(rules, fakecli.Rule{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"slow","enabled":true},{"label":"fast","enabled":true},{"label":"middle","enabled":true}]`})
 		return rules
 	}
-	exeA, err := fakecli.Install(t, dir, "herdr-soho-a", mkRules("a"))
+	exeA, err := fakecli.Install(t, dir, "herdr-a", mkRules("a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	exeB, err := fakecli.Install(t, dir, "herdr-soho-b", mkRules("b"))
+	exeB, err := fakecli.Install(t, dir, "herdr-b", mkRules("b"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"slow","enabled":true},{"label":"fast","enabled":true},{"label":"middle","enabled":true}]`}}); err != nil {
-		t.Fatal(err)
-	}
-	env := platform.Env{}
-	for _, item := range fakecli.Env(testutil.CleanEnv(t), dir, fakecli.EnvOptions{IncludeBasePath: true}) {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
-			env[key] = value
-		}
-	}
-	env["HERDR_BIN_PATH"] = filepath.Join(dir, "herdr")
 	release := func(load, machine string) error {
 		return os.WriteFile(filepath.Join(gates, load+"-"+machine), []byte("go"), 0o644)
 	}
 	t.Cleanup(func() {
-		// Unblock finds still waiting after the test (a failed wait) so the
-		// fakes exit instead of polling their release file forever.
+		// Unblock snapshots still waiting after the test (a failed wait) so
+		// the fakes exit instead of polling their release file forever.
 		for _, load := range []string{"a", "b"} {
 			for _, machine := range []string{"slow", "fast", "middle"} {
 				_ = os.WriteFile(filepath.Join(gates, load+"-"+machine), []byte("go"), 0o644)
 			}
 		}
 	})
-	return env, exeA, exeB, release
+	return boardEnv(t, dir, exeA), boardEnv(t, dir, exeB), release, filepath.Join(dir, "herdr-a.calls.jsonl"), filepath.Join(dir, "herdr-b.calls.jsonl")
 }
 
 // boardRemoteGate returns the publish closure that starts the load's gate
-// releases once the loader reaches the remote finds (the publication with
-// the remote loading count set). It waits 150 ms first so every find is
-// already spawned and polling (the parent starts them back to back), then
-// releases the gates 250 ms apart: the fakes poll their release file every
-// 20 ms, so the arrival order is exactly `order`.
-func boardRemoteGate(t *testing.T, release func(string, string) error, load string, order []string, loaded *BoardState) func() {
+// releases once the load's first batch (the local snapshot) publishes. It
+// then waits until every remote snapshot has started (the generation's call
+// log holds the local snapshot, the machine list and the three remotes), so
+// the releases - not the spawn race - impose the arrival order; the
+// releases follow 250 ms apart in `order`.
+func boardRemoteGate(t *testing.T, release func(string, string) error, load string, order []string, loaded *BoardState, callsLog string) func() {
 	t.Helper()
 	started := false
 	return func() {
-		if started || loaded.LoadingLocal || loaded.Loading != 3 || len(loaded.Entries) == 0 {
+		if started || loaded.LoadingLocal || loaded.Loading != 1 || len(loaded.Entries) == 0 {
 			return
 		}
 		started = true
 		stop := make(chan struct{})
 		t.Cleanup(func() { close(stop) })
 		go func() {
-			time.Sleep(150 * time.Millisecond)
+			// Five calls in the log: the local snapshot, the machine list
+			// and the three remote snapshots.
+			deadline := time.Now().Add(30 * time.Second)
+			for time.Now().Before(deadline) {
+				calls, err := fakecli.ReadCalls(callsLog)
+				if err == nil && len(calls) >= 5 {
+					break
+				}
+				select {
+				case <-stop:
+					return
+				case <-time.After(20 * time.Millisecond):
+				}
+			}
 			for i, machine := range order {
 				if i > 0 {
 					select {
@@ -891,11 +922,11 @@ func boardRefs(list []PickerEntry) []string {
 // not a row index, load b re-arriving the machines in another order - across
 // the whole refresh, and Enter still copies it.
 func TestBoardStreamingSelectionKeepsSelectedRef(t *testing.T) {
-	env, exeA, exeB, release := boardStreamFixture(t, "middle/w1:p1", "middle")
+	envA, envB, release, logA, logB := boardStreamFixture(t, "middle/w1:p1", "middle")
 	// Load 1 (open): arrival fast, middle, slow.
 	live := NewBoardState()
-	gateA := boardRemoteGate(t, release, "a", []string{"fast", "middle", "slow"}, live)
-	loadBoardEntries(contextpkg.Background(), live, exeA, env, platform.Current(), gateA)
+	gateA := boardRemoteGate(t, release, "a", []string{"fast", "middle", "slow"}, live, logA)
+	loadBoardEntries(contextpkg.Background(), live, envA, platform.Current(), gateA)
 	list := live.visible()
 	middle := -1
 	for i, entry := range list {
@@ -913,8 +944,8 @@ func TestBoardStreamingSelectionKeepsSelectedRef(t *testing.T) {
 	// row than in load 1.
 	loaded := NewBoardState()
 	pubs := 0
-	gateB := boardRemoteGate(t, release, "b", []string{"slow", "fast", "middle"}, loaded)
-	loadBoardEntries(contextpkg.Background(), loaded, exeB, env, platform.Current(), func() {
+	gateB := boardRemoteGate(t, release, "b", []string{"slow", "fast", "middle"}, loaded, logB)
+	loadBoardEntries(contextpkg.Background(), loaded, envB, platform.Current(), func() {
 		pubs++
 		gateB()
 		applyBoardUpdate(live, cloneBoardState(loaded))
@@ -945,10 +976,10 @@ func TestBoardStreamingSelectionKeepsSelectedRef(t *testing.T) {
 	if live.Selected != wantIdx {
 		t.Fatalf("selection=%d want %d (the ref moved across rows; the selection must follow the ref)", live.Selected, wantIdx)
 	}
-	live.ApplyKey("enter")
+	live.ApplyKey("c")
 	after := pickerString(live.LastEntry["ref"])
 	if before != "middle/w1:p1" || after != "middle/w1:p1" {
-		t.Fatalf("Enter copied %q want middle/w1:p1 (before=%q)", after, before)
+		t.Fatalf("c copied %q want middle/w1:p1 (before=%q)", after, before)
 	}
 }
 
@@ -957,10 +988,10 @@ func TestBoardStreamingSelectionKeepsSelectedRef(t *testing.T) {
 // selection must not jump to the top while the load is incomplete; only the
 // complete load may do it.
 func TestBoardSelectionFallsToTopOnlyWhenTheLoadIsComplete(t *testing.T) {
-	env, exeA, exeB, release := boardStreamFixture(t, "middle/w2:p2", "middle-2")
+	envA, envB, release, logA, logB := boardStreamFixture(t, "middle/w2:p2", "middle-2")
 	live := NewBoardState()
-	gateA := boardRemoteGate(t, release, "a", []string{"fast", "middle", "slow"}, live)
-	loadBoardEntries(contextpkg.Background(), live, exeA, env, platform.Current(), gateA)
+	gateA := boardRemoteGate(t, release, "a", []string{"fast", "middle", "slow"}, live, logA)
+	loadBoardEntries(contextpkg.Background(), live, envA, platform.Current(), gateA)
 	list := live.visible()
 	middle := -1
 	for i, entry := range list {
@@ -975,8 +1006,8 @@ func TestBoardSelectionFallsToTopOnlyWhenTheLoadIsComplete(t *testing.T) {
 	loaded := NewBoardState()
 	pubs := 0
 	goneAt := -1
-	gateB := boardRemoteGate(t, release, "b", []string{"slow", "fast", "middle"}, loaded)
-	loadBoardEntries(contextpkg.Background(), loaded, exeB, env, platform.Current(), func() {
+	gateB := boardRemoteGate(t, release, "b", []string{"slow", "fast", "middle"}, loaded, logB)
+	loadBoardEntries(contextpkg.Background(), loaded, envB, platform.Current(), func() {
 		pubs++
 		gateB()
 		applyBoardUpdate(live, cloneBoardState(loaded))
@@ -1091,10 +1122,118 @@ func TestBoardArrowsStartFromThePinnedCursorAfterAFilter(t *testing.T) {
 			if got := cursorRef(s); got != tc.want {
 				t.Fatalf("cursor after %s on %q, want %q", tc.name, got, tc.want)
 			}
-			s.FeedChunk("\r")
+			s.FeedChunk("c")
 			if got := pickerString(s.LastEntry["ref"]); got != tc.want {
-				t.Fatalf("Enter copied %q, want %q", got, tc.want)
+				t.Fatalf("c copied %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// --- Navigation: state -----------------------------------------------------
+
+// TestBoardCtrlEnterNavigatesThePinnedRef: while a generation is running,
+// Ctrl+Enter must target the pinned ref - never the row the cursor index
+// happens to point at.
+func TestBoardCtrlEnterNavigatesThePinnedRef(t *testing.T) {
+	live := NewBoardState()
+	live.Entries = []PickerEntry{
+		boardEntry("local/a1", "local", "ws-a", "alpha", "orchestrator-1", "claude", "working", "one"),
+		boardEntry("local/a2", "local", "ws-a", "alpha", "implementer-1", "codex", "idle", "two"),
+	}
+	live.Selected = 0 // pin local/a1
+
+	update := NewBoardState()
+	update.Entries = []PickerEntry{
+		boardEntry("local/a3", "local", "ws-a", "alpha", "scouter-1", "grok", "idle", "three"),
+		boardEntry("local/a2", "local", "ws-a", "alpha", "implementer-1", "codex", "idle", "two"),
+		boardEntry("local/a1", "local", "ws-a", "alpha", "orchestrator-1", "claude", "working", "one"),
+	}
+	update.FinishedMachines = []string{"local"}
+	applyBoardUpdate(live, update)
+
+	if got := live.ApplyKey("ctrl-enter"); got != "navigate" || !live.NavPending {
+		t.Fatalf("ctrl-enter action=%q pending=%v", got, live.NavPending)
+	}
+	if ref := pickerString(live.NavTarget["ref"]); ref != "local/a1" {
+		t.Fatalf("nav target=%q want the pinned ref local/a1 (last row, not the first)", ref)
+	}
+	// Duplicate actions are rejected while the navigation is pending.
+	if got := live.ApplyKey("ctrl-enter"); got != "" {
+		t.Fatalf("second ctrl-enter while pending=%q", got)
+	}
+	if got := live.ApplyKey("enter"); got != "" || live.Copied != nil {
+		t.Fatalf("enter while pending: action=%q copied=%v", got, live.Copied)
+	}
+	// A refresh that lands while the navigation is pending keeps the
+	// frozen target.
+	update2 := NewBoardState()
+	update2.Entries = []PickerEntry{
+		boardEntry("local/a4", "local", "ws-b", "beta", "reviewer-1", "codex", "idle", "four"),
+	}
+	update2.FinishedMachines = []string{"local"}
+	applyBoardUpdate(live, update2)
+	if !live.NavPending || pickerString(live.NavTarget["ref"]) != "local/a1" {
+		t.Fatalf("refresh changed the frozen nav target: pending=%v target=%v", live.NavPending, live.NavTarget)
+	}
+}
+
+// TestBoardCtrlEnterPinnedRefGone: a pinned ref that left the visible list
+// while the load is running has no target row - no navigation, no exit.
+func TestBoardCtrlEnterPinnedRefGone(t *testing.T) {
+	live := NewBoardState()
+	live.Entries = []PickerEntry{
+		boardEntry("local/a1", "local", "ws-a", "alpha", "orchestrator-1", "claude", "working", "one"),
+		boardEntry("local/a2", "local", "ws-a", "alpha", "implementer-1", "codex", "idle", "two"),
+	}
+	live.Selected = 1 // pin local/a2
+
+	update := NewBoardState()
+	update.Entries = []PickerEntry{
+		boardEntry("local/a1", "local", "ws-a", "alpha", "orchestrator-1", "claude", "working", "one"),
+	}
+	update.FinishedMachines = []string{"local"}
+	applyBoardUpdate(live, update)
+
+	if got := live.ApplyKey("ctrl-enter"); got != "" || live.NavPending || live.Exit != "" {
+		t.Fatalf("ctrl-enter with pinned ref gone: action=%q pending=%v exit=%q", got, live.NavPending, live.Exit)
+	}
+}
+
+func TestBoardFeedChunkNavigationKeys(t *testing.T) {
+	two := func() *BoardState {
+		s := NewBoardState()
+		s.Entries = []PickerEntry{
+			boardEntry("local/a1", "local", "ws-a", "alpha", "orchestrator-1", "claude", "working", "one"),
+			boardEntry("local/a2", "local", "ws-a", "alpha", "implementer-1", "codex", "idle", "two"),
+		}
+		return s
+	}
+	if got := two().FeedChunk("\x1b[13;5u"); got != "navigate" {
+		t.Fatalf("kitty ctrl+enter=%q", got)
+	}
+	s := two()
+	s.FeedChunk("\x1b[27;5;1")
+	if got := s.FeedChunk("3~"); got != "navigate" {
+		t.Fatalf("modifyOtherKeys ctrl+enter=%q", got)
+	}
+	if got := two().FeedChunk("\r"); got != "navigate" {
+		t.Fatalf("legacy enter=%q", got)
+	}
+	if got := two().FeedChunk("\x12"); got != "update" {
+		t.Fatalf("legacy ctrl+r=%q", got)
+	}
+	if got := two().FeedChunk("\x1b[114;5u"); got != "update" {
+		t.Fatalf("enhanced ctrl+r=%q", got)
+	}
+	s = two()
+	s.FeedChunk("a")
+	if got := s.FeedChunk("\x1b[99;5u"); got != "esc" || s.Query != "a" {
+		t.Fatalf("ctrl+c: action=%q query=%q", got, s.Query)
+	}
+	q := two()
+	q.FeedChunk("a")
+	if got := q.FeedChunk("\x1b[?0u"); got != "" || q.Query != "a" {
+		t.Fatalf("kitty query reply: action=%q query=%q", got, q.Query)
 	}
 }

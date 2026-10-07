@@ -124,7 +124,7 @@ func TestSendPiInputBox(t *testing.T) {
 			t.Fatalf("the box message needs exactly one Enter: %d", enters)
 		}
 	})
-	t.Run("pi without two separator lines keeps today's whole-screen behavior", func(t *testing.T) {
+	t.Run("pi without two separator lines: the screen proof stays whole-screen and no Enter goes", func(t *testing.T) {
 		prompt := newPromptFixture(t)
 		plain := prompt + "\n" // the whole visible screen, no '─' lines at all
 		rules := []fakecli.Rule{
@@ -135,21 +135,21 @@ func TestSendPiInputBox(t *testing.T) {
 			{Argv: []string{"agent", "prompt", "w0test:p0a", prompt, "--wait", "--until", "working", "--until", "blocked", "--until", "idle", "--until", "done", "--timeout", "15000"}},
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 4, Stdout: agentJSONKind("pi", "idle", "1")},
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Call: 1, Delay: 5, Stdout: prompt + "\n"},
-			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: plain},
-			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 3, Stdout: plain},
+			// The window's visible read and the pre-Enter read: the same
+			// screen, no '─' lines — the screen proof keeps the marker held
+			// (whole screen), but there is no recognized composer, so no
+			// Enter goes.
+			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: plain},
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 5, Stdout: agentJSONKind("pi", "idle", "1")},
-			{Argv: []string{"agent", "send-keys", "w0test:p0a", "enter"}},
-			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 6, Stdout: agentJSONKind("pi", "working", "2")},
-			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 4, Stdout: "after prompt\n"},
 		}
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
+		if code != 15 || out != "" || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
-		if enters := countEnters(t, f); enters != 1 {
-			t.Fatalf("today's behavior sends one Enter from the last 15 lines: %d", enters)
+		if enters := countEnters(t, f); enters != 0 {
+			t.Fatalf("no Enter goes to a pi without the recognized box: %d", enters)
 		}
 	})
 	t.Run("a claude whose box is between borders proves like pi", func(t *testing.T) {
@@ -206,7 +206,7 @@ func TestSendPiInputBox(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if enters := countEnters(t, f); enters != 0 {
@@ -234,7 +234,7 @@ func TestSendPiInputBox(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if enters := countEnters(t, f); enters != 1 {

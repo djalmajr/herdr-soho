@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -156,4 +157,45 @@ func dispatchOutputField(t *testing.T, out, key string) (string, bool) {
 	}
 	value, ok := fields[key].(string)
 	return value, ok
+}
+
+func TestDispatchInvalidNativeBinaryPrecedesCompactAndState(t *testing.T) {
+	f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
+	f.env["HERDR_SOHO_BIN"] = filepath.Join(t.TempDir(), "missing-native-binary")
+	before := snapshotTree(t, f.state)
+	code, out, stderr := f.run(t, "worker", f.brief, "--compact", "--no-wait")
+	if code != 2 || out != "" || !strings.Contains(stderr, "HERDR_SOHO_BIN") {
+		t.Fatalf("invalid binary: code=%d out=%q stderr=%q", code, out, stderr)
+	}
+	calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("invalid binary interacted with the worker before refusal: %#v", calls)
+	}
+	after := snapshotTree(t, f.state)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("invalid binary mutated task state: before=%v after=%v", before, after)
+	}
+}
+
+func TestRunInvalidNativeBinaryPrecedesSpawn(t *testing.T) {
+	f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
+	f.env["HERDR_SOHO_BIN"] = filepath.Join(t.TempDir(), "missing-native-binary")
+	before := snapshotTree(t, f.state)
+	code, out, stderr := runIn(t, []string{"run", "implementer", f.brief, "--no-wait"}, f.env, f.root)
+	if code != 2 || out != "" || !strings.Contains(stderr, "HERDR_SOHO_BIN") {
+		t.Fatalf("invalid binary: code=%d out=%q stderr=%q", code, out, stderr)
+	}
+	calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("invalid binary opened or interacted with a worker: %#v", calls)
+	}
+	if after := snapshotTree(t, f.state); !reflect.DeepEqual(before, after) {
+		t.Fatalf("invalid binary mutated task state: before=%v after=%v", before, after)
+	}
 }

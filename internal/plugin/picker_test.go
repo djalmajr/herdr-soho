@@ -1,7 +1,10 @@
 package plugin_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -126,17 +129,16 @@ func TestPickerFunctionsMatchJSFixture(t *testing.T) {
 	}
 }
 
-func TestPickerPipeCopiesOnEnterAndEscClosesWithoutCopy(t *testing.T) {
-	// JS: "main: Enter copies via the platform tool and notifies; the screen shows the rows"
-	// Mutation captured: changing Enter/Esc outcomes copies the wrong row or returns without selecting the required action.
+func TestPickerPipeCopiesOnCAndEscClosesWithoutCopy(t *testing.T) {
+	// Copy follows the selected reference and leaves the picker open.
 	entries := pickerFixtureEntries(t, readPickerFixture(t))
 	state := plugin.NewPickerState()
 	state.Entries = entries
 	if got := state.FeedChunk("\x1b[B"); got != "" || state.Selected != 1 {
 		t.Fatalf("down action=%q selection=%d", got, state.Selected)
 	}
-	if got := state.FeedChunk("\r"); got != "copy" || state.Copied == nil || *state.Copied != "local/w14:pW (-, -, idle) /tmp/soho" {
-		t.Fatalf("enter result=%q copy=%v", got, state.Copied)
+	if got := state.FeedChunk("c"); got != "copy" || state.Copied == nil || *state.Copied != "local/w14:pW" || state.Exit != "" {
+		t.Fatalf("c result=%q copy=%v exit=%q", got, state.Copied, state.Exit)
 	}
 	esc := plugin.NewPickerState()
 	esc.Entries = entries
@@ -146,17 +148,16 @@ func TestPickerPipeCopiesOnEnterAndEscClosesWithoutCopy(t *testing.T) {
 	}
 }
 
-func TestPickerCommandPipeLoadsFindAndCopiesSelectedEntry(t *testing.T) {
-	// JS: "main: Enter copies via the platform tool and notifies; the screen shows the rows"
-	// Mutation captured: changing find inputs, selected row, clipboard stdin or notification effect breaks the pipe flow.
+func TestPickerCommandPipeLoadsSnapshotsAndCopiesSelectedEntry(t *testing.T) {
+	// Exercise discovery, row selection and the exact clipboard bytes together.
 	dir := t.TempDir()
-	local := "{\"ref\":\"local/w1:p1\",\"machine\":\"local\",\"workspace_id\":\"w1\",\"tab_id\":\"w1:t1\",\"pane_id\":\"w1:p1\",\"name\":\"first\",\"kind\":\"codex\",\"status\":\"working\",\"workspace_label\":\"soho\",\"tab_label\":\"1\",\"cwd\":\"/tmp/first\"}\n"
-	remote := "{\"ref\":\"windows/w2:p1\",\"machine\":\"windows\",\"workspace_id\":\"w2\",\"tab_id\":\"w2:t1\",\"pane_id\":\"w2:p1\",\"name\":\"second\",\"kind\":\"claude\",\"status\":\"idle\",\"workspace_label\":\"pinar\",\"tab_label\":\"2\",\"cwd\":\"C:\\\\repo\"}\n"
-	cliPath, err := fakecli.Install(t, dir, "herdr-soho", []fakecli.Rule{{Argv: []string{"find", "--json"}, Stdout: local}, {Argv: []string{"find", "--json", "--machine", "windows"}, Stdout: remote}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"windows","enabled":true}]`}, {ArgvPrefix: true, Argv: []string{"notification", "show", "herdr-soho"}}})
+	local := `{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1","label":"soho"}],"tabs":[{"tab_id":"w1:t1","label":"1"}],"agents":[{"pane_id":"w1:p1","name":"first","agent":"codex","agent_status":"working","cwd":"/tmp/first"}],"panes":[{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1"}]}}}`
+	remote := `{"result":{"snapshot":{"workspaces":[{"workspace_id":"w2","label":"pinar"}],"tabs":[{"tab_id":"w2:t1","label":"2"}],"agents":[{"pane_id":"w2:p1","name":"second","agent":"claude","agent_status":"idle","cwd":"C:\\repo"}],"panes":[{"pane_id":"w2:p1","workspace_id":"w2","tab_id":"w2:t1"}]}}}`
+	herdr, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Stdout: local},
+		{Argv: []string{"machine", "list", "--json"}, Stdout: `[{"label":"windows","enabled":true}]`},
+		{Argv: []string{"--machine", "windows", "api", "snapshot"}, Stdout: remote},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestPickerCommandPipeLoadsFindAndCopiesSelectedEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := envWithFake(t, dir, map[string]string{"HERDR_BIN_PATH": filepath.Join(dir, "herdr")})
+	env := envWithFake(t, dir, map[string]string{"HERDR_BIN_PATH": herdr})
 	input, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +179,7 @@ func TestPickerCommandPipeLoadsFindAndCopiesSelectedEntry(t *testing.T) {
 	os.Stdin, os.Stdout = input, output
 	t.Cleanup(func() { os.Stdin, os.Stdout = oldIn, oldOut; _ = input.Close(); _ = writer.Close(); _ = output.Close() })
 	finished := make(chan int, 1)
-	go func() { finished <- plugin.RunPicker(env, platform.Current(), cliPath) }()
+	go func() { finished <- plugin.RunPicker(env, platform.Current(), herdr) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		screen, _ := os.ReadFile(output.Name())
@@ -187,7 +188,7 @@ func TestPickerCommandPipeLoadsFindAndCopiesSelectedEntry(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err = writer.Write([]byte("\x1b[B\r")); err != nil {
+	if _, err = writer.Write([]byte("\x1b[Bc")); err != nil {
 		t.Fatal(err)
 	}
 	if err = writer.Close(); err != nil {
@@ -211,33 +212,40 @@ func TestPickerCommandPipeLoadsFindAndCopiesSelectedEntry(t *testing.T) {
 	if !strings.Contains(string(screen), "windows/w2:p1") {
 		t.Fatalf("picker screen did not render the remote row: %q", screen)
 	}
-	findCalls, err := fakecli.ReadCallsForConfig(filepath.Join(dir, "herdr-soho.json"))
-	if err != nil || len(findCalls) != 2 || !reflect.DeepEqual(findCalls[0].Argv, []string{"find", "--json"}) || !reflect.DeepEqual(findCalls[1].Argv, []string{"find", "--json", "--machine", "windows"}) {
-		t.Fatalf("find calls=%#v err=%v", findCalls, err)
-	}
 	clipCalls, err := fakecli.ReadCallsForConfig(filepath.Join(dir, clipboard+".json"))
-	if err != nil || len(clipCalls) != 1 || clipCalls[0].Stdin != "windows/w2:p1 (second, claude, idle) C:\\repo" {
+	if err != nil || len(clipCalls) != 1 || clipCalls[0].Stdin != "windows/w2:p1" {
 		t.Fatalf("clipboard calls=%#v err=%v", clipCalls, err)
 	}
+	// The discovery runs the herdr CLI directly: the local snapshot before
+	// the machine list, then the remote snapshot. Copy needs no notification RPC.
 	herdrCalls, err := fakecli.ReadCallsForConfig(filepath.Join(dir, "herdr.json"))
-	if err != nil || len(herdrCalls) != 2 || !reflect.DeepEqual(herdrCalls[1].Argv, []string{"notification", "show", "herdr-soho", "--body", "copied windows/w2:p1", "--sound", "none"}) {
+	if err != nil || len(herdrCalls) != 3 {
 		t.Fatalf("Herdr calls=%#v err=%v", herdrCalls, err)
+	}
+	wantArgv := [][]string{
+		{"api", "snapshot"},
+		{"machine", "list", "--json"},
+		{"--machine", "windows", "api", "snapshot"},
+	}
+	for i, want := range wantArgv {
+		if !reflect.DeepEqual(herdrCalls[i].Argv, want) {
+			t.Fatalf("Herdr call %d argv=%#v want %#v", i, herdrCalls[i].Argv, want)
+		}
 	}
 }
 
-func TestPickerPipeEscapeCancelsSlowFindAndNeverCopies(t *testing.T) {
+func TestPickerPipeEscapeCancelsSlowSnapshotAndNeverCopies(t *testing.T) {
 	// JS: "main: Esc during a slow remote load exits without copying and kills the loads"
-	// Mutation captured: waiting for a find before reading input keeps Esc blocked until the slow child ends.
+	// Mutation captured: waiting for the snapshot before reading input keeps Esc blocked until the slow child ends.
 	dir := t.TempDir()
-	cliPath, err := fakecli.Install(t, dir, "herdr-soho", []fakecli.Rule{{Argv: []string{"find", "--json"}, Delay: 8000}})
+	herdr, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Delay: 8000},
+		{Argv: []string{"machine", "list", "--json"}, Stdout: "[]"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"machine", "list", "--json"}, Stdout: "[]"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := envWithFake(t, dir, map[string]string{"HERDR_BIN_PATH": filepath.Join(dir, "herdr")})
+	env := envWithFake(t, dir, map[string]string{"HERDR_BIN_PATH": herdr})
 	input, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -251,8 +259,8 @@ func TestPickerPipeEscapeCancelsSlowFindAndNeverCopies(t *testing.T) {
 	t.Cleanup(func() { os.Stdin, os.Stdout = oldIn, oldOut; _ = input.Close(); _ = writer.Close(); _ = output.Close() })
 	started := time.Now()
 	done := make(chan int, 1)
-	go func() { done <- plugin.RunPicker(env, platform.Current(), cliPath) }()
-	logPath := filepath.Join(dir, "herdr-soho.calls.jsonl")
+	go func() { done <- plugin.RunPicker(env, platform.Current(), herdr) }()
+	logPath := filepath.Join(dir, "herdr.calls.jsonl")
 	deadline := time.Now().Add(time.Second)
 	for {
 		if _, err := os.Stat(logPath); err == nil {
@@ -261,7 +269,7 @@ func TestPickerPipeEscapeCancelsSlowFindAndNeverCopies(t *testing.T) {
 		if time.Now().After(deadline) {
 			_, _ = writer.Write([]byte("\x1b"))
 			<-done
-			t.Fatalf("find call did not start before timeout: %v", time.Since(started))
+			t.Fatalf("snapshot call did not start before timeout: %v", time.Since(started))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -272,13 +280,521 @@ func TestPickerPipeEscapeCancelsSlowFindAndNeverCopies(t *testing.T) {
 		t.Fatalf("picker code=%d", code)
 	}
 	if time.Since(started) > time.Second {
-		t.Fatalf("Esc waited for the slow find: %s", time.Since(started))
+		t.Fatalf("Esc waited for the slow snapshot: %s", time.Since(started))
 	}
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(dir, "herdr-soho.json"))
-	if err != nil || len(calls) != 1 || !reflect.DeepEqual(calls[0].Argv, []string{"find", "--json"}) {
-		t.Fatalf("find calls=%#v err=%v", calls, err)
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(dir, "herdr.json"))
+	if err != nil || len(calls) != 1 || !reflect.DeepEqual(calls[0].Argv, []string{"api", "snapshot"}) {
+		t.Fatalf("snapshot calls=%#v err=%v", calls, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "pbcopy.calls.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("Esc invoked clipboard: %v", err)
+	}
+}
+
+// --- Navigation: keyboard decoding ---------------------------------------
+
+func TestPickerFeedChunkCtrlEnterEncodings(t *testing.T) {
+	entries := pickerFixtureEntries(t, readPickerFixture(t))
+	// Kitty encoding, fragmented one rune per FeedChunk call.
+	feed := plugin.NewPickerState()
+	feed.Entries = entries
+	feed.Selected = 1
+	var result string
+	for _, r := range []rune{'\x1b', '[', '1', '3', ';', '5', 'u'} {
+		result = feed.FeedChunk(string(r))
+	}
+	if result != "navigate" || !feed.NavPending || feed.Copied != nil || feed.Exit != "" {
+		t.Fatalf("kitty ctrl+enter: action=%q pending=%v copied=%v exit=%q", result, feed.NavPending, feed.Copied, feed.Exit)
+	}
+	wantRef, _ := entries[1]["ref"].(string)
+	gotRef, _ := feed.NavTarget["ref"].(string)
+	if gotRef != wantRef {
+		t.Fatalf("nav target ref=%q want %q", gotRef, wantRef)
+	}
+	// modifyOtherKeys encoding, fragmented across arbitrary chunks.
+	omod := plugin.NewPickerState()
+	omod.Entries = entries
+	omod.Selected = 2
+	omod.FeedChunk("\x1b[27")
+	omod.FeedChunk(";5;13")
+	if got := omod.FeedChunk("~"); got != "navigate" || !omod.NavPending {
+		t.Fatalf("modifyOtherKeys ctrl+enter: action=%q pending=%v", got, omod.NavPending)
+	}
+}
+
+func TestPickerFeedChunkKeyEncodings(t *testing.T) {
+	entries := pickerFixtureEntries(t, readPickerFixture(t))
+	check := func(name, chunk string, wantAction, wantQuery, wantExit string) {
+		t.Helper()
+		s := plugin.NewPickerState()
+		s.Entries = entries
+		got := s.FeedChunk(chunk)
+		if got != wantAction || s.Query != wantQuery || s.Exit != wantExit {
+			t.Errorf("%s: action=%q query=%q exit=%q want %q/%q/%q", name, got, s.Query, s.Exit, wantAction, wantQuery, wantExit)
+		}
+	}
+	check("legacy enter navigates", "\r", "navigate", "", "")
+	check("c copies the selected row", "c", "copy", "", "")
+	check("encoded enter navigates", "\x1b[13u", "navigate", "", "")
+	check("encoded escape closes", "\x1b[27u", "esc", "", "esc")
+	check("encoded ctrl+c closes", "\x1b[99;5u", "esc", "", "esc")
+	check("ctrl+c release is ignored", "\x1b[99;5:3u", "", "", "")
+	check("ctrl+c with Num Lock closes", "\x1b[99;133u", "esc", "", "esc")
+	check("plain encoded escape closes", "\x1b[27;1u", "esc", "", "esc")
+	check("alt enter is not copy", "\x1b[13;3u", "", "", "")
+	check("shift+alt enter is not ctrl enter", "\x1b[13;4u", "", "", "")
+	check("enter release is ignored", "\x1b[13;1:3u", "", "", "")
+	check("plain c copies with Num Lock", "\x1b[99;129u", "copy", "", "")
+	check("modified text key is not typed", "\x1b[97;5u", "", "", "")
+	check("unknown csi is not typed", "\x1b[1;2q", "", "", "")
+	check("legacy backspace", "a\x7f", "", "", "")
+	check("legacy ctrl+r is ignored by the picker", "\x12", "", "", "")
+	// A parameter stream longer than the decoder cap is dropped without
+	// growing unbounded, and the decoder recovers (no stuck pending, input
+	// alive again).
+	long := "\x1b[" + strings.Repeat("1", 40) + "u"
+	s := plugin.NewPickerState()
+	s.Entries = entries
+	s.FeedChunk(long)
+	if s.Query != "" {
+		t.Fatalf("oversized CSI leaked into search: %q", s.Query)
+	}
+	if s.CSIPending || s.EscPending {
+		t.Errorf("decoder stuck after csi cap: pending=%v", s.CSIPending)
+	}
+	if got := s.FeedChunk("a"); got != "" || !strings.HasSuffix(s.Query, "a") {
+		t.Errorf("after csi cap: action=%q query=%q", got, s.Query)
+	}
+	// The kitty query reply (CSI ? 0 u) is not typed either.
+	q := plugin.NewPickerState()
+	q.Entries = entries
+	q.FeedChunk("\x1b[?0u")
+	if q.Query != "" {
+		t.Errorf("query reply leaked into search: %q", q.Query)
+	}
+}
+
+func TestPickerCtrlEnterStateAndPendingGating(t *testing.T) {
+	entries := pickerFixtureEntries(t, readPickerFixture(t))
+	s := plugin.NewPickerState()
+	s.Entries = entries
+	s.Selected = 1
+	if got := s.FeedChunk("\x1b[13;5u"); got != "navigate" {
+		t.Fatalf("ctrl+enter action=%q", got)
+	}
+	if !s.NavPending || s.Copied != nil || s.Exit != "" {
+		t.Fatalf("pending=%v copied=%v exit=%q want pending without copy/exit", s.NavPending, s.Copied, s.Exit)
+	}
+	if got := s.ApplyKey("ctrl-enter"); got != "" {
+		t.Fatalf("second ctrl-enter while pending=%q", got)
+	}
+	if got := s.ApplyKey("enter"); got != "" || s.Copied != nil {
+		t.Fatalf("enter while pending: action=%q copied=%v", got, s.Copied)
+	}
+	// Esc stays responsive while a navigation is in flight.
+	if got := s.ApplyKey("esc"); got != "esc" || s.Exit != "esc" {
+		t.Fatalf("esc while pending: action=%q exit=%q", got, s.Exit)
+	}
+}
+
+func TestPickerTerminalKeyboardProtocolLifecycle(t *testing.T) {
+	var order []string
+	rawOK := func() (func() error, error) {
+		return func() error { order = append(order, "restore"); return nil }, nil
+	}
+	out := &bytes.Buffer{}
+	code := plugin.PickerTerminal(true, rawOK, out, func() int {
+		order = append(order, "run")
+		return 0
+	})
+	if code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	written := out.String()
+	push := strings.Index(written, "\x1b[>1u")
+	pop := strings.Index(written, "\x1b[<u")
+	cursor := strings.Index(written, "\x1b[?25h")
+	if push < 0 || pop < 0 || push > pop {
+		t.Fatalf("push/pop order: %q", written)
+	}
+	if pop >= cursor {
+		t.Fatalf("pop must precede the cursor show: %q", written)
+	}
+	if !reflect.DeepEqual(order, []string{"run", "restore"}) {
+		t.Fatalf("order=%v want [run restore]", order)
+	}
+
+	// Raw mode failure: nothing is written and the code is 1.
+	failed := &bytes.Buffer{}
+	code = plugin.PickerTerminal(true, func() (func() error, error) { return nil, errors.New("raw down") }, failed, func() int {
+		t.Fatalf("run must not start without raw mode")
+		return 0
+	})
+	if code != 1 || failed.Len() != 0 {
+		t.Fatalf("code=%d written=%q", code, failed.String())
+	}
+
+	// Panic: the pop is written and the original panic is re-raised.
+	out2 := &bytes.Buffer{}
+	repanicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				repanicked = r == "boom"
+			}
+		}()
+		plugin.PickerTerminal(true, rawOK, out2, func() int { panic("boom") })
+	}()
+	if !repanicked {
+		t.Fatalf("original panic not re-raised")
+	}
+	if !strings.Contains(out2.String(), "\x1b[<u") {
+		t.Fatalf("pop missing on panic: %q", out2.String())
+	}
+}
+
+// --- Navigation: engine ----------------------------------------------------
+
+func navSnapshotStdout(t *testing.T, focusedPane, focusedTab, focusedWS string, agents, panes, layouts []any) string {
+	t.Helper()
+	snap := map[string]any{
+		"focused_pane_id":      focusedPane,
+		"focused_tab_id":       focusedTab,
+		"focused_workspace_id": focusedWS,
+		"agents":               agents,
+		"panes":                panes,
+		"layouts":              layouts,
+		"workspaces":           []any{},
+		"tabs":                 []any{},
+	}
+	data, err := json.Marshal(map[string]any{"result": map[string]any{"type": "session_snapshot", "snapshot": snap}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func navEntry(ref, machine, paneID string) plugin.PickerEntry {
+	return plugin.PickerEntry{"ref": ref, "machine": machine, "pane_id": paneID}
+}
+
+func assertNavArgvOrder(t *testing.T, d string, want [][]string) {
+	t.Helper()
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(d, "herdr.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != len(want) {
+		t.Fatalf("calls=%d want %d: %+v", len(calls), len(want), calls)
+	}
+	for i, c := range calls {
+		if !reflect.DeepEqual(c.Argv, want[i]) {
+			t.Fatalf("call %d argv=%v want %v", i, c.Argv, want[i])
+		}
+	}
+}
+
+func TestPickerNavigationAgentFocusLocal(t *testing.T) {
+	d := t.TempDir()
+	panes := []any{
+		map[string]any{"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "w1:t1"},
+		map[string]any{"pane_id": "w1:p9", "workspace_id": "w1", "tab_id": "w1:t1"},
+	}
+	agents := []any{map[string]any{"pane_id": "w1:p1", "name": "alpha", "agent": "codex", "agent_status": "working"}}
+	fresh := navSnapshotStdout(t, "w1:p9", "w1:t1", "w1", agents, panes, nil)
+	verified := navSnapshotStdout(t, "w1:p1", "w1:t1", "w1", agents, panes, nil)
+	herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Call: 1, Stdout: fresh},
+		{Argv: []string{"agent", "focus", "w1:p1"}, Stdout: `{"result":{"type":"agent_info","agent":{"pane_id":"w1:p1","focused":true}}}`},
+		{Argv: []string{"api", "snapshot"}, Call: 2, Stdout: verified},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+	res := plugin.NavigateSelection(context.Background(), navEntry("local/w1:p1", "local", "w1:p1"), env, platform.Current())
+	if !res.OK || res.Remote {
+		t.Fatalf("nav=%+v", res)
+	}
+	assertNavArgvOrder(t, d, [][]string{{"api", "snapshot"}, {"agent", "focus", "w1:p1"}, {"api", "snapshot"}})
+}
+
+func TestPickerNavigationRemoteArgvAndNote(t *testing.T) {
+	d := t.TempDir()
+	panes := []any{map[string]any{"pane_id": "w2:p1", "workspace_id": "w2", "tab_id": "w2:t1"}}
+	agents := []any{map[string]any{"pane_id": "w2:p1", "name": "beta", "agent": "claude", "agent_status": "idle"}}
+	fresh := navSnapshotStdout(t, "w2:p9", "w2:t1", "w2", agents, panes, nil)
+	verified := navSnapshotStdout(t, "w2:p1", "w2:t1", "w2", agents, panes, nil)
+	herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{
+		{Argv: []string{"--machine", "windows", "api", "snapshot"}, Call: 1, Stdout: fresh},
+		{Argv: []string{"--machine", "windows", "agent", "focus", "w2:p1"}, Stdout: `{"result":{"type":"agent_info","agent":{"pane_id":"w2:p1","focused":true}}}`},
+		{Argv: []string{"--machine", "windows", "api", "snapshot"}, Call: 2, Stdout: verified},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+	res := plugin.NavigateSelection(context.Background(), navEntry("windows/w2:p1", "windows", "w2:p1"), env, platform.Current())
+	if !res.OK || !res.Remote {
+		t.Fatalf("nav=%+v", res)
+	}
+	if !strings.Contains(res.Note, "focused windows/w2:p1 on machine windows") || !strings.Contains(res.Note, "the local client still shows its current machine") {
+		t.Fatalf("note=%q", res.Note)
+	}
+	assertNavArgvOrder(t, d, [][]string{
+		{"--machine", "windows", "api", "snapshot"},
+		{"--machine", "windows", "agent", "focus", "w2:p1"},
+		{"--machine", "windows", "api", "snapshot"},
+	})
+}
+
+func TestPickerNavigationVanishedTargetStopsBeforeFocus(t *testing.T) {
+	d := t.TempDir()
+	panes := []any{map[string]any{"pane_id": "w1:p9", "workspace_id": "w1", "tab_id": "w1:t1"}}
+	fresh := navSnapshotStdout(t, "w1:p9", "w1:t1", "w1", nil, panes, nil)
+	herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{{Argv: []string{"api", "snapshot"}, Stdout: fresh}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+	res := plugin.NavigateSelection(context.Background(), navEntry("local/w1:p1", "local", "w1:p1"), env, platform.Current())
+	if res.OK || res.Cause == "" {
+		t.Fatalf("nav=%+v want a failure", res)
+	}
+	assertNavArgvOrder(t, d, [][]string{{"api", "snapshot"}})
+}
+
+func TestPickerNavigationRejectsStaleOrMalformedSnapshot(t *testing.T) {
+	cases := map[string]string{
+		"wrong type":   `{"result":{"type":"agent_info","snapshot":{"panes":[]}}}`,
+		"missing type": `{"result":{"snapshot":{"panes":[]}}}`,
+		"not json":     `not json at all`,
+		"no result":    `{}`,
+	}
+	entry := navEntry("local/w1:p1", "local", "w1:p1")
+	for name, stdout := range cases {
+		t.Run(name, func(t *testing.T) {
+			d := t.TempDir()
+			herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{{Argv: []string{"api", "snapshot"}, Stdout: stdout}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+			res := plugin.NavigateSelection(context.Background(), entry, env, platform.Current())
+			if res.OK || res.Cause == "" {
+				t.Fatalf("nav=%+v want a failure", res)
+			}
+			calls, err := fakecli.ReadCallsForConfig(filepath.Join(d, "herdr.json"))
+			if err != nil || len(calls) != 1 {
+				t.Fatalf("calls=%+v err=%v want exactly one snapshot call", calls, err)
+			}
+		})
+	}
+}
+
+func TestPickerNavigationWrongFinalFocusFails(t *testing.T) {
+	d := t.TempDir()
+	panes := []any{
+		map[string]any{"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "w1:t1"},
+		map[string]any{"pane_id": "w1:p9", "workspace_id": "w1", "tab_id": "w1:t1"},
+	}
+	agents := []any{map[string]any{"pane_id": "w1:p1", "name": "alpha", "agent": "codex", "agent_status": "working"}}
+	fresh := navSnapshotStdout(t, "w1:p9", "w1:t1", "w1", agents, panes, nil)
+	stale := navSnapshotStdout(t, "w1:p9", "w1:t1", "w1", agents, panes, nil) // focus did not stick
+	herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Call: 1, Stdout: fresh},
+		{Argv: []string{"agent", "focus", "w1:p1"}, Stdout: `{"result":{"type":"agent_info","agent":{"pane_id":"w1:p1","focused":true}}}`},
+		{Argv: []string{"api", "snapshot"}, Call: 2, Stdout: stale},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+	res := plugin.NavigateSelection(context.Background(), navEntry("local/w1:p1", "local", "w1:p1"), env, platform.Current())
+	if res.OK {
+		t.Fatalf("nav=%+v want a failure", res)
+	}
+	assertNavArgvOrder(t, d, [][]string{{"api", "snapshot"}, {"agent", "focus", "w1:p1"}, {"api", "snapshot"}})
+}
+
+func navShellLayout(t *testing.T, focusedPane string) string {
+	t.Helper()
+	panes := []any{
+		map[string]any{"pane_id": "w1:p2", "workspace_id": "w1", "tab_id": "w1:t1"},
+		map[string]any{"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "w1:t1"},
+		map[string]any{"pane_id": "w1:p3", "workspace_id": "w1", "tab_id": "w1:t1"},
+	}
+	layouts := []any{map[string]any{"tab_id": "w1:t1", "panes": []any{
+		map[string]any{"pane_id": "w1:p2", "rect": map[string]any{"x": 0.0, "y": 0.0, "width": 80.0, "height": 24.0}},
+		map[string]any{"pane_id": "w1:p1", "rect": map[string]any{"x": 80.0, "y": 0.0, "width": 80.0, "height": 24.0}},
+		map[string]any{"pane_id": "w1:p3", "rect": map[string]any{"x": 0.0, "y": 24.0, "width": 160.0, "height": 24.0}},
+	}}}
+	return navSnapshotStdout(t, focusedPane, "w1:t1", "w1", nil, panes, layouts)
+}
+
+// navShellLayout: the shell target w1:p1 is on the right of w1:p2 and
+// above w1:p3, so the verified candidates are (p2, right) then (p3, up).
+func TestPickerNavigationShellPaneUsesVerifiedNeighbor(t *testing.T) {
+	d := t.TempDir()
+	fresh := navShellLayout(t, "w1:p3")
+	verified := navShellLayout(t, "w1:p1")
+	herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Call: 1, Stdout: fresh},
+		{Argv: []string{"pane", "neighbor", "--direction", "right", "--pane", "w1:p2"}, Stdout: `{"result":{"type":"pane_neighbor","neighbor":{"neighbor_pane_id":"w1:p1"}}}`},
+		{Argv: []string{"pane", "focus", "--pane", "w1:p2", "--direction", "right"}, Stdout: `{"result":{"type":"pane_focus","focus":{"focused_pane_id":"w1:p1"}}}`},
+		{Argv: []string{"api", "snapshot"}, Call: 2, Stdout: verified},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+	res := plugin.NavigateSelection(context.Background(), navEntry("local/w1:p1", "local", "w1:p1"), env, platform.Current())
+	if !res.OK || res.Remote {
+		t.Fatalf("nav=%+v", res)
+	}
+	assertNavArgvOrder(t, d, [][]string{
+		{"api", "snapshot"},
+		{"pane", "neighbor", "--direction", "right", "--pane", "w1:p2"},
+		{"pane", "focus", "--pane", "w1:p2", "--direction", "right"},
+		{"api", "snapshot"},
+	})
+}
+
+func TestPickerNavigationSkipsUnverifiedNeighbor(t *testing.T) {
+	d := t.TempDir()
+	fresh := navShellLayout(t, "w1:p3")
+	verified := navShellLayout(t, "w1:p1")
+	herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Call: 1, Stdout: fresh},
+		{Argv: []string{"pane", "neighbor", "--direction", "right", "--pane", "w1:p2"}, Stdout: `{"result":{"type":"pane_neighbor","neighbor":{"neighbor_pane_id":"w1:p9"}}}`},
+		{Argv: []string{"pane", "neighbor", "--direction", "up", "--pane", "w1:p3"}, Stdout: `{"result":{"type":"pane_neighbor","neighbor":{"neighbor_pane_id":"w1:p1"}}}`},
+		{Argv: []string{"pane", "focus", "--pane", "w1:p3", "--direction", "up"}, Stdout: `{"result":{"type":"pane_focus","focus":{"focused_pane_id":"w1:p1"}}}`},
+		{Argv: []string{"api", "snapshot"}, Call: 2, Stdout: verified},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+	res := plugin.NavigateSelection(context.Background(), navEntry("local/w1:p1", "local", "w1:p1"), env, platform.Current())
+	if !res.OK {
+		t.Fatalf("nav=%+v", res)
+	}
+	assertNavArgvOrder(t, d, [][]string{
+		{"api", "snapshot"},
+		{"pane", "neighbor", "--direction", "right", "--pane", "w1:p2"},
+		{"pane", "neighbor", "--direction", "up", "--pane", "w1:p3"},
+		{"pane", "focus", "--pane", "w1:p3", "--direction", "up"},
+		{"api", "snapshot"},
+	})
+}
+
+func TestPickerNavigationNoVerifiedNeighborFails(t *testing.T) {
+	d := t.TempDir()
+	fresh := navShellLayout(t, "w1:p3")
+	herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Call: 1, Stdout: fresh},
+		{Argv: []string{"pane", "neighbor", "--direction", "right", "--pane", "w1:p2"}, Stdout: `{"result":{"type":"pane_neighbor","neighbor":{"neighbor_pane_id":"w1:p9"}}}`},
+		{Argv: []string{"pane", "neighbor", "--direction", "up", "--pane", "w1:p3"}, Stdout: `{"result":{"type":"pane_neighbor","neighbor":{"neighbor_pane_id":"w1:p9"}}}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+	res := plugin.NavigateSelection(context.Background(), navEntry("local/w1:p1", "local", "w1:p1"), env, platform.Current())
+	if res.OK || res.Cause == "" {
+		t.Fatalf("nav=%+v want a failure", res)
+	}
+	assertNavArgvOrder(t, d, [][]string{
+		{"api", "snapshot"},
+		{"pane", "neighbor", "--direction", "right", "--pane", "w1:p2"},
+		{"pane", "neighbor", "--direction", "up", "--pane", "w1:p3"},
+	})
+}
+
+func TestPickerNavigationSinglePaneTabUsesTabFocus(t *testing.T) {
+	d := t.TempDir()
+	panes := []any{map[string]any{"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "w1:t9"}}
+	layouts := []any{map[string]any{"tab_id": "w1:t9", "panes": []any{
+		map[string]any{"pane_id": "w1:p1", "rect": map[string]any{"x": 0.0, "y": 0.0, "width": 120.0, "height": 30.0}},
+	}}}
+	fresh := navSnapshotStdout(t, "w1:p2", "w1:t1", "w1", nil, panes, layouts)
+	verified := navSnapshotStdout(t, "w1:p1", "w1:t9", "w1", nil, panes, layouts)
+	herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Call: 1, Stdout: fresh},
+		{Argv: []string{"tab", "focus", "w1:t9"}, Stdout: `{"result":{"type":"tab_info","tab":{"tab_id":"w1:t9","focused":true}}}`},
+		{Argv: []string{"api", "snapshot"}, Call: 2, Stdout: verified},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+	res := plugin.NavigateSelection(context.Background(), navEntry("local/w1:p1", "local", "w1:p1"), env, platform.Current())
+	if !res.OK {
+		t.Fatalf("nav=%+v", res)
+	}
+	assertNavArgvOrder(t, d, [][]string{
+		{"api", "snapshot"},
+		{"tab", "focus", "w1:t9"},
+		{"api", "snapshot"},
+	})
+}
+
+func TestPickerNavigationDeadlineAndCancellation(t *testing.T) {
+	entry := navEntry("local/w1:p1", "local", "w1:p1")
+	d := t.TempDir()
+	herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{{Argv: []string{"api", "snapshot"}, Delay: 6000, Stdout: "{}"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+	start := time.Now()
+	res := plugin.NavigateSelection(context.Background(), entry, env, platform.Current())
+	elapsed := time.Since(start)
+	if res.OK {
+		t.Fatalf("nav=%+v want a failure", res)
+	}
+	if elapsed < 4500*time.Millisecond || elapsed > 8000*time.Millisecond {
+		t.Fatalf("elapsed=%v want ~5s", elapsed)
+	}
+	if !strings.Contains(res.Cause, "deadline") {
+		t.Fatalf("cause=%q", res.Cause)
+	}
+
+	d2 := t.TempDir()
+	herdr2, err := fakecli.Install(t, d2, "herdr", []fakecli.Rule{{Argv: []string{"api", "snapshot"}, Delay: 5000, Stdout: "{}"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env2 := envWithFake(t, d2, map[string]string{"HERDR_BIN_PATH": herdr2})
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+	start = time.Now()
+	res = plugin.NavigateSelection(ctx, entry, env2, platform.Current())
+	elapsed = time.Since(start)
+	if res.OK || elapsed >= 2*time.Second {
+		t.Fatalf("nav=%+v elapsed=%v want a fast cancellation", res, elapsed)
+	}
+	if !strings.Contains(res.Cause, "cancelled") {
+		t.Fatalf("cause=%q", res.Cause)
+	}
+}
+
+func TestPickerNavigationRefMismatchFailsBeforeAnyCall(t *testing.T) {
+	d := t.TempDir()
+	herdr, err := fakecli.Install(t, d, "herdr", []fakecli.Rule{{AnyArgs: true, Code: 127}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envWithFake(t, d, map[string]string{"HERDR_BIN_PATH": herdr})
+	res := plugin.NavigateSelection(context.Background(), navEntry("local/w1:p2", "local", "w1:p1"), env, platform.Current())
+	if res.OK || res.Cause == "" {
+		t.Fatalf("nav=%+v want a failure", res)
+	}
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(d, "herdr.json"))
+	if err == nil && len(calls) != 0 {
+		t.Fatalf("calls=%+v want none", calls)
 	}
 }

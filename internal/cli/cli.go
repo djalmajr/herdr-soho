@@ -1,14 +1,11 @@
 package cli
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime/debug"
-	"strconv"
 	"strings"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
@@ -25,6 +22,9 @@ import (
 	waitpkg "github.com/djalmajr/herdr-soho/internal/wait"
 )
 
+// knownCommands is the native command inventory: every entry has a native
+// case in Run (R1 retired the JS fallback), so any other command dies with
+// the unknown-command diagnostic before any probe or side effect.
 var knownCommands = map[string]bool{
 	"config": true, "session": true, "roles": true, "role": true, "kinds": true,
 	"models": true, "model": true, "spawn": true, "dispatch": true, "lint": true,
@@ -34,7 +34,8 @@ var knownCommands = map[string]bool{
 	"roster": true, "friction": true, "feedback": true, "tab-label": true,
 	"layout-plan": true, "env": true, "mutation-guard": true, "mutation-copy": true,
 	"reopen": true, "compact": true, "metrics": true, "copies": true, "gc": true,
-	"procs": true,
+	"procs": true, "install": true, "promote": true,
+	"collaborate": true, "capabilities": true, "hook": true,
 }
 
 var frictionLogPath string
@@ -82,7 +83,8 @@ func liveAgentsFriction(env platform.Env) []any {
 	return herdr.LiveAgents(env, herdr.Timeout)
 }
 
-// Run routes the commands implemented in Go and delegates the rest to JS.
+// Run routes the commands implemented natively; any other command dies 2
+// without executing or probing a runtime (R1 retired the JS fallback).
 func Run(args []string, env platform.Env) (code int) {
 	frictionLogPath = ""
 	defer func() {
@@ -106,6 +108,10 @@ func Run(args []string, env platform.Env) (code int) {
 		_, _ = io.WriteString(platform.Stdout, versionText(version, vcsRevision()))
 		return 0
 	}
+	if len(args) == 2 && args[0] == "capabilities" && args[1] == "--json" {
+		_, _ = io.WriteString(platform.Stdout, "{\"schema\":1,\"worker_collaboration\":1}\n")
+		return 0
+	}
 
 	decisionEnv := env.Clone()
 	applyLegacyEnv(decisionEnv)
@@ -118,7 +124,7 @@ func Run(args []string, env platform.Env) (code int) {
 	commandCwd, _ := os.Getwd()
 	var commandConfig *core.Config
 	readOnlyRejectedDoctor := command == "doctor" && decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && len(args) > 1
-	if !readOnlyRejectedDoctor && (command == "config" || command == "session" || command == "roles" || command == "role" || command == "explain" || command == "layout-plan" || command == "regrid" || command == "tab-label" || command == "stats" || command == "metrics" || command == "collect" || command == "setup" || command == "release" || command == "doctor" || command == "init" || command == "spawn" || command == "dispatch" || command == "run" || command == "lint" || command == "wait" || command == "status") {
+	if !readOnlyRejectedDoctor && (command == "config" || command == "session" || command == "roles" || command == "role" || command == "explain" || command == "layout-plan" || command == "regrid" || command == "promote" || command == "tab-label" || command == "stats" || command == "metrics" || command == "collect" || command == "setup" || command == "release" || command == "doctor" || command == "init" || command == "spawn" || command == "dispatch" || command == "run" || command == "lint" || command == "wait" || command == "status") {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		configCtx = &ctx
 	}
@@ -126,7 +132,7 @@ func Run(args []string, env platform.Env) (code int) {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		configCtx = &ctx
 	}
-	if command == "send" || command == "find" {
+	if command == "send" || command == "find" || command == "collaborate" {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		commandConfig = &ctx
 	}
@@ -142,7 +148,7 @@ func Run(args []string, env platform.Env) (code int) {
 			}
 			extra = fmt.Sprintf(" (%d extra %s not allowed)", count, noun)
 		}
-		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor' and 'roster', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes; rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
+		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
 	}
 	if command == "help" || command == "-h" || command == "--help" || command == "" {
 		_, _ = io.WriteString(platform.Stdout, usage)
@@ -178,7 +184,10 @@ func Run(args []string, env platform.Env) (code int) {
 		_, _ = io.WriteString(platform.Stdout, commandHelp(command))
 		return 0
 	}
-	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "tab-label" || command == "release" || command == "reopen" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" || command == "compact" || command == "copies" || command == "gc" || command == "procs" {
+	if command == "hook" {
+		return cmdHook(args[1:], decisionEnv, commandCwd)
+	}
+	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "promote" || command == "tab-label" || command == "release" || command == "reopen" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" || command == "compact" || command == "copies" || command == "gc" || command == "procs" {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		commandConfig = &ctx
 		herdr.RequireEnv(decisionEnv, platform.Current(), os.Getpid(), nil)
@@ -235,6 +244,13 @@ func Run(args []string, env platform.Env) (code int) {
 		ctx = configCtx
 	}
 	switch command {
+	case "collaborate":
+		if decisionEnv.Get("HERDR_WORKSPACE_ID") == "" {
+			decisionEnv["HERDR_WORKSPACE_ID"] = core.WorkspaceID(ctx, decisionEnv, commandCwd)
+		}
+		return cmdCollaborate(args[1:], ctx, decisionEnv, commandCwd)
+	case "capabilities":
+		platform.Die("usage: capabilities --json", 2)
 	case "kinds":
 		kinds.CmdKinds(decisionEnv, platform.Current())
 		return 0
@@ -246,7 +262,7 @@ func Run(args []string, env platform.Env) (code int) {
 		cmdEnv(configCtx, decisionEnv, commandCwd)
 		return 0
 	case "roster":
-		cmdRoster(ctx, decisionEnv, commandCwd)
+		cmdRoster(args[1:], ctx, decisionEnv, commandCwd)
 		return 0
 	case "friction":
 		cmdFriction(args[1:], ctx, decisionEnv, commandCwd)
@@ -295,6 +311,8 @@ func Run(args []string, env platform.Env) (code int) {
 		return cmdLayoutPlan(args[1:], ctx, decisionEnv, commandCwd)
 	case "regrid":
 		return cmdRegrid(args[1:], ctx, decisionEnv, commandCwd)
+	case "promote":
+		return cmdPromote(args[1:], ctx, decisionEnv, commandCwd)
 	case "tab-label":
 		return cmdTabLabel(args[1:], ctx, decisionEnv, commandCwd)
 	case "stats":
@@ -311,8 +329,13 @@ func Run(args []string, env platform.Env) (code int) {
 		return waitpkg.CmdStatus(args[1:], ctx, decisionEnv, commandCwd)
 	case "lint":
 		return cmdLint(args[1:], ctx, decisionEnv, commandCwd)
+	case "install":
+		return cmdInstall(args[1:], decisionEnv)
 	}
-	return runJS(command, args, env)
+	// A registered command without a native case dies with the same
+	// diagnostic as an unknown one: nothing is probed or executed.
+	platform.Die("unknown command '"+command+"'", 2)
+	return 2
 }
 
 // nowriteReadInvocation decides, from the shape of the invocation alone, what
@@ -327,7 +350,16 @@ func nowriteReadInvocation(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "doctor", "roster", "explain", "copies", "procs":
+	case "hook":
+		return len(args) == 2 && (args[1] == "reminder" || args[1] == "doctor")
+	case "collaborate":
+		return len(args) >= 3 && len(args) <= 4 && args[1] == "status" && args[2] != "" && !strings.HasPrefix(args[2], "-") && (len(args) == 3 || args[3] == "--json")
+	case "capabilities":
+		return len(args) == 2 && args[1] == "--json"
+	case "roster":
+		_, ok := rosterScope(args[1:])
+		return ok
+	case "doctor", "explain", "copies", "procs":
 		return len(args) == 1
 	case "status":
 		for _, agent := range args[1:] {
@@ -404,45 +436,4 @@ func withoutArg(args []string, target string) []string {
 
 func applyLegacyEnv(env platform.Env) {
 	core.ApplyLegacyEnv(env)
-}
-
-func runJS(command string, args []string, env platform.Env) int {
-	if runtime := env.Get("HERDR_SOHO_JS_RUNTIME"); runtime != "" && validRuntime(runtime, platform.Current()) {
-		skillDir := platform.SkillDir(env)
-		return execute(runtime, append([]string{filepath.Join(skillDir, "scripts", "herdr-soho.mjs")}, args...), env)
-	}
-	node, ok := platform.FindExecutable("node", env, platform.Current())
-	if ok && nodeMajor(node, env) >= 20 {
-		skillDir := platform.SkillDir(env)
-		return execute(node, append([]string{skillDir + string(os.PathSeparator) + "scripts" + string(os.PathSeparator) + "herdr-soho.mjs"}, args...), env)
-	}
-	if bun, found := platform.FindExecutable("bun", env, platform.Current()); found {
-		skillDir := platform.SkillDir(env)
-		return execute(bun, append([]string{skillDir + string(os.PathSeparator) + "scripts" + string(os.PathSeparator) + "herdr-soho.mjs"}, args...), env)
-	}
-	platform.Die("needs Node.js 20+ or Bun", 2)
-	return 2
-}
-
-func validRuntime(runtime, platformName string) bool {
-	if !filepath.IsAbs(runtime) {
-		return false
-	}
-	info, err := os.Stat(runtime)
-	if err != nil || !info.Mode().IsRegular() {
-		return false
-	}
-	return platformName == "win32" || info.Mode().Perm()&0o111 != 0
-}
-
-func nodeMajor(node string, env platform.Env) int {
-	cmd := exec.Command(node, "-e", "process.stdout.write(String(process.versions.node.split('.')[0]))")
-	cmd.Env = env.List()
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if cmd.Run() != nil {
-		return 0
-	}
-	major, _ := strconv.Atoi(strings.TrimSpace(stdout.String()))
-	return major
 }

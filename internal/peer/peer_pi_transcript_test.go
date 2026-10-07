@@ -139,7 +139,7 @@ func TestSendPiTranscriptProof(t *testing.T) {
 		assistantLine := piSessionLine("assistant", peer.PeerPrefix+" #"+id+"? I am still working")
 		done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), sessionPath, id, assistantLine)
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if !<-done {
@@ -170,7 +170,7 @@ func TestSendPiTranscriptProof(t *testing.T) {
 		toolLine := piSessionLine("toolResult", "the brief says "+peer.PeerPrefix+" #"+id+" but I have not started")
 		done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), sessionPath, id, toolLine)
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if !<-done {
@@ -200,7 +200,7 @@ func TestSendPiTranscriptProof(t *testing.T) {
 		toolCallLine := `{"type":"message","id":"9a234373","parentId":"7dfce086","message":{"role":"assistant","content":[{"type":"text","text":"running the tool"},{"type":"toolCall","id":"t1","name":"bash","arguments":{"command":"herdr-soho send w0test:p0a hi","context":{"role":"user","content":[{"type":"text","text":"` + peer.PeerPrefix + ` #` + id + ` nested in the arguments"}]}}}]}}`
 		done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), sessionPath, id, toolCallLine)
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if !<-done {
@@ -230,7 +230,7 @@ func TestSendPiTranscriptProof(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if enters := countSendKeyEnters(t, f); enters != 0 {
@@ -279,7 +279,7 @@ func TestSendPiTranscriptProof(t *testing.T) {
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		// Exactly today's message: no new warning for the absent session.
-		want := "herdr-soho: send: local/w0test:p0a did not take the message (no sign of it in its state or screen); read its pane before sending again\n"
+		want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -300,7 +300,7 @@ func TestSendPiTranscriptProof(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if gets := countGets(t, f); gets != 6 {
@@ -321,7 +321,7 @@ func TestSendPiTranscriptProof(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
-		if code != 15 || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		if gets := countGets(t, f); gets != 6 {
@@ -369,7 +369,7 @@ func TestSendRemotePiTranscriptNotArmed(t *testing.T) {
 	code, _, stderr := f.run([]string{"send", "windows/w3:p1", "hello"})
 	// Today's result for a remote send with no sign in its own state or
 	// screen: not 0 on the planted local session.
-	want := "herdr-soho: send: windows/w3:p1 did not take the message (no sign of it in its state or screen); read its pane before sending again\n"
+	want := "herdr-soho: send: windows/w3:p1 did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
 	if code != 15 || stderr != want {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}

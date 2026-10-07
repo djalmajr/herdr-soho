@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,186 +10,160 @@ import (
 	"testing"
 
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
-// Every command the JS knows has a Go case since D5b, so runJS is reached
-// only by a known command without one. The fallback tests register such a
-// command in the test binary (the helper process is this binary too).
+// Every command the JS entry used to know has a native case since R1 retired
+// the JS fallback, so a known command without a native case dies 2 with the
+// unknown-command diagnostic instead of probing Node, Bun or
+// HERDR_SOHO_JS_RUNTIME. The test binary registers such a command to reach
+// that path.
 func init() { knownCommands["not-ported"] = true }
 
-func TestRunFallback(t *testing.T) {
-	// JS (fora): "run-tests: missing jq exits 2 with Node-only guidance" — o teste executa o preflight do runner de suítes Bash, um detalhe do harness JavaScript.
-	// JS (fora): "Bash suite: missing jq exits 2 with a direct dependency message" — o teste invoca diretamente uma suíte Bash para validar seu pré-requisito.
-	// Mutation captured: running the fallback as a child changes signal delivery and leaks copied env values.
-	if runtime.GOOS == "windows" {
-		t.Skip("fallback shims are POSIX test fixtures")
-	}
-	t.Run("Unix fallback replaces the process and preserves args, stdin, env, and child code", func(t *testing.T) {
-		bin := t.TempDir()
-		record := filepath.Join(t.TempDir(), "args")
-		inputRecord := filepath.Join(t.TempDir(), "stdin")
-		node := filepath.Join(bin, "node")
-		script := "#!/bin/sh\nif [ \"$1\" = \"-e\" ]; then printf 20; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$RECORD\"\nprintf '%s' \"${HERDR_SOHO_SOCKET_PATH-unset}\" >> \"$RECORD\"\n/bin/cat > \"$INPUT_RECORD\"\nprintf 'child-output\\n'\nexit 17\n"
-		if err := os.WriteFile(node, []byte(script), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		env := map[string]string{"PATH": bin, "RECORD": record, "INPUT_RECORD": inputRecord, "HERDR_SOHO_SKILL_DIR": "/skill", "HERDR_AGENTS_SOCKET_PATH": "legacy"}
-		stdout, stderr, code := runFallbackHelper(t, os.Args[0], []string{"not-ported", "a b", "--x"}, env, "stdin payload")
-		if code != 17 || stdout != "child-output\n" || stderr != "" {
-			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
-		}
-		data, err := os.ReadFile(record)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := "/skill/scripts/herdr-soho.mjs\nnot-ported\na b\n--x\nunset"
-		if string(data) != want {
-			t.Fatalf("args:\n%s\nwant:\n%s", data, want)
-		}
-		stdin, err := os.ReadFile(inputRecord)
-		if err != nil || string(stdin) != "stdin payload" {
-			t.Fatalf("stdin = %q, %v", stdin, err)
-		}
-	})
-	t.Run("Node below 20 falls back to Bun", func(t *testing.T) {
-		bin := t.TempDir()
-		record := filepath.Join(t.TempDir(), "bun-args")
-		if err := os.WriteFile(filepath.Join(bin, "node"), []byte("#!/bin/sh\nprintf 18\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		bun := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RECORD\"\nexit 23\n"
-		if err := os.WriteFile(filepath.Join(bin, "bun"), []byte(bun), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		stdout, stderr, code := runFallbackHelper(t, os.Args[0], []string{"not-ported"}, map[string]string{"PATH": bin, "RECORD": record, "HERDR_SOHO_SKILL_DIR": "/skill"}, "")
-		if code != 23 || stdout != "" || stderr != "" {
-			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
-		}
-		data, err := os.ReadFile(record)
-		if err != nil || string(data) != "/skill/scripts/herdr-soho.mjs\nnot-ported\n" {
-			t.Fatalf("bun args = %q, %v", data, err)
-		}
-	})
-	t.Run("absolute HERDR_SOHO_JS_RUNTIME runs without a version probe", func(t *testing.T) {
-		bin := t.TempDir()
-		runtime := filepath.Join(bin, "custom-node")
-		record := filepath.Join(t.TempDir(), "runtime-args")
-		if err := os.WriteFile(runtime, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RECORD\"\nexit 19\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		_, stderr, code := runFallbackHelper(t, os.Args[0], []string{"not-ported"}, map[string]string{"PATH": t.TempDir(), "RECORD": record, "HERDR_SOHO_JS_RUNTIME": runtime, "HERDR_SOHO_SKILL_DIR": "/skill"}, "")
-		if code != 19 || stderr != "" {
-			t.Fatalf("code=%d stderr=%q", code, stderr)
-		}
-		data, err := os.ReadFile(record)
-		if err != nil || string(data) != "/skill/scripts/herdr-soho.mjs\nnot-ported\n" {
-			t.Fatalf("override args = %q, %v", data, err)
-		}
-	})
-	t.Run("Unix fallback process receives the child's termination signal", func(t *testing.T) {
-		bin := t.TempDir()
-		node := "#!/bin/sh\nif [ \"$1\" = \"-e\" ]; then printf 20; exit 0; fi\nkill -TERM $$\n"
-		if err := os.WriteFile(filepath.Join(bin, "node"), []byte(node), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		_, stderr, code := runFallbackHelper(t, os.Args[0], []string{"not-ported"}, map[string]string{"PATH": bin, "HERDR_SOHO_SKILL_DIR": "/skill"}, "")
-		if code != -1 || stderr != "" {
-			t.Fatalf("signaled child wrapper code=%d stderr=%q", code, stderr)
-		}
-	})
-	t.Run("skill root is discovered above the executable", func(t *testing.T) {
-		root := t.TempDir()
-		scripts := filepath.Join(root, "scripts")
-		bin := filepath.Join(t.TempDir(), "bin")
-		if err := os.Mkdir(bin, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(filepath.Join(root, "roles"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Mkdir(scripts, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(root, "SKILL.md"), []byte("skill"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		executable := filepath.Join(scripts, "helper")
-		if err := copyFile(os.Args[0], executable); err != nil {
-			t.Fatal(err)
-		}
-		record := filepath.Join(t.TempDir(), "args")
-		node := "#!/bin/sh\nif [ \"$1\" = \"-e\" ]; then printf 20; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$RECORD\"\nexit 0\n"
-		if err := os.WriteFile(filepath.Join(bin, "node"), []byte(node), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		physicalRoot, err := filepath.EvalSymlinks(root)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, stderr, code := runFallbackHelper(t, executable, []string{"not-ported"}, map[string]string{"PATH": bin, "RECORD": record}, "")
-		if code != 0 || stderr != "" {
-			t.Fatalf("code=%d stderr=%q", code, stderr)
-		}
-		data, err := os.ReadFile(record)
-		if err != nil || string(data) != filepath.Join(physicalRoot, "scripts", "herdr-soho.mjs")+"\nnot-ported\n" {
-			t.Fatalf("discovered entry = %q, %v", data, err)
-		}
-	})
-	t.Run("reports missing Node and Bun with launcher message and code 2", func(t *testing.T) {
-		bin := t.TempDir()
-		oldOut, oldErr := platform.Stdout, platform.Stderr
-		var out, errOut bytes.Buffer
-		platform.Stdout, platform.Stderr = &out, &errOut
-		defer func() { platform.Stdout, platform.Stderr = oldOut, oldErr }()
-		got := Run([]string{"not-ported"}, platform.Env{"PATH": bin, "HERDR_SOHO_SKILL_DIR": "/skill"})
-		if got != 2 || out.Len() != 0 || errOut.String() != "herdr-soho: needs Node.js 20+ or Bun\n" {
-			t.Fatalf("got %d out=%q err=%q", got, out.String(), errOut.String())
-		}
-	})
-}
-
-func TestFallbackExecHelper(t *testing.T) {
-	if os.Getenv("HERDR_GO_FALLBACK_HELPER") != "1" {
-		return
-	}
-	var args []string
-	if err := json.Unmarshal([]byte(os.Getenv("HERDR_GO_FALLBACK_ARGS")), &args); err != nil {
-		os.Exit(99)
-	}
-	os.Exit(Run(args, platform.EnvFromOS()))
-}
-
-func runFallbackHelper(t *testing.T, executable string, args []string, env map[string]string, stdin string) (string, string, int) {
+// hostileRuntimeEnv makes native Go poisons discoverable on every platform.
+// Every invocation, including a version probe, is recorded before responding.
+func hostileRuntimeEnv(t *testing.T, override string) (platform.Env, []string) {
 	t.Helper()
-	encoded, err := json.Marshal(args)
-	if err != nil {
-		t.Fatal(err)
+	bin := t.TempDir()
+	// Also poison probes that accidentally inherit the test process env.
+	t.Setenv("HERDR_SOHO_FAKECLI_CONFIG", bin)
+	var records []string
+	var custom string
+	for _, name := range []string{"node", "bun", "custom-node"} {
+		path, err := fakecli.Install(t, bin, name, []fakecli.Rule{
+			{Argv: []string{"-e"}, ArgvPrefix: true, Stdout: "20"},
+			{AnyArgs: true, Code: 17},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, filepath.Join(bin, name+".calls.jsonl"))
+		if name == "custom-node" {
+			custom = path
+		}
 	}
-	cmd := exec.Command(executable, "-test.run=^TestFallbackExecHelper$")
-	cmd.Env = []string{"HERDR_GO_FALLBACK_HELPER=1", "HERDR_GO_FALLBACK_ARGS=" + string(encoded)}
-	for key, value := range env {
-		cmd.Env = append(cmd.Env, key+"="+value)
+	env := platform.Env{
+		"PATH":                      bin,
+		"PATHEXT":                   ".EXE;.CMD;.BAT;.COM",
+		"HERDR_SOHO_FAKECLI_CONFIG": bin,
+		"HERDR_SOHO_SKILL_DIR":      "/skill",
+		"HOME":                      t.TempDir(),
+		"XDG_CONFIG_HOME":           t.TempDir(),
+		"USERPROFILE":               t.TempDir(),
 	}
-	cmd.Stdin = strings.NewReader(stdin)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err = cmd.Run()
-	if err == nil {
-		return stdout.String(), stderr.String(), 0
+	if runtime.GOOS == "windows" {
+		env["SystemRoot"] = os.Getenv("SystemRoot")
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		return stdout.String(), stderr.String(), exitErr.ExitCode()
+	switch override {
+	case "native":
+		override = custom
+	case "non-executable":
+		override = filepath.Join(bin, "plain")
+		if err := os.WriteFile(override, []byte("not an executable"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	case "directory":
+		override = t.TempDir()
 	}
-	t.Fatalf("fallback helper failed: %v stderr=%s", err, stderr.String())
-	return "", "", -1
+	if override != "" {
+		env["HERDR_SOHO_JS_RUNTIME"] = override
+	}
+	return env, records
 }
 
-func copyFile(source, dest string) error {
-	data, err := os.ReadFile(source)
-	if err != nil {
-		return err
+// assertNoRuntimeCalled proves absence of a probed or executed runtime from
+// the missing invocation record (not from a call count).
+func assertNoRuntimeCalled(t *testing.T, records []string) {
+	t.Helper()
+	for _, record := range records {
+		if _, err := os.Stat(record); !os.IsNotExist(err) {
+			t.Fatalf("a runtime was called: %s exists (%v)", record, err)
+		}
 	}
-	return os.WriteFile(dest, data, 0o700)
+}
+
+func TestRuntimePoisonRecordsVersionProbe(t *testing.T) {
+	env, records := hostileRuntimeEnv(t, "native")
+	for i, name := range []string{"node", "bun", "custom-node"} {
+		path, ok := platform.FindExecutable(name, env, platform.Current())
+		if !ok {
+			t.Fatalf("native %s poison is not discoverable", name)
+		}
+		cmd := exec.Command(path, "-e", "1")
+		cmd.Env = env.List()
+		out, err := cmd.Output()
+		if err != nil || string(out) != "20" {
+			t.Fatalf("%s probe: out=%q err=%v", name, out, err)
+		}
+		calls, err := fakecli.ReadCalls(records[i])
+		if err != nil || len(calls) != 1 || strings.Join(calls[0].Argv, " ") != "-e 1" {
+			t.Fatalf("%s did not record its version probe: calls=%v err=%v", name, calls, err)
+		}
+	}
+}
+
+func TestKnownCommandWithoutNativeCaseDiesNatively(t *testing.T) {
+	// Replaces the fallback tests: the old runJS probed HERDR_SOHO_JS_RUNTIME
+	// then node then bun for a known command without a Go case and inherited
+	// the child's exit code. R1 dies 2 natively with the exact
+	// unknown-command diagnostic and never runs a runtime.
+	overrides := []struct {
+		name, value string
+	}{
+		{"no override", ""},
+		{"non-absolute override is ignored", "node"},
+		{"relative override is ignored", "./node"},
+		{"hostile executable override is not run", "native"},
+		{"non-executable regular file override is ignored", "non-executable"},
+		{"directory override is ignored", "directory"},
+	}
+	for _, o := range overrides {
+		t.Run(o.name, func(t *testing.T) {
+			env, records := hostileRuntimeEnv(t, o.value)
+			var out, errOut bytes.Buffer
+			oldOut, oldErr := platform.Stdout, platform.Stderr
+			platform.Stdout, platform.Stderr = &out, &errOut
+			code := Run([]string{"not-ported"}, env)
+			platform.Stdout, platform.Stderr = oldOut, oldErr
+			if code != 2 || out.Len() != 0 || errOut.String() != "herdr-soho: unknown command 'not-ported'\n" {
+				t.Fatalf("code=%d out=%q err=%q", code, out.String(), errOut.String())
+			}
+			assertNoRuntimeCalled(t, records)
+		})
+	}
+}
+
+func TestUnknownCommandHostileInput(t *testing.T) {
+	// Unknown input dies 2 natively, names the command verbatim, and probes
+	// no runtime even when hostile runtime env is present.
+	for _, name := range []string{"nope", "nope;rm -rf /", "$(reboot)", `back\slash`, "new\nline", "-x"} {
+		env, records := hostileRuntimeEnv(t, "node")
+		var out, errOut bytes.Buffer
+		oldOut, oldErr := platform.Stdout, platform.Stderr
+		platform.Stdout, platform.Stderr = &out, &errOut
+		code := Run([]string{name}, env)
+		platform.Stdout, platform.Stderr = oldOut, oldErr
+		if code != 2 || out.Len() != 0 || errOut.String() != "herdr-soho: unknown command '"+name+"'\n" {
+			t.Fatalf("name=%q code=%d out=%q err=%q", name, code, out.String(), errOut.String())
+		}
+		assertNoRuntimeCalled(t, records)
+	}
+}
+
+func TestNativeKindsRunsUnderHostileRuntimeEnv(t *testing.T) {
+	// A real native consumer: with hostile runtime env and a restricted PATH
+	// a real command runs end to end (the actual table, exit 0) and nothing
+	// is probed or executed.
+	env, records := hostileRuntimeEnv(t, "native")
+	var out, errOut bytes.Buffer
+	oldOut, oldErr := platform.Stdout, platform.Stderr
+	platform.Stdout, platform.Stderr = &out, &errOut
+	code := Run([]string{"kinds"}, env)
+	platform.Stdout, platform.Stderr = oldOut, oldErr
+	if code != 0 || errOut.Len() != 0 || !strings.HasPrefix(out.String(), "KIND     EXECUTABLE") {
+		t.Fatalf("code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	assertNoRuntimeCalled(t, records)
 }
 
 func TestHelpAndUnknown(t *testing.T) {

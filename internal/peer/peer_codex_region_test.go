@@ -33,7 +33,7 @@ func withCodexComposerLine(screen, line string) string {
 }
 
 func TestCodexComposerRegion(t *testing.T) {
-	t.Run("the real screen: the region runs from the composer line to the end", func(t *testing.T) {
+	t.Run("the real screen: the first blank excludes status footer", func(t *testing.T) {
 		lines, ok := codexComposerRegion(codexEvidenceScreen(t))
 		if !ok {
 			t.Fatal("the real screen's '› Ask Codex to do anything' line must form the region")
@@ -41,13 +41,13 @@ func TestCodexComposerRegion(t *testing.T) {
 		if lines[0] != "› Ask Codex to do anything" {
 			t.Fatalf("region starts at %q", lines[0])
 		}
-		if len(lines) != 5 || lines[3] != "  ← for agents · ? for shortcuts          ⚠ 3 warnings · f2 to view" || lines[4] != "" {
-			t.Fatalf("region must run to the end of the screen: %+v", lines)
+		if len(lines) != 1 {
+			t.Fatalf("region must stop before the blank and status footer: %+v", lines)
 		}
 	})
 	t.Run("an indented composer line counts", func(t *testing.T) {
 		lines, ok := codexComposerRegion("history\n  › Ask Codex to do anything\nfooter\n")
-		if !ok || len(lines) != 3 || lines[0] != "  › Ask Codex to do anything" {
+		if !ok || len(lines) != 2 || lines[0] != "  › Ask Codex to do anything" || lines[1] != "footer" {
 			t.Fatalf("region=%+v ok=%v", lines, ok)
 		}
 	})
@@ -89,7 +89,7 @@ func TestCodexComposerRegion(t *testing.T) {
 	})
 	t.Run("CRLF line endings", func(t *testing.T) {
 		lines, ok := codexComposerRegion("history\r\n› Ask Codex to do anything\r\nfooter\r\n")
-		if !ok || len(lines) != 3 || lines[0] != "› Ask Codex to do anything" {
+		if !ok || len(lines) != 2 || lines[0] != "› Ask Codex to do anything" || lines[1] != "footer" {
 			t.Fatalf("region=%+v ok=%v", lines, ok)
 		}
 	})
@@ -143,29 +143,33 @@ func TestCodexSendScreenMarkers(t *testing.T) {
 			t.Fatal("a queue line of another message must not match")
 		}
 	})
-	t.Run("without a composer line the whole-screen rule stays", func(t *testing.T) {
+	t.Run("without a composer line the whole-screen rule stays for the screen proof, and no Enter goes", func(t *testing.T) {
 		noComposer := "history " + endLine + " and #" + id + "\n"
 		if !messageStillInScreen("codex", noComposer, endLine, id) {
 			t.Fatal("without the composer line the whole visible screen still counts")
 		}
-		if !idInInputBox("codex", noComposer, id) {
-			t.Fatal("without the composer line the last 15 lines still count")
+		if idInInputBox("codex", noComposer, id) {
+			t.Fatal("without the composer line there is no recognized composer: no Enter")
 		}
 		pushedDown := noComposer + strings.Repeat("chrome\n", 15)
 		if idInInputBox("codex", pushedDown, id) {
-			t.Fatal("the last 15 lines without the composer do not hold the id")
+			t.Fatal("an unrecognized screen presses no Enter")
 		}
 		if !messageStillInScreen("codex", pushedDown, endLine, id) {
 			t.Fatal("the whole visible screen still counts without the composer")
 		}
 	})
-	t.Run("a composer line beyond the last 8 non-empty lines keeps the whole-screen rule", func(t *testing.T) {
+	t.Run("a composer line beyond the last 8 non-empty lines keeps the whole-screen rule and presses no Enter", func(t *testing.T) {
+		// The '›' composer line is pushed out of the composer window by 8
+		// newer non-empty lines: the screen proof keeps the marker held
+		// (conservative), but the stale line is not a recognized composer,
+		// so no Enter goes.
 		stale := "history " + endLine + " and #" + id + "\n› Ask Codex to do anything\n" + strings.Repeat("filler\n", 8)
 		if !messageStillInScreen("codex", stale, endLine, id) {
 			t.Fatal("a stale composer line must not shrink the screen proof")
 		}
-		if !idInInputBox("codex", stale, id) {
-			t.Fatal("a stale composer line must not shrink the box check")
+		if idInInputBox("codex", stale, id) {
+			t.Fatal("a stale composer line is not a recognized composer: no Enter")
 		}
 	})
 	t.Run("every other kind keeps the whole-screen behavior", func(t *testing.T) {

@@ -1,13 +1,19 @@
---- a/base/transfer.mjs
-+++ b/base/transfer.mjs
-@@ -1,7 +1,7 @@
- export function transfer({ actor, account, amount, ledger }) {
-   if (!actor || !account) throw new TypeError('actor and account are required');
--  if (!Number.isFinite(amount) || amount <= 0) throw new RangeError('amount must be positive');
--  if (account.ownerId !== actor.id) throw new Error('not authorized');
-+  if (!Number.isFinite(amount) || amount < 0) throw new RangeError('amount must be positive');
-+  if (account.ownerId === actor.id) throw new Error('not authorized');
-   ledger.debit(actor.id, amount);
--  ledger.credit(account.id, amount);
-+  ledger.credit(account.id, Math.round(amount));
+--- a/base/transfer.go
++++ b/base/transfer.go
+@@ -50,13 +50,13 @@
+ 	if opts.Actor == nil || opts.Account == nil {
+ 		return ErrRequired
+ 	}
+-	if math.IsNaN(opts.Amount) || math.IsInf(opts.Amount, 0) || opts.Amount <= 0 {
++	if math.IsNaN(opts.Amount) || math.IsInf(opts.Amount, 0) || opts.Amount < 0 {
+ 		return ErrAmount
+ 	}
+-	if opts.Account.OwnerID != opts.Actor.ID {
++	if opts.Account.OwnerID == opts.Actor.ID {
+ 		return ErrNotAuthorized
+ 	}
+ 	opts.Ledger.Debit(opts.Actor.ID, opts.Amount)
+-	opts.Ledger.Credit(opts.Account.ID, opts.Amount)
++	opts.Ledger.Credit(opts.Account.ID, math.Round(opts.Amount))
+ 	return nil
  }

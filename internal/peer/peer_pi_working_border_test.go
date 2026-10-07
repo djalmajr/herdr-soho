@@ -71,7 +71,7 @@ func TestSendPiWorkingBorder(t *testing.T) {
 		f := newFixture(t, rules)
 		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
-		if code != 15 || strings.Contains(out, "sent to") || !strings.Contains(stderr, "did not take the message (no sign of it in its state or screen)") {
+		if code != 15 || strings.Contains(out, "sent to") || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
 		if enters := countEnters(t, f); enters != 1 {

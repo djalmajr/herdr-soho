@@ -19,6 +19,28 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
+// agentPromptRoleEnv marks the re-executed ordered-stream fixture: the
+// agentPrompt merge-order test installs a copy of this test binary as the
+// herdr fake, and the production code execs it with its own argv (no
+// -test flags reach the re-execution), so the role rides in the
+// environment and this package init handles it before any test or flag
+// parsing runs. The parent test run never sets it, so the init is a
+// no-op there.
+const agentPromptRoleEnv = "HERDR_SOHO_AGENTPROMPT_FIXTURE"
+
+func init() {
+	if os.Getenv(agentPromptRoleEnv) == "" {
+		return
+	}
+	// The exact write order of the old sh script — stderr, stdout,
+	// stderr. With MergeOutput both FDs point at the same temporary
+	// file, so the interleaving is the observable contract.
+	os.Stderr.WriteString("first on stderr\n")
+	os.Stdout.WriteString("then stdout\n")
+	os.Stderr.WriteString("last on stderr\n\n")
+	os.Exit(1)
+}
+
 func prepareRunHarness(t *testing.T, h *tm3bHarness) {
 	t.Helper()
 	if err := os.WriteFile(h.role, []byte("---\nname: Implementer\nkind: grok\nmodel: grok-4.7\neffort: high\nmode: edit\n---\nRole body.\n"), 0o600); err != nil {
@@ -502,6 +524,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 1, "old output\n", "0",
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, Stdout: "screen before\n", ArgvPrefix: true},
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, Stdout: "screen redraw\n", ArgvPrefix: true},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: "›\n"},
 		)
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 15 || dispatchOutputStatus(t, out) != "not-received" || countDispatchCalls(mustCalls(t, f), "prompt") != 2 {
@@ -518,9 +541,34 @@ func TestDispatchRemainingCases(t *testing.T) {
 		}
 	})
 	t.Run(`JS: "dispatch: a prompt sitting in the input box gets one Enter (enter_sent)"`, func(t *testing.T) {
+		// Adapted contract: the first Enter needs a recognized composer
+		// holding the exact composed path — the codex composer line with the
+		// real brief path, not a plain marker line. The clock advances with
+		// real time (a constant clock would never close the arrival window);
+		// the screen waits for a stable per-second stamp so it matches the
+		// dispatch's own composed name.
+		fixedNow := platform.Now
+		base := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
+		began := time.Now()
+		platform.Now = func() time.Time { return base.Add(time.Since(began)) }
+		t.Cleanup(func() { platform.Now = fixedNow })
+		composedName := func() string {
+			stamp := ""
+			for {
+				cur := core.NowStamp(platform.Now())
+				if cur != stamp {
+					stamp = cur
+					continue
+				}
+				if core.NowStamp(platform.Now().Add(300*time.Millisecond)) == stamp {
+					return "$ROOT/state/ws/briefs/worker-" + stamp + ".md"
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}
 		f := newDispatchArrivalFixture(t, "idle", 1, 1, "", "0",
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, ArgvPrefix: true, Stdout: "Welcome to the worker\n"},
-			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, ArgvPrefix: true, Stdout: "Read the file /tmp/brief.md in full\n"},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, ArgvPrefix: true, Stdout: "› Read the file " + composedName() + " in full and execute it.\n"},
 			fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, ArgvPrefix: true},
 			fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 8, Stdout: `{"result":{"agent":{"agent_status":"working","state_change_seq":2}}}`},
 		)
@@ -535,9 +583,34 @@ func TestDispatchRemainingCases(t *testing.T) {
 		}
 	})
 	t.Run(`JS: "dispatch: an input-box prompt that ignores the Enter ends not-received (exit 15)"`, func(t *testing.T) {
+		// Adapted contract: the first Enter needs a recognized composer
+		// holding the exact composed path — the codex composer line with the
+		// real brief path, not a plain marker line. The clock advances with
+		// real time (a constant clock would never close the arrival window);
+		// the screen waits for a stable per-second stamp so it matches the
+		// dispatch's own composed name.
+		fixedNow := platform.Now
+		base := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
+		began := time.Now()
+		platform.Now = func() time.Time { return base.Add(time.Since(began)) }
+		t.Cleanup(func() { platform.Now = fixedNow })
+		composedName := func() string {
+			stamp := ""
+			for {
+				cur := core.NowStamp(platform.Now())
+				if cur != stamp {
+					stamp = cur
+					continue
+				}
+				if core.NowStamp(platform.Now().Add(300*time.Millisecond)) == stamp {
+					return "$ROOT/state/ws/briefs/worker-" + stamp + ".md"
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}
 		f := newDispatchArrivalFixture(t, "idle", 1, 1, "", "0",
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 1, ArgvPrefix: true, Stdout: "Welcome to the worker\n"},
-			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, ArgvPrefix: true, Stdout: "Read the file /tmp/brief.md in full\n"},
+			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, ArgvPrefix: true, Stdout: "› Read the file " + composedName() + " in full and execute it.\n"},
 			fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, ArgvPrefix: true},
 		)
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "1"
@@ -670,11 +743,13 @@ func TestDispatchRemainingCases(t *testing.T) {
 		}
 	})
 	t.Run(`JS: "agentPrompt: stdout and stderr in write order, trailing newlines dropped (bash \"$(… 2>&1)\")"`, func(t *testing.T) {
-		// AgentPrompt runs with MergeOutput: both streams share one temp file,
-		// so the write order holds as in bash "$(… 2>&1)".
-		if runtime.GOOS == "windows" {
-			t.Skip("the fake herdr is a POSIX sh script; the merge itself is the same file handle on every host")
-		}
+		// AgentPrompt runs with MergeOutput: both streams share one temp
+		// file, so the write order holds as in bash "$(… 2>&1)". The
+		// fixture is a re-executed copy of this test binary (no shell
+		// behind the name): the role marker env (handled in the package
+		// init) writes the two streams interleaved exactly like the old
+		// sh script did, and the ordering is the same file handle on
+		// every host.
 		root, err := filepath.EvalSymlinks(t.TempDir())
 		if err != nil {
 			t.Fatal(err)
@@ -683,11 +758,24 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.Mkdir(bin, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		fake := "#!/bin/sh\nprintf 'first on stderr\\n' >&2\nprintf 'then stdout\\n'\nprintf 'last on stderr\\n\\n' >&2\nexit 1\n"
-		if err := os.WriteFile(filepath.Join(bin, "herdr"), []byte(fake), 0o700); err != nil {
-			t.Fatal(err)
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatalf("locating the test binary: %v", err)
 		}
-		r := herdr.AgentPrompt("w", "text", platform.Env{"PATH": bin + string(os.PathListSeparator) + "/usr/bin:/bin", "TMPDIR": root})
+		target := filepath.Join(bin, "herdr")
+		if runtime.GOOS == "windows" {
+			target += ".exe"
+		}
+		if err := os.Link(exe, target); err != nil {
+			data, readErr := os.ReadFile(exe)
+			if readErr != nil {
+				t.Fatalf("reading the test binary: %v", readErr)
+			}
+			if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
+				t.Fatalf("writing the fixture program: %v", writeErr)
+			}
+		}
+		r := herdr.AgentPrompt("w", "text", platform.Env{"PATH": bin, "TMPDIR": root, agentPromptRoleEnv: "ordered"})
 		if r.Ok || r.Raw != "first on stderr\nthen stdout\nlast on stderr" {
 			t.Fatalf("result=%#v", r)
 		}

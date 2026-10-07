@@ -198,10 +198,19 @@ func Env(base []string, dir string, options ...EnvOptions) []string {
 	}
 	out := make([]string, 0, len(base)+3)
 	inherited := sameEnvironment(base, os.Environ())
+	var raceOptions []string
 	for _, v := range base {
-		key, _, ok := strings.Cut(v, "=")
+		key, value, ok := strings.Cut(v, "=")
 		if ok {
 			upperKey := strings.ToUpper(key)
+			if upperKey == "GORACE" {
+				for _, option := range strings.Fields(value) {
+					if !strings.HasPrefix(option, "atexit_sleep_ms=") {
+						raceOptions = append(raceOptions, option)
+					}
+				}
+				continue
+			}
 			if upperKey == "PATH" || strings.EqualFold(key, configEnv) || upperKey == "HERDR_SOCKET_PATH" || (inherited && strings.HasPrefix(upperKey, "HERDR_")) {
 				continue
 			}
@@ -217,7 +226,11 @@ func Env(base []string, dir string, options ...EnvOptions) []string {
 	if option.SystemPath != "" {
 		path += string(os.PathListSeparator) + option.SystemPath
 	}
-	out = append(out, "PATH="+path, configEnv+"="+dir, "HERDR_SOCKET_PATH="+filepath.Join(dir, "herdr.sock"))
+	// Race-instrumented test binaries otherwise pause for one second on
+	// exit, which changes the short-lived CLI contract. Keep race detection
+	// and the caller's other detector options; remove only that exit delay.
+	raceOptions = append(raceOptions, "atexit_sleep_ms=0")
+	out = append(out, "PATH="+path, configEnv+"="+dir, "HERDR_SOCKET_PATH="+filepath.Join(dir, "herdr.sock"), "GORACE="+strings.Join(raceOptions, " "))
 	return out
 }
 

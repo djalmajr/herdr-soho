@@ -4,8 +4,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -18,7 +20,309 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
-func TestMain(m *testing.M) { fakecli.RunTests(m) }
+// runCliFixtureRoleEnv marks the re-executed fixture program: the RunCli
+// tests install a copy of this test binary on the fixture PATH and the
+// production code under test execs it with its own argv (no -test flags
+// reach the re-execution), so the role rides in the environment and is
+// handled here before any test runs.
+const runCliFixtureRoleEnv = "HERDR_SOHO_RUNCLI_FIXTURE_ROLE"
+
+// runCliFixturePidfileEnv names the file a fixture parent publishes with
+// the owned record of its grandchild (pid, start identity, name), so the
+// test owns (and stops) every process the fixture started.
+const runCliFixturePidfileEnv = "HERDR_SOHO_RUNCLI_FIXTURE_PIDFILE"
+
+// runCliFixturePsPathEnv carries the trusted ps lookup PATH the test
+// explicitly provides: the fixture role process runs with an isolated
+// PATH containing only the fixture program, so an ambient ps lookup from
+// inside the role finds nothing; the role uses exactly this value, and
+// nothing else, to read the grandchild's identity with the native
+// platform ProcInfo behavior.
+const runCliFixturePsPathEnv = "HERDR_SOHO_RUNCLI_FIXTURE_PS_PATH"
+
+func TestMain(m *testing.M) {
+	if role := os.Getenv(runCliFixtureRoleEnv); role != "" {
+		os.Exit(runRunCliFixtureRole(role))
+	}
+	fakecli.RunTests(m)
+}
+
+// runRunCliFixtureRole is the fixture role inside the re-executed test
+// binary. Every role keeps the default signal handling unless it says
+// otherwise, so the production timeout/stop paths stop it exactly as they
+// stop any child; the observable streams, exit codes, signal behavior and
+// pipe holding are the same the old sh scripts gave (the program is named
+// for what it replaces, not an interpreter standing behind the name).
+func runRunCliFixtureRole(role string) int {
+	switch role {
+	case "out-err-5":
+		os.Stdout.WriteString("out-line\n")
+		os.Stderr.WriteString("err-line\n")
+		return 5
+	case "out-err":
+		os.Stdout.WriteString("out\n")
+		os.Stderr.WriteString("err\n")
+		return 0
+	case "cat-err":
+		if _, err := io.Copy(os.Stdout, os.Stdin); err != nil {
+			os.Stderr.WriteString("err")
+			return 6
+		}
+		os.Stderr.WriteString("err")
+		return 7
+	case "pwd":
+		cwd, err := os.Getwd()
+		if err != nil {
+			return 6
+		}
+		os.Stdout.WriteString(cwd + "\n")
+		return 0
+	case "self-signal":
+		// os.Process.Kill is SIGKILL on Unix (the shape the test asserts);
+		// the role is only reached from the POSIX subtests.
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = p.Kill()
+		}
+		return 0 // unreachable: the signal stops the process
+	case "hold-300", "hold-5000", "hold-12000":
+		ms, err := strconv.Atoi(role[len("hold-"):])
+		if err != nil {
+			return 127
+		}
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		return 0
+	case "tree-hold":
+		// Parent plus a grandchild that holds the inherited pipes: the
+		// owned stand-in for the old `sleep 5 & sleep 5` (the grandchild
+		// outlives the parent's default SIGTERM and bounds the wait
+		// delay on its own).
+		child := runCliFixtureGrandchild("hold-5000")
+		if path := os.Getenv(runCliFixturePidfileEnv); path != "" {
+			_ = publishFixtureOwnedRecord(path, child)
+		}
+		_ = child.Wait()
+		return 0
+	case "pidfile-parent":
+		// The grandchild holds the pipes while the parent exits at once:
+		// the owned stand-in for `sleep 12 & echo $! > $PID_FILE; exit 0`.
+		child := runCliFixtureGrandchild("hold-12000")
+		path := os.Getenv("PID_FILE")
+		if path != "" {
+			if err := publishFixtureOwnedRecord(path, child); err != nil {
+				return 6
+			}
+		}
+		return 0
+	case "daemonize":
+		// A grandchild inherits the pipes and outlives the parent:
+		// the owned stand-in for `sleep 0.3 & printf 'daemonized\n'`.
+		child := runCliFixtureGrandchild("hold-300")
+		if path := os.Getenv(runCliFixturePidfileEnv); path != "" {
+			_ = publishFixtureOwnedRecord(path, child)
+		}
+		os.Stdout.WriteString("daemonized\n")
+		return 0
+	case "trap-term-0", "trap-term-3":
+		// Traps SIGTERM, prints and exits with the named code after the
+		// 20 ms the node scripts used: the owned stand-in for the
+		// `process.on('SIGTERM', …)` node cases.
+		code, err := strconv.Atoi(role[len("trap-term-"):])
+		if err != nil {
+			return 127
+		}
+		term := make(chan os.Signal, 1)
+		signal.Notify(term, syscall.SIGTERM)
+		<-term
+		os.Stdout.WriteString("caught\n")
+		time.Sleep(20 * time.Millisecond)
+		os.Exit(code)
+	case "badutf":
+		// The exact bytes the old printf wrote, on the same streams.
+		os.Stdout.Write([]byte{0x61, 0xFF, 0x62, 0xC0, 0x80, 0x63, 0xED, 0xA0, 0x80, 0x64, 0xF0, 0x90, 0x80, 0x65, 0xE2, 0x82})
+		os.Stderr.Write([]byte{0x78, 0xFE, 0x79, 0xF2, 0x80})
+		return 0
+	}
+	os.Stderr.WriteString("fixture: unknown role " + role + "\n")
+	return 127
+}
+
+// runCliFixtureGrandchild starts the re-executed test binary in another
+// fixture role and swaps only the role marker. The stdout and stderr are
+// assigned explicitly to the parent's own stdout/stderr (the pipes the
+// production wait reads): the exec default would point them at the
+// dev-null, and a grandchild that does not hold the pipes cannot delay
+// the wait the delay is meant to bound. The stdin keeps the exec default
+// (/dev/null): the grandchild roles only write, they never read.
+func runCliFixtureGrandchild(role string) *exec.Cmd {
+	exe, err := os.Executable()
+	if err != nil {
+		os.Exit(1)
+	}
+	cmd := exec.Command(exe)
+	items := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && key == runCliFixtureRoleEnv {
+			continue
+		}
+		items = append(items, entry)
+	}
+	items = append(items, runCliFixtureRoleEnv+"="+role)
+	cmd.Env = items
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		os.Exit(1)
+	}
+	return cmd
+}
+
+// runCliFixtureProgram places a copy of the test binary (a hard link when
+// supported, a copy otherwise) under dir with the given name: the native
+// fixture program the RunCli tests exec, replacing the old sh scripts.
+func runCliFixtureProgram(t *testing.T, dir, name string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locating the test binary: %v", err)
+	}
+	target := filepath.Join(dir, name)
+	if err := os.Link(exe, target); err != nil {
+		data, readErr := os.ReadFile(exe)
+		if readErr != nil {
+			t.Fatalf("reading the test binary: %v", readErr)
+		}
+		if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
+			t.Fatalf("writing the fixture program: %v", writeErr)
+		}
+	}
+}
+
+// fixtureOwnedRecord is the readiness/PID record a fixture parent
+// publishes about its grandchild: the pid, the exact native start
+// identity the platform read (the unix lstart, the windows creation
+// ticks) and the command base name, captured while the parent still owns
+// the live exec.Cmd and before the record is published. The record is
+// the only basis the cleanup uses to stop the grandchild.
+type fixtureOwnedRecord struct {
+	Pid     int    `json:"pid"`
+	Started string `json:"started"`
+	Name    string `json:"name"`
+}
+
+// fixtureChildIdentity reads one grandchild's start identity and command
+// base name with the native platform ProcInfo behavior, through the
+// trusted ps lookup PATH the test provided (the role's own PATH is the
+// isolated fixture bin and would not find ps; on windows the read is a
+// native process API and the PATH is inert); an unreadable read names
+// nothing, and nothing is fabricated.
+func fixtureChildIdentity(pid int) (string, string) {
+	path := os.Getenv(runCliFixturePsPathEnv)
+	if path == "" {
+		return "", ""
+	}
+	started, name, ok := ProcInfo(pid, Env{"PATH": path})
+	if !ok {
+		return "", ""
+	}
+	return started, name
+}
+
+// publishFixtureOwnedRecord captures the pid, start identity and name
+// from the live exec.Cmd the caller still owns and publishes the JSON
+// record: the identity is read before the record exists, so the cleanup
+// can later validate the original identity against it.
+func publishFixtureOwnedRecord(path string, cmd *exec.Cmd) error {
+	started, name := fixtureChildIdentity(cmd.Process.Pid)
+	record := fixtureOwnedRecord{Pid: cmd.Process.Pid, Started: started, Name: name}
+	data, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+// readFixtureOwnedRecord waits (bounded) for the published record and
+// parses it; a record without a positive pid names no owned process.
+func readFixtureOwnedRecord(t *testing.T, path string) fixtureOwnedRecord {
+	t.Helper()
+	until := time.Now().Add(5 * time.Second)
+	for {
+		if data, err := os.ReadFile(path); err == nil {
+			var record fixtureOwnedRecord
+			if json.Unmarshal(data, &record) == nil && record.Pid > 0 {
+				return record
+			}
+		}
+		if time.Now().After(until) {
+			t.Fatalf("the fixture never published a usable owned record at %s", path)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// fixturePsEnv is the trusted ps lookup environment the test-side
+// identity reads use: the harness's ambient PATH, nothing else (the
+// fixture children's isolated PATH would not find ps).
+func fixturePsEnv() Env {
+	return Env{"PATH": os.Getenv("PATH")}
+}
+
+// stopOwnedFixture stops the grandchild one owned record describes, with
+// the identity validation the registry stop applies: the original start
+// identity is validated immediately before the single owned signal,
+// through the platform's identity-aware read. A proven absence needs no
+// signal; an unreadable read is never signalled (unknown is not an
+// absence); a running pid whose start identity no longer matches the
+// record — or a record that captured no identity — is refused, so a
+// mismatched process is not signalled. After the single signal the
+// absence is confirmed by the identity-aware read poll (bounded); the
+// helper never repeats the kill. It reports "absent", "unknown",
+// "mismatch" or "stopped".
+func stopOwnedFixture(t *testing.T, record fixtureOwnedRecord, env Env) string {
+	t.Helper()
+	started, live := ReadProc(record.Pid, env)
+	switch {
+	case live == ProcGone:
+		return "absent"
+	case live == ProcUnknown:
+		return "unknown"
+	case record.Started == "":
+		return "unknown"
+	case record.Name == "":
+		return "unknown"
+	case !SameStarted(started, record.Started):
+		return "mismatch"
+	}
+	currentStarted, currentName, ok := ProcInfo(record.Pid, env)
+	if !ok {
+		return "unknown"
+	}
+	if !SameStarted(currentStarted, record.Started) || currentName != record.Name {
+		return "mismatch"
+	}
+	process, err := os.FindProcess(record.Pid)
+	if err != nil {
+		t.Fatalf("find fixture pid %d: %v", record.Pid, err)
+	}
+	if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		t.Fatalf("the single owned signal to fixture pid %d: %v", record.Pid, err)
+	}
+	until := time.Now().Add(5 * time.Second)
+	for {
+		_, live = ReadProc(record.Pid, env)
+		if live == ProcGone {
+			return "stopped"
+		}
+		if live == ProcUnknown {
+			t.Fatalf("fixture pid %d is unreadable after the owned signal: absence unconfirmed and no second signal is sent", record.Pid)
+		}
+		if time.Now().After(until) {
+			t.Fatalf("fixture pid %d still running after the single owned signal", record.Pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
 
 type windowsReference struct {
 	Version int `json:"version"`
@@ -151,9 +455,9 @@ func TestSkillDirRequiresRolesDirectory(t *testing.T) {
 	previous := currentExecutable
 	currentExecutable = func() (string, error) { return filepath.Join(bin, "herdr-soho"), nil }
 	defer func() { currentExecutable = previous }()
-	// A fake HOME: with the home lookup in place, a real home holding an
-	// installed skill would otherwise satisfy the lookup and skip the die.
-	env := Env{"HOME": t.TempDir(), "USERPROFILE": t.TempDir()}
+	// No home/cache values: a valid bundled fallback must not hide a
+	// missing roles directory in the executable's incomplete skill tree.
+	env := Env{}
 	got := capturePanic(func() { SkillDir(env) }) // Mutation captured: removing the roles/ validation accepts an incomplete skill tree.
 	exit, ok := got.(*ExitError)
 	if !ok || exit.Code != 2 {
@@ -167,16 +471,172 @@ func capturePanic(run func()) (value any) {
 	return nil
 }
 
+// TestLauncherPath pins the deliberate binary-only contract: the
+// configured HERDR_SOHO_BIN override (validated and symlink-resolved) or
+// the current executable; never a skill scripts launcher, never a
+// Node/Bun/Bash search, and every invalid override fails closed.
 func TestLauncherPath(t *testing.T) {
-	skill := t.TempDir()
-	env := Env{"HERDR_SOHO_SKILL_DIR": skill}
-	name := "herdr-soho"
-	if runtime.GOOS == "windows" {
-		name = "herdr-soho.cmd"
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locating the test binary: %v", err)
 	}
-	want := filepath.Join(skill, "scripts", name)
-	if got := LauncherPath(env); got != want {
-		t.Fatalf("LauncherPath() = %q, want %q", got, want)
+	want, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		t.Fatalf("resolving the test binary: %v", err)
+	}
+	t.Run("the HERDR_SOHO_BIN override names the native binary through symlinks and hostile spacing", func(t *testing.T) {
+		// A symlinked binary inside a directory with a space and a quote:
+		// the hostile spacing must not defeat the resolution, and the
+		// skill directory must play no part.
+		weird := filepath.Join(t.TempDir(), "sp ace", `qu"ote`)
+		if err := os.MkdirAll(weird, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(weird, "herdr-soho")
+		if err := os.Symlink(exe, link); err != nil {
+			t.Fatal(err)
+		}
+		env := Env{"HERDR_SOHO_BIN": link, "PATH": "", "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+		if got := LauncherPath(env); got != want {
+			t.Fatalf("LauncherPath() = %q, want the resolved native binary %q", got, want)
+		}
+	})
+	t.Run("the fallback is the current executable, not PATH and not skill/scripts", func(t *testing.T) {
+		previous := currentExecutable
+		currentExecutable = func() (string, error) { return exe, nil }
+		defer func() { currentExecutable = previous }()
+		// An empty or blank override means no override: the fallback holds.
+		for _, blank := range []string{"", "   "} {
+			env := Env{"HERDR_SOHO_BIN": blank, "PATH": "", "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+			if got := LauncherPath(env); got != exe {
+				t.Fatalf("LauncherPath() with %q override = %q, want the current executable %q", blank, got, exe)
+			}
+		}
+		got := LauncherPath(Env{"PATH": "", "HERDR_SOHO_SKILL_DIR": t.TempDir()})
+		if got != exe {
+			t.Fatalf("LauncherPath() = %q, want the current executable %q", got, exe)
+		}
+		if strings.Contains(got, "scripts") || strings.HasSuffix(got, ".cmd") {
+			t.Fatalf("LauncherPath() = %q names a scripts launcher; want the native binary", got)
+		}
+	})
+	t.Run("refusals fail closed with code 2, never a fallback", func(t *testing.T) {
+		tmp := t.TempDir()
+		for _, tc := range []struct {
+			name    string
+			bin     string
+			setup   func(t *testing.T) string
+			want    string
+			skipWin bool
+		}{
+			{name: "relative override", bin: "herdr-soho", want: "HERDR_SOHO_BIN must be an absolute path"},
+			{name: "missing override", bin: filepath.Join(tmp, "missing"), want: "HERDR_SOHO_BIN is missing or not a regular file"},
+			{name: "directory override", bin: tmp, want: "HERDR_SOHO_BIN is missing or not a regular file"},
+			{
+				name: "shebang script override", bin: filepath.Join(tmp, "script"), want: "HERDR_SOHO_BIN is not a native binary",
+				setup: func(t *testing.T) string {
+					f := filepath.Join(tmp, "script")
+					if err := os.WriteFile(f, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					return f
+				},
+			},
+			{
+				name: ".cmd batch override", bin: filepath.Join(tmp, "run.cmd"), want: "HERDR_SOHO_BIN is not a native binary",
+				setup: func(t *testing.T) string {
+					f := filepath.Join(tmp, "run.cmd")
+					if err := os.WriteFile(f, []byte("@echo off\nnode herdr-soho.mjs\n"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					return f
+				},
+			},
+			{
+				name: "symlink to a script resolves to the script", bin: filepath.Join(tmp, "link"), want: "HERDR_SOHO_BIN is not a native binary",
+				setup: func(t *testing.T) string {
+					target := filepath.Join(tmp, "real-script")
+					if err := os.WriteFile(target, []byte("#!/usr/bin/env node\n"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					link := filepath.Join(tmp, "link")
+					if err := os.Symlink(target, link); err != nil {
+						t.Fatal(err)
+					}
+					return link
+				},
+			},
+			{
+				name: "non-executable native binary", bin: filepath.Join(tmp, "noperm"), want: "HERDR_SOHO_BIN is not executable", skipWin: true,
+				setup: func(t *testing.T) string {
+					f := filepath.Join(tmp, "noperm")
+					data, err := os.ReadFile(exe)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(f, data, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					return f
+				},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				if tc.skipWin && runtime.GOOS == "windows" {
+					t.Skip("the mode bit is a unix contract; the windows round proves the PE path")
+				}
+				bin := tc.bin
+				if tc.setup != nil {
+					bin = tc.setup(t)
+				}
+				got := capturePanic(func() { LauncherPath(Env{"HERDR_SOHO_BIN": bin}) })
+				exit, ok := got.(*ExitError)
+				if !ok || exit.Code != 2 || !strings.Contains(exit.Msg, tc.want) {
+					t.Fatalf("LauncherPath panic=%#v; want ExitError code 2 naming %q", got, tc.want)
+				}
+			})
+		}
+	})
+}
+
+// TestIsNativeExecutableHeader pins the header words the override
+// validation accepts (Mach-O either byte order, ELF, PE) and the hostile
+// text it must refuse (shebang, .cmd batch, JSON, a bare MZ without the PE
+// signature, an out-of-window e_lfanew, a short file).
+func TestIsNativeExecutableHeader(t *testing.T) {
+	pe := make([]byte, 0x40)
+	pe[0], pe[1] = 'M', 'Z'
+	pe[0x3C] = 0x38 // e_lfanew: the PE signature sits at offset 0x38
+	copy(pe[0x38:], "PE\x00\x00")
+	for _, tc := range []struct {
+		name   string
+		header []byte
+		want   bool
+	}{
+		{name: "Mach-O 64", header: append([]byte{0xFE, 0xED, 0xFA, 0xCF}, make([]byte, 8)...), want: true},
+		{name: "Mach-O 32", header: []byte{0xFE, 0xED, 0xFA, 0xCE, 0, 0, 0, 0}, want: true},
+		{name: "Mach-O 64 swapped", header: []byte{0xCF, 0xFA, 0xED, 0xFE, 0, 0, 0, 0}, want: true},
+		{name: "Mach-O 32 swapped", header: []byte{0xCE, 0xFA, 0xED, 0xFE, 0, 0, 0, 0}, want: true},
+		{name: "Mach-O universal", header: []byte{0xCA, 0xFE, 0xBA, 0xBE, 0, 1, 0, 0}, want: true},
+		{name: "Mach-O universal swapped", header: []byte{0xBE, 0xBA, 0xFE, 0xCA, 0, 1, 0, 0}, want: true},
+		{name: "ELF", header: []byte{0x7F, 'E', 'L', 'F', 2, 1, 1, 0}, want: true},
+		{name: "PE with the signature at e_lfanew", header: pe, want: true},
+		{name: "shebang script", header: []byte("#!/bin/sh\necho hi\n"), want: false},
+		{name: ".cmd batch", header: []byte("@echo off\nnode herdr-soho.mjs\n"), want: false},
+		{name: "JSON", header: []byte(`{"a":1}`), want: false},
+		{name: "MZ without the PE signature", header: append([]byte("MZ"), make([]byte, 0x40-2)...), want: false},
+		{name: "MZ with an out-of-window e_lfanew", header: func() []byte {
+			bad := make([]byte, 0x40)
+			bad[0], bad[1], bad[0x3C], bad[0x3D] = 'M', 'Z', 0xFF, 0xFF
+			return bad
+		}(), want: false},
+		{name: "a two-byte file", header: []byte{'M', 'Z'}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isNativeExecutableHeader(tc.header); got != tc.want {
+				t.Fatalf("isNativeExecutableHeader(%x) = %v, want %v", tc.header[:min(8, len(tc.header))], got, tc.want)
+			}
+		})
 	}
 }
 
@@ -426,15 +886,15 @@ func TestWindowsPlatformMatchesJSFixtures(t *testing.T) {
 }
 
 func TestRunCli(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX fixture commands are unavailable on Windows")
-	}
+	// The fixture program is a re-executed copy of this test binary (no
+	// shell behind the name): the role selected by the environment
+	// reproduces each old sh script's observable streams, exit codes,
+	// signal behavior and pipe holding. The subtests that pin a POSIX
+	// exec/errno/signal contract keep their build boundary; the generic
+	// stream/exit/cwd/tmpdir subtests run on every platform.
 	bin := t.TempDir()
-	program := filepath.Join(bin, "fixture")
-	if err := os.WriteFile(program, []byte("#!/bin/sh\nprintf 'out-line\\n'\nprintf 'err-line\\n' >&2\nexit 5\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	env := Env{"PATH": bin, "TMPDIR": t.TempDir()}
+	runCliFixtureProgram(t, bin, runCliFixtureName())
+	env := Env{"PATH": bin, "TMPDIR": t.TempDir(), runCliFixtureRoleEnv: "out-err-5", runCliFixturePsPathEnv: os.Getenv("PATH")}
 	for _, tc := range []struct {
 		name string
 		mode RunOptions
@@ -454,21 +914,17 @@ func TestRunCli(t *testing.T) {
 		})
 	}
 	t.Run("stdin is passed through and exit codes are preserved", func(t *testing.T) {
-		if err := os.WriteFile(program, []byte("#!/bin/sh\n/bin/cat\nprintf 'err' >&2\nexit 7\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
+		env[runCliFixtureRoleEnv] = "cat-err"
 		r := RunCli("fixture", nil, RunOptions{Env: env, Input: "stdin body"})
 		if r.Status == nil || *r.Status != 7 || r.Stdout != "stdin body" || r.Stderr != "err" {
 			t.Fatalf("result = %#v", r)
 		}
 	})
 	t.Run("RunOptions.Cwd controls the child working directory", func(t *testing.T) { // Mutation captured: removing cmd.Dir ignores the caller's working directory.
+		env[runCliFixtureRoleEnv] = "pwd"
 		cwd := t.TempDir()
 		canonicalCwd, err := filepath.EvalSymlinks(cwd)
 		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(program, []byte("#!/bin/sh\npwd\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		r := RunCli("fixture", nil, RunOptions{Env: env, Cwd: cwd})
@@ -477,12 +933,10 @@ func TestRunCli(t *testing.T) {
 		}
 	})
 	t.Run("temporary output files use Env.TMPDIR and are removed", func(t *testing.T) { // Mutations captured: ignoring Env.TMPDIR or leaving output files behind changes observable filesystem state.
+		env[runCliFixtureRoleEnv] = "out-err"
 		customTemp := t.TempDir()
-		if err := os.WriteFile(program, []byte("#!/bin/sh\nprintf 'out\\n'\nprintf 'err\\n' >&2\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
 		missingTemp := filepath.Join(t.TempDir(), "missing")
-		created := RunCli("fixture", nil, RunOptions{Env: Env{"PATH": bin, "TMPDIR": missingTemp}, OutputFiles: true})
+		created := RunCli("fixture", nil, RunOptions{Env: Env{"PATH": bin, "TMPDIR": missingTemp, runCliFixtureRoleEnv: "out-err"}, OutputFiles: true})
 		if created.Status == nil || *created.Status != 0 || created.Error != "" {
 			t.Fatalf("a missing Env.TMPDIR is created (mkdirSync recursive in the JS): %#v", created)
 		}
@@ -490,7 +944,7 @@ func TestRunCli(t *testing.T) {
 			t.Fatalf("the created Env.TMPDIR must be used and left empty: %v, %v", entries, err)
 		}
 		for _, options := range []RunOptions{{MergeOutput: true}, {OutputFiles: true}} {
-			options.Env = Env{"PATH": bin, "TMPDIR": customTemp}
+			options.Env = Env{"PATH": bin, "TMPDIR": customTemp, runCliFixtureRoleEnv: "out-err"}
 			r := RunCli("fixture", nil, options)
 			entries, err := os.ReadDir(customTemp)
 			if err != nil || len(entries) != 0 {
@@ -506,15 +960,20 @@ func TestRunCli(t *testing.T) {
 		}
 	})
 	t.Run("a signaled child reports Node signal shape", func(t *testing.T) {
-		if err := os.WriteFile(program, []byte("#!/bin/sh\nkill -KILL $$\n"), 0o700); err != nil {
-			t.Fatal(err)
+		if runtime.GOOS == "windows" {
+			t.Skip("the Node signal shape is a POSIX exec contract; a Windows termination reports no signal")
 		}
+		env[runCliFixtureRoleEnv] = "self-signal"
 		r := RunCli("fixture", nil, RunOptions{Env: env})
 		if r.Status != nil || r.Signal != "SIGKILL" || !r.TimedOut || r.Error != "" {
 			t.Fatalf("result = %#v", r)
 		}
 	})
 	t.Run("spawn errors map errno codes", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("the shebang errno mapping (ENOENT for a missing interpreter, ENOEXEC for a non-executable) is a POSIX kernel contract")
+		}
+		// Inert rejection data: the exec fails before any engine runs.
 		bad := filepath.Join(bin, "bad-shebang")
 		if err := os.WriteFile(bad, []byte("#!/definitely/missing/interpreter\n"), 0o700); err != nil {
 			t.Fatal(err)
@@ -528,16 +987,50 @@ func TestRunCli(t *testing.T) {
 		}
 	})
 	t.Run("timeout wait delay of 1 s bounds the wait when a grandchild holds pipes", func(t *testing.T) {
-		if err := os.WriteFile(program, []byte("#!/bin/sh\n/bin/sleep 5 &\n/bin/sleep 5\n"), 0o700); err != nil {
-			t.Fatal(err)
+		if runtime.GOOS == "windows" {
+			t.Skip("the result asserts a non-empty POSIX signal from the SIGTERM cancel; Windows termination reports no signal")
 		}
+		env[runCliFixtureRoleEnv] = "tree-hold"
+		pidFile := filepath.Join(t.TempDir(), "grandchild.json")
+		env[runCliFixturePidfileEnv] = pidFile
 		start := time.Now()
 		r := RunCli("fixture", nil, RunOptions{Env: env, TimeoutMs: 100})
 		elapsed := time.Since(start)
+		// The grandchild is owned before any result assertion: a failure
+		// below must not leak it.
+		record := readFixtureOwnedRecord(t, pidFile)
+		psEnv := fixturePsEnv()
+		t.Cleanup(func() {
+			if outcome := stopOwnedFixture(t, record, psEnv); outcome != "absent" && outcome != "stopped" {
+				t.Errorf("the cleanup could not stop the grandchild: %s", outcome)
+			}
+		})
 		if !r.TimedOut || r.Status != nil || r.Signal == "" || elapsed > 1500*time.Millisecond {
 			t.Fatalf("result=%#v elapsed=%v", r, elapsed)
 		}
+		// Causal lower bound: the grandchild held the inherited pipes for
+		// 5 s, so the wait consumed the 1 s wait delay; an immediate exit
+		// (pipes not held) would return in well under 500 ms.
+		if elapsed < 500*time.Millisecond {
+			t.Fatalf("elapsed=%v is too fast for the 1 s wait delay over the pipes the grandchild inherited", elapsed)
+		}
+		// The grandchild outlived the parent's SIGTERM and is owned here:
+		// validated against the original identity, stopped with the
+		// single owned signal and confirmed absent, exactly like the old
+		// fixture's orphaned sleep is not left behind.
+		if outcome := stopOwnedFixture(t, record, psEnv); outcome != "stopped" && outcome != "absent" {
+			t.Fatalf("stop the owned grandchild: %s (record %#v)", outcome, record)
+		}
 	})
+}
+
+// runCliFixtureName is the fixture program's file name: extensionless on
+// Unix, .exe on Windows (the PATHEXT resolution).
+func runCliFixtureName() string {
+	if runtime.GOOS == "windows" {
+		return "fixture.exe"
+	}
+	return "fixture"
 }
 
 func TestRunCliWindowsTreeKillSelection(t *testing.T) {
@@ -657,36 +1150,42 @@ func TestRunTreeKillTestKiller(t *testing.T) {
 }
 
 func TestRunCliWaitDelay(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("requires a POSIX fixture process")
-	}
+	// The fixture program is the re-executed test binary in the
+	// pidfile-parent role (no shell): the grandchild holds the inherited
+	// pipes and outlives the parent, so the 1 s wait delay bounds the
+	// wait on every platform. The bounds are causal: the lower bound
+	// proves the wait actually waited on the pipes the grandchild
+	// inherited (an immediate exit would return in milliseconds), the
+	// upper bound proves the 1 s delay capped the wait instead of the
+	// 12 s the grandchild would hold.
 	bin := t.TempDir()
-	program := filepath.Join(bin, "fixture")
-	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	runCliFixtureProgram(t, bin, runCliFixtureName())
+	pidFile := filepath.Join(t.TempDir(), "grandchild.json")
 	const grandchildDelay = 12 * time.Second
-	if err := os.WriteFile(program, []byte("#!/bin/sh\n/bin/sleep 12 &\necho $! > \"$PID_FILE\"\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	env := Env{"PATH": bin, "PID_FILE": pidFile, runCliFixtureRoleEnv: "pidfile-parent", runCliFixturePsPathEnv: os.Getenv("PATH")}
 	start := time.Now()
-	r := RunCli("fixture", nil, RunOptions{Env: Env{"PATH": bin, "PID_FILE": pidFile}})
+	r := RunCli("fixture", nil, RunOptions{Env: env})
 	elapsed := time.Since(start)
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Fatalf("read grandchild pid: %v", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		t.Fatalf("parse grandchild pid %q: %v", data, err)
-	}
-	grandchild, err := os.FindProcess(pid)
-	if err != nil {
-		t.Fatalf("find grandchild %d: %v", pid, err)
-	}
-	if err := grandchild.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		t.Fatalf("stop grandchild %d: %v", pid, err)
-	}
-	if r.Status == nil || *r.Status != 0 || r.Error != "" || elapsed >= grandchildDelay {
+	// The grandchild is owned before any result assertion: a failure
+	// below must not leak it.
+	record := readFixtureOwnedRecord(t, pidFile)
+	psEnv := fixturePsEnv()
+	t.Cleanup(func() {
+		if outcome := stopOwnedFixture(t, record, psEnv); outcome != "absent" && outcome != "stopped" {
+			t.Errorf("the cleanup could not stop the grandchild: %s", outcome)
+		}
+	})
+	if r.Status == nil || *r.Status != 0 || r.Error != "" {
 		t.Fatalf("result=%#v elapsed=%v", r, elapsed)
+	}
+	if elapsed < 700*time.Millisecond {
+		t.Fatalf("elapsed=%v is too fast for the 1 s wait delay over the pipes the grandchild inherited", elapsed)
+	}
+	if elapsed >= grandchildDelay {
+		t.Fatalf("elapsed=%v reached the grandchild's hold: the wait delay did not cap the wait", elapsed)
+	}
+	if outcome := stopOwnedFixture(t, record, psEnv); outcome != "stopped" && outcome != "absent" {
+		t.Fatalf("stop the owned grandchild: %s (record %#v)", outcome, record)
 	}
 }
 
@@ -826,7 +1325,7 @@ func skipUnavailableSymlink(t *testing.T, err error) {
 // Mutation captured: losing the named result drops streams read by temp-file defers.
 func TestRunCliMatchesJSFixtures(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("POSIX process fixtures are covered by TestRunCliWindows on Windows")
+		t.Skip("the oracle rows pin POSIX shebang, errno and signal shapes; the Windows tier covers the runCLI process contract in TestRunCliWindows")
 	}
 	var fixture struct {
 		Version int `json:"version"`
@@ -861,12 +1360,35 @@ func TestRunCliMatchesJSFixtures(t *testing.T) {
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			bin, tmp := t.TempDir(), t.TempDir()
-			if tc.Mode != "missing" && tc.Command == "" {
-				if err := os.WriteFile(filepath.Join(bin, tc.Name), []byte(tc.Script), 0o700); err != nil {
-					t.Fatal(err)
+			// The native stand-in is this test binary, so a race build must
+			// retain detection without the detector's artificial exit delay.
+			env := Env{"PATH": bin, "TMPDIR": tmp, "GORACE": "atexit_sleep_ms=0", runCliFixturePsPathEnv: os.Getenv("PATH")}
+			if tc.Mode != "missing" {
+				if role := runCliFixtureRoleForCase(tc.Name); role != "" {
+					// The native stand-in for the row's script (or node
+					// case): a re-executed copy of this test binary named
+					// for the row's command, selected by the role
+					// environment.
+					installName := tc.Command
+					if installName == "" {
+						installName = tc.Name
+					}
+					runCliFixtureProgram(t, bin, installName)
+					env[runCliFixtureRoleEnv] = role
+					if tc.Name == "daemonize-no-timeout" {
+						env[runCliFixturePidfileEnv] = filepath.Join(tmp, "daemonize.json")
+					}
+				} else if tc.Command == "" {
+					// Inert rejection data (bad-shebang, no-shebang): the
+					// exec fails before any engine runs (missing
+					// interpreter / not executable), so the script text is
+					// never executed.
+					if err := os.WriteFile(filepath.Join(bin, tc.Name), []byte(tc.Script), 0o700); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
-			options := RunOptions{Env: Env{"PATH": bin + string(os.PathListSeparator) + os.Getenv("PATH"), "TMPDIR": tmp}}
+			options := RunOptions{Env: env}
 			switch tc.Mode {
 			case "mergeOutput":
 				options.MergeOutput = true
@@ -881,15 +1403,17 @@ func TestRunCliMatchesJSFixtures(t *testing.T) {
 			// while the child still exits on its own (status set, signal and
 			// timedOut absent): the recorded result does not depend on the
 			// deadline's value, only on it firing before the child exits on
-			// its own (the node scripts park on an interval). The fixture's
-			// 300 ms is not enough for node to start and install its SIGTERM
-			// trap on a loaded host — the deadline fired mid-startup and the
-			// child died on the signal, or was SIGKILLed by the 100 ms
-			// WaitDelay — so the Go test gives exactly those cases (the
-			// fixture rows that need a live child to trap the timeout) a
-			// generous deadline. The comparison with the fixture is
-			// unchanged: status, signal, stdout, timedOut and error are
-			// identical for any deadline the node child reaches.
+			// its own. The node scripts parked on an interval, and the
+			// fixture's 300 ms was not enough for node to start and install
+			// its SIGTERM trap on a loaded host — the deadline fired
+			// mid-startup and the child died on the signal, or was SIGKILLed
+			// by the 1 s WaitDelay — so the Go test gives exactly those
+			// cases (the fixture rows that need a live child to trap the
+			// timeout) a generous deadline; the native trap role parks the
+			// same way (blocked until the SIGTERM arrives). The comparison
+			// with the fixture is unchanged: status, signal, stdout,
+			// timedOut and error are identical for any deadline the child
+			// reaches.
 			if tc.Result.Error != nil && !tc.Result.TimedOut && tc.Result.Status != nil {
 				options.TimeoutMs = 5000
 			}
@@ -898,11 +1422,60 @@ func TestRunCliMatchesJSFixtures(t *testing.T) {
 				command = tc.Name
 			}
 			got := RunCli(command, tc.Args, options)
+			// The daemonized grandchild is owned before the result
+			// assertion: a failure below must not leak it.
+			var daemonRecord fixtureOwnedRecord
+			var daemonPath string
+			if tc.Name == "daemonize-no-timeout" {
+				daemonPath = filepath.Join(tmp, "daemonize.json")
+			}
+			if daemonPath != "" {
+				daemonRecord = readFixtureOwnedRecord(t, daemonPath)
+				psEnv := fixturePsEnv()
+				t.Cleanup(func() {
+					if outcome := stopOwnedFixture(t, daemonRecord, psEnv); outcome != "absent" && outcome != "stopped" {
+						t.Errorf("the cleanup could not stop the daemonized grandchild: %s", outcome)
+					}
+				})
+			}
 			if got.NotFound != tc.Result.NotFound || !equalIntPointer(got.Status, tc.Result.Status) || !equalStringPointer(got.Signal, tc.Result.Signal) || got.Stdout != tc.Result.Stdout || got.Stderr != tc.Result.Stderr || got.TimedOut != tc.Result.TimedOut || !equalStringPointer(got.Error, tc.Result.Error) {
 				t.Fatalf("Go=%#v JS=%#v", got, tc.Result)
 			}
+			if daemonPath != "" {
+				// The daemonized grandchild is owned through its published
+				// record: validated against the original identity, stopped
+				// with the single owned signal and confirmed absent, so no
+				// fixture process is left behind.
+				psEnv := fixturePsEnv()
+				if outcome := stopOwnedFixture(t, daemonRecord, psEnv); outcome != "stopped" && outcome != "absent" {
+					t.Fatalf("stop the owned grandchild: %s (record %#v)", outcome, daemonRecord)
+				}
+			}
 		})
 	}
+}
+
+// runCliFixtureRoleForCase maps an oracle row to its native fixture role
+// (empty when the row needs no executed fixture: the missing executable
+// and the inert rejection data).
+func runCliFixtureRoleForCase(name string) string {
+	switch name {
+	case "default", "merge", "files":
+		return "out-err-5"
+	case "signal":
+		return "self-signal"
+	case "timeout":
+		return "hold-5000"
+	case "trap-exit-0":
+		return "trap-term-0"
+	case "trap-exit-3":
+		return "trap-term-3"
+	case "daemonize-no-timeout":
+		return "daemonize"
+	case "badutf":
+		return "badutf"
+	}
+	return ""
 }
 
 func equalIntPointer(left, right *int) bool {

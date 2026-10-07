@@ -177,7 +177,7 @@ func TestTM9CoreCases(t *testing.T) {
 			{"idle", `{"message":"rate limit exceeded"}`}, {"idle", `{"error":"quota exceeded"}`}, {"idle", `{"error":{"code":"insufficient_quota","message":"rate limit exceeded"}}`}, {"idle", "hit your usage limit\r\nResets at 10:00\r\n"}, {"idle", "resets at 10:00"}, {"idle", "available again on 2026-09-24"}, {"idle", "quota exceeded, resets at 5:00pm"}, {"idle", "2026-09-24 14:30"}, {"idle", "in 5 minutes at 14:30"}, {"idle", "nothing usable here"},
 		}
 		renewals := []string{"Resets at 5:00pm", "Resets at 09:15:00", "Resets at 2:30PM.", "Resets at 2:30P.M.", "resets on 2026-09-24 at noon", "try again in 5 minutes", "retry after 2 hours", "quota exceeded, resets at 5:00pm", "2026-09-24 14:30", "in 5 minutes at 14:30", "nothing usable here", ""}
-		goldenBytes, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "scripts", "test", "golden", "parity-lanes.json"))
+		goldenBytes, err := os.ReadFile(filepath.Join("..", "testdata", "legacy", "parity-lanes.json"))
 		if err != nil {
 			t.Fatal(err)
 		}

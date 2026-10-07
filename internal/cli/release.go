@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/djalmajr/herdr-soho/internal/collaboration"
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
 	"github.com/djalmajr/herdr-soho/internal/layout"
@@ -55,6 +56,16 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 	burst := field(12) == "burst"
 	closes := closePane || burst && created == "1"
 	report := core.LastReport(sd, agent)
+	// A participant of an active collaboration is never released — not with
+	// --force: the cycle only ends through an explicit stop and finalize
+	// verdict, and a release must not pretend that outcome. Agents outside
+	// the roster (the orphan path above) are not participants and skip the
+	// check, as do panes with no active collaboration.
+	if pane != "" {
+		if code, message := collaborationReleaseRefusal(sd, agent, pane, ctx, env, cwd); code != 0 {
+			core.DieFriction(message, code, frictionLogPath, "release")
+		}
+	}
 	if !force && reportEmpty(report) {
 		state := herdr.AgentState(agent, env, herdr.Timeout, nil)
 		if state.State == "unavailable" {
@@ -232,6 +243,31 @@ func reportEmpty(report string) bool {
 	}
 	info, err := os.Stat(report)
 	return err != nil || info.Size() == 0
+}
+
+// collaborationReleaseRefusal refuses to release a participant of an active
+// collaboration: code 10 (the lane is busy) even with --force — the
+// orchestrator stops the collaboration and finalizes it explicitly first,
+// because a release must not fake the cycle's outcome. A registration that
+// cannot be read, or whose participants cannot be verified against the live
+// roster and Herdr, is code 4: inspect it before releasing anything.
+func collaborationReleaseRefusal(sd, agent, pane string, ctx *core.Config, env platform.Env, cwd string) (int, string) {
+	store := collaboration.Store{StateDir: sd}
+	a, err := store.ActiveFor(pane)
+	if err != nil {
+		return 4, fmt.Sprintf("release: the collaboration state of pane %s is unreadable (%v); inspect it before releasing %s", pane, err, agent)
+	}
+	if a == nil {
+		return 0, ""
+	}
+	if env.Get("HERDR_WORKSPACE_ID") == "" {
+		env = env.Clone()
+		env["HERDR_WORKSPACE_ID"] = core.WorkspaceID(ctx, env, cwd)
+	}
+	if err := collaboration.CheckParticipants(*a, sd, env); err != nil {
+		return 4, fmt.Sprintf("release: the participants of collaboration %s cannot be verified (%v); inspect before releasing %s", a.ID, err, agent)
+	}
+	return 10, fmt.Sprintf("release: %s is a participant of active collaboration %s (phase %s, round %d); stop it and finalize it explicitly first (herdr-soho collaborate stop %s, then herdr-soho collaborate finalize %s --verdict accept|reject): release never fakes the cycle's outcome", agent, a.ID, a.Phase, a.Round, a.ID, a.ID)
 }
 
 // releaseCopies removes the released agent's registered copies at the same
