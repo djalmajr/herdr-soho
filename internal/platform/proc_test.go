@@ -461,6 +461,9 @@ func TestReview92RejectReparentedSnapshot(t *testing.T) {
 // the real process table and the full lstart/ppid/state reads): the
 // parent remains in the tree — the child's current parent is still the
 // snapshot's parent, it stays verified and the stop reaches it.
+//
+// Verify ownership before stopping: a terminated heartbeat writer can leave
+// an empty file. After stopping, check both process states and the heartbeat.
 func TestReview92StopsOwnedChild(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the unix TERM/KILL round; the windows round exercises the same contract")
@@ -493,16 +496,19 @@ func TestReview92StopsOwnedChild(t *testing.T) {
 	if !ok {
 		t.Fatalf("the root %d is not readable", rootPid)
 	}
+	kidID, kidLive := procReadIdentityReal(kid, env)
+	if kidLive != ProcRunning || !kidID.ppidKnown || kidID.ppid != rootPid {
+		t.Fatalf("pre-stop: child %d is not owned by the root (live=%v ppidKnown=%v ppid=%d, want running under %d)", kid, kidLive, kidID.ppidKnown, kidID.ppid, rootPid)
+	}
+	t.Logf("pre-stop ownership: child=%d ppid=%d under root=%d", kid, kidID.ppid, rootPid)
 	err := StopProcessTree(rootPid, readStarted, env)
 	t.Logf("StopProcessTree error=%v", err)
 	if err != nil {
 		t.Fatalf("StopProcessTree: %v; the owned tree is verified and stopped", err)
 	}
-	ppid := beatPPID(beat)
-	if ppid != rootPid {
-		t.Fatalf("fixture child was not in tree (ppid %d)", ppid)
-	}
-	t.Logf("child=%d ppid=%d still in tree at the stop", kid, ppid)
+	// Mutation captured: omitting verified descendants leaves the child alive.
+	procGone(t, env, rootPid, 5*time.Second)
+	procGone(t, env, kid, 5*time.Second)
 	before, _ := os.ReadFile(beat)
 	time.Sleep(200 * time.Millisecond)
 	after, _ := os.ReadFile(beat)
