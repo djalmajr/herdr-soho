@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/peer"
+	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
@@ -123,8 +124,19 @@ func TestDiscoverSessionsLocalFirstArrivalOrder(t *testing.T) {
 		}
 		f := newFixtureAt(t, dir, rules)
 		f.env["FAKECLI_WAIT_FILE_TIMEOUT_MS"] = "10000"
+		// The subprocess timeout rounds the remaining budget to milliseconds.
+		// Keep an expired remote transport occupied until the shared context
+		// expires, so that rounding cannot free a slot for the fifth query.
+		// The real fake CLI calls and timeout results remain observable.
+		run := func(exe string, args []string, opts platform.RunOptions) platform.RunResult {
+			result := platform.RunCli(exe, args, opts)
+			if len(args) > 0 && args[0] == "--machine" && result.TimedOut {
+				<-opts.Context.Done()
+			}
+			return result
+		}
 		start := time.Now()
-		result := peer.DiscoverSessions(peer.DiscoverOptions{Env: f.env, Machines: machines, TimeoutMS: 800}, func(peer.SessionResult) {})
+		result := peer.DiscoverSessions(peer.DiscoverOptions{Env: f.env, Machines: machines, TimeoutMS: 800, Run: run}, func(peer.SessionResult) {})
 		elapsed := time.Since(start)
 		deadlines, timeouts := 0, 0
 		for _, failure := range result.Failures {

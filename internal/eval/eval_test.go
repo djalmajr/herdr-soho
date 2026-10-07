@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/testutil"
 )
 
 // The tests exercise the real package API and the real CLI binary against
@@ -576,24 +578,59 @@ func TestPrepareRejectsInsideFixture(t *testing.T) {
 }
 
 func TestPrepareRemovesIncompleteDestinationOnFailure(t *testing.T) {
-	outside := t.TempDir()
-	fixture := buildGoFixture(t, outside, "go-add-fixture", briefMD, referenceAdd, map[string]string{"add_test.go": addProbes})
-	unreadable := filepath.Join(fixture, "src", "add.go")
-	if err := os.Chmod(unreadable, 0); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o644) })
-	dest := filepath.Join(outside, "worker")
-	res := runCLI(t, t.TempDir(), cliEnv(t), "prepare", fixture, dest)
-	if res.code != 2 {
-		t.Fatalf("exit = %d, want 2 for a failed copy (stderr: %s)", res.code, res.stderr)
-	}
-	if res.stdout != "" {
-		t.Fatalf("stdout = %q, want empty", res.stdout)
-	}
-	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
-		t.Fatalf("incomplete destination was not removed: %v", err)
-	}
+	t.Run("unreadable source refuses the real CLI", func(t *testing.T) {
+		outside := t.TempDir()
+		fixture := buildGoFixture(t, outside, "go-add-fixture", briefMD, referenceAdd, map[string]string{"add_test.go": addProbes})
+		release := testutil.DenyFileReads(t, filepath.Join(fixture, "src", "add.go"))
+		defer release()
+		dest := filepath.Join(outside, "worker")
+		res := runCLI(t, t.TempDir(), cliEnv(t), "prepare", fixture, dest)
+		if res.code != 2 {
+			t.Fatalf("exit = %d, want 2 for a failed read (stderr: %s)", res.code, res.stderr)
+		}
+		if res.stdout != "" {
+			t.Fatalf("stdout = %q, want empty", res.stdout)
+		}
+		if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+			t.Fatalf("refused preparation left a destination: %v", err)
+		}
+	})
+	t.Run("cancellation removes an actually partial copy", func(t *testing.T) {
+		outside := t.TempDir()
+		fixture := buildGoFixture(t, outside, "go-add-fixture", briefMD, referenceAdd, map[string]string{"add_test.go": addProbes})
+		dest := filepath.Join(outside, "worker")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		partialSeen := false
+		observed := copyCleanupContext{Context: ctx, observe: func() {
+			if raw, err := os.ReadFile(filepath.Join(dest, "brief.md")); err == nil {
+				if string(raw) != briefMD {
+					t.Fatalf("partial copy contains an unexpected brief: %q", raw)
+				}
+				partialSeen = true
+				cancel()
+			}
+		}}
+		_, err := Prepare(observed, Options{Fixture: fixture, Destination: dest, Repository: t.TempDir()})
+		if !partialSeen || !errors.Is(err, context.Canceled) {
+			t.Fatalf("partialSeen=%v err=%v; want cancellation after a real file was copied", partialSeen, err)
+		}
+		if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+			t.Fatalf("incomplete destination was not removed: %v", err)
+		}
+	})
+}
+
+// copyCleanupContext observes filesystem progress at cancellation checks,
+// allowing cancellation after a real copy without sleeps or copy mocks.
+type copyCleanupContext struct {
+	context.Context
+	observe func()
+}
+
+func (c copyCleanupContext) Err() error {
+	c.observe()
+	return c.Context.Err()
 }
 
 func TestPrepareRejectsMissingParent(t *testing.T) {
