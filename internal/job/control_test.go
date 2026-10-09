@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -421,6 +424,247 @@ func TestControlTerminalRefusal(t *testing.T) {
 				t.Fatalf("running job entries: %v", got)
 			}
 		})
+	}
+}
+
+// crashCounterRename points the rename hook at a failure of only the
+// counter rename: the request bodies still publish, the seq file never
+// lands.
+func crashCounterRename(t *testing.T) {
+	t.Helper()
+	previous := renameAtomic
+	renameAtomic = func(from, to string) error {
+		if filepath.Base(to) == "seq" {
+			return errors.New("crash after body publish")
+		}
+		return previous(from, to)
+	}
+	t.Cleanup(func() { renameAtomic = previous })
+}
+
+// controlNumbers lists every counter number in use under the control
+// directory: the live and retired amend-/send- names and the retired
+// cancel.json/checkpoint suffixes.
+func controlNumbers(t *testing.T, ctl string) []int {
+	t.Helper()
+	suffix := regexp.MustCompile(`-([0-9]{1,12})(?:\.md)?$`)
+	nums := []int{}
+	for _, dir := range []string{ctl, filepath.Join(ctl, "done")} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			match := suffix.FindStringSubmatch(entry.Name())
+			if match == nil {
+				continue
+			}
+			n, err := strconv.Atoi(match[1])
+			if err == nil {
+				nums = append(nums, n)
+			}
+		}
+	}
+	sort.Ints(nums)
+	return nums
+}
+
+// TestControlSeqReuseAfterCrashedCounter: a crash after the body publishes
+// and before the counter rename leaves the counter stale; the next request
+// of either kind takes a fresh number, PendingControl lists distinct
+// numbers, and the retry converges to one new request with a fresh number
+// and a published counter.
+func TestControlSeqReuseAfterCrashedCounter(t *testing.T) {
+	s, root := startedJob(t)
+	ctl := controlDir(root)
+
+	crashCounterRename(t)
+
+	_, err := s.RequestAmend("job-1", []byte("amend one"))
+	if err == nil {
+		t.Fatal("expected the counter crash")
+	}
+	if _, err := os.Stat(filepath.Join(ctl, "amend-000001.md")); err != nil {
+		t.Fatalf("published body missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ctl, "seq")); !os.IsNotExist(err) {
+		t.Fatalf("crash wrote the counter: %v", err)
+	}
+
+	// The other kind must not reuse the published number.
+	_, err = s.RequestSend("job-1", []byte("send two"))
+	if err == nil {
+		t.Fatal("expected the counter crash")
+	}
+	if _, err := os.Stat(filepath.Join(ctl, "send-000002.md")); err != nil {
+		t.Fatalf("send took a reused number: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ctl, "send-000001.md")); !os.IsNotExist(err) {
+		t.Fatalf("reused number published: %v", err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(ctl, "seq")); err == nil {
+		t.Fatalf("counter written: %q", raw)
+	}
+
+	items, err := s.PendingControl("job-1")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("pending = %+v err=%v", items, err)
+	}
+	if items[0].Seq == items[1].Seq {
+		t.Fatalf("pending seqs are not distinct: %+v", items)
+	}
+	if items[0].Name != "amend-000001.md" || items[1].Name != "send-000002.md" {
+		t.Fatalf("pending = %+v", items)
+	}
+
+	// The retry converges to one new request with a fresh number and a
+	// published counter.
+	renameAtomic = os.Rename
+	item, err := s.RequestAmend("job-1", []byte("retry"))
+	if err != nil || item.Seq != 3 || item.Name != "amend-000003.md" {
+		t.Fatalf("retry: %+v err=%v", item, err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(ctl, "seq")); err != nil || strings.TrimSpace(string(raw)) != "3" {
+		t.Fatalf("seq after retry = %q err=%v", raw, err)
+	}
+	if nums := controlNumbers(t, ctl); !reflect.DeepEqual(nums, []int{1, 2, 3}) {
+		t.Fatalf("control numbers = %v", nums)
+	}
+}
+
+// TestControlRetireSuffixNoCollision: after a crashed counter, the retired
+// cancel.json and checkpoint suffixes and the fresh request numbers never
+// collide, and a lost counter still climbs past the retired suffixes.
+func TestControlRetireSuffixNoCollision(t *testing.T) {
+	s, root := startedJob(t)
+	ctl := controlDir(root)
+
+	crashCounterRename(t)
+	_, err := s.RequestAmend("job-1", []byte("amend one"))
+	if err == nil {
+		t.Fatal("expected the counter crash")
+	}
+	renameAtomic = os.Rename
+
+	queued, err := s.RequestCancel("job-1", 60)
+	if err != nil || !queued {
+		t.Fatalf("cancel: %v err=%v", queued, err)
+	}
+	queued, err = s.RequestCheckpoint("job-1")
+	if err != nil || !queued {
+		t.Fatalf("checkpoint: %v err=%v", queued, err)
+	}
+	cancel, err := s.PendingControl("job-1")
+	if err != nil || len(cancel) != 3 || cancel[0].Kind != "cancel" || cancel[1].Kind != "checkpoint" || cancel[2].Name != "amend-000001.md" {
+		t.Fatalf("pending = %+v err=%v", cancel, err)
+	}
+	if err := s.RetireControl("job-1", cancel[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RetireControl("job-1", cancel[1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(ctl, "done", "cancel.json-000002")); err != nil {
+		t.Fatalf("retired cancel suffix: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ctl, "done", "checkpoint-000003")); err != nil {
+		t.Fatalf("retired checkpoint suffix: %v", err)
+	}
+
+	// Fresh requests keep climbing past the retired suffixes.
+	sd, err := s.RequestSend("job-1", []byte("send"))
+	if err != nil || sd.Seq != 4 || sd.Name != "send-000004.md" {
+		t.Fatalf("send: %+v err=%v", sd, err)
+	}
+	a2, err := s.RequestAmend("job-1", []byte("amend two"))
+	if err != nil || a2.Seq != 5 || a2.Name != "amend-000005.md" {
+		t.Fatalf("amend: %+v err=%v", a2, err)
+	}
+	if nums := controlNumbers(t, ctl); !reflect.DeepEqual(nums, []int{1, 2, 3, 4, 5}) {
+		t.Fatalf("control numbers = %v", nums)
+	}
+
+	// A lost counter still climbs past the retired suffixes: with the live
+	// bodies retired into done/, only the done/ names carry the maximum.
+	bodies, err := s.PendingControl("job-1")
+	if err != nil || len(bodies) != 3 {
+		t.Fatalf("bodies = %+v err=%v", bodies, err)
+	}
+	for _, body := range bodies {
+		if err := s.RetireControl("job-1", body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Remove(filepath.Join(ctl, "seq")); err != nil {
+		t.Fatal(err)
+	}
+	a3, err := s.RequestAmend("job-1", []byte("amend three"))
+	if err != nil || a3.Seq != 6 || a3.Name != "amend-000006.md" {
+		t.Fatalf("amend after lost counter: %+v err=%v", a3, err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(ctl, "seq")); err != nil || strings.TrimSpace(string(raw)) != "6" {
+		t.Fatalf("seq after lost counter = %q err=%v", raw, err)
+	}
+}
+
+// TestControlSymlinkRefusal: a symlinked request file is not read or
+// retired, its target stays untouched, and a symlinked control/done is
+// refused (POSIX only).
+func TestControlSymlinkRefusal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink refusal is exercised on POSIX")
+	}
+	s, root := startedJob(t)
+	ctl := controlDir(root)
+
+	// A symlinked amend body is not listed and its target stays untouched.
+	secret := filepath.Join(root, "secret.txt")
+	if err := os.WriteFile(secret, []byte("SECRET-BODY"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(ctl, "amend-000009.md")); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.PendingControl("job-1")
+	if err != nil || len(items) != 0 {
+		t.Fatalf("pending = %+v err=%v", items, err)
+	}
+	if raw, err := os.ReadFile(secret); err != nil || string(raw) != "SECRET-BODY" {
+		t.Fatalf("symlink target read: %q err=%v", raw, err)
+	}
+
+	// A symlinked source is refused by the retire, not moved.
+	hostile := ControlItem{Kind: "amend", Name: "amend-000009.md", Path: filepath.Join(ctl, "amend-000009.md")}
+	if err := s.RetireControl("job-1", hostile); exitCode(t, err) != ExitUsage || err.Error() != "job: control path is not a regular file inside control/" {
+		t.Fatalf("symlinked source: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(ctl, "amend-000009.md")); err != nil {
+		t.Fatalf("symlinked source moved: %v", err)
+	}
+
+	// A symlinked done directory is refused and the request stays put.
+	item, err := s.RequestAmend("job-1", []byte("body"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outsideDone := filepath.Join(root, "outside-done")
+	if err := os.MkdirAll(outsideDone, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDone, filepath.Join(ctl, "done")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RetireControl("job-1", item); exitCode(t, err) != ExitUsage || err.Error() != "job: control path is not a regular file inside control/" {
+		t.Fatalf("symlinked done: %v", err)
+	}
+	if _, err := os.Stat(item.Path); err != nil {
+		t.Fatalf("request moved out of control: %v", err)
+	}
+	if entries, err := os.ReadDir(outsideDone); err != nil || len(entries) != 0 {
+		t.Fatalf("outside done received the request: %v err=%v", entries, err)
 	}
 }
 

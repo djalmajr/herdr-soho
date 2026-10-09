@@ -765,6 +765,31 @@ func TestJobControlCancelCheckpoint(t *testing.T) {
 	if entries, err := os.ReadDir(ctl2); err != nil || len(entries) != 0 {
 		t.Fatalf("terminal job wrote control files: %v err=%v", entries, err)
 	}
+
+	// A single stray positional argument is refused before any write:
+	// exit 2 naming the argument, nothing under control/.
+	t.Run("a stray positional argument is refused before any write", func(t *testing.T) {
+		f3 := newJobFix(t)
+		co3 := f3.checkout(t, "example-org", "example-repo")
+		f3.startJob(t, co3)
+		ctl3 := filepath.Join(co3, ".herdr-soho", "jobs", "job-1", "control")
+
+		for _, sub := range []string{"cancel", "checkpoint"} {
+			code, out, errOut := f3.run(t, sub, "--id", "job-1", "stray")
+			if code != 2 || out != "" || !strings.Contains(errOut, "job "+sub+": unexpected argument 'stray'") {
+				t.Fatalf("%s code=%d out=%q err=%q", sub, code, out, errOut)
+			}
+		}
+		// The store start pre-creates the control directory; the refusal
+		// must leave it without a single file.
+		if entries, err := os.ReadDir(ctl3); err == nil {
+			if len(entries) != 0 {
+				t.Fatalf("stray argument wrote control files: %v", entries)
+			}
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stray argument: %v", err)
+		}
+	})
 }
 
 func TestJobCapabilitiesLine(t *testing.T) {

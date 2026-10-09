@@ -820,8 +820,8 @@ func jobSend(args []string, env platform.Env) int {
 // line and exits 0.
 func jobCancel(args []string, env platform.Env) int {
 	vals, _, pos := parseJobFlags("cancel", args)
-	if len(pos) > 1 {
-		platform.Die("job cancel: unexpected argument '"+pos[1]+"'", 2)
+	if len(pos) != 0 {
+		platform.Die("job cancel: unexpected argument '"+pos[0]+"'", 2)
 	}
 	id := jobRequiredID("cancel", vals)
 	grace := 120
@@ -847,8 +847,8 @@ func jobCancel(args []string, env platform.Env) int {
 // A no-op checkpoint still exits 0.
 func jobCheckpoint(args []string, env platform.Env) int {
 	vals, _, pos := parseJobFlags("checkpoint", args)
-	if len(pos) > 1 {
-		platform.Die("job checkpoint: unexpected argument '"+pos[1]+"'", 2)
+	if len(pos) != 0 {
+		platform.Die("job checkpoint: unexpected argument '"+pos[0]+"'", 2)
 	}
 	id := jobRequiredID("checkpoint", vals)
 	store, code := jobStoreOrNotFound("checkpoint", id, env)
