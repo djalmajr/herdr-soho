@@ -779,14 +779,22 @@ func TestStartCrashAfterCreate(t *testing.T) {
 		t.Fatalf("crashed job state = %+v", snap.State)
 	}
 
-	// The retried Start returns the duplicate and creates no second
-	// workspace.
+	// The retried Start recovers the crashed start: the duplicate returns
+	// the failed state with the recovery motivo, the recovered workspace
+	// is closed, and no second workspace is created.
+	fake.Workspaces = []herdrWorkspace{
+		{ID: "w9", Label: "job-job-1", PaneCount: 1},
+	}
 	second, _, err := s.Start(startRequest("main", briefA))
 	if err != nil {
 		t.Fatalf("retry Start: %v", err)
 	}
-	if second.DuplicateOf != "job-1" || second.Status != StatusPreparing {
+	if second.DuplicateOf != "job-1" || second.Status != StatusFailed ||
+		second.Motivo == nil || *second.Motivo != "job: start interrupted" {
 		t.Fatalf("retry = %+v", second)
+	}
+	if second.WorkspaceID != "w9" || !second.WorkspaceClosed {
+		t.Fatalf("retry workspace = %q closed %v, want w9 / true", second.WorkspaceID, second.WorkspaceClosed)
 	}
 	if len(fake.CreateCalls) != 1 || len(fake.RunCalls) != 0 {
 		t.Fatalf("CreateCalls = %d RunCalls = %d, want 1 and 0", len(fake.CreateCalls), len(fake.RunCalls))

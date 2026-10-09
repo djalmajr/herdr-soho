@@ -584,6 +584,11 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 // control request.
 const jobControlStatusLine = `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[]}` + "\n"
 
+// jobRunningStatusLine is the fixture job's status line once it is
+// running: the live path of job cancel, which queues the request for the
+// supervisor.
+const jobRunningStatusLine = `{"id":"job-1","status":"running","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[]}` + "\n"
+
 // TestJobControlAmendSendWriteRequests: amend and send queue the request
 // file with the exact body, print the fresh status line and exit 0; the
 // body caps, unknown ids and supervise refusal are unchanged.
@@ -677,15 +682,18 @@ func TestJobControlAmendSendWriteRequests(t *testing.T) {
 // TestJobControlCancelCheckpoint: cancel queues {"grace":120} by default
 // (or the --grace value), checkpoint queues the empty marker; a repeat while
 // one is pending is a no-op with exit 0; a terminal job refuses amend/send
-// with exit 2 and writes nothing for cancel/checkpoint.
+// with exit 2 and writes nothing for cancel/checkpoint. The cancel rows run
+// on a running job: an accepted or preparing job is a crashed start that
+// the cancel recovers (TestJobCancelRecoversTheCrashedStart).
 func TestJobControlCancelCheckpoint(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
 	ctl := filepath.Join(co, ".herdr-soho", "jobs", "job-1", "control")
+	f.setStatus(t, co, "job-1", "running")
 
 	code, out, errOut := f.run(t, "cancel", "--id", "job-1")
-	if code != 0 || out != jobControlStatusLine || errOut != "" {
+	if code != 0 || out != jobRunningStatusLine || errOut != "" {
 		t.Fatalf("cancel code=%d out=%q err=%q", code, out, errOut)
 	}
 	data, err := os.ReadFile(filepath.Join(ctl, "cancel.json"))
@@ -696,7 +704,7 @@ func TestJobControlCancelCheckpoint(t *testing.T) {
 	// A second cancel while one is pending is a no-op with exit 0: the
 	// first file stays with its original grace.
 	code, out, errOut = f.run(t, "cancel", "--id", "job-1", "--grace", "30")
-	if code != 0 || out != jobControlStatusLine || errOut != "" {
+	if code != 0 || out != jobRunningStatusLine || errOut != "" {
 		t.Fatalf("cancel again code=%d out=%q err=%q", code, out, errOut)
 	}
 	data, _ = os.ReadFile(filepath.Join(ctl, "cancel.json"))
@@ -709,7 +717,7 @@ func TestJobControlCancelCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, _ = f.run(t, "cancel", "--id", "job-1", "--grace", "30")
-	if code != 0 || out != jobControlStatusLine {
+	if code != 0 || out != jobRunningStatusLine {
 		t.Fatalf("cancel grace code=%d out=%q", code, out)
 	}
 	data, err = os.ReadFile(filepath.Join(ctl, "cancel.json"))
@@ -718,7 +726,7 @@ func TestJobControlCancelCheckpoint(t *testing.T) {
 	}
 
 	code, out, errOut = f.run(t, "checkpoint", "--id", "job-1")
-	if code != 0 || out != jobControlStatusLine || errOut != "" {
+	if code != 0 || out != jobRunningStatusLine || errOut != "" {
 		t.Fatalf("checkpoint code=%d out=%q err=%q", code, out, errOut)
 	}
 	data, err = os.ReadFile(filepath.Join(ctl, "checkpoint"))
@@ -726,7 +734,7 @@ func TestJobControlCancelCheckpoint(t *testing.T) {
 		t.Fatalf("checkpoint file: %q err=%v", data, err)
 	}
 	code, out, _ = f.run(t, "checkpoint", "--id", "job-1")
-	if code != 0 || out != jobControlStatusLine {
+	if code != 0 || out != jobRunningStatusLine {
 		t.Fatalf("checkpoint again code=%d out=%q", code, out)
 	}
 
@@ -793,6 +801,33 @@ func TestJobControlCancelCheckpoint(t *testing.T) {
 			t.Fatalf("stray argument: %v", err)
 		}
 	})
+}
+
+// TestJobCancelRecoversTheCrashedStart: a job cancel of a crashed preparing
+// job (the starter died before the supervisor launched) recovers it instead
+// of queueing: the job ends failed with the report, the status line shows
+// failed, and nothing is queued for a supervisor that will never run.
+func TestJobCancelRecoversTheCrashedStart(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	// The crashed preparing start: no workspace id and no intent recorded
+	// (a crash before the intent), so there is nothing to close.
+	f.setStatus(t, co, "job-1", "preparing")
+	code, out, errOut := f.run(t, "cancel", "--id", "job-1")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, `"status":"failed"`) || !strings.Contains(out, `"motivo":"job: start interrupted"`) {
+		t.Fatalf("status line = %q", out)
+	}
+	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	if _, err := os.Stat(filepath.Join(jobDir, "report.json")); err != nil {
+		t.Fatalf("report.json: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(jobDir, "control", "cancel.json")); !os.IsNotExist(err) {
+		t.Fatalf("the cancel was queued anyway: %v", err)
+	}
 }
 
 func TestJobCapabilitiesLine(t *testing.T) {
@@ -973,8 +1008,10 @@ func newJobStartEE(t *testing.T) *jobStartEE {
 		t.Fatalf("install the fake gh: %v", err)
 	}
 	worktree := filepath.Join(checkout, ".worktrees", "job-job-1")
+	// The reachability probe and the create-intent record both read the
+	// workspace list; the list is the contract's real shape.
 	herdrRules := []fakecli.Rule{
-		{Argv: []string{"workspace", "list"}, Stdout: `{"result":[]}`},
+		{Argv: []string{"workspace", "list"}, Stdout: `{"result":{"workspaces":[]}}`},
 		{Argv: []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--no-focus"},
 			Stdout: `{"result":{"workspace_id":"w9","root_pane":{"pane_id":"w9:p1"}}}`},
 		{Argv: []string{"pane", "run", "w9:p1"}, ArgvPrefix: true},
@@ -1039,20 +1076,24 @@ func TestJobStartStartsTheJob(t *testing.T) {
 		t.Fatalf("duplicate_of on a fresh start: %#v", line)
 	}
 
-	// Exactly the contract's herdr calls: list, create, run.
+	// Exactly the contract's herdr calls: the reachability list, the
+	// create-intent list, the create, and the supervisor run.
 	calls := ee.herdrCalls(t)
-	if len(calls) != 3 {
+	if len(calls) != 4 {
 		t.Fatalf("herdr calls = %+v", calls)
 	}
 	worktree := filepath.Join(ee.checkout, ".worktrees", "job-job-1")
 	if want := []string{"workspace", "list"}; !reflect.DeepEqual(calls[0].Argv, want) {
 		t.Fatalf("call 0 = %v", calls[0].Argv)
 	}
-	if want := []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--no-focus"}; !reflect.DeepEqual(calls[1].Argv, want) {
+	if want := []string{"workspace", "list"}; !reflect.DeepEqual(calls[1].Argv, want) {
 		t.Fatalf("call 1 = %v", calls[1].Argv)
 	}
-	if want := []string{"pane", "run", "w9:p1", ee.selfExe, "job", "supervise", "--id", "job-1"}; !reflect.DeepEqual(calls[2].Argv, want) {
+	if want := []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--no-focus"}; !reflect.DeepEqual(calls[2].Argv, want) {
 		t.Fatalf("call 2 = %v", calls[2].Argv)
+	}
+	if want := []string{"pane", "run", "w9:p1", ee.selfExe, "job", "supervise", "--id", "job-1"}; !reflect.DeepEqual(calls[3].Argv, want) {
+		t.Fatalf("call 3 = %v", calls[3].Argv)
 	}
 	// gh ran exactly once: auth status.
 	ghCalls, err := fakecli.ReadCalls(filepath.Join(ee.fakeDir, "gh.calls.jsonl"))
@@ -1151,6 +1192,99 @@ func TestJobStartDuplicateAndConflict(t *testing.T) {
 	code, out, errOut = ee.start(t, changed)
 	if code != 20 || out != "" || !strings.Contains(errOut, "different brief") {
 		t.Fatalf("conflict code=%d out=%q err=%q", code, out, errOut)
+	}
+}
+
+// TestJobStartDuplicateRecoversTheCrashedStart: the duplicate job start of
+// a crashed preparing job (the start recorded the create intent, created
+// the workspace, and died before recording it) recovers it: the Herdr
+// lists the preexisting and the new job-job-1 workspaces, the recovery
+// closes exactly the new one, and the status line shows failed with
+// duplicate_of.
+func TestJobStartDuplicateRecoversTheCrashedStart(t *testing.T) {
+	ee := newJobStartEE(t)
+	store := ee.f.store(t, ee.checkout)
+	// The crashed preparing job: recorded, moved to preparing, with the
+	// create intent; the workspace it created is still open in the Herdr.
+	if _, err := store.Start("job-1", []byte(jobStartBrief)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition("job-1", job.StatusPreparing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Record("job-1", func(st *job.State) {
+		st.WorkspaceLabel = "job-job-1"
+		st.WorkspacePreexisting = []string{"w0"}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The fake Herdr lists the preexisting job-job-1 workspace (w0) and
+	// the crashed start's new one (w9), and accepts the close of w9.
+	configPath := filepath.Join(ee.fakeDir, "herdr.json")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var script struct {
+		Log          string         `json:"log"`
+		Rules        []fakecli.Rule `json:"rules"`
+		CaptureStdin bool           `json:"capture_stdin,omitempty"`
+		CaptureEnv   []string       `json:"capture_env,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &script); err != nil {
+		t.Fatal(err)
+	}
+	foundList := false
+	for i := range script.Rules {
+		if reflect.DeepEqual(script.Rules[i].Argv, []string{"workspace", "list"}) {
+			script.Rules[i].Stdout = `{"result":{"workspaces":[{"workspace_id":"w0","label":"job-job-1","pane_count":1},{"workspace_id":"w9","label":"job-job-1","pane_count":1}]}}`
+			foundList = true
+		}
+	}
+	if !foundList {
+		t.Fatal("the workspace list rule is missing")
+	}
+	script.Rules = append(script.Rules, fakecli.Rule{Argv: []string{"workspace", "close", "w9"}})
+	rewritten, err := json.Marshal(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, rewritten, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	briefFile := ee.f.briefFile(t, jobStartBrief)
+	code, out, errOut := ee.start(t, briefFile)
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, `"status":"failed"`) || !strings.Contains(out, `"duplicate_of":"job-1"`) ||
+		!strings.Contains(out, `"motivo":"job: start interrupted"`) {
+		t.Fatalf("status line = %q", out)
+	}
+	// The recovery made exactly the list and the close of the new
+	// workspace: no create, no pane run.
+	calls := ee.herdrCalls(t)
+	if len(calls) != 2 {
+		t.Fatalf("herdr calls = %+v", calls)
+	}
+	if want := []string{"workspace", "list"}; !reflect.DeepEqual(calls[0].Argv, want) {
+		t.Fatalf("call 0 = %v", calls[0].Argv)
+	}
+	if want := []string{"workspace", "close", "w9"}; !reflect.DeepEqual(calls[1].Argv, want) {
+		t.Fatalf("call 1 = %v", calls[1].Argv)
+	}
+	snap, err := store.Snapshot("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.State.Status != job.StatusFailed || snap.State.WorkspaceID != "w9" || !snap.State.WorkspaceClosed {
+		t.Fatalf("state = %+v", snap.State)
+	}
+	cfg := core.LoadConfig(ee.env, ee.checkout)
+	stateRoot := core.StateRootPath(&cfg, ee.env, ee.checkout)
+	if _, err := os.Stat(filepath.Join(stateRoot, "jobs", "job-1", "report.json")); err != nil {
+		t.Fatalf("report.json: %v", err)
 	}
 }
 

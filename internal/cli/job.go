@@ -874,6 +874,28 @@ func jobCancel(args []string, env platform.Env) int {
 	if code != 0 {
 		return code
 	}
+	// A crashed start (accepted or preparing with no supervisor) has
+	// nothing left to cancel: the recovery ends the job failed before
+	// anything is queued. A live starter keeps the job: the recovery
+	// declines and the cancel queues as usual.
+	if snap, err := store.Snapshot(id); err == nil && (snap.State.Status == job.StatusAccepted || snap.State.Status == job.StatusPreparing) {
+		friction := func(message string) {
+			core.Warn(message, filepath.Join(store.Root, "jobs", id, "friction.log"))
+		}
+		rawFriction := func(message string) {
+			core.RecordFrictionError(message, job.ExitHerdr, filepath.Join(store.Root, "jobs", id, "friction.log"))
+		}
+		if _, recovered, err := job.NewStartRecovery(env, friction, rawFriction)(store, id); err != nil {
+			dieJob("cancel", err)
+		} else if recovered {
+			snap, err := store.Snapshot(id)
+			if err != nil {
+				dieJob("cancel", err)
+			}
+			printJobStatusLine(snap)
+			return 0
+		}
+	}
 	if _, err := store.RequestCancel(id, grace); err != nil {
 		dieJob("cancel", err)
 	}
@@ -1030,6 +1052,14 @@ func jobStart(args []string, env platform.Env, cwd string) int {
 			st, err := store.Start(id, raw)
 			if err != nil {
 				dieJob("start", err)
+			}
+			// A duplicate still accepted or preparing is a crashed start
+			// (no supervisor will run it): the recovery ends it failed
+			// before the status line is printed.
+			if st.DuplicateOf != "" && (st.Status == job.StatusAccepted || st.Status == job.StatusPreparing) {
+				if _, _, err := job.NewStartRecovery(env, friction, rawFriction)(store, id); err != nil {
+					dieJob("start", err)
+				}
 			}
 			snap, err := store.Snapshot(id)
 			if err != nil {

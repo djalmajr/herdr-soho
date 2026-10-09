@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
@@ -76,7 +77,10 @@ func NewStarter(env platform.Env, machine Machine, selfExe string, stateRoot fun
 
 // Start runs the non-dry-run job start and stops at the first failure. The
 // returned store is nil when nothing was written; from store.Start on it
-// is always returned so the caller can print the job's state line.
+// is always returned so the caller can print the job's state line. The
+// job's start.lock is held for the whole start: a starter that crashes
+// releases it with the process, and a later duplicate start or cancel finds
+// it free and recovers the job.
 func (s Starter) Start(req StartRequest) (State, *Store, error) {
 	// 1. The server must be reachable before anything is written or run;
 	// the reachability query is the only subprocess of this step.
@@ -99,7 +103,39 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		preparedIt = true
 	}
 
-	// 3. Record the job. A duplicate is returned as is; no other step
+	// 3. The start lock, held until Start returns (defer, panics included):
+	// a held lock is another live starter, which owns the job; the OS
+	// releases it when this process dies, which is the crash signal the
+	// recovery reads.
+	jobDir, err := Dir(s.StateRoot(checkout), req.ID)
+	if err != nil {
+		return State{}, nil, err
+	}
+	if err = os.MkdirAll(jobDir, 0o700); err != nil {
+		return State{}, nil, err
+	}
+	startLock, err := tryStartLock(jobDir)
+	if err != nil {
+		if !errors.Is(err, errStartLockHeld) {
+			return State{}, nil, err
+		}
+		// A live starter owns the job: return its current state as a
+		// duplicate, like the same-brief duplicate below. No other step
+		// runs.
+		dupStore := Open(s.StateRoot(checkout))
+		snap, snapErr := dupStore.Snapshot(req.ID)
+		if snapErr != nil {
+			// The live starter has not published the state yet: the job
+			// is being created now, and there is no state to return.
+			return State{}, nil, snapErr
+		}
+		st := snap.State
+		st.DuplicateOf = req.ID
+		return st, dupStore, nil
+	}
+	defer closeStartLock(startLock)
+
+	// 4. Record the job. A duplicate is returned as is; no other step
 	// runs.
 	store := Open(s.StateRoot(checkout))
 	st, err := store.Start(req.ID, req.Brief)
@@ -107,10 +143,20 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		return st, store, err
 	}
 	if st.DuplicateOf != "" {
+		// A duplicate still accepted or preparing was left by a starter
+		// that died: the lock was free, so no live starter owns the job —
+		// recover it (the lock is held) and return the recovered state
+		// with the duplicate marker.
+		if st.Status == StatusAccepted || st.Status == StatusPreparing {
+			if st, _, err = recoverStartLocked(store, req.ID, s.Herdr, s.Friction); err != nil {
+				return st, store, err
+			}
+			st.DuplicateOf = req.ID
+		}
 		return st, store, nil
 	}
 
-	// 4. The job is being prepared.
+	// 5. The job is being prepared.
 	if _, err = store.Transition(req.ID, StatusPreparing); err != nil {
 		return State{}, store, s.failStored(store, req.ID, "", err)
 	}
@@ -118,7 +164,7 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		return State{}, store, s.failStored(store, req.ID, "", err)
 	}
 
-	// 5. Prepare the checkout and worktree (already done in step 2).
+	// 6. Prepare the checkout and worktree (already done in step 2).
 	if !preparedIt {
 		prepared, err = s.Preparer.Prepare(prepareRequest(req))
 		if err != nil {
@@ -127,7 +173,7 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		}
 	}
 
-	// 6. Record the run facts; StartedAt comes from the store clock. This
+	// 7. Record the run facts; StartedAt comes from the store clock. This
 	// slice computes no deadline: the timeout budget is enforced by the
 	// supervisor slice.
 	startedAt := formatTS(store.clock().Now())
@@ -144,8 +190,34 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		return State{}, store, s.failStored(store, req.ID, "", err)
 	}
 
-	// 7. Create the job workspace in the worktree.
-	workspaceID, rootPaneID, err := s.Herdr.Create(prepared.Dir, "job-"+req.ID, nil)
+	// 8. Record the create intent before the create: the label the job
+	// workspace gets and the ids that already had it. A start that crashes
+	// after the create recovers the workspace from this record (closing it
+	// only when its identity is proven); a crash before it has nothing to
+	// close. A list error fails the job like a create failure, and the
+	// create is not called.
+	rows, err := s.Herdr.List()
+	if err != nil {
+		_, _ = store.Fail(req.ID, "job: herdr workspace list failed", ExitHerdr)
+		return State{}, store, err
+	}
+	label := "job-" + req.ID
+	var preexisting []string
+	for _, row := range rows {
+		if row.Label == label {
+			preexisting = append(preexisting, row.ID)
+		}
+	}
+	sort.Strings(preexisting)
+	if _, err = store.Record(req.ID, func(st *State) {
+		st.WorkspaceLabel = label
+		st.WorkspacePreexisting = preexisting
+	}); err != nil {
+		return State{}, store, s.failStored(store, req.ID, "", err)
+	}
+
+	// 9. Create the job workspace in the worktree.
+	workspaceID, rootPaneID, err := s.Herdr.Create(prepared.Dir, label, nil)
 	if err != nil {
 		_, _ = store.Fail(req.ID, err.Error(), herdrExitCode(err))
 		return State{}, store, err
@@ -165,10 +237,13 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		_, _ = store.Fail(req.ID, "job: herdr workspace create returned an invalid workspace id", ExitHerdr)
 		return State{}, store, herdrExit("job: herdr workspace create returned an invalid workspace id")
 	}
-	// TODO(DJA-194): a crash in the window between Herdr.Create and the
-	// workspace id record below leaves the job preparing, with the run
-	// facts and an unrecorded Herdr workspace; supervisor recovery lands
-	// with the supervisor slice.
+	// A crash in the window between Herdr.Create and the workspace id
+	// record below leaves the job preparing with an unrecorded Herdr
+	// workspace: the create intent was recorded in step 8, so start
+	// recovery (RecoverStart) identifies the workspace by the label,
+	// closes it only when its identity is proven, and ends the job
+	// failed. The OS releases the held start.lock with the process, which
+	// is the crash signal the recovery reads.
 	if afterWorkspaceCreate != nil {
 		afterWorkspaceCreate()
 	}
@@ -179,21 +254,21 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		return State{}, store, s.failStored(store, req.ID, workspaceID, err)
 	}
 
-	// 8. Write the team into the workspace session file.
+	// 10. Write the team into the workspace session file.
 	if err = writeSessionConf(filepath.Join(s.StateRoot(checkout), workspaceID, "session.conf"), req.Team.Pairs); err != nil {
 		s.closeToFriction(workspaceID)
 		_, _ = store.Fail(req.ID, "job: cannot write the team session", ExitUsage)
 		return State{}, store, errUsage("job: cannot write the team session")
 	}
 
-	// 9. Launch the supervisor in the workspace's first pane.
+	// 11. Launch the supervisor in the workspace's first pane.
 	if err = s.Panes.Run(rootPaneID, []string{s.SelfExe, "job", "supervise", "--id", req.ID}); err != nil {
 		s.closeToFriction(workspaceID)
 		_, _ = store.Fail(req.ID, err.Error(), herdrExitCode(err))
 		return State{}, store, err
 	}
 
-	// 10. The job is running.
+	// 12. The job is running.
 	st, err = store.Transition(req.ID, StatusRunning)
 	if err != nil {
 		return State{}, store, s.failStored(store, req.ID, workspaceID, err)
@@ -276,4 +351,136 @@ func writeSessionConf(path string, pairs []TeamPair) error {
 		body += "\n"
 	}
 	return writeAtomic0600(path, []byte(body))
+}
+
+// NewStartRecovery wires the production start recovery: one herdr CLI for
+// the list and close calls, and the friction sinks for the errors the
+// recovery cannot prove through. The returned function recovers one job.
+func NewStartRecovery(env platform.Env, friction, rawFriction func(string)) func(store *Store, id string) (State, bool, error) {
+	herdr := newHerdrCLI(env, friction)
+	herdr.RawFriction = rawFriction
+	return func(store *Store, id string) (State, bool, error) {
+		return RecoverStart(store, id, herdr, friction, rawFriction)
+	}
+}
+
+// RecoverStart recovers a job whose start crashed while it was accepted or
+// preparing: it try-locks the job's start.lock — a held lock is a live
+// starter, which owns the job, so the current state is returned unchanged
+// with recovered=false — and runs the recovery under the lock. Any other
+// status is unchanged; an unknown or unreadable job is the store's error.
+func RecoverStart(store *Store, id string, herdr herdrWorkspaces, friction, rawFriction func(string)) (State, bool, error) {
+	dir, err := Dir(store.Root, id)
+	if err != nil {
+		return State{}, false, err
+	}
+	lockFile, err := tryStartLock(dir)
+	if err != nil {
+		if errors.Is(err, errStartLockHeld) {
+			snap, err := store.Snapshot(id)
+			if err != nil {
+				return State{}, false, err
+			}
+			return snap.State, false, nil
+		}
+		return State{}, false, err
+	}
+	defer closeStartLock(lockFile)
+	st, recovered, err := recoverStartLocked(store, id, herdr, friction)
+	if err != nil {
+		return st, false, err
+	}
+	return st, recovered, nil
+}
+
+// recoverStartLocked runs the crash recovery under the start.lock the
+// caller holds. Only accepted and preparing are recovered (recovered=true
+// on the way): any other status is unchanged; a crash in the start window
+// left the job accepted or preparing with no supervisor. The job workspace
+// is closed only when its identity is proven — the recorded WorkspaceID,
+// or exactly one new row of the recorded WorkspaceLabel that is not in
+// WorkspacePreexisting and is a valid id; an ambiguous or unreadable list
+// closes nothing and says so to friction. The job ends failed ("job: start
+// interrupted", exit 19) and a pending cancel request retires with the
+// terminal record.
+func recoverStartLocked(store *Store, id string, herdr herdrWorkspaces, friction func(string)) (State, bool, error) {
+	snap, err := store.Snapshot(id)
+	if err != nil {
+		return State{}, false, err
+	}
+	st := snap.State
+	if st.Status != StatusAccepted && st.Status != StatusPreparing {
+		return st, false, nil
+	}
+	// The job workspace, closed only when its identity is proven.
+	var workspaceID string
+	if st.WorkspaceID != "" {
+		// Proven by the record.
+		workspaceID = st.WorkspaceID
+	} else if st.WorkspaceLabel != "" {
+		rows, err := herdr.List()
+		if err != nil {
+			// Fail closed: the list is unreadable, so no identity.
+			frictionStartAmbiguous(friction)
+		} else {
+			var candidates []string
+			for _, row := range rows {
+				if row.Label != st.WorkspaceLabel || !validWorkspaceID(row.ID) || hasPreexistingID(st.WorkspacePreexisting, row.ID) {
+					continue
+				}
+				candidates = append(candidates, row.ID)
+			}
+			switch len(candidates) {
+			case 1:
+				workspaceID = candidates[0]
+				if _, err := store.Record(id, func(s *State) { s.WorkspaceID = workspaceID }); err != nil {
+					return State{}, false, err
+				}
+			case 0:
+				// Nothing to close.
+			default:
+				// Fail closed: the identity is ambiguous, so close
+				// nothing.
+				frictionStartAmbiguous(friction)
+			}
+		}
+	}
+	if workspaceID != "" {
+		if err := herdr.Close(workspaceID); err != nil {
+			if friction != nil {
+				friction("job: cannot close the job workspace: " + err.Error())
+			}
+		} else {
+			if _, err := store.Record(id, func(s *State) { s.WorkspaceClosed = true }); err != nil {
+				return State{}, false, err
+			}
+		}
+	}
+	// The terminal record, then the pending cancel retires with it: the
+	// supervisor's retirement (control.go) is reused, not copied.
+	failed, err := store.Fail(id, "job: start interrupted", ExitFailed)
+	if err != nil {
+		return failed, false, err
+	}
+	(&Supervisor{Store: store, ID: id, Friction: friction}).retirePendingCancel()
+	return failed, true, nil
+}
+
+// frictionStartAmbiguous is the recovery's fail-closed friction line: the
+// workspace may be left open because its identity could not be
+// established.
+func frictionStartAmbiguous(friction func(string)) {
+	if friction != nil {
+		friction("job: the Herdr workspace may be left open: its identity could not be established")
+	}
+}
+
+// hasPreexistingID reports whether id is in the recorded preexisting list.
+func hasPreexistingID(ids []string, id string) bool {
+	for _, existing := range ids {
+		if existing == id {
+			return true
+		}
+	}
+	return false
 }
