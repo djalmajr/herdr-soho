@@ -102,6 +102,12 @@ func (h WakeHook) Run(ev Event) (attempts int) {
 		return 0
 	}
 	line = append(line, '\n')
+	// A positive timeout below 1 ms must not truncate to 0, which RunCli reads
+	// as "no deadline".
+	timeoutMs := int(timeout / time.Millisecond)
+	if timeoutMs < 1 {
+		timeoutMs = 1
+	}
 	maxAttempts := 1 + len(delays)
 	cause := ""
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -109,7 +115,7 @@ func (h WakeHook) Run(ev Event) (attempts int) {
 		opts := platform.RunOptions{
 			Env:       env,
 			Input:     string(line),
-			TimeoutMs: int(timeout / time.Millisecond),
+			TimeoutMs: timeoutMs,
 		}
 		var result platform.RunResult
 		if filepath.IsAbs(argv[0]) {

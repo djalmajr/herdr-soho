@@ -469,3 +469,24 @@ func TestWakeScheduleComesOnlyFromSleep(t *testing.T) {
 	}
 	wantDurations(t, sleeps, []time.Duration{10 * time.Second, 30 * time.Second, 90 * time.Second})
 }
+
+// TestWakeSubMillisecondTimeout: a positive timeout below 1 ms still arms a
+// deadline instead of truncating to "no deadline".
+func TestWakeSubMillisecondTimeout(t *testing.T) {
+	_, env := newWakeHookEnv(t, []fakecli.Rule{{AnyArgs: true, Delay: 5000}})
+	hook := WakeHook{
+		Cmd:     "wakehook slow",
+		JobID:   "job-1",
+		Env:     env,
+		Timeout: 999 * time.Microsecond,
+		Delays:  []time.Duration{},
+		Sleep:   func(time.Duration) {},
+	}
+	start := time.Now()
+	if attempts := hook.Run(wakeEvent("failure", nil)); attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	if elapsed := time.Since(start); elapsed >= 4*time.Second {
+		t.Fatalf("Run took %s, want the 1 ms deadline to stop the 5 s hook", elapsed)
+	}
+}
