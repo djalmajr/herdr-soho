@@ -486,8 +486,10 @@ func TestJobAmendBoundedFileRead(t *testing.T) {
 	if err := os.WriteFile(atCap, []byte(strings.Repeat("x", jobAmendBodyLimit)), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Phase 2 adaptation: an accepted body now queues the amend request (exit 0,
+	// one status line) instead of the phase 1 "not available yet" refusal.
 	code, out, errOut := f.run(t, "amend", "--id", "job-1", atCap)
-	if code != 2 || out != "" || !strings.Contains(errOut, "not available yet") {
+	if code != 0 || !strings.Contains(out, `"id":"job-1"`) || errOut != "" {
 		t.Fatalf("at cap: code=%d out=%q err=%q", code, out, errOut)
 	}
 	overCap := filepath.Join(t.TempDir(), "over-cap.md")

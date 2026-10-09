@@ -525,13 +525,10 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Valid inputs refuse after validation, before any write.
+	// Only supervise still validates and refuses; amend, send, cancel and
+	// checkpoint now queue control requests (TestJobControl* below). That
+	// is the intentional adaptation of the phase-1 rows for DJA-194 slice 7b.
 	for _, args := range [][]string{
-		{"amend", "--id", "job-1", bodyFile},
-		{"send", "--id", "job-1", "-"},
-		{"cancel", "--id", "job-1"},
-		{"cancel", "--id", "job-1", "--grace", "120"},
-		{"checkpoint", "--id", "job-1"},
 		{"supervise", "--id", "job-1"},
 	} {
 		code, out, errOut := f.run(t, args...)
@@ -573,6 +570,195 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 	code, _, _ = f.run(t)
 	if code != 2 {
 		t.Fatalf("bare job code=%d", code)
+	}
+}
+
+// jobControlStatusLine is the fresh status line of the fixture job after a
+// control request.
+const jobControlStatusLine = `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[]}` + "\n"
+
+// TestJobControlAmendSendWriteRequests: amend and send queue the request
+// file with the exact body, print the fresh status line and exit 0; the
+// body caps, unknown ids and supervise refusal are unchanged.
+func TestJobControlAmendSendWriteRequests(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	ctl := filepath.Join(co, ".herdr-soho", "jobs", "job-1", "control")
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyFile, []byte("amend body\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errOut := f.run(t, "amend", "--id", "job-1", bodyFile)
+	if code != 0 || out != jobControlStatusLine || errOut != "" {
+		t.Fatalf("amend code=%d out=%q err=%q", code, out, errOut)
+	}
+	data, err := os.ReadFile(filepath.Join(ctl, "amend-000001.md"))
+	if err != nil || string(data) != "amend body\n" {
+		t.Fatalf("amend file: %q err=%v", data, err)
+	}
+
+	// send from stdin, then amend again: the counter crosses kinds.
+	old := jobStdin
+	jobStdin = strings.NewReader("send note\n")
+	t.Cleanup(func() { jobStdin = old })
+	code, out, errOut = f.run(t, "send", "--id", "job-1", "-")
+	if code != 0 || out != jobControlStatusLine || errOut != "" {
+		t.Fatalf("send code=%d out=%q err=%q", code, out, errOut)
+	}
+	data, err = os.ReadFile(filepath.Join(ctl, "send-000002.md"))
+	if err != nil || string(data) != "send note\n" {
+		t.Fatalf("send file: %q err=%v", data, err)
+	}
+	bodyFile2 := filepath.Join(t.TempDir(), "body2.md")
+	if err := os.WriteFile(bodyFile2, []byte("second amend"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ = f.run(t, "amend", "--id", "job-1", bodyFile2)
+	if code != 0 || out != jobControlStatusLine {
+		t.Fatalf("amend 2 code=%d out=%q", code, out)
+	}
+	data, err = os.ReadFile(filepath.Join(ctl, "amend-000003.md"))
+	if err != nil || string(data) != "second amend" {
+		t.Fatalf("amend 2 file: %q err=%v", data, err)
+	}
+
+	// The caps are unchanged: over 64 KiB amend and over 16 KiB send refuse
+	// with exit 2; the exact caps are accepted.
+	bigFile := filepath.Join(t.TempDir(), "big.md")
+	if err := os.WriteFile(bigFile, []byte(strings.Repeat("a", 64<<10+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = f.run(t, "amend", "--id", "job-1", bigFile)
+	if code != 2 || out != "" || !strings.Contains(errOut, "exceeds 64 KiB") {
+		t.Fatalf("big amend code=%d out=%q err=%q", code, out, errOut)
+	}
+	if err := os.WriteFile(bigFile, []byte(strings.Repeat("a", 64<<10)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, _ = f.run(t, "amend", "--id", "job-1", bigFile)
+	if code != 0 {
+		t.Fatalf("64 KiB amend code=%d", code)
+	}
+	old2 := jobStdin
+	jobStdin = strings.NewReader(strings.Repeat("b", 16<<10+1))
+	t.Cleanup(func() { jobStdin = old2 })
+	code, out, errOut = f.run(t, "send", "--id", "job-1", "-")
+	if code != 2 || out != "" || !strings.Contains(errOut, "exceeds 16 KiB") {
+		t.Fatalf("big send code=%d out=%q err=%q", code, out, errOut)
+	}
+
+	// Unknown ids are not_found, before any write.
+	code, out, errOut = f.run(t, "amend", "--id", "nope", bodyFile)
+	if code != 3 || out != `{"status":"not_found"}`+"\n" || errOut != "" {
+		t.Fatalf("unknown amend code=%d out=%q err=%q", code, out, errOut)
+	}
+	code, out, errOut = f.run(t, "send", "--id", "nope", "-")
+	if code != 3 || out != `{"status":"not_found"}`+"\n" || errOut != "" {
+		t.Fatalf("unknown send code=%d out=%q err=%q", code, out, errOut)
+	}
+
+	// supervise still validates and refuses.
+	code, out, errOut = f.run(t, "supervise", "--id", "job-1")
+	if code != 2 || out != "" || errOut != "herdr-soho: job supervise: not available yet\n" {
+		t.Fatalf("supervise code=%d out=%q err=%q", code, out, errOut)
+	}
+}
+
+// TestJobControlCancelCheckpoint: cancel queues {"grace":120} by default
+// (or the --grace value), checkpoint queues the empty marker; a repeat while
+// one is pending is a no-op with exit 0; a terminal job refuses amend/send
+// with exit 2 and writes nothing for cancel/checkpoint.
+func TestJobControlCancelCheckpoint(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	ctl := filepath.Join(co, ".herdr-soho", "jobs", "job-1", "control")
+
+	code, out, errOut := f.run(t, "cancel", "--id", "job-1")
+	if code != 0 || out != jobControlStatusLine || errOut != "" {
+		t.Fatalf("cancel code=%d out=%q err=%q", code, out, errOut)
+	}
+	data, err := os.ReadFile(filepath.Join(ctl, "cancel.json"))
+	if err != nil || string(data) != `{"grace":120}` {
+		t.Fatalf("cancel file: %q err=%v", data, err)
+	}
+
+	// A second cancel while one is pending is a no-op with exit 0: the
+	// first file stays with its original grace.
+	code, out, errOut = f.run(t, "cancel", "--id", "job-1", "--grace", "30")
+	if code != 0 || out != jobControlStatusLine || errOut != "" {
+		t.Fatalf("cancel again code=%d out=%q err=%q", code, out, errOut)
+	}
+	data, _ = os.ReadFile(filepath.Join(ctl, "cancel.json"))
+	if string(data) != `{"grace":120}` {
+		t.Fatalf("cancel overwritten: %q", data)
+	}
+
+	// --grace applies to a fresh queue: retire the file, then ask again.
+	if err := os.Remove(filepath.Join(ctl, "cancel.json")); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ = f.run(t, "cancel", "--id", "job-1", "--grace", "30")
+	if code != 0 || out != jobControlStatusLine {
+		t.Fatalf("cancel grace code=%d out=%q", code, out)
+	}
+	data, err = os.ReadFile(filepath.Join(ctl, "cancel.json"))
+	if err != nil || string(data) != `{"grace":30}` {
+		t.Fatalf("cancel grace file: %q err=%v", data, err)
+	}
+
+	code, out, errOut = f.run(t, "checkpoint", "--id", "job-1")
+	if code != 0 || out != jobControlStatusLine || errOut != "" {
+		t.Fatalf("checkpoint code=%d out=%q err=%q", code, out, errOut)
+	}
+	data, err = os.ReadFile(filepath.Join(ctl, "checkpoint"))
+	if err != nil || len(data) != 0 {
+		t.Fatalf("checkpoint file: %q err=%v", data, err)
+	}
+	code, out, _ = f.run(t, "checkpoint", "--id", "job-1")
+	if code != 0 || out != jobControlStatusLine {
+		t.Fatalf("checkpoint again code=%d out=%q", code, out)
+	}
+
+	// Unknown ids are not_found for all four subcommands.
+	for _, sub := range []string{"cancel", "checkpoint"} {
+		code, out, errOut := f.run(t, sub, "--id", "nope")
+		if code != 3 || out != `{"status":"not_found"}`+"\n" || errOut != "" {
+			t.Fatalf("%s code=%d out=%q err=%q", sub, code, out, errOut)
+		}
+	}
+
+	// A terminal job: amend and send refuse with exit 2, cancel and
+	// checkpoint are no-ops with exit 0 and write nothing.
+	f2 := newJobFix(t)
+	co2 := f2.checkout(t, "example-org", "example-repo")
+	f2.startJob(t, co2)
+	f2.setStatus(t, co2, "job-1", "done")
+	ctl2 := filepath.Join(co2, ".herdr-soho", "jobs", "job-1", "control")
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyFile, []byte("amend body\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = f2.run(t, "amend", "--id", "job-1", bodyFile)
+	if code != 2 || out != "" || !strings.Contains(errOut, "job is not active") {
+		t.Fatalf("terminal amend code=%d out=%q err=%q", code, out, errOut)
+	}
+	code, out, errOut = f2.run(t, "send", "--id", "job-1", bodyFile)
+	if code != 2 || out != "" || !strings.Contains(errOut, "job is not active") {
+		t.Fatalf("terminal send code=%d out=%q err=%q", code, out, errOut)
+	}
+	code, out, errOut = f2.run(t, "cancel", "--id", "job-1", "--grace", "30")
+	if code != 0 || out == "" || errOut != "" {
+		t.Fatalf("terminal cancel code=%d out=%q err=%q", code, out, errOut)
+	}
+	code, out, errOut = f2.run(t, "checkpoint", "--id", "job-1")
+	if code != 0 || out == "" || errOut != "" {
+		t.Fatalf("terminal checkpoint code=%d out=%q err=%q", code, out, errOut)
+	}
+	if entries, err := os.ReadDir(ctl2); err != nil || len(entries) != 0 {
+		t.Fatalf("terminal job wrote control files: %v err=%v", entries, err)
 	}
 }
 

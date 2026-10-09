@@ -103,8 +103,16 @@ func cmdJob(args []string, env platform.Env, cwd string) int {
 		return jobClose(rest, env)
 	case "note":
 		return jobNote(rest, env)
+	case "amend":
+		return jobAmend(rest, env)
+	case "send":
+		return jobSend(rest, env)
+	case "cancel":
+		return jobCancel(rest, env)
+	case "checkpoint":
+		return jobCheckpoint(rest, env)
 	default:
-		return jobRefusePhase2(sub, rest, env)
+		return jobRefusePhase2(rest, env)
 	}
 }
 
@@ -729,43 +737,125 @@ func jobNote(args []string, env platform.Env) int {
 	return 0
 }
 
-// jobRefusePhase2 validates the phase-2 subcommand's inputs — including that
-// the job exists and, for amend/send, the body within its cap — and then
-// refuses: the side effects arrive in phase 2.
+// jobRefusePhase2 validates the supervise inputs and refuses: the supervisor
+// arrives in the next slice.
 //
-// TODO(DJA-194): phase 2 — amend, send, cancel, checkpoint and supervise.
-func jobRefusePhase2(sub string, args []string, env platform.Env) int {
-	vals, _, pos := parseJobFlags(sub, args)
+// TODO(DJA-194): phase 2 — supervise.
+func jobRefusePhase2(args []string, env platform.Env) int {
+	vals, _, pos := parseJobFlags("supervise", args)
 	if len(pos) > 1 {
-		platform.Die("job "+sub+": unexpected argument '"+pos[1]+"'", 2)
+		platform.Die("job supervise: unexpected argument '"+pos[1]+"'", 2)
 	}
-	id := jobRequiredID(sub, vals)
-	if sub == "amend" || sub == "send" {
-		if len(pos) != 1 {
-			platform.Die("job "+sub+": missing body (a file or -)", 2)
-		}
-	}
-	if sub == "cancel" {
-		if raw, ok := vals["--grace"]; ok {
-			n, err := strconv.Atoi(raw)
-			if err != nil || n < 0 || n > 3600 {
-				platform.Die("job cancel: --grace must be an integer from 0 to 3600", 2)
-			}
-		}
-	}
-	_, code := jobStoreOrNotFound(sub, id, env)
+	id := jobRequiredID("supervise", vals)
+	_, code := jobStoreOrNotFound("supervise", id, env)
 	if code != 0 {
 		return code
 	}
-	if sub == "amend" || sub == "send" {
-		limit := jobAmendBodyLimit
-		what := "64 KiB"
-		if sub == "send" {
-			limit, what = jobSendBodyLimit, "16 KiB"
-		}
-		jobReadBody(sub, "body", pos[0], limit, what)
+	platform.Die("job supervise: not available yet", 2)
+	return 0
+}
+
+// jobControlStatus prints the fresh snapshot status line after a control
+// request: the store and id are known, so only a read failure dies.
+func jobControlStatus(sub string, store *job.Store, id string) {
+	snap, err := store.Snapshot(id)
+	if err != nil {
+		dieJob(sub, err)
 	}
-	platform.Die("job "+sub+": not available yet", 2)
+	printJobStatusLine(snap)
+}
+
+// jobAmend queues the amendment body (a file or -) as a control request and
+// prints the status line. The supervisor delivers it later and appends
+// amend_received; no event is written here and no Herdr call is made.
+func jobAmend(args []string, env platform.Env) int {
+	vals, _, pos := parseJobFlags("amend", args)
+	if len(pos) > 1 {
+		platform.Die("job amend: unexpected argument '"+pos[1]+"'", 2)
+	}
+	id := jobRequiredID("amend", vals)
+	if len(pos) != 1 {
+		platform.Die("job amend: missing body (a file or -)", 2)
+	}
+	store, code := jobStoreOrNotFound("amend", id, env)
+	if code != 0 {
+		return code
+	}
+	body := jobReadBody("amend", "body", pos[0], jobAmendBodyLimit, "64 KiB")
+	if _, err := store.RequestAmend(id, body); err != nil {
+		dieJob("amend", err)
+	}
+	jobControlStatus("amend", store, id)
+	return 0
+}
+
+// jobSend queues the note body (a file or -) as a control request and prints
+// the status line. Like amend, it writes no event and makes no Herdr call.
+func jobSend(args []string, env platform.Env) int {
+	vals, _, pos := parseJobFlags("send", args)
+	if len(pos) > 1 {
+		platform.Die("job send: unexpected argument '"+pos[1]+"'", 2)
+	}
+	id := jobRequiredID("send", vals)
+	if len(pos) != 1 {
+		platform.Die("job send: missing body (a file or -)", 2)
+	}
+	store, code := jobStoreOrNotFound("send", id, env)
+	if code != 0 {
+		return code
+	}
+	body := jobReadBody("send", "body", pos[0], jobSendBodyLimit, "16 KiB")
+	if _, err := store.RequestSend(id, body); err != nil {
+		dieJob("send", err)
+	}
+	jobControlStatus("send", store, id)
+	return 0
+}
+
+// jobCancel queues the control cancel request; the default grace is 120
+// seconds when --grace is absent. A no-op cancel still prints the status
+// line and exits 0.
+func jobCancel(args []string, env platform.Env) int {
+	vals, _, pos := parseJobFlags("cancel", args)
+	if len(pos) > 1 {
+		platform.Die("job cancel: unexpected argument '"+pos[1]+"'", 2)
+	}
+	id := jobRequiredID("cancel", vals)
+	grace := 120
+	if raw, ok := vals["--grace"]; ok {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > 3600 {
+			platform.Die("job cancel: --grace must be an integer from 0 to 3600", 2)
+		}
+		grace = n
+	}
+	store, code := jobStoreOrNotFound("cancel", id, env)
+	if code != 0 {
+		return code
+	}
+	if _, err := store.RequestCancel(id, grace); err != nil {
+		dieJob("cancel", err)
+	}
+	jobControlStatus("cancel", store, id)
+	return 0
+}
+
+// jobCheckpoint queues the immediate-push marker and prints the status line.
+// A no-op checkpoint still exits 0.
+func jobCheckpoint(args []string, env platform.Env) int {
+	vals, _, pos := parseJobFlags("checkpoint", args)
+	if len(pos) > 1 {
+		platform.Die("job checkpoint: unexpected argument '"+pos[1]+"'", 2)
+	}
+	id := jobRequiredID("checkpoint", vals)
+	store, code := jobStoreOrNotFound("checkpoint", id, env)
+	if code != 0 {
+		return code
+	}
+	if _, err := store.RequestCheckpoint(id); err != nil {
+		dieJob("checkpoint", err)
+	}
+	jobControlStatus("checkpoint", store, id)
 	return 0
 }
 
