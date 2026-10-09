@@ -334,8 +334,8 @@ func (s *Supervisor) recoverOrchestrator(st State) (string, bool, error) {
 		}
 		// The candidate's pane must live in the job's own workspace: the
 		// text before the first : of the pane, compared to a recorded id
-		// that is one safe path segment. The roster column is not the
-		// liveness: a spaced tab label shifts it.
+		// that is one safe path segment. The roster STATE column is not
+		// read: a spaced tab label before it shifts it.
 		workspace, _, ok := strings.Cut(row.Pane, ":")
 		if !ok || !validWorkspaceID(st.WorkspaceID) || workspace != st.WorkspaceID {
 			continue

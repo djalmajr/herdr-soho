@@ -245,7 +245,7 @@ func TestTeamOpsRoster(t *testing.T) {
 		}
 	})
 
-	t.Run("a row with fewer than six fields fails the whole read", func(t *testing.T) {
+	t.Run("a row with fewer than four fields fails the whole read", func(t *testing.T) {
 		out := "NAME                 ROLE               KIND     PANE     TAB              STATE     REPORT       CWD TASK\n" +
 			"orch-1               job-orchestrator\n"
 		f := newTeamOpsFix(t, []fakecli.Rule{
