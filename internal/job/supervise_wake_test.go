@@ -490,3 +490,37 @@ func TestSuperviseWakeQueueFullDefersTheRest(t *testing.T) {
 		t.Fatalf("friction = %v, want none", friction)
 	}
 }
+
+// TestSuperviseWakeAlreadyTerminalDrainsBehindCursor: a supervisor that
+// returns before the watch loop (here a restart on a job that already
+// ended) still runs the waking events after the cursor, so a crash between
+// the terminal transition and the cursor write never drops them.
+func TestSuperviseWakeAlreadyTerminalDrainsBehindCursor(t *testing.T) {
+	store, jobDir, clock, team, fakeDir, env := wakeSupFixture(t,
+		[]fakecli.Rule{{AnyArgs: true}},
+		fakecli.InstallOptions{CaptureEnv: wakeEnvKeys})
+	if _, err := store.Note("job-1", EventIn{Tipo: "question", Resumo: "needs a decision"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []string{StatusFinishing, StatusDone} {
+		if _, err := store.Transition("job-1", to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(jobDir, "wake.seq"), []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var friction []string
+	sup := supSupervisor(store, clock, team, &friction)
+	sup.Wake = &WakeHook{Cmd: "wakehook", JobID: "job-1", Env: env}
+	exit, err := sup.Run()
+	if err != nil || exit != 0 {
+		t.Fatalf("Run: exit=%d err=%v, want 0", exit, err)
+	}
+	if got := hookSeqs(t, fakeDir); !reflect.DeepEqual(got, []int{2}) {
+		t.Fatalf("hook seqs = %v, want [2] (the question after the cursor)", got)
+	}
+	if team.spawnCalls != 0 || len(team.dispatches) != 0 {
+		t.Fatalf("a terminal job spawned or dispatched: %d %v", team.spawnCalls, team.dispatches)
+	}
+}

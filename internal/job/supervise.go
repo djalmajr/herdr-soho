@@ -117,6 +117,18 @@ func (s *Supervisor) clockSleep(d time.Duration) {
 // non-nil only for unexpected store failures, which exit with the
 // conservative failed code.
 func (s *Supervisor) Run() (int, error) {
+	// The wake worker runs for the whole process and drains on every
+	// return, so waking events behind the cursor are run even when the
+	// supervisor returns before the watch loop (an already-ended job, a
+	// failed start wait). A panic is a crash: it does not drain, and the
+	// cursor reruns the events on the next start.
+	s.startWake()
+	defer func() {
+		if r := recover(); r != nil {
+			panic(r)
+		}
+		s.finishWakes()
+	}()
 	code, done, err := s.waitRunning()
 	if err != nil {
 		return ExitFailed, err
@@ -124,7 +136,6 @@ func (s *Supervisor) Run() (int, error) {
 	if done {
 		return code, nil
 	}
-	s.startWake()
 	// The job lane (and its max_workers bump) is set once, before the
 	// orchestrator is recorded; a restarted supervisor skips it, so the bump
 	// is never applied twice.
