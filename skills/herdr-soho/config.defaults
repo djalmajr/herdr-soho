@@ -346,3 +346,10 @@ model.grok.worker=grok
 # lane.build.kind=pi
 # lane.build.model=my-provider/my-model
 # lane.build.effort=high
+
+# Ephemeral job settings for this machine. machine_label is compared with brief.maquina when that field is present. job_orgs is the comma-separated list of organizations a job may check out; empty means none. job_repos_root is the checkout root (a leading ~ expands to the home directory, which is %USERPROFILE% on Windows). job_timeout is the default job budget in minutes, from 1 to 1440. job_wake_cmd is an optional wake-hook argv string, split on spaces, with no shell.
+machine_label=
+job_orgs=
+job_repos_root=~/repo.git
+job_timeout=120
+job_wake_cmd=
