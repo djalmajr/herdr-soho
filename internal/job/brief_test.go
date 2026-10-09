@@ -67,6 +67,50 @@ func TestBriefRenderFields(t *testing.T) {
 	}
 }
 
+func TestValidateBrief(t *testing.T) {
+	raw := []byte(`{"schema":1,"id":"job-1","origem":{"tipo":"card","ref":"CARD-1"},"repo":"example-org/example-repo","base":"main","modo":"workspace","maquina":"machine-a","objetivo":"Ship it.","aceite":[{"criterio":"tests pass","prova":"go test ./internal/job"}],"equipe":{"lane.review.effort":"high","panes":"3"}}`)
+	info, err := ValidateBrief(raw, "job-1")
+	if err != nil {
+		t.Fatalf("ValidateBrief: %v", err)
+	}
+	if len(info.Hash) != 64 {
+		t.Fatalf("hash %q is not a SHA-256 hex string", info.Hash)
+	}
+	if info.Repo != "example-org/example-repo" || info.Base != "main" || info.Modo != "workspace" || info.Maquina != "machine-a" {
+		t.Fatalf("fields = %q %q %q %q", info.Repo, info.Base, info.Modo, info.Maquina)
+	}
+	if info.Equipe["lane.review.effort"] != "high" || info.Equipe["panes"] != "3" || len(info.Equipe) != 2 {
+		t.Fatalf("equipe = %#v", info.Equipe)
+	}
+	if !strings.Contains(info.Markdown, "# Brief — job") || !strings.Contains(info.Markdown, "Ship it.") {
+		t.Fatalf("markdown = %q", info.Markdown)
+	}
+
+	// Absent optional fields stay empty, not defaulted.
+	minimal := []byte(`{"schema":1,"id":"job-1","origem":{"tipo":"card","ref":"CARD-1"},"repo":"example-org/example-repo","objetivo":"Ship it.","aceite":[{"criterio":"tests pass","prova":"go test ./internal/job"}]}`)
+	info, err = ValidateBrief(minimal, "job-1")
+	if err != nil {
+		t.Fatalf("minimal: %v", err)
+	}
+	if info.Base != "" || info.Modo != "" || info.Maquina != "" || len(info.Equipe) != 0 {
+		t.Fatalf("minimal fields = %q %q %q %#v", info.Base, info.Modo, info.Maquina, info.Equipe)
+	}
+
+	// The id must match; a non-string equipe value is refused.
+	if _, err = ValidateBrief(raw, "other"); err == nil {
+		t.Fatal("a mismatching id must be refused")
+	}
+	if _, err = ValidateBrief([]byte(`{"schema":1,"id":"job-1","origem":{"tipo":"card","ref":"CARD-1"},"repo":"example-org/example-repo","objetivo":"Ship it.","aceite":[{"criterio":"tests pass","prova":"go test ./internal/job"}],"equipe":{"panes":3}}`), "job-1"); err == nil {
+		t.Fatal("a non-string equipe value must be refused")
+	}
+
+	// Above the 256 KiB cap.
+	over := make([]byte, MaxBriefBytes+1)
+	if _, err = ValidateBrief(over, "job-1"); err == nil {
+		t.Fatal("an over-cap brief must be refused")
+	}
+}
+
 func TestLintBrief(t *testing.T) {
 	t.Run("strict rejects a configured placeholder", func(t *testing.T) {
 		root := t.TempDir()

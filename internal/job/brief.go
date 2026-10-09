@@ -35,11 +35,13 @@ type briefDoc struct {
 	Markdown   string
 	Repo       string
 	Base       string
+	Modo       string
 	Maquina    string
 	OrigemRef  string
 	Decisoes   []string
 	Restricoes []string
 	NonGoals   []string
+	Equipe     map[string]string
 	Idioma     string
 }
 
@@ -131,13 +133,15 @@ func parseBrief(raw []byte, id string) (briefDoc, error) {
 		}
 		base = parsed
 	}
+	modo := ""
 	if value, exists := fields["modo"]; exists {
 		parsed, ok := value.(string)
 		if !ok || (parsed != "worktree" && parsed != "workspace") {
 			return briefDoc{}, errUsage("job: invalid brief")
 		}
+		modo = parsed
 	}
-	// TODO(DJA-194): verify maquina equals machine_label once machine config is loaded.
+	// job start checks maquina against the machine config (machine_label).
 	maquina := ""
 	if value, exists := fields["maquina"]; exists {
 		parsed, ok := value.(string)
@@ -146,10 +150,20 @@ func parseBrief(raw []byte, id string) (briefDoc, error) {
 		}
 		maquina = parsed
 	}
-	// TODO(DJA-194): verify equipe keys with the session set parser.
-	if value, exists := fields["equipe"]; exists {
-		if _, ok := value.(map[string]any); !ok {
+	// job start checks the equipe keys with the session set parser.
+	equipe := map[string]string{}
+	if value, exists := fields["equipe"]; exists && value != nil {
+		items, ok := value.(map[string]any)
+		if !ok {
 			return briefDoc{}, errUsage("job: invalid brief")
+		}
+		equipe = make(map[string]string, len(items))
+		for key, item := range items {
+			text, ok := item.(string)
+			if !ok {
+				return briefDoc{}, errUsage("job: invalid brief")
+			}
+			equipe[key] = text
 		}
 	}
 	canonical, err := canonicalJSON(value)
@@ -169,12 +183,46 @@ func parseBrief(raw []byte, id string) (briefDoc, error) {
 		Markdown:   markdown,
 		Repo:       repo,
 		Base:       base,
+		Modo:       modo,
 		Maquina:    maquina,
 		OrigemRef:  ref,
 		Decisoes:   decisoes,
 		Restricoes: restricoes,
 		NonGoals:   nonGoals,
+		Equipe:     equipe,
 		Idioma:     idioma,
+	}, nil
+}
+
+// BriefInfo is the validated brief that job start works with: the canonical
+// hash, the rendered Markdown brief, and the fields the CLI checks against
+// the machine configuration and the team.
+type BriefInfo struct {
+	Hash     string
+	Markdown string
+	Repo     string
+	Base     string
+	Modo     string
+	Maquina  string
+	Equipe   map[string]string
+}
+
+// ValidateBrief parses and validates the raw brief for id without writing
+// anything; job start uses it to check the brief against the machine
+// configuration before any preparation.
+func ValidateBrief(raw []byte, id string) (BriefInfo, error) {
+	doc, err := parseBrief(raw, id)
+	if err != nil {
+		return BriefInfo{}, err
+	}
+	return BriefInfo{
+		Hash:     doc.Hash,
+		Markdown: doc.Markdown,
+		Repo:     doc.Repo,
+		Base:     doc.Base,
+		Modo:     doc.Modo,
+		Maquina:  doc.Maquina,
+		Equipe:   doc.Equipe,
 	}, nil
 }
 

@@ -35,7 +35,7 @@ var knownCommands = map[string]bool{
 	"layout-plan": true, "env": true, "mutation-guard": true, "mutation-copy": true,
 	"reopen": true, "compact": true, "metrics": true, "copies": true, "gc": true,
 	"procs": true, "install": true, "promote": true,
-	"collaborate": true, "capabilities": true, "hook": true,
+	"collaborate": true, "capabilities": true, "hook": true, "job": true,
 }
 
 var frictionLogPath string
@@ -109,7 +109,7 @@ func Run(args []string, env platform.Env) (code int) {
 		return 0
 	}
 	if len(args) == 2 && args[0] == "capabilities" && args[1] == "--json" {
-		_, _ = io.WriteString(platform.Stdout, "{\"schema\":1,\"worker_collaboration\":1}\n")
+		_, _ = io.WriteString(platform.Stdout, "{\"schema\":1,\"worker_collaboration\":1,\"ephemeral_job\":1,\"job_events\":1}\n")
 		return 0
 	}
 
@@ -135,6 +135,12 @@ func Run(args []string, env platform.Env) (code int) {
 	if command == "send" || command == "find" || command == "collaborate" {
 		ctx := core.LoadConfig(decisionEnv, commandCwd)
 		commandConfig = &ctx
+	}
+	// A writing job subcommand under NOWRITE dies with the job-specific
+	// message before the generic refusal; the five read subcommands (and
+	// their flags) pass through nowriteReadInvocation below.
+	if decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && command == "job" && len(args) > 1 && !nowriteJobRead(args[1:]) {
+		platform.Die("HERDR_SOHO_NOWRITE=1 is read-only: job "+args[1]+" writes; only job status, wait, events, collect and list run", 2)
 	}
 	if decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && !nowriteReadInvocation(args) {
 		shown, extra := command, ""
@@ -251,6 +257,10 @@ func Run(args []string, env platform.Env) (code int) {
 		return cmdCollaborate(args[1:], ctx, decisionEnv, commandCwd)
 	case "capabilities":
 		platform.Die("usage: capabilities --json", 2)
+	case "job":
+		// The job family loads no Herdr environment, never calls Herdr and
+		// leaves frictionLogPath empty (it runs outside Herdr).
+		return cmdJob(args[1:], decisionEnv, commandCwd)
 	case "kinds":
 		kinds.CmdKinds(decisionEnv, platform.Current())
 		return 0
@@ -356,6 +366,8 @@ func nowriteReadInvocation(args []string) bool {
 		return len(args) >= 3 && len(args) <= 4 && args[1] == "status" && args[2] != "" && !strings.HasPrefix(args[2], "-") && (len(args) == 3 || args[3] == "--json")
 	case "capabilities":
 		return len(args) == 2 && args[1] == "--json"
+	case "job":
+		return nowriteJobRead(args[1:])
 	case "roster":
 		_, ok := rosterScope(args[1:])
 		return ok
