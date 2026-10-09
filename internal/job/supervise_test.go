@@ -49,6 +49,9 @@ type fakeTeam struct {
 	releaseCalls     int
 	releaseTeamCalls int
 	gcCalls          int
+	rosterRows       []rosterRow
+	rosterErr        error
+	rosterCalls      int
 }
 
 var _ teamOps = (*fakeTeam)(nil)
@@ -105,6 +108,14 @@ func (f *fakeTeam) ReleaseTeam() error {
 func (f *fakeTeam) GC() error {
 	f.gcCalls++
 	return nil
+}
+
+func (f *fakeTeam) Roster() ([]rosterRow, error) {
+	f.rosterCalls++
+	if f.rosterErr != nil {
+		return nil, f.rosterErr
+	}
+	return f.rosterRows, nil
 }
 
 // crashBetweenSpawnAndRecord is the sentinel panic of the crash-window test.
@@ -606,11 +617,15 @@ func TestSuperviseRestartSpawnsAndDispatchesNothing(t *testing.T) {
 func TestSuperviseCrashBetweenSpawnAndRecord(t *testing.T) {
 	store, jobDir, clock, team := supFixture(t)
 	team.spawnPanic = true
+	// The crashed spawn left this orchestrator alive in the job's own
+	// workspace: the restarted run adopts it instead of spawning a second
+	// one.
+	team.rosterRows = []rosterRow{{Name: "orch-1", Role: "job-orchestrator", Pane: "w1:p2", State: "working"}}
 	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
 	team.statusScript = []fakeStatus{{State: "done", Report: report}}
 	var friction []string
 
-	// First run: the crash leaves the orchestrator unrecorded.
+	// First run: the crash leaves the spawn intent without the name.
 	sup := supSupervisor(store, clock, team, &friction)
 	func() {
 		defer func() {
@@ -622,11 +637,12 @@ func TestSuperviseCrashBetweenSpawnAndRecord(t *testing.T) {
 			t.Errorf("first Run: %v", err)
 		}
 	}()
-	if st := supState(t, store); st.Orchestrator != "" || st.Status != StatusRunning {
+	if st := supState(t, store); st.OrchestratorSpawnAt == "" || st.Orchestrator != "" || st.Status != StatusRunning {
 		t.Fatalf("after the crash the state = %+v", st)
 	}
 
-	// Second run: it converges to done; the gap is the second spawn.
+	// Second run: it adopts the orchestrator and converges to done without
+	// spawning again.
 	sup = supSupervisor(store, clock, team, &friction)
 	exit, err := sup.Run()
 	if err != nil {
@@ -635,19 +651,30 @@ func TestSuperviseCrashBetweenSpawnAndRecord(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exit = %d, want 0", exit)
 	}
-	if team.spawnCalls != 2 {
-		t.Fatalf("spawn calls = %d, want 2: the crash window can spawn twice (known gap)", team.spawnCalls)
+	if team.spawnCalls != 1 {
+		t.Fatalf("spawn calls = %d, want 1: the restart adopts the spawned orchestrator", team.spawnCalls)
 	}
 	if len(team.dispatches) != 1 {
 		t.Fatalf("dispatches = %v, want exactly one", team.dispatches)
 	}
+	if team.ensureCalls != 1 {
+		t.Fatalf("ensure calls = %d, want 1 across the crash and the restart", team.ensureCalls)
+	}
 	if st := supState(t, store); st.Status != StatusDone || st.Orchestrator != "orch-1" {
 		t.Fatalf("state = %+v", st)
 	}
-	if events, err := readEvents(jobDir); err != nil {
+	events, err := readEvents(jobDir)
+	if err != nil {
 		t.Fatal(err)
-	} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "worker_done", "terminal", "cleanup"}) {
+	}
+	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "worker_done", "terminal", "cleanup"}) {
 		t.Fatalf("event types = %v", got)
+	}
+	if n := countTipe(events, "worker_spawned"); n != 1 {
+		t.Fatalf("worker_spawned count = %d, want exactly one (the adoption events once)", n)
+	}
+	if spawned := events[1]; spawned.Refs["agente"] != "orch-1" || spawned.Refs["papel"] != "job-orchestrator" {
+		t.Fatalf("worker_spawned = %+v, want the adopted name and role", spawned)
 	}
 }
 

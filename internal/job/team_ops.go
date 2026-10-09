@@ -31,6 +31,17 @@ type teamOps interface {
 	Release(name string) error
 	ReleaseTeam() error
 	GC() error
+	Roster() ([]rosterRow, error)
+}
+
+// rosterRow is one rostered worker row the supervisor reads for spawn
+// recovery: the columns it needs, in the order the roster prints them
+// (NAME ROLE KIND PANE TAB STATE ...).
+type rosterRow struct {
+	Name  string
+	Role  string
+	Pane  string
+	State string
 }
 
 // selfCLI is the production teamOps: one herdr-soho executable, the job
@@ -244,6 +255,46 @@ func (c selfCLI) ReleaseTeam() error {
 		}
 	}
 	return nil
+}
+
+// Roster reads the team roster for spawn recovery: the header row, one
+// row per rostered worker, and the "other live agents" block that runs to
+// the end of the output. A failed roster call or a row with fewer than
+// six fields is the fixed error — the recovery never decides from a
+// partial roster.
+func (c selfCLI) Roster() ([]rosterRow, error) {
+	out, err := c.step("read the team roster", "roster")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := parseRoster(out)
+	if err != nil {
+		return nil, teamOpsError("read the team roster")
+	}
+	return rows, nil
+}
+
+// parseRoster parses the roster output: the header row starts with NAME
+// and is skipped, the whitespace-separated rows are the rostered workers
+// (NAME, ROLE, KIND, PANE, TAB, STATE, ...), and the block that opens with
+// a line beginning # (the other live agents) runs to the end of the
+// output. A row before that block with fewer than six fields is an error.
+func parseRoster(out string) ([]rosterRow, error) {
+	var rows []rosterRow
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "#") {
+			break
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] == "NAME" {
+			continue
+		}
+		if len(fields) < 6 {
+			return nil, errors.New("roster row has fewer than six fields")
+		}
+		rows = append(rows, rosterRow{Name: fields[0], Role: fields[1], Pane: fields[3], State: fields[5]})
+	}
+	return rows, nil
 }
 
 // GC runs the job's garbage collection over its registered copies and

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -197,12 +198,12 @@ func (s *Supervisor) Run() (int, error) {
 		}
 		return code, nil
 	}
-	// The job lane (and its max_workers bump) is set once, before the
-	// orchestrator is recorded; a restarted supervisor skips it, so the bump
-	// is never applied twice.
+	// The job lane (and its max_workers bump) is set once, before the spawn
+	// intent is recorded; a restarted supervisor (the intent is recorded, or
+	// the orchestrator is) skips it, so the bump is never applied twice.
 	if snap, err := s.Store.Snapshot(s.ID); err != nil {
 		return ExitFailed, err
-	} else if snap.State.Orchestrator == "" {
+	} else if snap.State.Orchestrator == "" && snap.State.OrchestratorSpawnAt == "" {
 		if err := s.Ops.EnsureJobLane(); err != nil {
 			s.fail("job: cannot ensure the job lane", ExitHerdr)
 			return ExitHerdr, nil
@@ -264,27 +265,171 @@ func (s *Supervisor) waitRunning() (int, bool, error) {
 	return ExitFailed, true, nil
 }
 
-// ensureOrchestrator spawns the job orchestrator when it is not recorded yet
-// (restarts reuse the recorded name) and appends the worker_spawned event.
-// done is true when the spawn failed (the job already failed); err is a
-// store failure.
+// ensureOrchestrator records the job orchestrator and appends its
+// worker_spawned event exactly once. A fresh job records the spawn intent
+// (OrchestratorSpawnAt) before spawning: a crash between the spawn and the
+// Orchestrator record leaves the intent without the name, and the
+// restarted supervisor recovers the orchestrator it already spawned —
+// adopting it when its identity is proven, spawning when it is proven that
+// none exists, and failing the job closed without spawning otherwise. A
+// crash between the Orchestrator record and the event append leaves the
+// name recorded with no event: the event is appended once, keyed on the
+// name. done is true when the spawn failed or the recovery failed closed
+// (the job already failed); err is a store failure.
 func (s *Supervisor) ensureOrchestrator() (string, bool, error) {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
 		return "", false, err
 	}
 	if snap.State.Orchestrator != "" {
+		// A crash between the record and the append left the name with no
+		// worker_spawned: append it once when the spawn intent shows the
+		// name came from this job's spawn. A name without the intent (an
+		// older record or a recovery-free restart) is untouched.
+		if snap.State.OrchestratorSpawnAt != "" {
+			if err := s.appendWorkerSpawnedOnce(snap.State.Orchestrator); err != nil {
+				return "", false, err
+			}
+		}
 		return snap.State.Orchestrator, false, nil
 	}
+	if snap.State.OrchestratorSpawnAt != "" {
+		// The spawn intent is recorded and the name is not: the spawn ran
+		// and a crash lost the record. Recover the orchestrator it left.
+		return s.recoverOrchestrator(snap.State)
+	}
+	// The spawn intent is recorded before the spawn, so the crash window
+	// between the spawn and the record still leaves it behind for a
+	// restart to recover from.
+	spawnAt := formatTS(s.Store.clock().Now())
+	if _, err := s.Store.Record(s.ID, func(st *State) { st.OrchestratorSpawnAt = spawnAt }); err != nil {
+		return "", false, err
+	}
+	return s.spawnOrchestrator()
+}
+
+// recoverOrchestrator is the restart path of ensureOrchestrator when the
+// spawn intent is recorded and the name is not: the crash happened after
+// the spawn. A single live job-orchestrator candidate in the job's own
+// workspace is adopted — recorded and evented exactly as the normal path
+// does, without a spawn. With no candidate, a workspace whose only pane
+// is the supervisor's own root pane proves the orchestrator pane is gone,
+// and the orchestrator is spawned as normal. Anything else — more than one
+// candidate, a roster read error, an invalid or missing workspace, a
+// multi-pane workspace, a list error, no Herdr adapter — fails the job
+// closed without spawning: the supervisor never spawns blind and never
+// releases or closes a pane it did not prove is the job's.
+func (s *Supervisor) recoverOrchestrator(st State) (string, bool, error) {
+	rows, err := s.Ops.Roster()
+	if err != nil {
+		return s.failOrchestratorRecovery()
+	}
+	var candidates []rosterRow
+	for _, row := range rows {
+		if row.Role != "job-orchestrator" || row.State == "gone" {
+			continue
+		}
+		// The candidate's pane must live in the job's own workspace: the
+		// text before the first : of the pane, compared to a recorded id
+		// that is one safe path segment.
+		workspace, _, ok := strings.Cut(row.Pane, ":")
+		if !ok || !validWorkspaceID(st.WorkspaceID) || workspace != st.WorkspaceID {
+			continue
+		}
+		candidates = append(candidates, row)
+	}
+	if len(candidates) == 1 {
+		// Adopt the orchestrator the crash left alive: no spawn.
+		name := candidates[0].Name
+		if _, err := s.Store.Record(s.ID, func(st *State) { st.Orchestrator = name }); err != nil {
+			return "", false, err
+		}
+		if _, err := s.Store.Append(s.ID, EventIn{
+			Tipo:   "worker_spawned",
+			Resumo: "job orchestrator spawned",
+			Refs:   map[string]string{"agente": name, "papel": "job-orchestrator"},
+		}); err != nil {
+			return "", false, err
+		}
+		return name, false, nil
+	}
+	if len(candidates) > 1 {
+		// Two live orchestrators in the job workspace: the identity is
+		// unproven.
+		return s.failOrchestratorRecovery()
+	}
+	if s.Herdr == nil || !validWorkspaceID(st.WorkspaceID) {
+		// No adapter, or a recorded id that is not one safe path segment:
+		// the job workspace cannot be identified in the list.
+		return s.failOrchestratorRecovery()
+	}
+	workspaces, err := s.Herdr.List()
+	if err != nil {
+		return s.failOrchestratorRecovery()
+	}
+	for _, workspace := range workspaces {
+		if workspace.ID != st.WorkspaceID {
+			continue
+		}
+		if workspace.PaneCount != 1 {
+			// A pane beyond the supervisor's own root pane may be the
+			// crashed orchestrator's: the identity is unproven.
+			return s.failOrchestratorRecovery()
+		}
+		// One pane, the supervisor's own root pane: no orchestrator pane
+		// exists, so spawn as normal.
+		return s.spawnOrchestrator()
+	}
+	// The job workspace is missing from the list.
+	return s.failOrchestratorRecovery()
+}
+
+// failOrchestratorRecovery is the fail-closed of the recovery: the job
+// fails with the fixed motivo and the Herdr exit code, without spawning
+// and without releasing or closing a pane the supervisor did not prove is
+// the job's.
+func (s *Supervisor) failOrchestratorRecovery() (string, bool, error) {
+	s.fail("job: cannot establish the job orchestrator", ExitHerdr)
+	return "", true, nil
+}
+
+// appendWorkerSpawnedOnce appends the worker_spawned event for name when no
+// worker_spawned event with that refs.agente exists yet: the crash lost the
+// append after the record, and exactly one such event ever lands.
+func (s *Supervisor) appendWorkerSpawnedOnce(name string) error {
+	jobDir, err := s.Store.readDir(s.ID)
+	if err != nil {
+		return err
+	}
+	events, err := readEvents(jobDir)
+	if err != nil {
+		return err
+	}
+	for _, event := range events {
+		if event.Tipo == "worker_spawned" && event.Refs["agente"] == name {
+			return nil
+		}
+	}
+	_, err = s.Store.Append(s.ID, EventIn{
+		Tipo:   "worker_spawned",
+		Resumo: "job orchestrator spawned",
+		Refs:   map[string]string{"agente": name, "papel": "job-orchestrator"},
+	})
+	return err
+}
+
+// spawnOrchestrator spawns the job orchestrator, records its name, and
+// appends the worker_spawned event. A crash between the spawn and the
+// record leaves the spawn intent for the recovery; a crash between the
+// record and the append leaves the name for the worker_spawned backfill.
+// done is true when the spawn failed (the job already failed); err is a
+// store failure.
+func (s *Supervisor) spawnOrchestrator() (string, bool, error) {
 	name, err := s.Ops.SpawnOrchestrator()
 	if err != nil {
 		s.fail("job: cannot spawn the job orchestrator", ExitHerdr)
 		return "", true, nil
 	}
-	// TODO(DJA-194): a crash between the spawn and this record leaves the
-	// orchestrator unrecorded: the restarted supervisor spawns a second
-	// one. Recording the spawn receipt before the dispatch, or recovering
-	// the pane, closes the window; the design lands with the release slice.
 	if _, err = s.Store.Record(s.ID, func(st *State) { st.Orchestrator = name }); err != nil {
 		return "", false, err
 	}

@@ -202,6 +202,52 @@ func TestTeamOpsSpawnOrchestrator(t *testing.T) {
 	})
 }
 
+func TestTeamOpsRoster(t *testing.T) {
+	t.Run("the header is skipped and the rows parse until the # block", func(t *testing.T) {
+		out := "NAME                 ROLE               KIND     PANE     TAB              STATE     REPORT       CWD TASK\n" +
+			"orch-1               job-orchestrator   job      w1:p2    Job              working   none         /work brief\n" +
+			"worker-1             implementer        worker   w1:p3    Impl             working   ready        /work brief\n" +
+			"\n# other live agents in workspace w1 (not spawned by this skill)\n" +
+			"other-agent          -                  null     w1:p4    Other            working            \n"
+		f := newTeamOpsFix(t, []fakecli.Rule{
+			{Argv: []string{"roster"}, Stdout: out},
+		})
+		rows, err := f.cli().Roster()
+		if err != nil {
+			t.Fatalf("Roster: %v", err)
+		}
+		want := []rosterRow{
+			{Name: "orch-1", Role: "job-orchestrator", Pane: "w1:p2", State: "working"},
+			{Name: "worker-1", Role: "implementer", Pane: "w1:p3", State: "working"},
+		}
+		if !reflect.DeepEqual(rows, want) {
+			t.Fatalf("rows = %+v, want %+v (the # block is not rostered workers)", rows, want)
+		}
+		assertTeamCalls(t, f, [][]string{{"roster"}})
+	})
+
+	t.Run("a row with fewer than six fields fails the whole read", func(t *testing.T) {
+		out := "NAME                 ROLE               KIND     PANE     TAB              STATE     REPORT       CWD TASK\n" +
+			"orch-1               job-orchestrator\n"
+		f := newTeamOpsFix(t, []fakecli.Rule{
+			{Argv: []string{"roster"}, Stdout: out},
+		})
+		rows, err := f.cli().Roster()
+		if err == nil {
+			t.Fatalf("Roster = %+v, want the short-row parse error", rows)
+		}
+		wantExit(t, err, ExitHerdr, "job: cannot read the team roster")
+	})
+
+	t.Run("a non-zero exit is the fixed error", func(t *testing.T) {
+		f := newTeamOpsFix(t, []fakecli.Rule{
+			{Argv: []string{"roster"}, Code: 7},
+		})
+		_, err := f.cli().Roster()
+		wantExit(t, err, ExitHerdr, "job: cannot read the team roster")
+	})
+}
+
 func TestTeamOpsDispatchAndRelease(t *testing.T) {
 	t.Run("dispatch uses --no-wait and --amend only when asked", func(t *testing.T) {
 		brief := filepath.Join(t.TempDir(), "orchestrator-brief.md")

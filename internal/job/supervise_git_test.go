@@ -493,6 +493,10 @@ func (o releaseOps) GC() error {
 	*o.log = append(*o.log, "gc")
 	return o.inner.GC()
 }
+func (o releaseOps) Roster() ([]rosterRow, error) {
+	*o.log = append(*o.log, "roster")
+	return o.inner.Roster()
+}
 
 // closingHerdr records the workspace close in the shared order log and
 // counts the cleanup events in the job log at the moment of the close:
