@@ -1,0 +1,335 @@
+package job
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+)
+
+// herdrFixture is one hermetic herdr-CLI scenario: a fake herdr on an
+// isolated PATH with its own HOME and XDG_CONFIG_HOME. It never touches the
+// real herdr binary or a Herdr server.
+type herdrFixture struct {
+	t       *testing.T
+	fakeDir string
+	env     platform.Env
+}
+
+func newHerdrFixture(t *testing.T, rules []fakecli.Rule) *herdrFixture {
+	t.Helper()
+	fakeDir := t.TempDir()
+	if _, err := fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
+		t.Fatalf("install the fake herdr: %v", err)
+	}
+	env := platform.Env{}
+	for _, item := range fakecli.Env(nil, fakeDir) {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && key != "" {
+			env[key] = value
+		}
+	}
+	env["HOME"] = t.TempDir()
+	env["XDG_CONFIG_HOME"] = t.TempDir()
+	return &herdrFixture{t: t, fakeDir: fakeDir, env: env}
+}
+
+func (f *herdrFixture) cli() *herdrCLI {
+	return newHerdrCLI(f.env, nil)
+}
+
+// cliWithFriction wires a friction collector into the CLI.
+func (f *herdrFixture) cliWithFriction(messages *[]string) *herdrCLI {
+	return newHerdrCLI(f.env, func(message string) { *messages = append(*messages, message) })
+}
+
+// calls reads the fake herdr call log; a missing log means no call ran.
+func (f *herdrFixture) calls() []fakecli.Call {
+	calls, err := fakecli.ReadCalls(filepath.Join(f.fakeDir, "herdr.calls.jsonl"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		f.t.Fatalf("read the herdr call log: %v", err)
+	}
+	return calls
+}
+
+const (
+	herdrTestCwd   = "/fixture/work"
+	herdrTestLabel = "job TASK-1.a"
+)
+
+func herdrTestCreateArgv() []string {
+	return []string{"workspace", "create", "--cwd", herdrTestCwd, "--label", herdrTestLabel, "--env", "A=1", "--env", "B=2", "--no-focus"}
+}
+
+func TestHerdrWorkspacesCreate(t *testing.T) {
+	env := map[string]string{"B": "2", "A": "1"}
+	t.Run("both envelope shapes parse into the workspace and root pane", func(t *testing.T) {
+		for name, stdout := range map[string]string{
+			"workspace object":   `{"id":"cli:x","result":{"workspace":{"workspace_id":"w9","root_pane":{"pane_id":"w9:p1"}}}}`,
+			"flat with tab":      `{"id":"cli:x","result":{"workspace_id":"w9","tab":{"root_pane":{"pane_id":"w9:p1"}}}}`,
+			"flat with pane":     `{"result":{"workspace_id":"w9","root_pane":{"pane_id":"w9:p1"}}}`,
+			"workspace id win":   `{"result":{"workspace":{"workspace_id":"ws-nested","root_pane":{"pane_id":"w9:p1"}},"workspace_id":"ws-flat"}}`,
+			"nested pane win":    `{"result":{"workspace_id":"w9","root_pane":{"pane_id":"flat"},"workspace":{"root_pane":{"pane_id":"nested"}}}}`,
+			"workspace pane win": `{"result":{"workspace":{"workspace_id":"w9","root_pane":{"pane_id":"ws-p1"}},"tab":{"root_pane":{"pane_id":"tab-p1"}}}}`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				f := newHerdrFixture(t, []fakecli.Rule{{Argv: herdrTestCreateArgv(), Stdout: stdout}})
+				workspaceID, rootPaneID, err := f.cli().Create(herdrTestCwd, herdrTestLabel, env)
+				if err != nil {
+					t.Fatalf("Create: %v", err)
+				}
+				wantWS, wantPane := "w9", "w9:p1"
+				if name == "workspace id win" {
+					wantWS = "ws-nested"
+				}
+				if name == "nested pane win" {
+					wantPane = "flat"
+				}
+				if name == "workspace pane win" {
+					wantPane = "ws-p1"
+				}
+				if workspaceID != wantWS || rootPaneID != wantPane {
+					t.Fatalf("Create = %q %q, want %q %q", workspaceID, rootPaneID, wantWS, wantPane)
+				}
+				calls := f.calls()
+				if len(calls) != 1 || !sameArgv(calls[0].Argv, herdrTestCreateArgv()) {
+					t.Fatalf("herdr calls = %v, want exactly %v", calls, herdrTestCreateArgv())
+				}
+			})
+		}
+	})
+	t.Run("a non-zero exit is a process failure without friction", func(t *testing.T) {
+		var messages []string
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: herdrTestCreateArgv(), Code: 1, Stderr: "token=do-not-print"}})
+		_, _, err := f.cliWithFriction(&messages).Create(herdrTestCwd, herdrTestLabel, env)
+		wantExit(t, err, ExitHerdr, "job: herdr workspace create failed")
+		if len(messages) != 0 {
+			t.Fatalf("friction messages = %v, want none", messages)
+		}
+	})
+}
+
+func TestHerdrWorkspacesCreateUnknownShape(t *testing.T) {
+	for name, stdout := range map[string]string{
+		"empty result":    `{"result":{}}`,
+		"top-level array": `[]`,
+		"not json":        `not json`,
+		"missing pane":    `{"result":{"workspace_id":"w9"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var messages []string
+			f := newHerdrFixture(t, []fakecli.Rule{{Argv: herdrTestCreateArgv(), Stdout: stdout}})
+			_, _, err := f.cliWithFriction(&messages).Create(herdrTestCwd, herdrTestLabel, map[string]string{"A": "1", "B": "2"})
+			wantExit(t, err, ExitHerdr, "job: herdr workspace create returned an unknown result")
+			if len(messages) != 1 {
+				t.Fatalf("friction calls = %d, want 1", len(messages))
+			}
+			want := "job: herdr workspace create returned an unknown result: " + core.FrictionSafe(stdout)
+			if messages[0] != want {
+				t.Fatalf("friction = %q, want %q", messages[0], want)
+			}
+			if strings.Contains(err.Error(), stdout) {
+				t.Fatalf("error %q carries the raw envelope", err)
+			}
+		})
+	}
+	t.Run("a long envelope is cut to 2000 bytes in friction", func(t *testing.T) {
+		stdout := strings.Repeat("a", 2500)
+		var messages []string
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: herdrTestCreateArgv(), Stdout: stdout}})
+		_, _, err := f.cliWithFriction(&messages).Create(herdrTestCwd, herdrTestLabel, map[string]string{"A": "1", "B": "2"})
+		wantExit(t, err, ExitHerdr, "job: herdr workspace create returned an unknown result")
+		if len(messages) != 1 {
+			t.Fatalf("friction calls = %d, want 1", len(messages))
+		}
+		want := "job: herdr workspace create returned an unknown result: " + strings.Repeat("a", 2000)
+		if messages[0] != want {
+			t.Fatalf("friction length = %d, want %d", len(messages[0]), len(want))
+		}
+	})
+}
+
+func TestHerdrWorkspacesServerReachable(t *testing.T) {
+	t.Run("exit 0 with a result key is reachable", func(t *testing.T) {
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "list"}, Stdout: `{"id":"cli:x","result":[]}`}})
+		if !f.cli().ServerReachable() {
+			t.Fatal("ServerReachable = false, want true")
+		}
+		assertListOnly(t, f)
+	})
+	t.Run("a non-zero exit is unreachable", func(t *testing.T) {
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "list"}, Code: 1}})
+		if f.cli().ServerReachable() {
+			t.Fatal("ServerReachable = true after a non-zero exit")
+		}
+		assertListOnly(t, f)
+	})
+	t.Run("non-JSON stdout is unreachable", func(t *testing.T) {
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "list"}, Stdout: "not json"}})
+		if f.cli().ServerReachable() {
+			t.Fatal("ServerReachable = true for non-JSON stdout")
+		}
+		assertListOnly(t, f)
+	})
+	t.Run("a JSON object without a result key is unreachable", func(t *testing.T) {
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "list"}, Stdout: `{"id":"cli:x"}`}})
+		if f.cli().ServerReachable() {
+			t.Fatal("ServerReachable = true without a result key")
+		}
+		assertListOnly(t, f)
+	})
+	t.Run("a missing executable is unreachable", func(t *testing.T) {
+		env := platform.Env{
+			"HOME":            t.TempDir(),
+			"XDG_CONFIG_HOME": t.TempDir(),
+			"PATH":            t.TempDir(),
+		}
+		if newHerdrCLI(env, nil).ServerReachable() {
+			t.Fatal("ServerReachable = true with no herdr on PATH")
+		}
+	})
+}
+
+// assertListOnly fails when the fake saw any call other than exactly one
+// `workspace list` — in particular a call whose first argument is `server`,
+// which could start a server.
+func assertListOnly(t *testing.T, f *herdrFixture) {
+	t.Helper()
+	calls := f.calls()
+	if len(calls) != 1 {
+		t.Fatalf("herdr calls = %d, want exactly 1 (workspace list)", len(calls))
+	}
+	for _, call := range calls {
+		if len(call.Argv) > 0 && call.Argv[0] == "server" {
+			t.Fatalf("ServerReachable ran a server command: %v", call.Argv)
+		}
+	}
+	if !sameArgv(calls[0].Argv, []string{"workspace", "list"}) {
+		t.Fatalf("herdr call argv = %v, want [workspace list]", calls[0].Argv)
+	}
+}
+
+func TestHerdrWorkspacesClose(t *testing.T) {
+	t.Run("exact argv and success", func(t *testing.T) {
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "close", "w9"}}})
+		if err := f.cli().Close("w9"); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		calls := f.calls()
+		if len(calls) != 1 || !sameArgv(calls[0].Argv, []string{"workspace", "close", "w9"}) {
+			t.Fatalf("herdr calls = %v, want exactly one close of w9", calls)
+		}
+	})
+	t.Run("a non-zero exit fails with code 4", func(t *testing.T) {
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "close", "w9"}, Code: 1}})
+		err := f.cli().Close("w9")
+		wantExit(t, err, ExitHerdr, "job: herdr workspace close failed")
+	})
+	t.Run("an empty id refuses with code 2 without running anything", func(t *testing.T) {
+		f := newHerdrFixture(t, nil)
+		err := f.cli().Close("")
+		wantExit(t, err, ExitUsage, "")
+		if calls := f.calls(); len(calls) != 0 {
+			t.Fatalf("herdr calls = %d, want 0", len(calls))
+		}
+	})
+}
+
+func TestHerdrWorkspacesRun(t *testing.T) {
+	argv := []string{"/opt/bin/herdr-soho", "job", "supervise", "--id", "TASK-1.a"}
+	t.Run("exact argv and success", func(t *testing.T) {
+		want := append([]string{"pane", "run", "w9:p1"}, argv...)
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: want}})
+		if err := f.cli().Run("w9:p1", argv); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		calls := f.calls()
+		if len(calls) != 1 || !sameArgv(calls[0].Argv, want) {
+			t.Fatalf("herdr calls = %v, want exactly %v", calls, want)
+		}
+	})
+	t.Run("unsafe arguments are refused with code 4 and no call", func(t *testing.T) {
+		for name, tc := range map[string]struct {
+			paneID string
+			argv   []string
+		}{
+			"empty pane id":       {paneID: ""},
+			"space in pane id":    {paneID: "w9 p1"},
+			"semicolon in pane":   {paneID: "w9;p1"},
+			"empty argv element":  {paneID: "w9:p1", argv: []string{"/bin/cmd", ""}},
+			"space in argv":       {paneID: "w9:p1", argv: []string{"/Users/a b/herdr-soho"}},
+			"semicolon in argv":   {paneID: "w9:p1", argv: []string{"x;y"}},
+			"glob in argv":        {paneID: "w9:p1", argv: []string{"cmd", "*"}},
+			"shell quote in argv": {paneID: "w9:p1", argv: []string{"cmd", "a'b"}},
+		} {
+			t.Run(name, func(t *testing.T) {
+				f := newHerdrFixture(t, nil)
+				err := f.cli().Run(tc.paneID, tc.argv)
+				wantExit(t, err, ExitHerdr, "job: herdr pane run refused an unsafe argument")
+				if calls := f.calls(); len(calls) != 0 {
+					t.Fatalf("herdr calls = %d, want 0", len(calls))
+				}
+			})
+		}
+	})
+	t.Run("a non-zero exit fails with code 4", func(t *testing.T) {
+		want := append([]string{"pane", "run", "w9:p1"}, argv...)
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: want, Code: 1}})
+		err := f.cli().Run("w9:p1", argv)
+		wantExit(t, err, ExitHerdr, "job: herdr pane run failed")
+	})
+}
+
+func TestHerdrWorkspacesDeadline(t *testing.T) {
+	f := newHerdrFixture(t, []fakecli.Rule{{Argv: herdrTestCreateArgv(), Delay: 5000}})
+	cli := f.cli()
+	cli.Timeout = 200 * time.Millisecond
+	start := time.Now()
+	_, _, err := cli.Create(herdrTestCwd, herdrTestLabel, map[string]string{"A": "1", "B": "2"})
+	elapsed := time.Since(start)
+	wantExit(t, err, ExitHerdr, "job: herdr workspace create failed")
+	if elapsed > 10*time.Second {
+		t.Fatalf("Create took %s, want under 10s", elapsed)
+	}
+}
+
+func TestFakeHerdrRecordsCalls(t *testing.T) {
+	f := &fakeHerdr{CreateWorkspaceID: "w1", CreateRootPaneID: "w1:p1"}
+	var workspaces herdrWorkspaces = f
+	var panes herdrPanes = f
+	workspaceID, rootPaneID, err := workspaces.Create("/work", "label", map[string]string{"K": "V"})
+	if err != nil || workspaceID != "w1" || rootPaneID != "w1:p1" {
+		t.Fatalf("Create = %q %q %v, want w1 w1:p1", workspaceID, rootPaneID, err)
+	}
+	if err := workspaces.Close("w1"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if workspaces.ServerReachable() {
+		t.Fatal("ServerReachable = true, want the configured false")
+	}
+	argv := []string{"cmd", "arg"}
+	if err := panes.Run("w1:p1", argv); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	argv[0] = "mutated"
+	if len(f.CreateCalls) != 1 || f.CreateCalls[0].Cwd != "/work" || f.CreateCalls[0].Label != "label" || f.CreateCalls[0].Env["K"] != "V" {
+		t.Fatalf("create calls = %+v", f.CreateCalls)
+	}
+	if len(f.CloseIDs) != 1 || f.CloseIDs[0] != "w1" || f.ListCalls != 1 {
+		t.Fatalf("close/list state = %v %d", f.CloseIDs, f.ListCalls)
+	}
+	if len(f.RunCalls) != 1 || f.RunCalls[0].PaneID != "w1:p1" || !sameArgv(f.RunCalls[0].Argv, []string{"cmd", "arg"}) {
+		t.Fatalf("run calls = %+v (the fake must copy argv)", f.RunCalls)
+	}
+	if f.Reachable {
+		t.Fatal("the fake must not mutate its configured results")
+	}
+}
