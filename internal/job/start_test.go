@@ -754,12 +754,17 @@ func TestStartCrashAfterCreate(t *testing.T) {
 
 	afterWorkspaceCreate = func() { panic("simulated crash after workspace create") }
 	t.Cleanup(func() { afterWorkspaceCreate = nil })
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("the crash hook did not panic")
-		}
+	// Recover inside a nested function so the assertions below run after
+	// the simulated crash.
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("the crash hook did not panic")
+			}
+		}()
+		s.Start(startRequest("main", briefA))
 	}()
-	s.Start(startRequest("main", briefA))
+	afterWorkspaceCreate = nil
 
 	// The job is left preparing, with the run facts but no workspace id.
 	store := Open(stateRoot)
@@ -785,5 +790,42 @@ func TestStartCrashAfterCreate(t *testing.T) {
 	}
 	if len(fake.CreateCalls) != 1 || len(fake.RunCalls) != 0 {
 		t.Fatalf("CreateCalls = %d RunCalls = %d, want 1 and 0", len(fake.CreateCalls), len(fake.RunCalls))
+	}
+}
+
+// TestStartStorageFailureAfterRecordFails: a storage error after the job is
+// recorded (here the preparing event append) still ends the job failed with
+// a report, and no workspace is created.
+func TestStartStorageFailureAfterRecordFails(t *testing.T) {
+	f := newPrepareFixture(t, []fakecli.Rule{{Argv: []string{"auth", "status"}}})
+	f.cloneCheckout()
+	fake := startFake()
+	stateRoot := t.TempDir()
+	var friction []string
+	s := startStarter(t, f, fake, stateRoot, &friction)
+
+	appendEventFn = func(dir string, now time.Time, in EventIn) (Event, error) {
+		if in.Tipo == "preparing" {
+			return Event{}, errors.New("simulated disk failure")
+		}
+		return appendEvent(dir, now, in)
+	}
+	t.Cleanup(func() { appendEventFn = appendEvent })
+
+	if _, _, err := s.Start(startRequest("main", briefA)); err == nil {
+		t.Fatal("Start succeeded despite the storage failure")
+	}
+	snap, err := Open(stateRoot).Snapshot("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.State.Status != StatusFailed || snap.State.Motivo == nil {
+		t.Fatalf("state = %+v, want failed with a motivo", snap.State)
+	}
+	if _, err := os.Stat(filepath.Join(stateRoot, "jobs", "job-1", "report.json")); err != nil {
+		t.Fatalf("report.json: %v", err)
+	}
+	if len(fake.CreateCalls) != 0 {
+		t.Fatalf("CreateCalls = %d, want 0", len(fake.CreateCalls))
 	}
 }

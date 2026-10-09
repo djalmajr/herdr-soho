@@ -106,10 +106,10 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 
 	// 4. The job is being prepared.
 	if _, err = store.Transition(req.ID, StatusPreparing); err != nil {
-		return st, store, err
+		return State{}, store, s.failStored(store, req.ID, "", err)
 	}
 	if _, err = store.Append(req.ID, EventIn{Tipo: "preparing", Resumo: "preparing checkout and worktree"}); err != nil {
-		return st, store, err
+		return State{}, store, s.failStored(store, req.ID, "", err)
 	}
 
 	// 5. Prepare the checkout and worktree (already done in step 2).
@@ -135,7 +135,7 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		st.TimeoutMin = req.TimeoutMin
 		st.StartedAt = startedAt
 	}); err != nil {
-		return State{}, store, err
+		return State{}, store, s.failStored(store, req.ID, "", err)
 	}
 
 	// 7. Create the job workspace in the worktree.
@@ -155,7 +155,7 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		st.WorkspaceID = workspaceID
 		st.RootPane = rootPaneID
 	}); err != nil {
-		return State{}, store, err
+		return State{}, store, s.failStored(store, req.ID, workspaceID, err)
 	}
 
 	// 8. Write the team into the workspace session file.
@@ -175,7 +175,7 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 	// 10. The job is running.
 	st, err = store.Transition(req.ID, StatusRunning)
 	if err != nil {
-		return State{}, store, err
+		return State{}, store, s.failStored(store, req.ID, workspaceID, err)
 	}
 	return st, store, nil
 }
@@ -214,6 +214,21 @@ func exitCodeOr(err error, def int) int {
 		return exit.Code
 	}
 	return def
+}
+
+// failStored ends a recorded job after a storage error (a state, event or
+// run-fact write failed): it closes the workspace when one was created and
+// fails the job with exit 2, best effort, so every failure after the job is
+// recorded still aims at a terminal state with report.json. The original
+// error is returned.
+func (s Starter) failStored(store *Store, id, workspaceID string, err error) error {
+	if workspaceID != "" {
+		s.closeToFriction(workspaceID)
+	}
+	if _, failErr := store.Fail(id, "job: cannot record the job state", ExitUsage); failErr != nil && s.Friction != nil {
+		s.Friction("job: cannot record the job failure: " + failErr.Error())
+	}
+	return err
 }
 
 // closeToFriction closes the job workspace after a post-create failure;
