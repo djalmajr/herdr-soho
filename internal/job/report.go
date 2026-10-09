@@ -1,18 +1,38 @@
 package job
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/djalmajr/herdr-soho/internal/reportscan"
 )
 
-// ReportFacts is the worktree snapshot used to fill limpeza.removivel.
-// Removivel is true only when the tree is clean and Head equals HeadRemoto.
+// ReportFacts is the worktree and job snapshot the supervisor passes in to
+// fill the report: the clean and head facts behind limpeza.removivel, the
+// commits, the draft pull request, the acceptance checks, the review, the
+// blockers, the team, the cost, the logs and the workspace release.
 type ReportFacts struct {
-	Clean      bool
-	Head       string
-	HeadRemoto string
-	Resumo     string
+	Clean         bool
+	Head          string
+	HeadRemoto    string
+	Resumo        string
+	Commits       []Commit
+	PR            *PullRequest
+	Testes        []Teste
+	Revisao       *Revisao
+	Blockers      []string
+	Equipe        *Equipe
+	Custo         *Custo
+	Logs          *Logs
+	Workspace     string
+	PanesFechados int
 }
 
 // PullRequest is the draft pull request recorded by a later slice.
@@ -22,7 +42,8 @@ type PullRequest struct {
 	Estado string `json:"estado,omitempty"`
 }
 
-// Report is the supervisor report.json document. It has no retencao_ate key.
+// Report is the supervisor report.json document. The field order is the
+// key order of the contract report example. It has no retencao_ate key.
 type Report struct {
 	Schema       int          `json:"schema"`
 	ID           string       `json:"id"`
@@ -36,11 +57,72 @@ type Report struct {
 	Head         string       `json:"head,omitempty"`
 	HeadRemoto   string       `json:"head_remoto,omitempty"`
 	Sincronizado bool         `json:"sincronizado"`
+	Commits      []Commit     `json:"commits"`
 	PR           *PullRequest `json:"pr"`
+	Itens        []Item       `json:"itens"`
+	Parciais     int          `json:"parciais"`
+	Testes       []Teste      `json:"testes"`
+	Revisao      *Revisao     `json:"revisao"`
+	Artefatos    []Artefato   `json:"artefatos"`
+	Blockers     []string     `json:"blockers"`
+	Perguntas    []string     `json:"perguntas"`
 	Memoria      Memoria      `json:"memoria"`
+	Equipe       *Equipe      `json:"equipe"`
 	Eventos      Eventos      `json:"eventos"`
+	Custo        *Custo       `json:"custo"`
+	Logs         *Logs        `json:"logs"`
 	Limpeza      Limpeza      `json:"limpeza"`
 	Publico      Publico      `json:"publico"`
+}
+
+// Item is one orchestrator report line carrying a completion marker, in
+// file order.
+type Item struct {
+	N      int    `json:"n"`
+	Item   string `json:"item"`
+	Estado string `json:"estado"`
+}
+
+// Teste is one acceptance check the supervisor ran.
+type Teste struct {
+	Cmd       string `json:"cmd"`
+	Resultado string `json:"resultado"`
+}
+
+// Revisao is the review verdict of another model family. Severity is
+// formatted exactly "P0 a, P1 b, P2 c, P3 d".
+type Revisao struct {
+	Verdict  string `json:"verdict"`
+	Findings int    `json:"findings"`
+	Severity string `json:"severity"`
+}
+
+// Artefato is a job artefact the supervisor hashed; the path is relative to
+// the job dir, which job collect --verify resolves.
+type Artefato struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+// Equipe is the team resolution the job ran with.
+type Equipe struct {
+	Fonte         string   `json:"fonte"`
+	OverrideBrief []string `json:"override_brief"`
+}
+
+// Custo is the job duration and worker count.
+type Custo struct {
+	Inicio   string `json:"inicio"`
+	Fim      string `json:"fim"`
+	DuracaoS int    `json:"duracao_s"`
+	Workers  int    `json:"workers"`
+}
+
+// Logs points at the job logs.
+type Logs struct {
+	ReportMD string `json:"report_md"`
+	StateDir string `json:"state_dir"`
+	Friction string `json:"friction"`
 }
 
 // MemItem is one decision suggestion for the dispatcher to route.
@@ -117,6 +199,7 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 		return Report{}, err
 	}
 	global, projeto, decisions := decisionAggregates(events)
+	items, parciais, artefatos := readReportMD(dir)
 	// The report is built only from known facts: with no commits known (no
 	// head), the pull request is null and the motivo says so; the state
 	// motivo wins when set.
@@ -131,7 +214,26 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 			ids = append(ids, ref)
 		}
 	}
+	if facts.PR != nil {
+		ids = append(ids, "PR#"+strconv.Itoa(facts.PR.Numero))
+	}
 	inSync := facts.Head != "" && facts.Head == facts.HeadRemoto
+	verdict := ""
+	if facts.Revisao != nil {
+		verdict = facts.Revisao.Verdict
+	}
+	commits := facts.Commits
+	if commits == nil {
+		commits = []Commit{}
+	}
+	testes := facts.Testes
+	if testes == nil {
+		testes = []Teste{}
+	}
+	blockers := facts.Blockers
+	if blockers == nil {
+		blockers = []string{}
+	}
 	return Report{
 		Schema:       1,
 		ID:           st.ID,
@@ -145,6 +247,15 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 		Head:         facts.Head,
 		HeadRemoto:   facts.HeadRemoto,
 		Sincronizado: inSync,
+		Commits:      commits,
+		PR:           facts.PR,
+		Itens:        items,
+		Parciais:     parciais,
+		Testes:       testes,
+		Revisao:      facts.Revisao,
+		Artefatos:    artefatos,
+		Blockers:     blockers,
+		Perguntas:    openQuestions(events),
 		Memoria: Memoria{
 			Lida:              []MemRead{},
 			Global:            global,
@@ -152,16 +263,21 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 			DecisionsTotal:    decisions,
 			DecisionsAckedSeq: st.DecisionsAckedSeq,
 		},
+		Equipe: facts.Equipe,
 		Eventos: Eventos{
 			Total:     len(events),
 			UltimoSeq: lastSeq(events),
 			Arquivo:   filepath.Join(dir, "events.jsonl"),
 		},
+		Custo: facts.Custo,
+		Logs:  facts.Logs,
 		Limpeza: Limpeza{
-			Worktree:  "kept",
-			Removivel: facts.Clean && inSync,
+			Workspace:     facts.Workspace,
+			Worktree:      "kept",
+			PanesFechados: facts.PanesFechados,
+			Removivel:     facts.Clean && inSync,
 		},
-		Publico: Publico{Blockers: []string{}, IDs: ids},
+		Publico: Publico{Verdict: verdict, Blockers: blockers, IDs: ids},
 	}, nil
 }
 
@@ -187,6 +303,108 @@ func decisionAggregates(events []Event) (global, projeto []MemItem, total int) {
 		}
 	}
 	return global, projeto, total
+}
+
+// reportItemFence mirrors the fence semantics of reportscan.PartialCount,
+// which does not export its fence tracking: the items and the partial count
+// must agree on which lines are inside a code block.
+var (
+	reportItemFenceOpen  = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
+	reportItemFenceClose = regexp.MustCompile("^ {0,3}(`{3,}|~{3,}) *$")
+	reportItemPrefix     = regexp.MustCompile(`^\s*(?:[-*][ \t]+|[0-9]+\.[ \t]+|\|[ \t]*)`)
+)
+
+// readReportMD reads the orchestrator report.md in the job dir: the marker
+// items, the partial count (reportscan's rule) and the artefact with the
+// file's sha256. A missing or unreadable file leaves all three empty.
+func readReportMD(dir string) (items []Item, parciais int, artefatos []Artefato) {
+	items = []Item{}
+	artefatos = []Artefato{}
+	raw, err := os.ReadFile(filepath.Join(dir, "report.md"))
+	if err != nil {
+		return items, 0, artefatos
+	}
+	text := string(raw)
+	items = reportItems(text)
+	parciais = reportscan.PartialCount(text)
+	sum := sha256.Sum256(raw)
+	artefatos = append(artefatos, Artefato{Path: "report.md", SHA256: hex.EncodeToString(sum[:])})
+	return items, parciais, artefatos
+}
+
+// reportItems extracts the orchestrator report items: the lines outside
+// fenced code blocks that carry exactly one of the [done], [partial] or
+// [skipped] markers, numbered in file order. The item text is the line with
+// the marker, the leading list and table syntax and the surrounding
+// whitespace removed, cut to 280 code points.
+func reportItems(text string) []Item {
+	items := []Item{}
+	inFence, fenceChar, fenceLen := false, byte(0), 0
+	for _, line := range strings.Split(text, "\n") {
+		open := reportItemFenceOpen.FindStringSubmatch(line)
+		if !inFence && open != nil {
+			inFence, fenceChar, fenceLen = true, open[1][0], len(open[1])
+			continue
+		}
+		if inFence {
+			if close := reportItemFenceClose.FindStringSubmatch(line); close != nil && close[1][0] == fenceChar && len(close[1]) >= fenceLen {
+				inFence = false
+			}
+			continue
+		}
+		estado := singleItemMarker(line)
+		if estado == "" {
+			continue
+		}
+		item := reportItemPrefix.ReplaceAllString(line, "")
+		items = append(items, Item{N: len(items) + 1, Item: cutRunes(strings.TrimSpace(item), resumoLimit), Estado: estado})
+	}
+	return items
+}
+
+// singleItemMarker reports the marker of a line carrying exactly one report
+// marker, or "" for a line with none or with two or more (a doubled marker
+// of the same kind included), which the brief skips.
+func singleItemMarker(line string) string {
+	total := strings.Count(line, "[done]") + strings.Count(line, "[partial]") + strings.Count(line, "[skipped]")
+	if total != 1 {
+		return ""
+	}
+	switch {
+	case strings.Contains(line, "[done]"):
+		return "done"
+	case strings.Contains(line, "[partial]"):
+		return "partial"
+	default:
+		return "skipped"
+	}
+}
+
+// openQuestions is the resumo of the question events with a seq greater than
+// the last unblocked event's seq, in seq order; empty when none is open.
+func openQuestions(events []Event) []string {
+	last := 0
+	for _, event := range events {
+		if event.Tipo == "unblocked" && event.Seq > last {
+			last = event.Seq
+		}
+	}
+	questions := []string{}
+	for _, event := range events {
+		if event.Tipo == "question" && event.Seq > last {
+			questions = append(questions, event.Resumo)
+		}
+	}
+	return questions
+}
+
+// cutRunes shortens value to at most limit code points, keeping the start.
+func cutRunes(value string, limit int) string {
+	if utf8.RuneCountInString(value) <= limit {
+		return value
+	}
+	runes := []rune(value)
+	return string(runes[:limit])
 }
 
 // refreshReport reconciles the stored report.json with the job log and
@@ -286,6 +504,27 @@ func readReport(dir string) (Report, error) {
 func saveReport(dir string, rep Report) error {
 	rep.Schema = 1
 	rep.Limpeza.Worktree = "kept"
+	// The contract fields are always present with empty values: a report
+	// written before they existed unmarshals them as nil, and the rewrite
+	// stores them empty rather than null.
+	if rep.Commits == nil {
+		rep.Commits = []Commit{}
+	}
+	if rep.Itens == nil {
+		rep.Itens = []Item{}
+	}
+	if rep.Testes == nil {
+		rep.Testes = []Teste{}
+	}
+	if rep.Artefatos == nil {
+		rep.Artefatos = []Artefato{}
+	}
+	if rep.Blockers == nil {
+		rep.Blockers = []string{}
+	}
+	if rep.Perguntas == nil {
+		rep.Perguntas = []string{}
+	}
 	raw, err := json.Marshal(rep)
 	if err != nil {
 		return err
