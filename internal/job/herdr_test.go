@@ -3,6 +3,7 @@ package job
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -286,6 +287,58 @@ func TestHerdrWorkspacesRun(t *testing.T) {
 		err := f.cli().Run("w9:p1", argv)
 		wantExit(t, err, ExitHerdr, "job: herdr pane run failed")
 	})
+}
+
+// TestHerdrWorkspacesRunShortNames pins the 8.3 short-name rule: a tilde is
+// accepted only as an 8.3 short-name (a letter or digit, then ~, then one
+// or more digits), which Windows uses in executable paths, and every other
+// tilde form stays refused with exit 4 and zero herdr calls.
+func TestHerdrWorkspacesRunShortNames(t *testing.T) {
+	t.Run("8.3 short-name arguments are accepted", func(t *testing.T) {
+		for _, arg := range []string{
+			`C:\Users\RUNNER~1\AppData\Local\Temp\go-build1\b001\cli.test.exe`,
+			`C:\PROGRA~1\herdr\herdr-soho.exe`,
+			`/tmp/ABCDEF~12/x`,
+			`D:\a\b~3`,
+		} {
+			t.Run(arg, func(t *testing.T) {
+				want := []string{"pane", "run", "w9:p1", arg}
+				f := newHerdrFixture(t, []fakecli.Rule{{Argv: want}})
+				if err := f.cli().Run("w9:p1", []string{arg}); err != nil {
+					t.Fatalf("Run(%q): %v", arg, err)
+				}
+				calls := f.calls()
+				if len(calls) != 1 || !sameArgv(calls[0].Argv, want) {
+					t.Fatalf("herdr calls = %v, want exactly one %v", calls, want)
+				}
+			})
+		}
+	})
+	// Tilde forms that are not 8.3 short names; refused as an argv element
+	// and as the pane id.
+	tildeArgs := []string{"~", `~/x`, `~user/bin`, "a~", "a~b", `/~1`, `\~1`, `x=~1`, `x:~1`, ".~1", "-~1"}
+	// Unsafe arguments that are not tilde forms.
+	otherArgs := []string{"a~1;b", "a~1 b", `%TEMP%`, `$HOME`, "a\x60b", "a|b", "a&b", "a>b", `a"b`, "a\nb"}
+	for _, arg := range append(append([]string{}, tildeArgs...), otherArgs...) {
+		t.Run("refused argument "+strconv.Quote(arg), func(t *testing.T) {
+			f := newHerdrFixture(t, nil)
+			err := f.cli().Run("w9:p1", []string{arg})
+			wantExit(t, err, ExitHerdr, "job: herdr pane run refused an unsafe argument")
+			if calls := f.calls(); len(calls) != 0 {
+				t.Fatalf("herdr calls = %d, want 0", len(calls))
+			}
+		})
+	}
+	for _, paneID := range tildeArgs {
+		t.Run("refused pane id "+strconv.Quote(paneID), func(t *testing.T) {
+			f := newHerdrFixture(t, nil)
+			err := f.cli().Run(paneID, nil)
+			wantExit(t, err, ExitHerdr, "job: herdr pane run refused an unsafe argument")
+			if calls := f.calls(); len(calls) != 0 {
+				t.Fatalf("herdr calls = %d, want 0", len(calls))
+			}
+		})
+	}
 }
 
 func TestHerdrWorkspacesDeadline(t *testing.T) {

@@ -1241,14 +1241,15 @@ func TestJobSuperviseRunsTheSupervisor(t *testing.T) {
 		}
 	}
 	// The launcher resolves the override's symlinks, so it must point at a
-	// regular copy of the fake. The copy keeps the fake's own name: the fake
-	// derives its config file name from its executable's base name.
+	// regular copy of the fake. The copy keeps the fake's own name, including
+	// the platform extension (.exe on Windows): the fake derives its config
+	// file name from its executable's base name.
 	fakeData, err := os.ReadFile(exe)
 	if err != nil {
 		t.Fatal(err)
 	}
 	realDir := t.TempDir()
-	real := filepath.Join(realDir, "herdr-soho")
+	real := filepath.Join(realDir, filepath.Base(exe))
 	if err := os.WriteFile(real, fakeData, 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -157,9 +157,14 @@ func (c *herdrCLI) ServerReachable() bool {
 	return ok
 }
 
-// safePaneRunArg matches one `herdr pane run` argument: letters, digits,
-// and . _ / : \ = -; an empty argument matches nothing.
-var safePaneRunArg = regexp.MustCompile(`^[A-Za-z0-9._/:\\=-]+$`)
+// safePaneRunArg matches one `herdr pane run` argument or pane id: a
+// non-empty sequence of letters, digits, and . _ / : \ = -, plus 8.3
+// short-name tildes (a letter or digit, then ~, then one or more digits),
+// which Windows uses in executable paths such as C:\Users\USER~1\.... A ~
+// outside that form is refused: shell tilde expansion only happens at the
+// start of a word (POSIX and PowerShell), and cmd.exe reads ~ only inside
+// %...%, which stays refused.
+var safePaneRunArg = regexp.MustCompile(`^(?:[A-Za-z0-9._/:\\=-]|[A-Za-z0-9]~[0-9]+)+$`)
 
 // Run starts an argv in an existing pane:
 // `herdr pane run <paneID> <argv...>`. It refuses an empty paneID or any
