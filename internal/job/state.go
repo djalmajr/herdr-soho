@@ -42,13 +42,23 @@ type State struct {
 	Base              string  `json:"base,omitempty"`
 	BaseSHA           string  `json:"base_sha,omitempty"`
 	Modo              string  `json:"modo,omitempty"`
-	WorkspaceID       string  `json:"workspace_id,omitempty"`
-	RootPane          string  `json:"root_pane,omitempty"`
-	WorkspaceClosed   bool    `json:"workspace_closed,omitempty"`
-	TimeoutMin        int     `json:"timeout_min,omitempty"`
-	StartedAt         string  `json:"started_at,omitempty"`
-	Orchestrator      string  `json:"orchestrator,omitempty"`
-	DispatchedAt      string  `json:"dispatched_at,omitempty"`
+	// WorkspaceLabel and WorkspacePreexisting are the create intent, recorded
+	// before `herdr workspace create`: the label the job workspace gets and
+	// the ids of the workspaces that already had it. Start recovery
+	// identifies the job workspace by them when a crash left it unrecorded.
+	WorkspaceLabel       string   `json:"workspace_label,omitempty"`
+	WorkspacePreexisting []string `json:"workspace_preexisting,omitempty"`
+	WorkspaceID          string   `json:"workspace_id,omitempty"`
+	RootPane             string   `json:"root_pane,omitempty"`
+	WorkspaceClosed      bool     `json:"workspace_closed,omitempty"`
+	TimeoutMin           int      `json:"timeout_min,omitempty"`
+	StartedAt            string   `json:"started_at,omitempty"`
+	// OrchestratorSpawnAt is the spawn intent, recorded before the job
+	// orchestrator is spawned: a restarted supervisor that finds it without
+	// Orchestrator recovers the spawn instead of spawning blindly.
+	OrchestratorSpawnAt string `json:"orchestrator_spawn_at,omitempty"`
+	Orchestrator        string `json:"orchestrator,omitempty"`
+	DispatchedAt        string `json:"dispatched_at,omitempty"`
 }
 
 // Store is the job state root (core.StateRootPath, not a workspace directory).

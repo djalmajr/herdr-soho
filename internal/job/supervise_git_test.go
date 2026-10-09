@@ -520,7 +520,8 @@ func (h *closingHerdr) Close(id string) error {
 	*h.log = append(*h.log, "herdrClose:"+id)
 	return h.inner.Close(id)
 }
-func (h closingHerdr) ServerReachable() bool { return h.inner.ServerReachable() }
+func (h closingHerdr) ServerReachable() bool           { return h.inner.ServerReachable() }
+func (h closingHerdr) List() ([]herdrWorkspace, error) { return h.inner.List() }
 
 // crashingHerdr panics once in Close: a crash after the cleanup event and
 // before the workspace close.
@@ -539,7 +540,8 @@ func (h crashingHerdr) Close(id string) error {
 	}
 	return h.inner.Close(id)
 }
-func (h crashingHerdr) ServerReachable() bool { return h.inner.ServerReachable() }
+func (h crashingHerdr) ServerReachable() bool           { return h.inner.ServerReachable() }
+func (h crashingHerdr) List() ([]herdrWorkspace, error) { return h.inner.List() }
 
 func TestSuperviseRelease(t *testing.T) {
 	t.Run("done with commits: the complete report and the release order", func(t *testing.T) {

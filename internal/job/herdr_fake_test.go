@@ -29,11 +29,14 @@ type fakeHerdr struct {
 	CloseErr          error
 	Reachable         bool
 	RunErr            error
+	Workspaces        []herdrWorkspace
+	ListErr           error
 
 	// Recorded calls.
 	CreateCalls []fakeHerdrCreateCall
 	CloseIDs    []string
 	ListCalls   int
+	ListReads   int
 	RunCalls    []fakeHerdrRunCall
 }
 
@@ -53,6 +56,16 @@ func (f *fakeHerdr) Close(workspaceID string) error {
 func (f *fakeHerdr) ServerReachable() bool {
 	f.ListCalls++
 	return f.Reachable
+}
+
+// List returns a copy of the configured rows; ListReads counts the calls
+// (ListCalls counts ServerReachable).
+func (f *fakeHerdr) List() ([]herdrWorkspace, error) {
+	f.ListReads++
+	if f.ListErr != nil {
+		return nil, f.ListErr
+	}
+	return append([]herdrWorkspace(nil), f.Workspaces...), nil
 }
 
 func (f *fakeHerdr) Run(paneID string, argv []string) error {

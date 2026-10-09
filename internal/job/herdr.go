@@ -24,6 +24,16 @@ type herdrWorkspaces interface {
 	Create(cwd, label string, env map[string]string) (workspaceID, rootPaneID string, err error)
 	Close(workspaceID string) error
 	ServerReachable() bool
+	List() ([]herdrWorkspace, error)
+}
+
+// herdrWorkspace is one row of `herdr workspace list`: the id, the label
+// and the pane count. Crash recovery reads it to find the job workspace
+// by its label and to count its panes.
+type herdrWorkspace struct {
+	ID        string
+	Label     string
+	PaneCount int
 }
 
 // herdrPanes is the job's view of Herdr panes.
@@ -188,6 +198,47 @@ func (c *herdrCLI) ServerReachable() bool {
 	}
 	_, ok := doc["result"]
 	return ok
+}
+
+// List reads `herdr workspace list`: result.workspaces[], each with
+// workspace_id, label and pane_count. A non-zero exit, a timeout, invalid
+// JSON, a missing workspaces array, or a row without a string
+// workspace_id, a string label or a non-negative integer pane_count is
+// exit 4: a row the job cannot read makes the whole list unreadable, so
+// recovery never decides from a partial list. Like ServerReachable, it
+// never runs a command that could start a server.
+func (c *herdrCLI) List() ([]herdrWorkspace, error) {
+	out, err := runStep("herdr", []string{"workspace", "list"}, c.timeout(), c.Env)
+	if err != nil {
+		return nil, herdrExit("job: herdr workspace list failed")
+	}
+	rows, ok := parseWorkspaceList(out)
+	if !ok {
+		return nil, herdrExit("job: herdr workspace list returned an unknown result")
+	}
+	return rows, nil
+}
+
+func parseWorkspaceList(out string) ([]herdrWorkspace, bool) {
+	var doc struct {
+		Result *struct {
+			Workspaces *[]map[string]any `json:"workspaces"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || doc.Result == nil || doc.Result.Workspaces == nil {
+		return nil, false
+	}
+	rows := make([]herdrWorkspace, 0, len(*doc.Result.Workspaces))
+	for _, item := range *doc.Result.Workspaces {
+		id, idOK := item["workspace_id"].(string)
+		label, labelOK := item["label"].(string)
+		count, countOK := item["pane_count"].(float64)
+		if !idOK || id == "" || !labelOK || !countOK || count < 0 || count != float64(int(count)) {
+			return nil, false
+		}
+		rows = append(rows, herdrWorkspace{ID: id, Label: label, PaneCount: int(count)})
+	}
+	return rows, true
 }
 
 // safePaneRunArg matches one `herdr pane run` argument or pane id: a

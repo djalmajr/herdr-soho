@@ -239,6 +239,66 @@ func assertListOnly(t *testing.T, f *herdrFixture) {
 	}
 }
 
+func TestHerdrWorkspacesList(t *testing.T) {
+	t.Run("the rows are read from result.workspaces", func(t *testing.T) {
+		stdout := `{"id":"cli:workspace:list","result":{"type":"workspace_list","workspaces":[` +
+			`{"active_tab_id":"w9:t1","agent_status":"done","focused":false,"label":"job-TASK-1","number":1,"pane_count":2,"tab_count":1,"workspace_id":"w9"},` +
+			`{"label":"other","pane_count":1,"workspace_id":"w12"}]}}`
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "list"}, Stdout: stdout}})
+		rows, err := f.cli().List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		want := []herdrWorkspace{{ID: "w9", Label: "job-TASK-1", PaneCount: 2}, {ID: "w12", Label: "other", PaneCount: 1}}
+		if len(rows) != len(want) {
+			t.Fatalf("List = %+v, want %+v", rows, want)
+		}
+		for i := range want {
+			if rows[i] != want[i] {
+				t.Fatalf("List[%d] = %+v, want %+v", i, rows[i], want[i])
+			}
+		}
+		assertListOnly(t, f)
+	})
+	t.Run("an empty list is no rows", func(t *testing.T) {
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "list"}, Stdout: `{"result":{"workspaces":[]}}`}})
+		rows, err := f.cli().List()
+		if err != nil || len(rows) != 0 {
+			t.Fatalf("List = %+v, %v; want no rows and no error", rows, err)
+		}
+	})
+	t.Run("an unreadable list is exit 4", func(t *testing.T) {
+		for name, stdout := range map[string]string{
+			"not json":               "not json",
+			"no result":              `{"id":"cli:x"}`,
+			"result array":           `{"result":[]}`,
+			"no workspaces":          `{"result":{}}`,
+			"workspaces not array":   `{"result":{"workspaces":{}}}`,
+			"row without id":         `{"result":{"workspaces":[{"label":"a","pane_count":1}]}}`,
+			"row with empty id":      `{"result":{"workspaces":[{"workspace_id":"","label":"a","pane_count":1}]}}`,
+			"row without label":      `{"result":{"workspaces":[{"workspace_id":"w1","pane_count":1}]}}`,
+			"row without pane count": `{"result":{"workspaces":[{"workspace_id":"w1","label":"a"}]}}`,
+			"negative pane count":    `{"result":{"workspaces":[{"workspace_id":"w1","label":"a","pane_count":-1}]}}`,
+			"fractional pane count":  `{"result":{"workspaces":[{"workspace_id":"w1","label":"a","pane_count":1.5}]}}`,
+			"string pane count":      `{"result":{"workspaces":[{"workspace_id":"w1","label":"a","pane_count":"1"}]}}`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "list"}, Stdout: stdout}})
+				rows, err := f.cli().List()
+				wantExit(t, err, ExitHerdr, "job: herdr workspace list returned an unknown result")
+				if rows != nil {
+					t.Fatalf("List rows = %+v, want nil", rows)
+				}
+			})
+		}
+	})
+	t.Run("a non-zero exit is exit 4", func(t *testing.T) {
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "list"}, Code: 1, Stdout: `{"result":{"workspaces":[]}}`}})
+		_, err := f.cli().List()
+		wantExit(t, err, ExitHerdr, "job: herdr workspace list failed")
+	})
+}
+
 func TestHerdrWorkspacesClose(t *testing.T) {
 	t.Run("exact argv and success", func(t *testing.T) {
 		f := newHerdrFixture(t, []fakecli.Rule{{Argv: []string{"workspace", "close", "w9"}}})
