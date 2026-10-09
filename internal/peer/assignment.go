@@ -156,10 +156,10 @@ func SendAssignmentMessage(options AssignmentMessageOptions) (collaboration.Deli
 	if id == "" {
 		id = RandomPeerID()
 	}
-	header := strings.Split(PeerHeader(HeaderField(sessionref.FormatRef(sessionref.Ref{Machine: sessionref.LocalMachine, PaneID: from.Pane})), HeaderField(from.Name), HeaderField(from.Kind), HeaderField(from.Role), id), "\n")
-	header[2] = fmt.Sprintf("Reply within this assignment: herdr-soho send %s --assignment %s --type review.question \"<your reply>\"", from.Name, a.ID)
+	ref := HeaderField(sessionref.FormatRef(sessionref.Ref{Machine: sessionref.LocalMachine, PaneID: from.Pane}))
+	header := PeerHeaderAssignment(PeerSender{Ref: ref, Name: HeaderField(from.Name), Kind: HeaderField(from.Kind), Role: HeaderField(from.Role), Model: HeaderField(from.Model)}, from.Name, a.ID, id)
 	metadata := fmt.Sprintf("Assignment: %s; type: %s; round: %d; revision: %s.", a.ID, HeaderField(options.Type), a.Round, a.Revision)
-	message := strings.Join(header, "\n") + "\n" + metadata + "\n\n" + QuotePeerBody(LiteralPeerText(options.Body)) + "\n" + PeerEndLine(id)
+	message := header + "\n" + metadata + "\n\n" + QuotePeerBody(LiteralPeerText(options.Body)) + "\n" + PeerEndLine(id)
 	// No --wait: neither side waits for the other's turn, report or idle.
 	r := platform.RunCli("herdr", []string{"agent", "prompt", to.Pane, message}, platform.RunOptions{Env: env, TimeoutMs: remaining()})
 	result := collaboration.DeliveryResult{Status: "submitted"}
