@@ -776,6 +776,14 @@ func jobSupervise(args []string, env platform.Env) int {
 	if err != nil {
 		dieJob("supervise", err)
 	}
+	// The machine's wake hook: an empty job_wake_cmd leaves Wake nil.
+	machine, err := job.LoadMachine(platform.Current(), env)
+	if err != nil {
+		dieJob("supervise", err)
+	}
+	if machine.WakeCmd != "" {
+		sup.Wake = &job.WakeHook{Cmd: machine.WakeCmd, JobID: id, Env: env, Friction: friction}
+	}
 	exit, runErr := sup.Run()
 	if runErr != nil {
 		friction("job: the job supervisor stopped with an error")

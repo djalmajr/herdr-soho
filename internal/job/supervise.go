@@ -58,12 +58,23 @@ type Supervisor struct {
 	Poll     time.Duration
 	Friction func(string)
 
+	// Wake: the machine's job wake hook; nil or an empty Cmd disables it
+	// (no worker, no cursor).
+	Wake *WakeHook
+
 	// Tick bookkeeping: consecutive bad observations (the gone-family
 	// states, status errors) and the unknown states already reported to
 	// friction.
 	goneStreak int
 	errStreak  int
 	frictioned map[string]bool
+
+	// Wake bookkeeping: the queue and its worker (nil when the hook is
+	// disabled) and the highest event seq queued in this process
+	// (initialized from the cursor).
+	wakeQueue  chan Event
+	wakeDone   chan struct{}
+	wakeQueued int
 }
 
 // NewSupervisor wires the production supervisor over a recorded job: the
@@ -113,6 +124,7 @@ func (s *Supervisor) Run() (int, error) {
 	if done {
 		return code, nil
 	}
+	s.startWake()
 	// The job lane (and its max_workers bump) is set once, before the
 	// orchestrator is recorded; a restarted supervisor skips it, so the bump
 	// is never applied twice.
@@ -261,10 +273,13 @@ func orchestratorBriefSection(id string) []byte {
 		"\n- Ask for an immediate push after a commit with `herdr-soho job checkpoint --id " + id + "`.\n")
 }
 
-// tick runs one watch iteration. This slice only checks the job
-// orchestrator; later slices add their own calls here: control delivery,
-// git sync, the job budget and the wake hook.
+// tick runs one watch iteration. This slice dispatches the wake queue and
+// checks the job orchestrator; later slices add their own calls here:
+// control delivery, git sync and the job budget.
 func (s *Supervisor) tick() (int, bool, error) {
+	if code, done, err := s.dispatchWakes(); err != nil || done {
+		return code, true, err
+	}
 	return s.checkOrchestrator()
 }
 
@@ -474,6 +489,9 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 	if _, err := s.Store.Transition(s.ID, status); err != nil {
 		return 0, true, err
 	}
+	// The terminal events wake the dispatcher too; the worker drains
+	// before the workspace close.
+	s.finishWakes()
 	// TODO(DJA-194): release, final push and workspace close (slice 7d).
 	if _, err := s.Store.WriteReport(s.ID, ReportFacts{}); err != nil {
 		return 0, true, err
@@ -501,5 +519,8 @@ func (s *Supervisor) fail(motivo string, exit int) {
 	if _, err := s.Store.Fail(s.ID, motivo, exit); err != nil && s.Friction != nil {
 		s.Friction("job: the supervisor could not record the failure")
 	}
+	// The terminal events wake the dispatcher too; the worker drains
+	// before the workspace close.
+	s.finishWakes()
 	// TODO(DJA-194): release, final push and workspace close (slice 7d).
 }
