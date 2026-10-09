@@ -183,8 +183,9 @@ func (s *Supervisor) Run() (int, error) {
 	if done {
 		// A job that already ended may not have finished its release (a
 		// crash before the workspace close): finalize again; it skips the
-		// steps already done.
-		if snap, snapErr := s.Store.Snapshot(s.ID); snapErr == nil && isTerminalOutcome(snap.State.Status) && !snap.State.WorkspaceClosed {
+		// steps already done. A job without a recorded workspace has no
+		// release to finish.
+		if snap, snapErr := s.Store.Snapshot(s.ID); snapErr == nil && isTerminalOutcome(snap.State.Status) && snap.State.WorkspaceID != "" && !snap.State.WorkspaceClosed {
 			s.finishWakes()
 			s.finalize(snap.State.Status)
 		}

@@ -883,3 +883,42 @@ func TestSuperviseNewSupervisor(t *testing.T) {
 		t.Fatal("NewSupervisor accepted an unknown id")
 	}
 }
+
+// TestSuperviseRestartTerminalWithoutWorkspace: a restart on a terminal
+// job that never recorded a Herdr workspace finalizes nothing: report.json
+// and the event log stay as they are.
+func TestSuperviseRestartTerminalWithoutWorkspace(t *testing.T) {
+	store, jobDir, clock, team := supFixture(t)
+	if _, err := store.Record("job-1", func(st *State) { st.WorkspaceID = "" }); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []string{StatusFinishing, StatusDone} {
+		if _, err := store.Transition("job-1", to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reportPath := filepath.Join(jobDir, "report.json")
+	before, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventsBefore, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var friction []string
+	sup := supSupervisor(store, clock, team, &friction)
+	if exit, err := sup.Run(); err != nil || exit != 0 {
+		t.Fatalf("Run = %d %v, want 0", exit, err)
+	}
+	after, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("a restart rewrote report.json of a job without a workspace")
+	}
+	if eventsAfter, err := readEvents(jobDir); err != nil || len(eventsAfter) != len(eventsBefore) {
+		t.Fatalf("events %d -> %d (%v), want unchanged", len(eventsBefore), len(eventsAfter), err)
+	}
+}
