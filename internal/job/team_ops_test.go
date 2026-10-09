@@ -217,13 +217,32 @@ func TestTeamOpsRoster(t *testing.T) {
 			t.Fatalf("Roster: %v", err)
 		}
 		want := []rosterRow{
-			{Name: "orch-1", Role: "job-orchestrator", Pane: "w1:p2", State: "working"},
-			{Name: "worker-1", Role: "implementer", Pane: "w1:p3", State: "working"},
+			{Name: "orch-1", Role: "job-orchestrator", Pane: "w1:p2"},
+			{Name: "worker-1", Role: "implementer", Pane: "w1:p3"},
 		}
 		if !reflect.DeepEqual(rows, want) {
 			t.Fatalf("rows = %+v, want %+v (the # block is not rostered workers)", rows, want)
 		}
 		assertTeamCalls(t, f, [][]string{{"roster"}})
+	})
+
+	t.Run("a spaced tab label keeps the identity columns exact", func(t *testing.T) {
+		// The tab label impl+rev 2 carries a space: it shifts the STATE
+		// column (and everything after), so the parser reads only the
+		// identity columns and stays exact for the job-orchestrator row.
+		out := "NAME                 ROLE               KIND     PANE     TAB              STATE     REPORT       CWD TASK\n" +
+			"orch-1               job-orchestrator   job      w1:p2    impl+rev 2       gone      none         /work brief\n"
+		f := newTeamOpsFix(t, []fakecli.Rule{
+			{Argv: []string{"roster"}, Stdout: out},
+		})
+		rows, err := f.cli().Roster()
+		if err != nil {
+			t.Fatalf("Roster: %v", err)
+		}
+		want := []rosterRow{{Name: "orch-1", Role: "job-orchestrator", Pane: "w1:p2"}}
+		if !reflect.DeepEqual(rows, want) {
+			t.Fatalf("rows = %+v, want %+v (the spaced label must not shift the identity)", rows, want)
+		}
 	})
 
 	t.Run("a row with fewer than six fields fails the whole read", func(t *testing.T) {

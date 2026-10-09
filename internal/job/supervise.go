@@ -310,15 +310,18 @@ func (s *Supervisor) ensureOrchestrator() (string, bool, error) {
 
 // recoverOrchestrator is the restart path of ensureOrchestrator when the
 // spawn intent is recorded and the name is not: the crash happened after
-// the spawn. A single live job-orchestrator candidate in the job's own
-// workspace is adopted — recorded and evented exactly as the normal path
-// does, without a spawn. With no candidate, a workspace whose only pane
-// is the supervisor's own root pane proves the orchestrator pane is gone,
-// and the orchestrator is spawned as normal. Anything else — more than one
-// candidate, a roster read error, an invalid or missing workspace, a
-// multi-pane workspace, a list error, no Herdr adapter — fails the job
-// closed without spawning: the supervisor never spawns blind and never
-// releases or closes a pane it did not prove is the job's.
+// the spawn. The roster gives only the identity (name, role, pane); the
+// liveness of each job-orchestrator candidate in the job's own workspace
+// comes from the authoritative Status read the supervisor already uses.
+// A single live candidate is adopted — recorded and evented exactly as the
+// normal path does, without a spawn. With no candidate, a workspace whose
+// only pane is the supervisor's own root pane proves the orchestrator
+// pane is gone, and the orchestrator is spawned as normal; a gone
+// candidate counts as no candidate. Anything else — a status read error,
+// more than one candidate, a roster read error, an invalid or missing workspace, a multi-pane
+// workspace, a list error, no Herdr adapter — fails the job closed without
+// spawning: the supervisor never spawns blind and never releases or closes
+// a pane it did not prove is the job's.
 func (s *Supervisor) recoverOrchestrator(st State) (string, bool, error) {
 	rows, err := s.Ops.Roster()
 	if err != nil {
@@ -326,14 +329,25 @@ func (s *Supervisor) recoverOrchestrator(st State) (string, bool, error) {
 	}
 	var candidates []rosterRow
 	for _, row := range rows {
-		if row.Role != "job-orchestrator" || row.State == "gone" {
+		if row.Role != "job-orchestrator" {
 			continue
 		}
 		// The candidate's pane must live in the job's own workspace: the
 		// text before the first : of the pane, compared to a recorded id
-		// that is one safe path segment.
+		// that is one safe path segment. The roster column is not the
+		// liveness: a spaced tab label shifts it.
 		workspace, _, ok := strings.Cut(row.Pane, ":")
 		if !ok || !validWorkspaceID(st.WorkspaceID) || workspace != st.WorkspaceID {
+			continue
+		}
+		// Liveness is the candidate's own status read: gone is not a
+		// candidate; a failed read fails the recovery closed; every other
+		// state keeps the row a candidate.
+		state, _, err := s.Ops.Status(row.Name)
+		if err != nil {
+			return s.failOrchestratorRecovery()
+		}
+		if state == "gone" {
 			continue
 		}
 		candidates = append(candidates, row)

@@ -189,6 +189,59 @@ func TestRecoverStartAmbiguousFailsClosed(t *testing.T) {
 	})
 }
 
+// TestRecoverStartInvalidLabeledIDsFailClosed: a new labeled row whose id
+// the job cannot name makes the identity unproven, like an ambiguous
+// list: nothing closes and the friction line is written — even when a
+// valid new row is present alongside the invalid one. Zero new labeled
+// rows stay friction-free (TestRecoverStartZeroNewRows).
+func TestRecoverStartInvalidLabeledIDsFailClosed(t *testing.T) {
+	assertFailClosed := func(t *testing.T, root string, fake *fakeHerdr, friction []string) {
+		t.Helper()
+		store := Open(root)
+		st, recovered, err := RecoverStart(store, "job-1", fake, func(m string) { friction = append(friction, m) }, nil)
+		if err != nil || !recovered {
+			t.Fatalf("RecoverStart: %+v err=%v recovered=%v", st, err, recovered)
+		}
+		if st.Status != StatusFailed || st.Motivo == nil || *st.Motivo != "job: start interrupted" ||
+			st.WorkspaceID != "" || st.WorkspaceClosed {
+			t.Fatalf("state = %+v", st)
+		}
+		if len(fake.CloseIDs) != 0 {
+			t.Fatalf("CloseIDs = %v, want none", fake.CloseIDs)
+		}
+		if len(friction) != 1 || friction[0] != "job: the Herdr workspace may be left open: its identity could not be established" {
+			t.Fatalf("friction = %v", friction)
+		}
+		assertFailedReport(t, root, "job-1", "job: start interrupted")
+	}
+	t.Run("one new labeled row with an invalid id closes nothing", func(t *testing.T) {
+		root := t.TempDir()
+		crashedStartState(t, root)
+		var friction []string
+		// The preexisting job-job-1 workspace (w0) plus one new row whose
+		// id the job cannot name.
+		fake := &fakeHerdr{Workspaces: []herdrWorkspace{
+			{ID: "w0", Label: "job-job-1", PaneCount: 1},
+			{ID: "../w9", Label: "job-job-1", PaneCount: 1},
+		}}
+		assertFailClosed(t, root, fake, friction)
+	})
+	t.Run("a valid and an invalid new row close nothing", func(t *testing.T) {
+		root := t.TempDir()
+		crashedStartState(t, root)
+		var friction []string
+		// The preexisting job-job-1 workspace (w0) plus one new row with a
+		// valid id and one with an id the job cannot name: the valid one
+		// does not make the set proven.
+		fake := &fakeHerdr{Workspaces: []herdrWorkspace{
+			{ID: "w0", Label: "job-job-1", PaneCount: 1},
+			{ID: "w1", Label: "job-job-1", PaneCount: 1},
+			{ID: "../w9", Label: "job-job-1", PaneCount: 1},
+		}}
+		assertFailClosed(t, root, fake, friction)
+	})
+}
+
 // TestRecoverStartZeroNewRows: the crash left no new labeled workspace (a
 // crash before the create): nothing to close, and the job still ends
 // failed.

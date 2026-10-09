@@ -397,12 +397,13 @@ func RecoverStart(store *Store, id string, herdr herdrWorkspaces, friction, rawF
 // caller holds. Only accepted and preparing are recovered (recovered=true
 // on the way): any other status is unchanged; a crash in the start window
 // left the job accepted or preparing with no supervisor. The job workspace
-// is closed only when its identity is proven — the recorded WorkspaceID,
-// or exactly one new row of the recorded WorkspaceLabel that is not in
-// WorkspacePreexisting and is a valid id; an ambiguous or unreadable list
-// closes nothing and says so to friction. The job ends failed ("job: start
-// interrupted", exit 19) and a pending cancel request retires with the
-// terminal record.
+// is closed only when its identity is proven: the recorded WorkspaceID, or
+// exactly one new row of the recorded WorkspaceLabel that is not in
+// WorkspacePreexisting — an unreadable list, more than one new row, or
+// any new row with an id the job cannot name (invalid) leaves the identity
+// unproven: close nothing and say so to friction. The job ends failed
+// ("job: start interrupted", exit 19) and a pending cancel request retires
+// with the terminal record.
 func recoverStartLocked(store *Store, id string, herdr herdrWorkspaces, friction func(string)) (State, bool, error) {
 	snap, err := store.Snapshot(id)
 	if err != nil {
@@ -424,25 +425,31 @@ func recoverStartLocked(store *Store, id string, herdr herdrWorkspaces, friction
 			frictionStartAmbiguous(friction)
 		} else {
 			var candidates []string
+			invalid := false
 			for _, row := range rows {
-				if row.Label != st.WorkspaceLabel || !validWorkspaceID(row.ID) || hasPreexistingID(st.WorkspacePreexisting, row.ID) {
+				if row.Label != st.WorkspaceLabel || hasPreexistingID(st.WorkspacePreexisting, row.ID) {
+					continue
+				}
+				if !validWorkspaceID(row.ID) {
+					// A new row the job cannot name: the set is
+					// unproven, like an ambiguous one.
+					invalid = true
 					continue
 				}
 				candidates = append(candidates, row.ID)
 			}
-			switch len(candidates) {
-			case 1:
+			switch {
+			case invalid || len(candidates) > 1:
+				// Fail closed: the identity is unproven (an invalid id
+				// or more than one candidate), so close nothing.
+				frictionStartAmbiguous(friction)
+			case len(candidates) == 1:
 				workspaceID = candidates[0]
 				if _, err := store.Record(id, func(s *State) { s.WorkspaceID = workspaceID }); err != nil {
 					return State{}, false, err
 				}
-			case 0:
-				// Nothing to close.
-			default:
-				// Fail closed: the identity is ambiguous, so close
-				// nothing.
-				frictionStartAmbiguous(friction)
 			}
+			// Zero candidates and no invalid row: nothing to close.
 		}
 	}
 	if workspaceID != "" {

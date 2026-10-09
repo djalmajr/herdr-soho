@@ -35,13 +35,15 @@ type teamOps interface {
 }
 
 // rosterRow is one rostered worker row the supervisor reads for spawn
-// recovery: the columns it needs, in the order the roster prints them
-// (NAME ROLE KIND PANE TAB STATE ...).
+// recovery: the identity columns it needs, in the order the roster prints
+// them (NAME ROLE KIND PANE ...). Liveness is not a roster column: a
+// spaced tab label (the TAB column, a padded label that may carry an
+// " N" suffix) shifts the whitespace-separated columns after it, so the
+// supervisor reads each candidate's state from its status instead.
 type rosterRow struct {
-	Name  string
-	Role  string
-	Pane  string
-	State string
+	Name string
+	Role string
+	Pane string
 }
 
 // selfCLI is the production teamOps: one herdr-soho executable, the job
@@ -260,7 +262,7 @@ func (c selfCLI) ReleaseTeam() error {
 // Roster reads the team roster for spawn recovery: the header row, one
 // row per rostered worker, and the "other live agents" block that runs to
 // the end of the output. A failed roster call or a row with fewer than
-// six fields is the fixed error — the recovery never decides from a
+// four fields is the fixed error — the recovery never decides from a
 // partial roster.
 func (c selfCLI) Roster() ([]rosterRow, error) {
 	out, err := c.step("read the team roster", "roster")
@@ -275,10 +277,17 @@ func (c selfCLI) Roster() ([]rosterRow, error) {
 }
 
 // parseRoster parses the roster output: the header row starts with NAME
-// and is skipped, the whitespace-separated rows are the rostered workers
-// (NAME, ROLE, KIND, PANE, TAB, STATE, ...), and the block that opens with
-// a line beginning # (the other live agents) runs to the end of the
-// output. A row before that block with fewer than six fields is an error.
+// and is skipped, the whitespace-separated rows are the rostered workers,
+// and the block that opens with a line beginning # (the other live agents)
+// runs to the end of the output. Only the identity columns are read —
+// NAME (field 0), ROLE (field 1) and PANE (field 3) — and a row before
+// that block with fewer than four fields is an error. They are exact for a
+// job-orchestrator row: the ROLE column carries a (history) suffix only
+// when the whole text fits in 18 characters, which job-orchestrator
+// (16) plus the shortest suffix never does, and the name, kind and pane
+// are single tokens, so only a column at field 4 or later (a spaced tab
+// label, a cwd with spaces) can shift the rest of the row, never the
+// first four.
 func parseRoster(out string) ([]rosterRow, error) {
 	var rows []rosterRow
 	for _, line := range strings.Split(out, "\n") {
@@ -289,10 +298,10 @@ func parseRoster(out string) ([]rosterRow, error) {
 		if len(fields) == 0 || fields[0] == "NAME" {
 			continue
 		}
-		if len(fields) < 6 {
-			return nil, errors.New("roster row has fewer than six fields")
+		if len(fields) < 4 {
+			return nil, errors.New("roster row has fewer than four fields")
 		}
-		rows = append(rows, rosterRow{Name: fields[0], Role: fields[1], Pane: fields[3], State: fields[5]})
+		rows = append(rows, rosterRow{Name: fields[0], Role: fields[1], Pane: fields[3]})
 	}
 	return rows, nil
 }

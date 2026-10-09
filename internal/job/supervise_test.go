@@ -52,6 +52,10 @@ type fakeTeam struct {
 	rosterRows       []rosterRow
 	rosterErr        error
 	rosterCalls      int
+	// recoveryStatus is the one-shot per-name status the recovery candidate
+	// read consumes: the watch-loop script is not consumed by that read, and
+	// a second read for the same name falls back to the script.
+	recoveryStatus map[string]fakeStatus
 }
 
 var _ teamOps = (*fakeTeam)(nil)
@@ -84,6 +88,10 @@ func (f *fakeTeam) Send(name, path string) error {
 }
 
 func (f *fakeTeam) Status(name string) (string, string, error) {
+	if next, ok := f.recoveryStatus[name]; ok {
+		delete(f.recoveryStatus, name)
+		return next.State, next.Report, next.Err
+	}
 	f.statusCalls++
 	if len(f.statusScript) == 0 {
 		panic("fakeTeam: no scripted status")
@@ -620,7 +628,8 @@ func TestSuperviseCrashBetweenSpawnAndRecord(t *testing.T) {
 	// The crashed spawn left this orchestrator alive in the job's own
 	// workspace: the restarted run adopts it instead of spawning a second
 	// one.
-	team.rosterRows = []rosterRow{{Name: "orch-1", Role: "job-orchestrator", Pane: "w1:p2", State: "working"}}
+	team.rosterRows = []rosterRow{{Name: "orch-1", Role: "job-orchestrator", Pane: "w1:p2"}}
+	team.recoveryStatus = map[string]fakeStatus{"orch-1": {State: "working"}}
 	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
 	team.statusScript = []fakeStatus{{State: "done", Report: report}}
 	var friction []string

@@ -203,9 +203,10 @@ func TestSuperviseSpawnRecoverFailsClosed(t *testing.T) {
 	t.Run("two candidates fail closed without spawning", func(t *testing.T) {
 		store, jobDir, clock, team := supFixture(t)
 		team.rosterRows = []rosterRow{
-			{Name: "orch-a", Role: "job-orchestrator", Pane: "w1:p2", State: "working"},
-			{Name: "orch-b", Role: "job-orchestrator", Pane: "w1:p3", State: "idle"},
+			{Name: "orch-a", Role: "job-orchestrator", Pane: "w1:p2"},
+			{Name: "orch-b", Role: "job-orchestrator", Pane: "w1:p3"},
 		}
+		team.recoveryStatus = map[string]fakeStatus{"orch-a": {State: "working"}, "orch-b": {State: "idle"}}
 		herdr := &fakeHerdr{Workspaces: []herdrWorkspace{{ID: "w1", Label: "job", PaneCount: 2}}}
 		var friction []string
 		crashSpawn(t, store, clock, team, &friction)
@@ -219,7 +220,7 @@ func TestSuperviseSpawnRecoverFailsClosed(t *testing.T) {
 
 	t.Run("a candidate in another workspace is not adopted", func(t *testing.T) {
 		store, jobDir, clock, team := supFixture(t)
-		team.rosterRows = []rosterRow{{Name: "orch-x", Role: "job-orchestrator", Pane: "w9:p2", State: "working"}}
+		team.rosterRows = []rosterRow{{Name: "orch-x", Role: "job-orchestrator", Pane: "w9:p2"}}
 		// Two panes: even though the roster read succeeds, the recovery
 		// cannot prove the job workspace's pane state and fails closed
 		// instead of adopting the foreign orchestrator. The done status is
@@ -243,9 +244,12 @@ func TestSuperviseSpawnRecoverFailsClosed(t *testing.T) {
 
 	t.Run("a gone candidate is not adopted", func(t *testing.T) {
 		store, jobDir, clock, team := supFixture(t)
-		team.rosterRows = []rosterRow{{Name: "orch-x", Role: "job-orchestrator", Pane: "w1:p2", State: "gone"}}
+		team.rosterRows = []rosterRow{{Name: "orch-x", Role: "job-orchestrator", Pane: "w1:p2"}}
 		// As above: the done status keeps a mutant that ignores the gone
-		// state on the state assertion instead of the unscripted watch.
+		// state on the state assertion instead of the unscripted watch. The
+		// gone liveness comes from the candidate's status read, not the
+		// roster column (a spaced tab label shifts that column).
+		team.recoveryStatus = map[string]fakeStatus{"orch-x": {State: "gone"}}
 		herdr := &fakeHerdr{Workspaces: []herdrWorkspace{{ID: "w1", Label: "job", PaneCount: 2}}}
 		report := writeOrchestratorReport(t, recoverReport)
 		team.statusScript = []fakeStatus{{State: "done", Report: report}}
@@ -261,6 +265,26 @@ func TestSuperviseSpawnRecoverFailsClosed(t *testing.T) {
 		}
 		assertRecoveryFailed(t, store, jobDir, team, nil)
 	})
+
+	t.Run("a candidate status error fails closed without spawning", func(t *testing.T) {
+		store, jobDir, clock, team := supFixture(t)
+		team.rosterRows = []rosterRow{{Name: "orch-x", Role: "job-orchestrator", Pane: "w1:p2"}}
+		// The candidate's status cannot be read: the recovery fails closed
+		// before the list is consulted. The done status keeps a mutant that
+		// ignores the error on the state assertion.
+		team.recoveryStatus = map[string]fakeStatus{"orch-x": {Err: errors.New("status failed")}}
+		herdr := &fakeHerdr{Workspaces: []herdrWorkspace{{ID: "w1", Label: "job", PaneCount: 1}}}
+		report := writeOrchestratorReport(t, recoverReport)
+		team.statusScript = []fakeStatus{{State: "done", Report: report}}
+		var friction []string
+		crashSpawn(t, store, clock, team, &friction)
+		sup := supSupervisorWithHerdr(store, clock, team, &friction, herdr)
+		exit, err := sup.Run()
+		if err != nil || exit != ExitHerdr {
+			t.Fatalf("second Run: %d %v, want %d", exit, err, ExitHerdr)
+		}
+		assertRecoveryFailed(t, store, jobDir, team, herdr)
+	})
 }
 
 // TestSuperviseSpawnRecoverEnsureJobLaneOnce: the job lane (and its
@@ -268,7 +292,8 @@ func TestSuperviseSpawnRecoverFailsClosed(t *testing.T) {
 // spawn intent marks the lane as already ensured.
 func TestSuperviseSpawnRecoverEnsureJobLaneOnce(t *testing.T) {
 	store, _, clock, team := supFixture(t)
-	team.rosterRows = []rosterRow{{Name: "orch-1", Role: "job-orchestrator", Pane: "w1:p2", State: "working"}}
+	team.rosterRows = []rosterRow{{Name: "orch-1", Role: "job-orchestrator", Pane: "w1:p2"}}
+	team.recoveryStatus = map[string]fakeStatus{"orch-1": {State: "working"}}
 	report := writeOrchestratorReport(t, recoverReport)
 	team.statusScript = []fakeStatus{{State: "done", Report: report}}
 	var friction []string
