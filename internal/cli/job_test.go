@@ -530,14 +530,17 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Only supervise still validates and refuses; amend, send, cancel and
-	// checkpoint now queue control requests (TestJobControl* below). That
-	// is the intentional adaptation of the phase-1 rows for DJA-194 slice 7b.
+	// supervise still validates and, outside a Herdr workspace, refuses
+	// before the job is looked up; amend, send, cancel and checkpoint now
+	// queue control requests (TestJobControl* below). That is the
+	// intentional adaptation of the phase-1 rows for DJA-194 slice 7b and
+	// the supervise row for slice 6c.
 	for _, args := range [][]string{
 		{"supervise", "--id", "job-1"},
+		{"supervise", "--id", "nope"},
 	} {
 		code, out, errOut := f.run(t, args...)
-		want := "herdr-soho: job " + args[0] + ": not available yet\n"
+		want := "herdr-soho: job supervise: run it inside the job's Herdr workspace\n"
 		if code != 2 || out != "" || errOut != want {
 			t.Fatalf("%v code=%d out=%q err=%q", args, code, out, errOut)
 		}
@@ -550,7 +553,6 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 		{"send", "--id", "nope", "-"},
 		{"cancel", "--id", "nope"},
 		{"checkpoint", "--id", "nope"},
-		{"supervise", "--id", "nope"},
 	} {
 		code, out, _ := f.run(t, args...)
 		if code != 3 || out != `{"status":"not_found"}`+"\n" {
@@ -664,9 +666,10 @@ func TestJobControlAmendSendWriteRequests(t *testing.T) {
 		t.Fatalf("unknown send code=%d out=%q err=%q", code, out, errOut)
 	}
 
-	// supervise still validates and refuses.
+	// supervise, outside a Herdr workspace, refuses (the phase-1 row
+	// adapted for slice 6c: the supervisor arrives in the same slice).
 	code, out, errOut = f.run(t, "supervise", "--id", "job-1")
-	if code != 2 || out != "" || errOut != "herdr-soho: job supervise: not available yet\n" {
+	if code != 2 || out != "" || errOut != "herdr-soho: job supervise: run it inside the job's Herdr workspace\n" {
 		t.Fatalf("supervise code=%d out=%q err=%q", code, out, errOut)
 	}
 }
@@ -1148,5 +1151,140 @@ func TestJobStartDuplicateAndConflict(t *testing.T) {
 	code, out, errOut = ee.start(t, changed)
 	if code != 20 || out != "" || !strings.Contains(errOut, "different brief") {
 		t.Fatalf("conflict code=%d out=%q err=%q", code, out, errOut)
+	}
+}
+
+// TestJobSuperviseCLIRefusals covers the supervisor entry: outside a Herdr
+// workspace it refuses before the job is looked up, an unknown id inside
+// one is not_found, and NOWRITE still refuses the writing subcommand.
+func TestJobSuperviseCLIRefusals(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	want := "herdr-soho: job supervise: run it inside the job's Herdr workspace\n"
+
+	// Outside Herdr, both a known and an unknown id refuse with exit 2.
+	for _, args := range [][]string{
+		{"supervise", "--id", "job-1"},
+		{"supervise", "--id", "nope"},
+	} {
+		code, out, errOut := f.run(t, args...)
+		if code != 2 || out != "" || errOut != want {
+			t.Fatalf("%v code=%d out=%q err=%q", args, code, out, errOut)
+		}
+	}
+
+	// Inside Herdr, an unknown id is not_found before the supervisor runs.
+	herdr := platform.Env{}
+	for name, value := range f.env {
+		herdr[name] = value
+	}
+	herdr["HERDR_ENV"] = "1"
+	code, out, errOut := f.runEnv(t, herdr, "supervise", "--id", "nope")
+	if code != 3 || out != `{"status":"not_found"}`+"\n" || errOut != "" {
+		t.Fatalf("unknown id code=%d out=%q err=%q", code, out, errOut)
+	}
+
+	// NOWRITE refuses the writing subcommand, even inside Herdr.
+	nowrite := platform.Env{}
+	for name, value := range herdr {
+		nowrite[name] = value
+	}
+	nowrite["HERDR_SOHO_NOWRITE"] = "1"
+	code, out, errOut = f.runEnv(t, nowrite, "supervise", "--id", "job-1")
+	if code != 2 || out != "" || !strings.Contains(errOut, "HERDR_SOHO_NOWRITE=1 is read-only: job supervise writes") {
+		t.Fatalf("NOWRITE code=%d out=%q err=%q", code, out, errOut)
+	}
+}
+
+// TestJobSuperviseRunsTheSupervisor runs the whole path: job supervise
+// builds the supervisor with the fake executable as the team command
+// runner, the supervisor spawns and dispatches the orchestrator, watches
+// it to done, copies the report and exits 0 with the done status line.
+func TestJobSuperviseRunsTheSupervisor(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+
+	// The start slice's run facts: a running job with its worktree dir.
+	body := fmt.Sprintf(`{"schema":1,"id":"job-1","status":"running","brief_sha256":"x","decisions_acked_seq":0,"motivo":null,"dir":%q}`+"\n", co)
+	if err := os.WriteFile(filepath.Join(jobDir, "state.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reportDir := t.TempDir()
+	reportPath := filepath.Join(reportDir, "report.md")
+	if err := os.WriteFile(reportPath, []byte("# Report — job\n\n- Item 1 [done] did the thing\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeDir := t.TempDir()
+	exe, err := fakecli.Install(t, fakeDir, "herdr-soho", []fakecli.Rule{
+		{Argv: []string{"session", "set", "lane.job.roles", "job-orchestrator"}},
+		{Argv: []string{"session", "set", "lane.job.panes", "1"}},
+		{Argv: []string{"config"}, Stdout: "KEY                VALUE                          SOURCE\nmax_workers        3                              defaults\n"},
+		{Argv: []string{"spawn", "job-orchestrator", "--cwd", co, "--approvals", "full", "--fresh"}, Stdout: `{"name":"orch-1","pane_id":"w9:p2","status":"ready"}` + "\n"},
+		{Argv: []string{"dispatch", "orch-1", filepath.Join(jobDir, "orchestrator-brief.md"), "--no-wait"}},
+		{Argv: []string{"status", "orch-1"}, Stdout: "orch-1\tdone\t" + reportPath + "\t-\t-\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := platform.Env{}
+	for name, value := range f.env {
+		env[name] = value
+	}
+	for _, item := range fakecli.Env(nil, fakeDir) {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && key != "" {
+			env[key] = value
+		}
+	}
+	// The launcher resolves the override's symlinks, so it must point at a
+	// regular copy of the fake. The copy keeps the fake's own name: the fake
+	// derives its config file name from its executable's base name.
+	fakeData, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realDir := t.TempDir()
+	real := filepath.Join(realDir, "herdr-soho")
+	if err := os.WriteFile(real, fakeData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env["HERDR_ENV"] = "1"
+	env["HERDR_SOHO_BIN"] = real
+
+	code, out, errOut := f.runEnv(t, env, "supervise", "--id", "job-1")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, `"status":"done"`) || !strings.Contains(out, `"id":"job-1"`) {
+		t.Fatalf("status line out=%q", out)
+	}
+	// The orchestrator's report is the job report now, byte for byte.
+	copied, err := os.ReadFile(filepath.Join(jobDir, "report.md"))
+	if err != nil || string(copied) != "# Report — job\n\n- Item 1 [done] did the thing\n" {
+		t.Fatalf("report.md = %q err=%v", copied, err)
+	}
+	brief, err := os.ReadFile(filepath.Join(jobDir, "orchestrator-brief.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(brief), "- Job id: job-1\n") || !strings.Contains(string(brief), "herdr-soho job checkpoint --id job-1") {
+		t.Fatalf("orchestrator brief = %q", brief)
+	}
+	state, err := os.ReadFile(filepath.Join(jobDir, "state.json"))
+	if err != nil || !strings.Contains(string(state), `"status":"done"`) || !strings.Contains(string(state), `"orchestrator":"orch-1"`) {
+		t.Fatalf("state.json = %q err=%v", state, err)
+	}
+	events, err := os.ReadFile(filepath.Join(jobDir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tipo := range []string{`"tipo":"worker_spawned"`, `"tipo":"worker_done"`, `"tipo":"terminal"`} {
+		if !strings.Contains(string(events), tipo) {
+			t.Fatalf("events missing %s: %s", tipo, events)
+		}
 	}
 }

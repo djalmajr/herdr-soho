@@ -348,7 +348,21 @@ func (p Preparer) cli(exe string, args []string, timeout time.Duration, env plat
 // or a non-zero status fails the step; the subprocess output never reaches
 // the error.
 func runStep(exe string, args []string, timeout time.Duration, env platform.Env) (string, error) {
-	result := platform.RunCli(exe, args, platform.RunOptions{Env: env, TimeoutMs: int(timeout / time.Millisecond)})
+	return runStepIn("", exe, args, timeout, env)
+}
+
+// runStepIn is runStep with the subprocess working directory set to dir
+// (RunOptions.Cwd); "" keeps the current directory. The same rules apply.
+// An absolute exe is run as is (platform.RunExecutable); a name is
+// resolved through PATH (platform.RunCli).
+func runStepIn(dir, exe string, args []string, timeout time.Duration, env platform.Env) (string, error) {
+	opts := platform.RunOptions{Env: env, Cwd: dir, TimeoutMs: int(timeout / time.Millisecond)}
+	var result platform.RunResult
+	if filepath.IsAbs(exe) {
+		result = platform.RunExecutable(exe, args, opts)
+	} else {
+		result = platform.RunCli(exe, args, opts)
+	}
 	if result.NotFound || result.TimedOut || result.Status == nil || *result.Status != 0 {
 		return "", errSubprocess
 	}

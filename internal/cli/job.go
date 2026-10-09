@@ -74,8 +74,8 @@ const jobWaitBoundMS = 600000
 // cmdJob dispatches the job command family. It runs outside Herdr; the
 // read subcommands (status, wait, events, collect, list) read files only;
 // start (without --dry-run) records the job, prepares the checkout, opens
-// the Herdr workspace and launches the supervisor; ack, close and note
-// change state.
+// the Herdr workspace and launches the supervisor; supervise runs the
+// supervisor inside the job's workspace; ack, close and note change state.
 func cmdJob(args []string, env platform.Env, cwd string) int {
 	if len(args) == 0 {
 		platform.Die("usage: job <status|wait|events|collect|list> --id <id> [--flags]", 2)
@@ -112,8 +112,13 @@ func cmdJob(args []string, env platform.Env, cwd string) int {
 		return jobCancel(rest, env)
 	case "checkpoint":
 		return jobCheckpoint(rest, env)
+	case "supervise":
+		return jobSupervise(rest, env)
 	default:
-		return jobRefusePhase2(rest, env)
+		// Every subcommand in the flag spec has a case above; the spec
+		// check already refused the unknown ones.
+		platform.Die("job "+sub+": not available yet", 2)
+		return 0
 	}
 }
 
@@ -740,22 +745,47 @@ func jobNote(args []string, env platform.Env) int {
 	return 0
 }
 
-// jobRefusePhase2 validates the supervise inputs and refuses: the supervisor
-// arrives in the next slice.
-//
-// TODO(DJA-194): phase 2 — supervise.
-func jobRefusePhase2(args []string, env platform.Env) int {
+// jobSupervise runs the job supervisor: it requires the job's Herdr
+// workspace (HERDR_ENV=1), locates the job, builds the supervisor with this
+// executable as the team command runner and the job friction file as its
+// friction log, prints the job's status line and exits with the outcome
+// code.
+func jobSupervise(args []string, env platform.Env) int {
 	vals, _, pos := parseJobFlags("supervise", args)
 	if len(pos) > 1 {
 		platform.Die("job supervise: unexpected argument '"+pos[1]+"'", 2)
 	}
 	id := jobRequiredID("supervise", vals)
-	_, code := jobStoreOrNotFound("supervise", id, env)
-	if code != 0 {
-		return code
+	if env.Get("HERDR_ENV") != "1" {
+		platform.Die("job supervise: run it inside the job's Herdr workspace", 2)
 	}
-	platform.Die("job supervise: not available yet", 2)
-	return 0
+	store, err := locateJob(env, id)
+	if err != nil {
+		dieJob("supervise", err)
+	}
+	if store == nil {
+		printJobNotFound()
+		return job.ExitNotFound
+	}
+	// The friction file of the job; the callback writes in the existing
+	// friction format.
+	friction := func(message string) {
+		core.Warn(message, filepath.Join(store.Root, "jobs", id, "friction.log"))
+	}
+	sup, err := job.NewSupervisor(store, id, env, platform.LauncherPath(env), friction)
+	if err != nil {
+		dieJob("supervise", err)
+	}
+	exit, runErr := sup.Run()
+	if runErr != nil {
+		friction("job: the job supervisor stopped with an error")
+	}
+	snap, err := store.Snapshot(id)
+	if err != nil {
+		dieJob("supervise", err)
+	}
+	printJobStatusLine(snap)
+	return exit
 }
 
 // jobControlStatus prints the fresh snapshot status line after a control

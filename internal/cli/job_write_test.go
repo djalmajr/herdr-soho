@@ -427,7 +427,8 @@ func TestJobWriteBodiesAndStubLimits(t *testing.T) {
 	for _, args := range [][]string{
 		{"cancel", "--id", "nope"},
 		{"checkpoint", "--id", "nope"},
-		{"supervise", "--id", "nope"},
+		// Phase 2 adaptation: supervise requires HERDR_ENV=1 before the job
+		// lookup, so an unknown id outside Herdr is exit 2, not not_found.
 	} {
 		code, out, _ := f.run(t, args...)
 		if code != 3 || out != `{"status":"not_found"}`+"\n" {
