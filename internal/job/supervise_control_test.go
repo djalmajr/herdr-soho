@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -164,8 +165,14 @@ func assertStopAmend(t *testing.T, jobDir string) {
 	if !bytes.Equal(raw, []byte(stopAmendWant)) {
 		t.Fatalf("stop-amend.md = %q, want the exact contract body", raw)
 	}
-	if mode, err := os.Stat(filepath.Join(jobDir, "stop-amend.md")); err != nil || mode.Mode().Perm() != 0o600 {
-		t.Fatalf("stop-amend.md mode = %v", mode)
+	mode, err := os.Stat(filepath.Join(jobDir, "stop-amend.md"))
+	if err != nil {
+		t.Fatalf("stop-amend.md: %v", err)
+	}
+	// Windows reports 0666 for a writable file; the 0600 contract is the
+	// POSIX one.
+	if runtime.GOOS != "windows" && mode.Mode().Perm() != 0o600 {
+		t.Fatalf("stop-amend.md mode = %o, want 0600", mode.Mode().Perm())
 	}
 }
 
@@ -888,4 +895,65 @@ func eventsLast(t *testing.T, jobDir string) Event {
 	}
 	t.Fatal("no terminal event")
 	return Event{}
+}
+
+// Repeated checkpoints converge ([retry]): while one is pending the queue
+// stays a single marker (a repeat request is a no-op), the supervisor
+// handles that one exactly once, and the queue is reusable after.
+func TestSuperviseControlRepeatedCheckpointConverges(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := ctlSup(t, 10*time.Second, &friction)
+	if queued, err := store.RequestCheckpoint("job-1"); !queued || err != nil {
+		t.Fatalf("checkpoint: queued=%v err=%v", queued, err)
+	}
+	// A repeat while the first is pending must not accumulate: the no-op
+	// reports not queued.
+	if queued, err := store.RequestCheckpoint("job-1"); queued || err != nil {
+		t.Fatalf("repeat checkpoint: queued=%v err=%v, want a no-op", queued, err)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"checkpoint"}) {
+		t.Fatalf("pending control = %v, want the single marker", got)
+	}
+	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
+	team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}
+
+	exit, err := sup.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	// Checkpoint asks for an immediate push: the git sync of the same tick
+	// consumes pushNow (the checkpoint event is asserted below).
+	if sup.pushNow {
+		t.Fatal("pushNow was not consumed by the git sync")
+	}
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"accepted", "worker_spawned", "checkpoint", "worker_done", "terminal", "cleanup"}
+	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("event types = %v, want %v", got, want)
+	}
+	if e := events[2]; e.Resumo != "push requested" || len(e.Refs) != 0 {
+		t.Fatalf("checkpoint event = %+v, want the resumo and no refs", e)
+	}
+	// The request retired with its counter.
+	if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"seq"}) {
+		t.Fatalf("pending control = %v, want only seq", got)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"checkpoint-000001"}) {
+		t.Fatalf("retired control = %v", got)
+	}
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v", friction)
+	}
+	if clock.sleeps != 1 {
+		t.Fatalf("sleeps = %d, want 1", clock.sleeps)
+	}
+	if st := supState(t, store); st.Status != StatusDone {
+		t.Fatalf("state = %+v", st)
+	}
 }

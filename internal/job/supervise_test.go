@@ -2,9 +2,11 @@ package job
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -243,8 +245,13 @@ func TestSuperviseHappyPath(t *testing.T) {
 		t.Fatalf("orchestrator brief = %q, want %q", gotBrief, wantBrief)
 	}
 	mode, err := os.Stat(filepath.Join(jobDir, "orchestrator-brief.md"))
-	if err != nil || mode.Mode().Perm() != 0o600 {
-		t.Fatalf("orchestrator brief mode = %v", mode)
+	if err != nil {
+		t.Fatalf("orchestrator brief: %v", err)
+	}
+	// Windows reports 0666 for a writable file; the 0600 contract is the
+	// POSIX one.
+	if runtime.GOOS != "windows" && mode.Mode().Perm() != 0o600 {
+		t.Fatalf("orchestrator brief mode = %o, want 0600", mode.Mode().Perm())
 	}
 	// The report was copied into the job dir, byte for byte.
 	original, err := os.ReadFile(report)
@@ -721,7 +728,10 @@ func TestSuperviseStartWait(t *testing.T) {
 		// The start lands two polls in.
 		clock.onSleep = func() {
 			if clock.sleeps == 2 {
-				if err := os.WriteFile(filepath.Join(jobDir, "state.json"), []byte(`{"schema":1,"id":"job-1","status":"running","brief_sha256":"x","decisions_acked_seq":0,"motivo":null,"dir":"`+t.TempDir()+`"}`+"\n"), 0o600); err != nil {
+				// The worktree path is escaped into the JSON with %q: a raw
+				// splice would leave backslashes that are not valid JSON.
+				body := fmt.Sprintf(`{"schema":1,"id":"job-1","status":"running","brief_sha256":"x","decisions_acked_seq":0,"motivo":null,"dir":%q}`+"\n", t.TempDir())
+				if err := os.WriteFile(filepath.Join(jobDir, "state.json"), []byte(body), 0o600); err != nil {
 					panic(err)
 				}
 			}

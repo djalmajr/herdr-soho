@@ -331,13 +331,15 @@ func TestTeamOpsWorkingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The nested directory resolves to repository a, proving the subprocess
-	// started inside it; repository b is the control.
+	// started inside it; repository b is the control. git rev-parse prints
+	// forward slashes on every OS, so the separators are cleaned before the
+	// comparison.
 	out, err := runStepIn(sub, "git", []string{"rev-parse", "--show-toplevel"}, 60*time.Second, env)
 	if err != nil {
 		t.Fatalf("runStepIn: %v", err)
 	}
-	if strings.TrimSpace(out) != canonicalA {
-		t.Fatalf("runStepIn toplevel = %q, want %q", out, canonicalA)
+	if got := filepath.Clean(strings.TrimSpace(out)); got != canonicalA {
+		t.Fatalf("runStepIn toplevel = %q, want %q", got, canonicalA)
 	}
 	out, err = runStepIn(repos["b"], "git", []string{"rev-parse", "--show-toplevel"}, 60*time.Second, env)
 	if err != nil {
@@ -347,8 +349,8 @@ func TestTeamOpsWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(out) != canonicalB {
-		t.Fatalf("runStepIn (control) toplevel = %q, want %q", out, canonicalB)
+	if got := filepath.Clean(strings.TrimSpace(out)); got != canonicalB {
+		t.Fatalf("runStepIn (control) toplevel = %q, want %q", got, canonicalB)
 	}
 	// selfCLI passes the same directory: the spawn argv carries it and the
 	// subprocess ran there.
