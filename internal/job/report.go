@@ -200,11 +200,17 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 	}
 	global, projeto, decisions := decisionAggregates(events)
 	items, parciais, artefatos := readReportMD(dir)
-	// The report is built only from known facts: with no commits known (no
-	// head), the pull request is null and the motivo says so; the state
-	// motivo wins when set.
+	// The report is built only from known facts: the motivo says so when
+	// the state carries none and either there are no git facts (no head,
+	// for example a workspace-mode job) or the commit list is known and
+	// empty with no pull request (a worktree job that ends with no commit
+	// ahead of the base). A nil commit list means the listing failed or
+	// was not run (the friction already names it) and is never labeled sem
+	// commits; a state motivo that is already set (a terminal motivo, a
+	// failure) is never overwritten.
+	noCommits := facts.PR == nil && facts.Commits != nil && len(facts.Commits) == 0
 	motivo := st.Motivo
-	if motivo == nil && facts.Head == "" {
+	if motivo == nil && (facts.Head == "" || noCommits) {
 		none := "sem commits"
 		motivo = &none
 	}

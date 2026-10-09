@@ -185,9 +185,15 @@ func (s *Supervisor) Run() (int, error) {
 		// crash before the workspace close): finalize again; it skips the
 		// steps already done. A job without a recorded workspace has no
 		// release to finish.
-		if snap, snapErr := s.Store.Snapshot(s.ID); snapErr == nil && isTerminalOutcome(snap.State.Status) && snap.State.WorkspaceID != "" && !snap.State.WorkspaceClosed {
-			s.finishWakes()
-			s.finalize(snap.State.Status)
+		if snap, snapErr := s.Store.Snapshot(s.ID); snapErr == nil && isTerminalOutcome(snap.State.Status) {
+			if snap.State.WorkspaceID != "" && !snap.State.WorkspaceClosed {
+				s.finishWakes()
+				s.finalize(snap.State.Status)
+			}
+			// A crash between the terminal record and the retirement of the
+			// cancel leaves it pending on the terminal job: retire it
+			// idempotently and send nothing.
+			s.retirePendingCancel()
 		}
 		return code, nil
 	}
@@ -579,6 +585,9 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 	if _, err := s.Store.Transition(s.ID, status); err != nil {
 		return 0, true, err
 	}
+	// The job is terminal: a cancel still pending (it stays pending through
+	// the stop so a restart finds it) has nothing left to deliver.
+	s.retirePendingCancel()
 	// The terminal events wake the dispatcher too; the worker drains
 	// before the release and the workspace close.
 	s.finishWakes()
@@ -605,8 +614,13 @@ func (s *Supervisor) frictionUnknown(state string) {
 // every terminal outcome: final push, report, release, cleanup, close.
 func (s *Supervisor) fail(motivo string, exit int) {
 	s.finalSync(StatusFailed)
-	if _, err := s.Store.Fail(s.ID, motivo, exit); err != nil && s.Friction != nil {
-		s.Friction("job: the supervisor could not record the failure")
+	if _, err := s.Store.Fail(s.ID, motivo, exit); err != nil {
+		if s.Friction != nil {
+			s.Friction("job: the supervisor could not record the failure")
+		}
+	} else {
+		// The job is terminal: a pending cancel has nothing left to deliver.
+		s.retirePendingCancel()
 	}
 	// The terminal events wake the dispatcher too; the worker drains
 	// before the release and the workspace close.

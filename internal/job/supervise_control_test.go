@@ -641,13 +641,14 @@ func TestSuperviseControlSecondCancelNoEffect(t *testing.T) {
 	if queued, err := store.RequestCancel("job-1", 60); !queued || err != nil {
 		t.Fatalf("cancel: queued=%v err=%v", queued, err)
 	}
-	// A second cancel lands after the stop started; it retires with no
-	// effect and never extends the deadline.
+	// A second cancel lands after the stop started; while one is pending
+	// the queue is a single file, so the request is a no-op and never
+	// extends the deadline.
+	var secondQueued bool
+	var secondErr error
 	clock.onSleep = func() {
 		if clock.sleeps == 1 {
-			if queued, err := store.RequestCancel("job-1", 300); !queued || err != nil {
-				panic(err)
-			}
+			secondQueued, secondErr = store.RequestCancel("job-1", 300)
 		}
 	}
 	working := make([]fakeStatus, 7)
@@ -666,9 +667,16 @@ func TestSuperviseControlSecondCancelNoEffect(t *testing.T) {
 	if st := supState(t, store); st.Status != StatusCanceled {
 		t.Fatalf("state = %+v", st)
 	}
-	// Both cancels retired, the stop ran once, and the deadline stayed at
+	// The no-op queued nothing and the single cancel retired once, after
+	// the terminal outcome: the stop ran once and the deadline stayed at
 	// the first cancel's 60 s grace.
-	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"cancel.json-000001", "cancel.json-000002"}) {
+	if secondErr != nil {
+		t.Fatalf("second cancel: err=%v, want the no-op", secondErr)
+	}
+	if secondQueued {
+		t.Fatal("second cancel queued a new file, want the no-op on the pending one")
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"cancel.json-000001"}) {
 		t.Fatalf("retired control = %v", got)
 	}
 	if len(team.dispatches) != 2 {

@@ -14,7 +14,10 @@ import (
 // delivery and its event, so a crash between the two redelivers the request
 // on the next supervisor run — a redelivered amend is a duplicate
 // amendment the orchestrator applies idempotently, and a redelivered
-// checkpoint only asks for another (no-op) push.
+// checkpoint only asks for another (no-op) push. A cancel is the stop path's
+// delivery: it stays pending through the grace and retires only after the
+// stop's terminal outcome is recorded, so a supervisor that restarts inside
+// the grace finds it and starts the stop once more.
 
 // stopAmendBody is the exact body of the stop amendment the stop path
 // writes and dispatches (contract "Cancel and timeout").
@@ -25,10 +28,12 @@ const stopAmendBody = "Stop now and report what you have: commit what is integra
 const defaultTimeoutGrace = 120 * time.Second
 
 // deliverControl reads the pending control requests and handles them in the
-// queue's order: cancel starts the stop path unless one is already running
-// (a second cancel retires with no effect), checkpoint asks for an
-// immediate push, and amend and send are delivered to the job orchestrator
-// — a delivery failure keeps the request for the next tick and writes one
+// queue's order: cancel starts the stop path on its first sight in this
+// process and is a no-op while a stop is running (no second stop
+// amendment, no grace reset, no retirement — it retires only after the
+// stop's terminal outcome is recorded), checkpoint asks for an immediate
+// push, and amend and send are delivered to the job orchestrator — a
+// delivery failure keeps the request for the next tick and writes one
 // friction line naming the request. A request retires only after its
 // delivery and its event.
 func (s *Supervisor) deliverControl() (int, bool, error) {
@@ -39,11 +44,14 @@ func (s *Supervisor) deliverControl() (int, bool, error) {
 	for _, item := range items {
 		switch item.Kind {
 		case "cancel":
+			// The pending cancel stays in control/ until the stop path's
+			// terminal outcome retires it (endStop): a supervisor that
+			// restarts inside the grace finds it and starts the stop once
+			// more. While a stop is already running the request is a no-op
+			// for this tick: no new stop amendment, no grace reset, no
+			// retirement.
 			if s.stopping == "" {
 				s.beginStop("canceled", time.Duration(item.Grace)*time.Second)
-			}
-			if err := s.Store.RetireControl(s.ID, item); err != nil {
-				return 0, false, err
 			}
 		case "checkpoint":
 			s.pushNow = true
@@ -113,7 +121,12 @@ func (s *Supervisor) deliverControlBody(item ControlItem, amend bool) error {
 // the stop amendment (atomic, 0600, the exact contract body), dispatches it
 // to the job orchestrator as an amendment (a failure goes to friction and
 // the stop continues), and records the kind and its monotonic deadline.
-// checkBudget decides the stop's end from here on.
+// checkBudget decides the stop's end from here on. stopping and the
+// deadline live only in this process: a supervisor that restarts and finds
+// the still-pending cancel starts the stop once more — one stop amendment
+// per supervisor process, the request's full grace measured on that
+// process's own monotonic clock. That is the accepted bound: the grace
+// restarts on a supervisor restart, never on a tick.
 func (s *Supervisor) beginStop(kind string, grace time.Duration) {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
@@ -219,6 +232,11 @@ func (s *Supervisor) checkBudget() (int, bool, error) {
 // endStop ends the stop path: the job moves to finishing when it is not
 // there yet, and the outcome follows the kind (canceled 21, timeout 9).
 // The terminal path (the git slice) commits leftovers, pushes and releases.
+// A pending cancel retires once the terminal outcome is recorded
+// (finishOutcome and fail retire it on every terminal path), so nothing
+// stays pending on a terminal job; a crash in the window between the
+// terminal record and the retirement is retired by the supervisor that
+// starts on the terminal job.
 func (s *Supervisor) endStop(st State) (int, bool, error) {
 	status, motivo, exit := StatusCanceled, "cancelado", ExitCanceled
 	if s.stopping == StatusTimeout {
@@ -230,4 +248,27 @@ func (s *Supervisor) endStop(st State) (int, bool, error) {
 		}
 	}
 	return s.finishOutcome(status, motivo, exit)
+}
+
+// retirePendingCancel retires the pending cancel request, if any: the
+// request stayed pending through the stop so a restarted supervisor finds
+// it, and once the job is terminal there is nothing left to deliver. It
+// sends nothing; a missing source (already retired) is the no-op that
+// makes the retirement idempotent.
+func (s *Supervisor) retirePendingCancel() {
+	items, err := s.Store.PendingControl(s.ID)
+	if err != nil {
+		if s.Friction != nil {
+			s.Friction("job: the supervisor cannot read the control requests to retire the cancel")
+		}
+		return
+	}
+	for _, item := range items {
+		if item.Kind != "cancel" {
+			continue
+		}
+		if err := s.Store.RetireControl(s.ID, item); err != nil && s.Friction != nil {
+			s.Friction("job: the supervisor cannot retire the cancel request " + item.Name)
+		}
+	}
 }
