@@ -347,7 +347,6 @@ func TestJobStartValidationRefusals(t *testing.T) {
 		{name: "brief repo mismatch", args: []string{"start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", f.briefFile(t, otherRepo), "--dry-run"}},
 		{name: "brief id mismatch", args: []string{"start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", f.briefFile(t, otherID), "--dry-run"}},
 		{name: "unknown equipe key", args: []string{"start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", f.briefFile(t, unknownKey), "--dry-run"}, need: "unknown key"},
-		{name: "non-dry", args: []string{"start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", f.briefFile(t, jobStartBrief)}, need: "only --dry-run is available in this build"},
 	}
 	for _, tc := range cases {
 		code, out, errOut := f.run(t, tc.args...)

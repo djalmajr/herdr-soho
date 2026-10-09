@@ -71,10 +71,11 @@ var jobLifecycleStates = map[string]bool{
 
 const jobWaitBoundMS = 600000
 
-// cmdJob dispatches the job command family. It runs outside Herdr and never
-// calls Herdr: the read subcommands (status, wait, events, collect, list)
-// read files only; the writing subcommands validate their inputs and, in
-// this build, only start --dry-run, ack, close and note change state.
+// cmdJob dispatches the job command family. It runs outside Herdr; the
+// read subcommands (status, wait, events, collect, list) read files only;
+// start (without --dry-run) records the job, prepares the checkout, opens
+// the Herdr workspace and launches the supervisor; ack, close and note
+// change state.
 func cmdJob(args []string, env platform.Env, cwd string) int {
 	if len(args) == 0 {
 		platform.Die("usage: job <status|wait|events|collect|list> --id <id> [--flags]", 2)
@@ -303,8 +304,9 @@ type jobStatusLine struct {
 		Total     int `json:"total"`
 		UltimoSeq int `json:"ultimo_seq"`
 	} `json:"eventos"`
-	DecisionsAckedSeq  int   `json:"decisions_acked_seq"`
-	DecisionsPendentes []int `json:"decisions_pendentes"`
+	DecisionsAckedSeq  int    `json:"decisions_acked_seq"`
+	DecisionsPendentes []int  `json:"decisions_pendentes"`
+	DuplicateOf        string `json:"duplicate_of,omitempty"`
 }
 
 func printJobStatusLine(snap job.Snapshot) {
@@ -314,6 +316,7 @@ func printJobStatusLine(snap job.Snapshot) {
 		Motivo:             snap.State.Motivo,
 		DecisionsAckedSeq:  snap.State.DecisionsAckedSeq,
 		DecisionsPendentes: snap.Pending,
+		DuplicateOf:        snap.State.DuplicateOf,
 	}
 	line.Eventos.Total = snap.EventTotal
 	line.Eventos.UltimoSeq = snap.LastSeq
@@ -951,17 +954,9 @@ func jobStart(args []string, env platform.Env, cwd string) int {
 	if timeout == 0 {
 		timeout = machine.TimeoutMin
 	}
-	if !bare["--dry-run"] {
-		// TODO(DJA-194): phase 2 — prepare, create the workspace and supervise.
-		platform.Die("job start: only --dry-run is available in this build", 2)
-	}
 	resolvedBase := info.Base
 	if base != "" {
 		resolvedBase = base
-	}
-	var baseOut *string
-	if resolvedBase != "" {
-		baseOut = &resolvedBase
 	}
 	modo := "worktree"
 	if info.Modo != "" {
@@ -969,6 +964,63 @@ func jobStart(args []string, env platform.Env, cwd string) int {
 	}
 	if modoFlag != "" {
 		modo = modoFlag
+	}
+	if !bare["--dry-run"] {
+		selfExe := platform.LauncherPath(env)
+		stateRootOf := func(checkout string) string {
+			cfg := core.LoadConfig(env, checkout)
+			return core.StateRootPath(&cfg, env, checkout)
+		}
+		// The friction file of the job; the callback is built once the id
+		// is valid and writes in the existing friction format.
+		friction := func(message string) {
+			core.Warn(message, filepath.Join(stateRootOf(checkout), "jobs", id, "friction.log"))
+		}
+		store, err := locateJob(env, id)
+		if err != nil {
+			dieJob("start", err)
+		}
+		if store != nil {
+			// The id is already recorded: a duplicate returns the status
+			// line with duplicate_of, a different brief dies with 20.
+			st, err := store.Start(id, raw)
+			if err != nil {
+				dieJob("start", err)
+			}
+			snap, err := store.Snapshot(id)
+			if err != nil {
+				dieJob("start", err)
+			}
+			snap.State.DuplicateOf = st.DuplicateOf
+			printJobStatusLine(snap)
+			return 0
+		}
+		starter := job.NewStarter(env, machine, selfExe, stateRootOf, friction)
+		st, store, err := starter.Start(job.StartRequest{
+			ID: id, Org: org, Repo: repoName, Base: resolvedBase, Mode: modo,
+			Brief: raw, TimeoutMin: timeout, Team: team,
+		})
+		if err != nil {
+			// The job's status line when the store and state exist (the
+			// failure wrote it), then the error on stderr with its code.
+			if store != nil {
+				if snap, err := store.Snapshot(id); err == nil {
+					printJobStatusLine(snap)
+				}
+			}
+			dieJob("start", err)
+		}
+		snap, err := store.Snapshot(id)
+		if err != nil {
+			dieJob("start", err)
+		}
+		snap.State.DuplicateOf = st.DuplicateOf
+		printJobStatusLine(snap)
+		return 0
+	}
+	var baseOut *string
+	if resolvedBase != "" {
+		baseOut = &resolvedBase
 	}
 	override := team.OverrideKeys
 	if override == nil {

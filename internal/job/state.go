@@ -25,7 +25,9 @@ const (
 	StatusClosed    = "closed"
 )
 
-// State is the jobs/<id>/state.json document.
+// State is the jobs/<id>/state.json document. The fields from Checkout on
+// are run facts recorded by the start slice; they are optional so a job
+// without them serializes byte for byte as before.
 type State struct {
 	Schema            int     `json:"schema"`
 	ID                string  `json:"id"`
@@ -34,6 +36,16 @@ type State struct {
 	DecisionsAckedSeq int     `json:"decisions_acked_seq"`
 	Motivo            *string `json:"motivo"`
 	DuplicateOf       string  `json:"duplicate_of,omitempty"`
+	Checkout          string  `json:"checkout,omitempty"`
+	Dir               string  `json:"dir,omitempty"`
+	Branch            string  `json:"branch,omitempty"`
+	Base              string  `json:"base,omitempty"`
+	BaseSHA           string  `json:"base_sha,omitempty"`
+	Modo              string  `json:"modo,omitempty"`
+	WorkspaceID       string  `json:"workspace_id,omitempty"`
+	RootPane          string  `json:"root_pane,omitempty"`
+	TimeoutMin        int     `json:"timeout_min,omitempty"`
+	StartedAt         string  `json:"started_at,omitempty"`
 }
 
 // Store is the job state root (core.StateRootPath, not a workspace directory).

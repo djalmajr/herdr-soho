@@ -2,22 +2,27 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/job"
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
 // jobFix is one machine with an isolated HOME/XDG and a job_repos_root under
@@ -835,5 +840,288 @@ func TestJobUsage(t *testing.T) {
 	platform.Stdout, platform.Stderr = oldOut, oldErr
 	if code != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), "herdr-soho job") {
 		t.Fatalf("job --help code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+}
+
+// jobStartEE stages a non-dry-run job start: a real git on the fixture
+// PATH, a local bare remote with a main branch, an existing checkout
+// cloned from it, and fake gh and herdr binaries.
+type jobStartEE struct {
+	f        *jobFix
+	env      platform.Env
+	gitEnv   platform.Env
+	bare     string
+	checkout string
+	fakeDir  string
+	selfExe  string
+}
+
+// linkSystemGit puts the real git on the fixture PATH (symlink, or a copy
+// where symlinks are unavailable).
+func linkSystemGit(t *testing.T, dir string) {
+	t.Helper()
+	path, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("locate the system git: %v", err)
+	}
+	name := "git"
+	if runtime.GOOS == "windows" {
+		name = "git.exe"
+	}
+	target := filepath.Join(dir, name)
+	if err := os.Symlink(path, target); err != nil {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("reading the system git: %v", readErr)
+		}
+		if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
+			t.Fatalf("copying the system git: %v", writeErr)
+		}
+	}
+}
+
+// runGit runs a real git with the given env, bounded by a 60 s deadline.
+func runGit(t *testing.T, env platform.Env, dir string, args ...string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.WaitDelay = time.Second
+	cmd.Dir = dir
+	cmd.Env = env.List()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %s: %v", args, out, err)
+	}
+}
+
+func newJobStartEE(t *testing.T) *jobStartEE {
+	t.Helper()
+	f := newJobFix(t)
+	f.setMachine(t)
+	f.setTeam(t)
+	bin := filepath.Join(f.root, "bin")
+	linkSystemGit(t, bin)
+
+	// A hermetic git env for the fixture's own git commands.
+	gitEnv := f.env.Clone()
+	gitEnv["GIT_CONFIG_NOSYSTEM"] = "1"
+	gitEnv["GIT_CONFIG_GLOBAL"] = filepath.Join(f.root, "gitconfig")
+	gitEnv["GIT_AUTHOR_NAME"] = "fixture"
+	gitEnv["GIT_AUTHOR_EMAIL"] = "fixture@example.org"
+	gitEnv["GIT_COMMITTER_NAME"] = "fixture"
+	gitEnv["GIT_COMMITTER_EMAIL"] = "fixture@example.org"
+	if err := os.WriteFile(gitEnv["GIT_CONFIG_GLOBAL"], []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A bare remote with a main branch, then an existing checkout of it.
+	bare := filepath.Join(f.root, "bare.git")
+	seed := filepath.Join(f.root, "seed")
+	if err := os.MkdirAll(seed, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, gitEnv, f.root, "init", "-q", "--bare", bare)
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"commit", "-q", "--allow-empty", "-m", "init"},
+		{"branch", "-M", "main"},
+		{"remote", "add", "origin", bare},
+		{"push", "-q", "origin", "main"},
+	} {
+		runGit(t, gitEnv, seed, args...)
+	}
+	runGit(t, gitEnv, bare, "symbolic-ref", "HEAD", "refs/heads/main")
+	checkout := filepath.Join(f.repos, "example-org", "example-repo")
+	if err := os.MkdirAll(filepath.Dir(checkout), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, gitEnv, f.root, "clone", "-q", bare, checkout)
+
+	// Fake gh and herdr on a PATH that resolves them before the fixture git.
+	fakeDir := t.TempDir()
+	if _, err := fakecli.Install(t, fakeDir, "gh", []fakecli.Rule{{
+		Argv: []string{"auth", "status"},
+	}}); err != nil {
+		t.Fatalf("install the fake gh: %v", err)
+	}
+	worktree := filepath.Join(checkout, ".worktrees", "job-job-1")
+	herdrRules := []fakecli.Rule{
+		{Argv: []string{"workspace", "list"}, Stdout: `{"result":[]}`},
+		{Argv: []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--no-focus"},
+			Stdout: `{"result":{"workspace_id":"w9","root_pane":{"pane_id":"w9:p1"}}}`},
+		{Argv: []string{"pane", "run", "w9:p1"}, ArgvPrefix: true},
+	}
+	if _, err := fakecli.Install(t, fakeDir, "herdr", herdrRules); err != nil {
+		t.Fatalf("install the fake herdr: %v", err)
+	}
+	env := platform.Env{}
+	for _, item := range fakecli.Env(f.env.List(), fakeDir, fakecli.EnvOptions{SystemPath: bin}) {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && key != "" {
+			env[key] = value
+		}
+	}
+	selfExe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve the test executable: %v", err)
+	}
+	return &jobStartEE{f: f, env: env, gitEnv: gitEnv, bare: bare, checkout: checkout, fakeDir: fakeDir, selfExe: selfExe}
+}
+
+// herdrCalls reads the fake herdr call log; a missing log means no call.
+func (ee *jobStartEE) herdrCalls(t *testing.T) []fakecli.Call {
+	t.Helper()
+	calls, err := fakecli.ReadCalls(filepath.Join(ee.fakeDir, "herdr.calls.jsonl"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("read the herdr call log: %v", err)
+	}
+	return calls
+}
+
+func (ee *jobStartEE) start(t *testing.T, briefFile string) (int, string, string) {
+	t.Helper()
+	return ee.f.runEnv(t, ee.env, "start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", briefFile)
+}
+
+func TestJobStartStartsTheJob(t *testing.T) {
+	ee := newJobStartEE(t)
+	briefFile := ee.f.briefFile(t, jobStartBrief)
+	code, out, errOut := ee.start(t, briefFile)
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	if strings.Count(out, "\n") != 1 || !strings.HasSuffix(out, "\n") {
+		t.Fatalf("stdout = %q, want one line", out)
+	}
+	var line map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(out, "\n")), &line); err != nil {
+		t.Fatalf("status line: %v: %q", err, out)
+	}
+	if line["id"] != "job-1" || line["status"] != "running" || line["motivo"] != nil {
+		t.Fatalf("status line = %#v", line)
+	}
+	eventos, _ := line["eventos"].(map[string]any)
+	if eventos["total"] != float64(2) || eventos["ultimo_seq"] != float64(2) {
+		t.Fatalf("eventos = %#v", line["eventos"])
+	}
+	if _, ok := line["duplicate_of"]; ok {
+		t.Fatalf("duplicate_of on a fresh start: %#v", line)
+	}
+
+	// Exactly the contract's herdr calls: list, create, run.
+	calls := ee.herdrCalls(t)
+	if len(calls) != 3 {
+		t.Fatalf("herdr calls = %+v", calls)
+	}
+	worktree := filepath.Join(ee.checkout, ".worktrees", "job-job-1")
+	if want := []string{"workspace", "list"}; !reflect.DeepEqual(calls[0].Argv, want) {
+		t.Fatalf("call 0 = %v", calls[0].Argv)
+	}
+	if want := []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--no-focus"}; !reflect.DeepEqual(calls[1].Argv, want) {
+		t.Fatalf("call 1 = %v", calls[1].Argv)
+	}
+	if want := []string{"pane", "run", "w9:p1", ee.selfExe, "job", "supervise", "--id", "job-1"}; !reflect.DeepEqual(calls[2].Argv, want) {
+		t.Fatalf("call 2 = %v", calls[2].Argv)
+	}
+	// gh ran exactly once: auth status.
+	ghCalls, err := fakecli.ReadCalls(filepath.Join(ee.fakeDir, "gh.calls.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ghCalls) != 1 || !reflect.DeepEqual(ghCalls[0].Argv, []string{"auth", "status"}) {
+		t.Fatalf("gh calls = %+v", ghCalls)
+	}
+
+	// The worktree exists on the job branch.
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	branchOut, err := exec.Command("git", "-C", worktree, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(branchOut) != "job/job-1\n" {
+		t.Fatalf("branch = %q", branchOut)
+	}
+
+	// The session file: the team pairs in order, mode 0600.
+	cfg := core.LoadConfig(ee.env, ee.checkout)
+	stateRoot := core.StateRootPath(&cfg, ee.env, ee.checkout)
+	session := filepath.Join(stateRoot, "w9", "session.conf")
+	raw, err := os.ReadFile(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "panes=3\nlane.build.roles=implementer\nlane.review.roles=reviewer\nlane.review.effort=high\n"
+	if string(raw) != want {
+		t.Fatalf("session.conf = %q, want %q", raw, want)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("session.conf mode = %v", info.Mode().Perm())
+		}
+	}
+
+	// The run facts in state.json.
+	machine, err := job.LoadMachine(platform.Current(), ee.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := ee.f.store(t, ee.checkout).Snapshot("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := snap.State
+	if st.Checkout != ee.checkout || st.Dir != worktree || st.Branch != "job/job-1" ||
+		st.Base != "main" || len(st.BaseSHA) != 40 || st.Modo != "worktree" ||
+		st.TimeoutMin != machine.TimeoutMin || st.WorkspaceID != "w9" || st.RootPane != "w9:p1" ||
+		st.StartedAt == "" {
+		t.Fatalf("run facts = %+v (timeout want %d)", st, machine.TimeoutMin)
+	}
+}
+
+func TestJobStartDuplicateAndConflict(t *testing.T) {
+	ee := newJobStartEE(t)
+	briefFile := ee.f.briefFile(t, jobStartBrief)
+	changed := ee.f.briefFile(t, strings.Replace(jobStartBrief, "Ship the change.", "Ship another change.", 1))
+
+	code, out, errOut := ee.start(t, briefFile)
+	if code != 0 || errOut != "" {
+		t.Fatalf("first code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, `"status":"running"`) {
+		t.Fatalf("first out=%q", out)
+	}
+
+	// The id is now held: the same brief returns duplicate_of and exits 0,
+	// without a second workspace.
+	code, out, errOut = ee.start(t, briefFile)
+	if code != 0 || errOut != "" {
+		t.Fatalf("duplicate code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, `"duplicate_of":"job-1"`) || !strings.Contains(out, `"status":"running"`) {
+		t.Fatalf("duplicate out=%q", out)
+	}
+	creates := 0
+	for _, call := range ee.herdrCalls(t) {
+		if len(call.Argv) >= 2 && call.Argv[0] == "workspace" && call.Argv[1] == "create" {
+			creates++
+		}
+	}
+	if creates != 1 {
+		t.Fatalf("workspace create calls = %d, want 1", creates)
+	}
+
+	// A changed brief is exit 20.
+	code, out, errOut = ee.start(t, changed)
+	if code != 20 || out != "" || !strings.Contains(errOut, "different brief") {
+		t.Fatalf("conflict code=%d out=%q err=%q", code, out, errOut)
 	}
 }
