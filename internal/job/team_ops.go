@@ -26,6 +26,7 @@ type teamOps interface {
 	EnsureJobLane() error
 	SpawnOrchestrator() (name string, err error)
 	Dispatch(name, briefPath string, amend bool) error
+	Send(name, path string) error
 	Status(name string) (state, reportPath string, err error)
 	Release(name string) error
 }
@@ -144,6 +145,14 @@ func (c selfCLI) Dispatch(name, briefPath string, amend bool) error {
 		args = append(args, "--amend")
 	}
 	_, err := c.step("dispatch the job orchestrator", args...)
+	return err
+}
+
+// Send delivers a note to the agent from the file at path, as the CLI's
+// send with --file and no --now: the prompt is submitted for the agent's
+// CLI to queue or steer. A non-zero exit is a delivery failure.
+func (c selfCLI) Send(name, path string) error {
+	_, err := c.step("send to the job orchestrator", "send", name, "--file", path)
 	return err
 }
 

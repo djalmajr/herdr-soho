@@ -75,6 +75,19 @@ type Supervisor struct {
 	wakeQueue  chan Event
 	wakeDone   chan struct{}
 	wakeQueued int
+
+	// Control delivery and the job budget (supervise_control.go): pushNow is
+	// set here and read and cleared by the git sync slice; stopping is "" or
+	// the kind the stop path ends with (canceled, timeout) and stopDeadline
+	// its Clock.Monotonic deadline; warned guards the single
+	// timeout_warning; budgetBase is the virtual Monotonic base the budget
+	// counts from, captured once on the first budget check.
+	pushNow       bool
+	stopping      string
+	stopDeadline  int64
+	warned        bool
+	budgetBase    int64
+	budgetBaseSet bool
 }
 
 // NewSupervisor wires the production supervisor over a recorded job: the
@@ -284,12 +297,28 @@ func orchestratorBriefSection(id string) []byte {
 		"\n- Ask for an immediate push after a commit with `herdr-soho job checkpoint --id " + id + "`.\n")
 }
 
-// tick runs one watch iteration. This slice dispatches the wake queue and
-// checks the job orchestrator; later slices add their own calls here:
-// control delivery, git sync and the job budget.
+// tick runs one watch iteration: the wake queue first (it only enqueues),
+// then the dispatcher's control requests (amend, send, checkpoint,
+// cancel), then the job budget, which decides the stop path's end while a
+// stop is running, and the job orchestrator when no stop is running. Git
+// sync is a later slice.
 func (s *Supervisor) tick() (int, bool, error) {
 	if code, done, err := s.dispatchWakes(); err != nil || done {
 		return code, true, err
+	}
+	if code, done, err := s.deliverControl(); err != nil || done {
+		return code, done, err
+	}
+	if s.stopping != "" {
+		return s.checkBudget()
+	}
+	if code, done, err := s.checkBudget(); err != nil || done {
+		return code, done, err
+	}
+	if s.stopping != "" {
+		// checkBudget started the stop at 100 % of the budget this tick;
+		// the stop path decides from here on.
+		return s.checkBudget()
 	}
 	return s.checkOrchestrator()
 }

@@ -26,6 +26,11 @@ type fakeStatus struct {
 	Err    error
 }
 
+type fakeSend struct {
+	Name string
+	Path string
+}
+
 type fakeTeam struct {
 	ensureCalls  int
 	ensureErr    error
@@ -35,6 +40,8 @@ type fakeTeam struct {
 	spawnPanic   bool // panics once, after counting: a crash between spawn and Record
 	dispatches   []fakeDispatch
 	dispatchErr  error
+	sends        []fakeSend
+	sendErr      error
 	statusScript []fakeStatus
 	statusCalls  int
 	releaseCalls int
@@ -62,6 +69,11 @@ func (f *fakeTeam) SpawnOrchestrator() (string, error) {
 func (f *fakeTeam) Dispatch(name, briefPath string, amend bool) error {
 	f.dispatches = append(f.dispatches, fakeDispatch{Name: name, Path: briefPath, Amend: amend})
 	return f.dispatchErr
+}
+
+func (f *fakeTeam) Send(name, path string) error {
+	f.sends = append(f.sends, fakeSend{Name: name, Path: path})
+	return f.sendErr
 }
 
 func (f *fakeTeam) Status(name string) (string, string, error) {
