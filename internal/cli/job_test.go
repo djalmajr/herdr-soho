@@ -10,8 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/job"
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -104,6 +107,11 @@ type treeEntry struct {
 	mode    os.FileMode
 }
 
+// treeSnapshot records (path, size, mtime, mode) of every entry below root,
+// files and directories. It stats each path with os.Lstat instead of the
+// WalkDir entry's d.Info, whose metadata on Windows comes from the directory
+// enumeration and is updated lazily, so two walks of an unchanged tree can
+// differ.
 func treeSnapshot(t *testing.T, root string) map[string]treeEntry {
 	t.Helper()
 	snap := map[string]treeEntry{}
@@ -111,7 +119,7 @@ func treeSnapshot(t *testing.T, root string) map[string]treeEntry {
 		if err != nil {
 			return err
 		}
-		info, err := d.Info()
+		info, err := os.Lstat(path)
 		if err != nil {
 			return err
 		}
@@ -122,6 +130,93 @@ func treeSnapshot(t *testing.T, root string) map[string]treeEntry {
 		t.Fatal(err)
 	}
 	return snap
+}
+
+// jobTreeChanges lists the paths that differ between two tree snapshots,
+// sorted: paths present in after that are new (as-is) or whose entry moved
+// (with each changed field as "field old->new"), and paths of before missing
+// from after (suffixed " (removed)").
+func jobTreeChanges(before, after map[string]treeEntry) []string {
+	changed := []string{}
+	for path, entry := range after {
+		prev, ok := before[path]
+		if !ok {
+			changed = append(changed, path)
+			continue
+		}
+		fields := []string{}
+		if prev.size != entry.size {
+			fields = append(fields, fmt.Sprintf("size %d->%d", prev.size, entry.size))
+		}
+		if prev.modTime != entry.modTime {
+			fields = append(fields, fmt.Sprintf("mtime %d->%d", prev.modTime, entry.modTime))
+		}
+		if prev.mode != entry.mode {
+			fields = append(fields, fmt.Sprintf("mode %v->%v", prev.mode, entry.mode))
+		}
+		if len(fields) > 0 {
+			changed = append(changed, fmt.Sprintf("%s (%s)", path, strings.Join(fields, ", ")))
+		}
+	}
+	for path := range before {
+		if _, ok := after[path]; !ok {
+			changed = append(changed, path+" (removed)")
+		}
+	}
+	sort.Strings(changed)
+	return changed
+}
+
+// assertJobTreeUnchanged fails t if the two tree snapshots differ, naming the
+// changed paths so a CI failure shows what moved.
+func assertJobTreeUnchanged(t *testing.T, before, after map[string]treeEntry, msg string) {
+	t.Helper()
+	if changed := jobTreeChanges(before, after); len(changed) > 0 {
+		t.Fatalf("%s: %v", msg, changed)
+	}
+}
+
+func TestJobTreeSnapshotReportsChangedPaths(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	b := filepath.Join(dir, "b.txt")
+	c := filepath.Join(dir, "c.txt")
+	if err := os.WriteFile(a, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte("bye"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := treeSnapshot(t, dir)
+	// Grow a (size and a fixed mtime), remove b, add c.
+	fixed := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := os.WriteFile(a, []byte("hello world"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(a, fixed, fixed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(b); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(c, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	after := treeSnapshot(t, dir)
+	// The root's own mtime and size move when its children are created or
+	// removed; the report under test is about the three entries, so drop the
+	// root from both snapshots.
+	delete(before, dir)
+	delete(after, dir)
+	want := []string{
+		a + " (size 5->11, mtime " + strconv.FormatInt(before[a].modTime, 10) + "->" + strconv.FormatInt(fixed.UnixNano(), 10) + ")",
+		b + " (removed)",
+		c,
+	}
+	sort.Strings(want)
+	if got := jobTreeChanges(before, after); !reflect.DeepEqual(got, want) {
+		t.Fatalf("jobTreeChanges=%v want=%v", got, want)
+	}
 }
 
 func TestJobStatusPrintsTheSnapshotLine(t *testing.T) {
@@ -517,9 +612,7 @@ func TestJobNowrite(t *testing.T) {
 			t.Fatalf("%v code=%d out=%q err=%q", args, code, out, errOut)
 		}
 	}
-	if !reflect.DeepEqual(tree, treeSnapshot(t, f.root)) {
-		t.Fatal("NOWRITE reads changed the tree")
-	}
+	assertJobTreeUnchanged(t, tree, treeSnapshot(t, f.root), "NOWRITE reads changed the tree")
 
 	for _, sub := range []string{"start", "supervise", "amend", "send", "ack", "cancel", "close", "checkpoint", "note"} {
 		code, out, errOut := f.runEnv(t, env, sub, "--id", "job-1")

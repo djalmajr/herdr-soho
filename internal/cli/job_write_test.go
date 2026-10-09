@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io/fs"
 	"os"
@@ -467,9 +468,7 @@ func TestJobNowriteWritingSubcommands(t *testing.T) {
 			t.Fatalf("%v code=%d out=%q err=%q", args, code, out, errOut)
 		}
 	}
-	if !reflect.DeepEqual(tree, treeSnapshot(t, f.root)) {
-		t.Fatal("NOWRITE writing subcommands changed the tree")
-	}
+	assertJobTreeUnchanged(t, tree, treeSnapshot(t, f.root), "NOWRITE writing subcommands changed the tree")
 }
 
 // TestJobAmendBoundedFileRead proves the file branch of the body reads
@@ -507,7 +506,11 @@ func TestJobAmendBoundedFileRead(t *testing.T) {
 		t.Skip("FIFOs are POSIX-only")
 	}
 	fifo := filepath.Join(t.TempDir(), "body.fifo")
-	if out, err := exec.Command("mkfifo", fifo).CombinedOutput(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "mkfifo", fifo)
+	cmd.WaitDelay = 2 * time.Second
+	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("mkfifo: %v: %s", err, out)
 	}
 	done := make(chan struct{})
