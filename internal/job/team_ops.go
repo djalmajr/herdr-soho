@@ -29,6 +29,8 @@ type teamOps interface {
 	Send(name, path string) error
 	Status(name string) (state, reportPath string, err error)
 	Release(name string) error
+	ReleaseTeam() error
+	GC() error
 }
 
 // selfCLI is the production teamOps: one herdr-soho executable, the job
@@ -208,11 +210,46 @@ func parseStatusLine(line, name string) (state, report string, ok bool) {
 	return state, report, true
 }
 
-// Release closes the agent's pane and force-releases it. This slice does
-// not release (the release slice owns it); the adapter is complete so that
-// slice has nothing to add.
+// Release closes the agent's pane and force-releases it.
 func (c selfCLI) Release(name string) error {
 	_, err := c.step("release the job orchestrator", "release", name, "--close", "--force")
+	return err
+}
+
+// ReleaseTeam releases every worker the roster lists except the job
+// orchestrator, which the supervisor releases on its own: it reads the
+// roster and force-releases the listed names one by one. The header row
+// and the "other live agents" block are skipped, and a failed roster read
+// or release is the fixed error.
+func (c selfCLI) ReleaseTeam() error {
+	out, err := c.step("release the team workers", "roster")
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		// The "other live agents" block opens with a comment line and runs
+		// to the end of the output (including the layout line); nothing
+		// after it is a rostered worker.
+		if strings.HasPrefix(line, "#") {
+			break
+		}
+		fields := strings.Fields(line)
+		// The header row and the job orchestrator's row (its role column
+		// is job-orchestrator) are not team workers.
+		if len(fields) < 2 || fields[0] == "NAME" || fields[1] == "job-orchestrator" {
+			continue
+		}
+		if _, err := c.step("release the team workers", "release", fields[0], "--close", "--force"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GC runs the job's garbage collection over its registered copies and
+// processes.
+func (c selfCLI) GC() error {
+	_, err := c.step("gc the job copies and processes", "gc", "--yes")
 	return err
 }
 

@@ -195,10 +195,10 @@ func TestSuperviseControlDeliveryOrder(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exit = %d, want 0", exit)
 	}
-	// Checkpoint asks for an immediate push; the git slice reads and clears
-	// pushNow.
-	if !sup.pushNow {
-		t.Fatal("pushNow is not set by the checkpoint request")
+	// Checkpoint asks for an immediate push: the git sync of the same tick
+	// consumes pushNow (the checkpoint event is asserted below).
+	if sup.pushNow {
+		t.Fatal("pushNow was not consumed by the git sync")
 	}
 	// Amend: exactly one amendment dispatch with the request path.
 	if len(team.dispatches) != 2 || team.dispatches[1] != (fakeDispatch{Name: "orch-1", Path: amend.Path, Amend: true}) {
@@ -212,7 +212,7 @@ func TestSuperviseControlDeliveryOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"accepted", "worker_spawned", "checkpoint", "amend_received", "amend_received", "worker_done", "terminal"}
+	want := []string{"accepted", "worker_spawned", "checkpoint", "amend_received", "amend_received", "worker_done", "terminal", "cleanup"}
 	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
 		t.Fatalf("event types = %v, want %v", got, want)
 	}
@@ -284,7 +284,7 @@ func TestSuperviseControlAmendUnblocksBlockedJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"accepted", "worker_spawned", "blocked", "amend_received", "unblocked", "worker_done", "terminal"}
+	want := []string{"accepted", "worker_spawned", "blocked", "amend_received", "unblocked", "worker_done", "terminal", "cleanup"}
 	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
 		t.Fatalf("event types = %v, want %v", got, want)
 	}
@@ -392,7 +392,7 @@ func TestSuperviseControlDispatchFailureRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTypes := []string{"accepted", "worker_spawned", "amend_received", "worker_done", "terminal"}
+	wantTypes := []string{"accepted", "worker_spawned", "amend_received", "worker_done", "terminal", "cleanup"}
 	if got := eventTipes(events); !reflect.DeepEqual(got, wantTypes) {
 		t.Fatalf("event types = %v, want %v (one amend_received)", got, wantTypes)
 	}
@@ -443,7 +443,7 @@ func TestSuperviseControlRestartRedeliversPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"accepted", "amend_received", "worker_done", "terminal"}
+	want := []string{"accepted", "amend_received", "worker_done", "terminal", "cleanup"}
 	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
 		t.Fatalf("event types = %v, want %v", got, want)
 	}
@@ -565,7 +565,7 @@ func TestSuperviseControlCancelByDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"accepted", "worker_spawned", "terminal"}
+	want := []string{"accepted", "worker_spawned", "terminal", "cleanup"}
 	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
 		t.Fatalf("event types = %v, want %v", got, want)
 	}
@@ -703,7 +703,7 @@ func TestSuperviseBudgetWarningThenTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"accepted", "worker_spawned", "timeout_warning", "terminal"}
+	want := []string{"accepted", "worker_spawned", "timeout_warning", "terminal", "cleanup"}
 	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
 		t.Fatalf("event types = %v, want %v (one warning)", got, want)
 	}
@@ -879,5 +879,13 @@ func eventsLast(t *testing.T, jobDir string) Event {
 	if len(events) == 0 {
 		t.Fatal("no events")
 	}
-	return events[len(events)-1]
+	// The terminal path ends with the cleanup event; the terminal event is
+	// the last one of its type.
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Tipo == "terminal" {
+			return events[i]
+		}
+	}
+	t.Fatal("no terminal event")
+	return Event{}
 }

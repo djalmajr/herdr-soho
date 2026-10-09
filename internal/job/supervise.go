@@ -62,6 +62,23 @@ type Supervisor struct {
 	// (no worker, no cursor).
 	Wake *WakeHook
 
+	// Git sync and release: the git sync of the job branch — nil in
+	// workspace mode, which runs no git at all — and the Herdr adapter
+	// that closes the job workspace last.
+	Git   *GitSync
+	Herdr herdrWorkspaces
+
+	// Git sync bookkeeping (pushNow, the immediate push ask of job
+	// checkpoint, is declared with the control fields): the ticks since the
+	// last sync, the last synced head, the announced
+	// commit shas, the first commit's title, and this process's draft
+	// pull request.
+	lastPushTick int
+	lastHead     string
+	announced    map[string]bool
+	prTitle      string
+	lastPR       *PullRequest
+
 	// Tick bookkeeping: consecutive bad observations (the gone-family
 	// states, status errors) and the unknown states already reported to
 	// friction.
@@ -92,7 +109,9 @@ type Supervisor struct {
 
 // NewSupervisor wires the production supervisor over a recorded job: the
 // job worktree from state.json is the working directory of every team
-// command, and the clock is the store's.
+// command, the clock is the store's, the git sync watches the job branch
+// (workspace mode has none), and the Herdr adapter owns the workspace
+// close.
 func NewSupervisor(store *Store, id string, env platform.Env, selfExe string, friction func(string)) (*Supervisor, error) {
 	snap, err := store.Snapshot(id)
 	if err != nil {
@@ -101,13 +120,28 @@ func NewSupervisor(store *Store, id string, env platform.Env, selfExe string, fr
 	if snap.State.Dir == "" {
 		return nil, errUsage("job: the job has no worktree directory")
 	}
-	return &Supervisor{
+	s := &Supervisor{
 		Store:    store,
 		ID:       id,
 		Ops:      selfCLI{Exe: selfExe, Dir: snap.State.Dir, Env: env},
 		Clock:    store.clock(),
 		Friction: friction,
-	}, nil
+		Herdr:    newHerdrCLI(env, friction),
+	}
+	if snap.State.Modo != "workspace" && snap.State.Branch != "" {
+		// A branch job without a recorded branch has no push refspec, so
+		// it is not synced; workspace mode runs no git at all. The draft
+		// pull request's repo comes from brief.json; a missing or
+		// unreadable brief leaves it empty and the pr step errors on use.
+		var repo string
+		if dir, err := store.readDir(id); err == nil {
+			if fields, err := readBriefFields(dir); err == nil {
+				repo = jsonString(fields, "repo")
+			}
+		}
+		s.Git = &GitSync{Env: env, Dir: snap.State.Dir, Branch: snap.State.Branch, Base: snap.State.Base, Repo: repo}
+	}
+	return s, nil
 }
 
 func (s *Supervisor) poll() time.Duration {
@@ -299,14 +333,18 @@ func orchestratorBriefSection(id string) []byte {
 
 // tick runs one watch iteration: the wake queue first (it only enqueues),
 // then the dispatcher's control requests (amend, send, checkpoint,
-// cancel), then the job budget, which decides the stop path's end while a
-// stop is running, and the job orchestrator when no stop is running. Git
-// sync is a later slice.
+// cancel), then the git sync (a checkpoint request pushes in the same tick;
+// a rejected push blocks the job before the orchestrator is read), then the
+// job budget, which decides the stop path's end while a stop is running,
+// and the job orchestrator when no stop is running.
 func (s *Supervisor) tick() (int, bool, error) {
 	if code, done, err := s.dispatchWakes(); err != nil || done {
 		return code, true, err
 	}
 	if code, done, err := s.deliverControl(); err != nil || done {
+		return code, done, err
+	}
+	if code, done, err := s.syncGit(); err != nil || done {
 		return code, done, err
 	}
 	if s.stopping != "" {
@@ -517,8 +555,12 @@ func (s *Supervisor) onOrchestratorDone(st State, name, reportPath string) (int,
 
 // finishOutcome appends the terminal event (refs.motivo when set,
 // refs.exit), moves the job to the outcome — which publishes report.json —
-// and republishes the report with this slice's facts.
+// and finalizes: the final push and draft pull request, the complete
+// report facts, the release, the cleanup event, and the workspace close.
 func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, error) {
+	// The final push happens while the job is still finishing, so its events
+	// precede the terminal event.
+	s.finalSync(status)
 	refs := map[string]string{"exit": strconv.Itoa(exit)}
 	if motivo != "" {
 		refs["motivo"] = motivo
@@ -530,12 +572,9 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 		return 0, true, err
 	}
 	// The terminal events wake the dispatcher too; the worker drains
-	// before the workspace close.
+	// before the release and the workspace close.
 	s.finishWakes()
-	// TODO(DJA-194): release, final push and workspace close (slice 7d).
-	if _, err := s.Store.WriteReport(s.ID, ReportFacts{}); err != nil {
-		return 0, true, err
-	}
+	s.finalize(status)
 	return exit, true, nil
 }
 
@@ -554,13 +593,15 @@ func (s *Supervisor) frictionUnknown(state string) {
 
 // fail records the failure (event, stored motivo, walk to failed, terminal
 // event, report) and never returns its error: the state is the truth, and
-// a failure to record it goes to friction only.
+// a failure to record it goes to friction only. The failure finalizes like
+// every terminal outcome: final push, report, release, cleanup, close.
 func (s *Supervisor) fail(motivo string, exit int) {
+	s.finalSync(StatusFailed)
 	if _, err := s.Store.Fail(s.ID, motivo, exit); err != nil && s.Friction != nil {
 		s.Friction("job: the supervisor could not record the failure")
 	}
 	// The terminal events wake the dispatcher too; the worker drains
-	// before the workspace close.
+	// before the release and the workspace close.
 	s.finishWakes()
-	// TODO(DJA-194): release, final push and workspace close (slice 7d).
+	s.finalize(StatusFailed)
 }

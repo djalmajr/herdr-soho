@@ -110,7 +110,7 @@ func TestSuperviseWakeNoteRunsHookOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(string(eventsRaw), "\n")
-	if len(lines) != 6 || !strings.Contains(lines[1], `"tipo":"question"`) {
+	if len(lines) != 7 || !strings.Contains(lines[1], `"tipo":"question"`) {
 		t.Fatalf("events.jsonl = %q, want the question on its second line", lines)
 	}
 	// stdin is the exact events.jsonl line, not a re-rendering.
@@ -322,7 +322,7 @@ func TestSuperviseWakeFailingHookRetriesThenAdvances(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "question", "worker_spawned", "worker_done", "terminal"}) {
+	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "question", "worker_spawned", "worker_done", "terminal", "cleanup"}) {
 		t.Fatalf("event types = %v, want no failure event", got)
 	}
 }

@@ -32,19 +32,21 @@ type fakeSend struct {
 }
 
 type fakeTeam struct {
-	ensureCalls  int
-	ensureErr    error
-	spawnCalls   int
-	spawnName    string
-	spawnErr     error
-	spawnPanic   bool // panics once, after counting: a crash between spawn and Record
-	dispatches   []fakeDispatch
-	dispatchErr  error
-	sends        []fakeSend
-	sendErr      error
-	statusScript []fakeStatus
-	statusCalls  int
-	releaseCalls int
+	ensureCalls      int
+	ensureErr        error
+	spawnCalls       int
+	spawnName        string
+	spawnErr         error
+	spawnPanic       bool // panics once, after counting: a crash between spawn and Record
+	dispatches       []fakeDispatch
+	dispatchErr      error
+	sends            []fakeSend
+	sendErr          error
+	statusScript     []fakeStatus
+	statusCalls      int
+	releaseCalls     int
+	releaseTeamCalls int
+	gcCalls          int
 }
 
 var _ teamOps = (*fakeTeam)(nil)
@@ -90,6 +92,16 @@ func (f *fakeTeam) Status(name string) (string, string, error) {
 
 func (f *fakeTeam) Release(name string) error {
 	f.releaseCalls++
+	return nil
+}
+
+func (f *fakeTeam) ReleaseTeam() error {
+	f.releaseTeamCalls++
+	return nil
+}
+
+func (f *fakeTeam) GC() error {
+	f.gcCalls++
 	return nil
 }
 
@@ -142,7 +154,13 @@ func supFixture(t *testing.T) (*Store, string, *fakeClock, *fakeTeam) {
 	if _, err := store.Transition("job-1", StatusPreparing); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Record("job-1", func(st *State) { st.Dir = dir }); err != nil {
+	// The run facts a started job has: the worktree and the branch facts.
+	if _, err := store.Record("job-1", func(st *State) { st.Dir = dir; st.Branch = "job/job-1"; st.Base = "main" }); err != nil {
+		t.Fatal(err)
+	}
+	// The job's Herdr workspace, so the terminal release and close steps
+	// have a target.
+	if _, err := store.Record("job-1", func(st *State) { st.WorkspaceID = "w1" }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Transition("job-1", StatusRunning); err != nil {
@@ -251,7 +269,7 @@ func TestSuperviseHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"accepted", "worker_spawned", "worker_done", "terminal"}
+	want := []string{"accepted", "worker_spawned", "worker_done", "terminal", "cleanup"}
 	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
 		t.Fatalf("event types = %v, want %v", got, want)
 	}
@@ -307,7 +325,7 @@ func TestSupervisePartialsNoPendingFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"accepted", "worker_spawned", "worker_done", "terminal"}
+	want := []string{"accepted", "worker_spawned", "worker_done", "terminal", "cleanup"}
 	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
 		t.Fatalf("event types = %v, want %v", got, want)
 	}
@@ -404,7 +422,7 @@ func TestSuperviseQuestionThenWorking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"accepted", "worker_spawned", "blocked", "unblocked", "worker_done", "terminal"}
+	want := []string{"accepted", "worker_spawned", "blocked", "unblocked", "worker_done", "terminal", "cleanup"}
 	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
 		t.Fatalf("event types = %v, want %v", got, want)
 	}
@@ -438,7 +456,7 @@ func TestSuperviseGoneThreeTicks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"accepted", "worker_spawned", "failure", "terminal"}
+	want := []string{"accepted", "worker_spawned", "failure", "terminal", "cleanup"}
 	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
 		t.Fatalf("event types = %v, want %v", got, want)
 	}
@@ -466,7 +484,7 @@ func TestSuperviseGoneTwoThenWorking(t *testing.T) {
 	}
 	if events, err := readEvents(jobDir); err != nil {
 		t.Fatal(err)
-	} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "worker_done", "terminal"}) {
+	} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "worker_done", "terminal", "cleanup"}) {
 		t.Fatalf("event types = %v", got)
 	}
 }
@@ -529,7 +547,7 @@ func TestSuperviseStatusErrorThreeTicks(t *testing.T) {
 	}
 	if events, err := readEvents(jobDir); err != nil {
 		t.Fatal(err)
-	} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "failure", "terminal"}) {
+	} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "failure", "terminal", "cleanup"}) {
 		t.Fatalf("event types = %v", got)
 	}
 }
@@ -567,7 +585,7 @@ func TestSuperviseRestartSpawnsAndDispatchesNothing(t *testing.T) {
 	// not rewritten.
 	if events, err := readEvents(jobDir); err != nil {
 		t.Fatal(err)
-	} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_done", "terminal"}) {
+	} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_done", "terminal", "cleanup"}) {
 		t.Fatalf("event types = %v, want no worker_spawned on a restart", got)
 	}
 	if _, err := os.Stat(filepath.Join(jobDir, "orchestrator-brief.md")); !os.IsNotExist(err) {
@@ -621,7 +639,7 @@ func TestSuperviseCrashBetweenSpawnAndRecord(t *testing.T) {
 	}
 	if events, err := readEvents(jobDir); err != nil {
 		t.Fatal(err)
-	} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "worker_done", "terminal"}) {
+	} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "worker_done", "terminal", "cleanup"}) {
 		t.Fatalf("event types = %v", got)
 	}
 }
@@ -750,10 +768,11 @@ func TestSuperviseStepFailures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "failure", "terminal"}) {
+		if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "failure", "terminal", "cleanup"}) {
 			t.Fatalf("event types = %v", got)
 		}
-		if terminal := events[len(events)-1]; terminal.Refs["exit"] != "4" {
+		// The cleanup event lands after the terminal one.
+		if terminal := events[len(events)-2]; terminal.Refs["exit"] != "4" {
 			t.Fatalf("terminal refs = %+v", terminal.Refs)
 		}
 	})
@@ -800,7 +819,7 @@ func TestSuperviseStepFailures(t *testing.T) {
 		}
 		if events, err := readEvents(jobDir); err != nil {
 			t.Fatal(err)
-		} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "failure", "terminal"}) {
+		} else if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "failure", "terminal", "cleanup"}) {
 			t.Fatalf("event types = %v", got)
 		}
 	})
