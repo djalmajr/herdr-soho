@@ -1014,6 +1014,12 @@ func jobStart(args []string, env platform.Env, cwd string) int {
 		friction := func(message string) {
 			core.Warn(message, filepath.Join(stateRootOf(checkout), "jobs", id, "friction.log"))
 		}
+		// The raw friction sink: the raw create envelope reaches the job
+		// friction log as an error line of the start's own exit code, and
+		// never stderr (the start ends with exit 4 there when it fires).
+		rawFriction := func(message string) {
+			core.RecordFrictionError(message, job.ExitHerdr, filepath.Join(stateRootOf(checkout), "jobs", id, "friction.log"))
+		}
 		store, err := locateJob(env, id)
 		if err != nil {
 			dieJob("start", err)
@@ -1033,7 +1039,7 @@ func jobStart(args []string, env platform.Env, cwd string) int {
 			printJobStatusLine(snap)
 			return 0
 		}
-		starter := job.NewStarter(env, machine, selfExe, stateRootOf, friction)
+		starter := job.NewStarter(env, machine, selfExe, stateRootOf, friction, rawFriction)
 		st, store, err := starter.Start(job.StartRequest{
 			ID: id, Org: org, Repo: repoName, Base: resolvedBase, Mode: modo,
 			Brief: raw, TimeoutMin: timeout, Team: team,

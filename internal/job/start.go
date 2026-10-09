@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
@@ -41,30 +42,35 @@ type StartRequest struct {
 // injected Preparer, herdrWorkspaces and herdrPanes, so tests substitute
 // fakes for the herdr CLI.
 type Starter struct {
-	Env       platform.Env
-	Machine   Machine
-	Preparer  Preparer
-	Herdr     herdrWorkspaces
-	Panes     herdrPanes
-	SelfExe   string
-	StateRoot func(checkout string) string
-	Friction  func(string)
+	Env         platform.Env
+	Machine     Machine
+	Preparer    Preparer
+	Herdr       herdrWorkspaces
+	Panes       herdrPanes
+	SelfExe     string
+	StateRoot   func(checkout string) string
+	Friction    func(string)
+	RawFriction func(string)
 }
 
 // NewStarter wires the production starter: the machine's Preparer with the
 // default production clone, and one herdr CLI for both the workspace and
-// the pane calls.
-func NewStarter(env platform.Env, machine Machine, selfExe string, stateRoot func(string) string, friction func(string)) Starter {
+// the pane calls. The raw friction sink carries raw subprocess output
+// (the unknown create envelope) to the friction log only; a nil sink drops
+// it.
+func NewStarter(env platform.Env, machine Machine, selfExe string, stateRoot func(string) string, friction func(string), rawFriction func(string)) Starter {
 	herdr := newHerdrCLI(env, friction)
+	herdr.RawFriction = rawFriction
 	return Starter{
-		Env:       env,
-		Machine:   machine,
-		Preparer:  Preparer{Machine: machine, Env: env},
-		Herdr:     herdr,
-		Panes:     herdr,
-		SelfExe:   selfExe,
-		StateRoot: stateRoot,
-		Friction:  friction,
+		Env:         env,
+		Machine:     machine,
+		Preparer:    Preparer{Machine: machine, Env: env},
+		Herdr:       herdr,
+		Panes:       herdr,
+		SelfExe:     selfExe,
+		StateRoot:   stateRoot,
+		Friction:    friction,
+		RawFriction: rawFriction,
 	}
 }
 
@@ -143,6 +149,21 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 	if err != nil {
 		_, _ = store.Fail(req.ID, err.Error(), herdrExitCode(err))
 		return State{}, store, err
+	}
+	// The id is about to be joined into the session file path and passed
+	// to `herdr workspace close`: it must be one safe path segment.
+	// Otherwise nothing is recorded or written, the workspace is left
+	// open (friction says so), and the job fails with the fixed message.
+	// The raw id goes only to the raw friction sink, sanitized and cut.
+	if !validWorkspaceID(workspaceID) {
+		if s.RawFriction != nil {
+			s.RawFriction("job: herdr workspace create returned an invalid workspace id: " + cutFriction(core.FrictionSafe(workspaceID)))
+		}
+		if s.Friction != nil {
+			s.Friction("job: the Herdr workspace was left open: its id is invalid")
+		}
+		_, _ = store.Fail(req.ID, "job: herdr workspace create returned an invalid workspace id", ExitHerdr)
+		return State{}, store, herdrExit("job: herdr workspace create returned an invalid workspace id")
 	}
 	// TODO(DJA-194): a crash in the window between Herdr.Create and the
 	// workspace id record below leaves the job preparing, with the run

@@ -2,8 +2,10 @@ package job
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
@@ -32,11 +34,13 @@ type herdrPanes interface {
 // herdrCLI implements herdrWorkspaces and herdrPanes through the herdr CLI,
 // every call via runStep (argv only, context deadline and WaitDelay, and an
 // error that never carries subprocess output). A zero Timeout means 30 s. A
-// nil Friction drops friction messages.
+// nil Friction drops friction messages and a nil RawFriction drops raw
+// friction lines.
 type herdrCLI struct {
-	Env      platform.Env
-	Timeout  time.Duration
-	Friction func(message string)
+	Env         platform.Env
+	Timeout     time.Duration
+	Friction    func(message string)
+	RawFriction func(message string)
 }
 
 func newHerdrCLI(env platform.Env, friction func(string)) *herdrCLI {
@@ -80,11 +84,12 @@ func (c *herdrCLI) Create(cwd, label string, env map[string]string) (string, str
 	}
 	workspaceID, rootPaneID, ok := parseWorkspaceCreateResult(out)
 	if !ok {
-		// The raw envelope only goes to friction, sanitized and cut; it
-		// never reaches stdout, stderr, or the error message.
-		message := "job: herdr workspace create returned an unknown result: " + cutFriction(core.FrictionSafe(out))
-		if c.Friction != nil {
-			c.Friction(message)
+		// The raw envelope goes only to the raw friction sink, sanitized
+		// and cut; when that sink is absent it is dropped. It never
+		// reaches stdout, stderr, the error message, or the normal
+		// friction callback.
+		if c.RawFriction != nil {
+			c.RawFriction("job: herdr workspace create returned an unknown result: " + cutFriction(core.FrictionSafe(out)))
 		}
 		return "", "", herdrExit("job: herdr workspace create returned an unknown result")
 	}
@@ -126,10 +131,38 @@ func parseWorkspaceCreateResult(out string) (string, string, bool) {
 	return workspaceID, rootPaneID, true
 }
 
-// Close ends the job's Herdr workspace. An empty id refuses with exit 2
-// before anything runs.
+// validWorkspaceID reports whether id is one safe path segment for the job
+// state root and one safe argument for `herdr workspace close`: non-empty,
+// at most 128 bytes, not "." or "..", with no path separator ("/", "\",
+// ":" cover separators, rooted, drive and UNC forms, and alternate data
+// streams), no byte below 0x20 or equal to 0x7f (NUL included), no leading
+// "-" (a flag to the close argv), no leading or trailing space and no
+// trailing "." (Windows strips them, aliasing another name), and local to
+// the filesystem (not absolute, rooted, or a reserved device name such as
+// NUL or CON on Windows).
+func validWorkspaceID(id string) bool {
+	if id == "" || len(id) > 128 || id == "." || id == ".." {
+		return false
+	}
+	if strings.ContainsAny(id, `/\\:`) {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		if id[i] < 0x20 || id[i] == 0x7f {
+			return false
+		}
+	}
+	if id[0] == '-' || id[0] == ' ' || id[len(id)-1] == ' ' || id[len(id)-1] == '.' {
+		return false
+	}
+	return filepath.IsLocal(id)
+}
+
+// Close ends the job's Herdr workspace. An id that is not one safe path
+// segment — in particular the empty id — refuses with exit 2 before
+// anything runs.
 func (c *herdrCLI) Close(workspaceID string) error {
-	if workspaceID == "" {
+	if !validWorkspaceID(workspaceID) {
 		return errUsage("job: invalid workspace id")
 	}
 	if _, err := runStep("herdr", []string{"workspace", "close", workspaceID}, c.timeout(), c.Env); err != nil {

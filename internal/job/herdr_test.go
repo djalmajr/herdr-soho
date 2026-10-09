@@ -3,6 +3,7 @@ package job
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -44,7 +45,8 @@ func (f *herdrFixture) cli() *herdrCLI {
 	return newHerdrCLI(f.env, nil)
 }
 
-// cliWithFriction wires a friction collector into the CLI.
+// cliWithFriction wires a friction collector into the CLI; the raw
+// friction sink stays nil unless the test sets it.
 func (f *herdrFixture) cliWithFriction(messages *[]string) *herdrCLI {
 	return newHerdrCLI(f.env, func(message string) { *messages = append(*messages, message) })
 }
@@ -126,34 +128,53 @@ func TestHerdrWorkspacesCreateUnknownShape(t *testing.T) {
 		"missing pane":    `{"result":{"workspace_id":"w9"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			var messages []string
+			var messages, raw []string
 			f := newHerdrFixture(t, []fakecli.Rule{{Argv: herdrTestCreateArgv(), Stdout: stdout}})
-			_, _, err := f.cliWithFriction(&messages).Create(herdrTestCwd, herdrTestLabel, map[string]string{"A": "1", "B": "2"})
+			cli := f.cliWithFriction(&messages)
+			cli.RawFriction = func(message string) { raw = append(raw, message) }
+			_, _, err := cli.Create(herdrTestCwd, herdrTestLabel, map[string]string{"A": "1", "B": "2"})
 			wantExit(t, err, ExitHerdr, "job: herdr workspace create returned an unknown result")
-			if len(messages) != 1 {
-				t.Fatalf("friction calls = %d, want 1", len(messages))
+			if len(messages) != 0 {
+				t.Fatalf("normal friction = %v, want none (the raw line only goes to the raw sink)", messages)
+			}
+			if len(raw) != 1 {
+				t.Fatalf("raw friction calls = %d, want 1", len(raw))
 			}
 			want := "job: herdr workspace create returned an unknown result: " + core.FrictionSafe(stdout)
-			if messages[0] != want {
-				t.Fatalf("friction = %q, want %q", messages[0], want)
+			if raw[0] != want {
+				t.Fatalf("raw friction = %q, want %q", raw[0], want)
 			}
 			if strings.Contains(err.Error(), stdout) {
 				t.Fatalf("error %q carries the raw envelope", err)
 			}
 		})
 	}
-	t.Run("a long envelope is cut to 2000 bytes in friction", func(t *testing.T) {
+	t.Run("a long envelope is cut to 2000 bytes in the raw sink", func(t *testing.T) {
 		stdout := strings.Repeat("a", 2500)
-		var messages []string
+		var messages, raw []string
 		f := newHerdrFixture(t, []fakecli.Rule{{Argv: herdrTestCreateArgv(), Stdout: stdout}})
-		_, _, err := f.cliWithFriction(&messages).Create(herdrTestCwd, herdrTestLabel, map[string]string{"A": "1", "B": "2"})
+		cli := f.cliWithFriction(&messages)
+		cli.RawFriction = func(message string) { raw = append(raw, message) }
+		_, _, err := cli.Create(herdrTestCwd, herdrTestLabel, map[string]string{"A": "1", "B": "2"})
 		wantExit(t, err, ExitHerdr, "job: herdr workspace create returned an unknown result")
-		if len(messages) != 1 {
-			t.Fatalf("friction calls = %d, want 1", len(messages))
+		if len(messages) != 0 {
+			t.Fatalf("normal friction = %v, want none", messages)
+		}
+		if len(raw) != 1 {
+			t.Fatalf("raw friction calls = %d, want 1", len(raw))
 		}
 		want := "job: herdr workspace create returned an unknown result: " + strings.Repeat("a", 2000)
-		if messages[0] != want {
-			t.Fatalf("friction length = %d, want %d", len(messages[0]), len(want))
+		if raw[0] != want {
+			t.Fatalf("raw friction length = %d, want %d", len(raw[0]), len(want))
+		}
+	})
+	t.Run("a nil raw sink drops the raw line without a fallback", func(t *testing.T) {
+		var messages []string
+		f := newHerdrFixture(t, []fakecli.Rule{{Argv: herdrTestCreateArgv(), Stdout: `{"result":{"token":"x"}}`}})
+		_, _, err := f.cliWithFriction(&messages).Create(herdrTestCwd, herdrTestLabel, map[string]string{"A": "1", "B": "2"})
+		wantExit(t, err, ExitHerdr, "job: herdr workspace create returned an unknown result")
+		if len(messages) != 0 {
+			t.Fatalf("normal friction = %v, want none (no fallback to the normal sink)", messages)
 		}
 	})
 }
@@ -240,6 +261,47 @@ func TestHerdrWorkspacesClose(t *testing.T) {
 		wantExit(t, err, ExitUsage, "")
 		if calls := f.calls(); len(calls) != 0 {
 			t.Fatalf("herdr calls = %d, want 0", len(calls))
+		}
+	})
+	t.Run("hostile ids refuse with code 2 without running anything", func(t *testing.T) {
+		ids := []string{
+			"../escape", "..", ".", "a/b", `a\b`, "/abs", `\rooted`,
+			`C:\x`, "C:x", `\\server\share`, "-x", "--force",
+			"a\x00b", "w\n2", " w2", "w2.",
+		}
+		// NUL is a reserved device name only on Windows, where
+		// filepath.IsLocal refuses it; elsewhere it stays a valid name.
+		if runtime.GOOS == "windows" {
+			ids = append(ids, "NUL")
+		}
+		for _, id := range ids {
+			t.Run(strconv.Quote(id), func(t *testing.T) {
+				f := newHerdrFixture(t, nil)
+				err := f.cli().Close(id)
+				wantExit(t, err, ExitUsage, "job: invalid workspace id")
+				if calls := f.calls(); len(calls) != 0 {
+					t.Fatalf("herdr calls = %v, want none", calls)
+				}
+			})
+		}
+	})
+	t.Run("a valid one-segment id runs workspace close", func(t *testing.T) {
+		ids := []string{"w2A", "w12", "ws-1"}
+		if runtime.GOOS != "windows" {
+			ids = append(ids, "NUL")
+		}
+		for _, id := range ids {
+			t.Run(strconv.Quote(id), func(t *testing.T) {
+				want := []string{"workspace", "close", id}
+				f := newHerdrFixture(t, []fakecli.Rule{{Argv: want}})
+				if err := f.cli().Close(id); err != nil {
+					t.Fatalf("Close(%q): %v", id, err)
+				}
+				calls := f.calls()
+				if len(calls) != 1 || !sameArgv(calls[0].Argv, want) {
+					t.Fatalf("herdr calls = %v, want exactly %v", calls, want)
+				}
+			})
 		}
 	})
 }

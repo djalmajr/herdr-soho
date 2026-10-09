@@ -1289,3 +1289,89 @@ func TestJobSuperviseRunsTheSupervisor(t *testing.T) {
 		}
 	}
 }
+
+// TestJobStartUnknownEnvelopeGoesOnlyToFriction pins the unknown
+// workspace-create envelope as friction-only: the start exits 4 with the
+// fixed stderr line, and the raw envelope reaches none of stdout, stderr,
+// state.json, or report.json — it lands in the job's friction.log as an
+// error line, never as a warning.
+func TestJobStartUnknownEnvelopeGoesOnlyToFriction(t *testing.T) {
+	ee := newJobStartEE(t)
+	configPath := filepath.Join(ee.fakeDir, "herdr.json")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var script struct {
+		Log          string         `json:"log"`
+		Rules        []fakecli.Rule `json:"rules"`
+		CaptureStdin bool           `json:"capture_stdin,omitempty"`
+		CaptureEnv   []string       `json:"capture_env,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &script); err != nil {
+		t.Fatal(err)
+	}
+	const secret = `{"result":{"token":"SECRET_MARKER_r2"}}`
+	found := false
+	for i := range script.Rules {
+		if len(script.Rules[i].Argv) >= 2 && script.Rules[i].Argv[0] == "workspace" && script.Rules[i].Argv[1] == "create" {
+			script.Rules[i].Stdout = secret
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("create rule missing")
+	}
+	rewritten, err := json.Marshal(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, rewritten, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	briefFile := ee.f.briefFile(t, jobStartBrief)
+	code, out, errOut := ee.start(t, briefFile)
+	if code != 4 {
+		t.Fatalf("code=%d out=%q err=%q, want exit 4", code, out, errOut)
+	}
+	const marker = "SECRET_MARKER_r2"
+	if strings.Contains(out, marker) {
+		t.Fatalf("stdout carries the raw envelope: %q", out)
+	}
+	if strings.Contains(errOut, marker) {
+		t.Fatalf("stderr carries the raw envelope: %q", errOut)
+	}
+	if !strings.Contains(errOut, "job: herdr workspace create returned an unknown result") {
+		t.Fatalf("stderr = %q, want the fixed unknown-result line", errOut)
+	}
+	cfg := core.LoadConfig(ee.env, ee.checkout)
+	stateRoot := core.StateRootPath(&cfg, ee.env, ee.checkout)
+	jobDir := filepath.Join(stateRoot, "jobs", "job-1")
+	for _, name := range []string{"state.json", "report.json"} {
+		body, err := os.ReadFile(filepath.Join(jobDir, name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if strings.Contains(string(body), marker) {
+			t.Fatalf("%s carries the raw envelope: %s", name, body)
+		}
+	}
+	friction, err := os.ReadFile(filepath.Join(jobDir, "friction.log"))
+	if err != nil {
+		t.Fatalf("friction.log: %v", err)
+	}
+	markerInFriction := false
+	for _, line := range strings.Split(string(friction), "\n") {
+		if !strings.Contains(line, marker) {
+			continue
+		}
+		markerInFriction = true
+		if !strings.Contains(line, "\terror(exit 4)\t") {
+			t.Fatalf("friction line carries the envelope outside the error sink: %q", line)
+		}
+	}
+	if !markerInFriction {
+		t.Fatalf("friction.log is missing the raw envelope: %s", friction)
+	}
+}

@@ -337,6 +337,19 @@ func (s *Supervisor) finalize(status string) {
 	if snap.State.WorkspaceID == "" || s.Herdr == nil || snap.State.WorkspaceClosed {
 		return
 	}
+	if !validWorkspaceID(snap.State.WorkspaceID) {
+		// The recorded id is not one safe path segment: a close would
+		// hand a hostile argument to `herdr workspace close`, so the
+		// workspace is left open exactly as a failed close is — the
+		// fixed friction line, the report rewritten open, and no
+		// WorkspaceClosed record.
+		s.frictionf("job: the recorded workspace id is invalid; the workspace was not closed")
+		facts.Workspace = "open"
+		if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
+			s.frictionf("job: finalize: " + err.Error())
+		}
+		return
+	}
 	if err := s.Herdr.Close(snap.State.WorkspaceID); err == nil {
 		// Recorded so a later supervisor never closes the workspace twice;
 		// the process may end with the workspace right after this.
