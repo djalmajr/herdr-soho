@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -82,6 +83,12 @@ var ConfigScalarKeys = []string{
 	"report_language", "notify", "feedback", "feedback_repo", "feedback_dir", "feedback_to",
 	"setup_target", "inbound", "worker_messages", "metrics",
 	"pressure_disk_free_percent", "pressure_swap_percent",
+}
+
+// jobMachineKeys are known to ConfigKeyOk. They stay out of ConfigScalarKeys
+// so `herdr-soho config` keeps the row order pinned by the frozen parity oracle.
+var jobMachineKeys = []string{
+	"machine_label", "job_orgs", "job_repos_root", "job_timeout", "job_wake_cmd",
 }
 
 var KnownKinds = []string{"claude", "codex", "grok", "agy", "gemini", "cursor", "pi", "opencode"}
@@ -207,6 +214,37 @@ func loadConfigFile(file, label string, ctx *Config) {
 	ctx.Layers = append(ctx.Layers, record)
 }
 
+// ConfigPair is one key/value read from a config file: the normalized key,
+// the raw spelling of the last occurrence (JS-whitespace trimmed, so a
+// leading BOM does not survive), and the entry value.
+type ConfigPair struct {
+	Key      string
+	Original string
+	Value    string
+}
+
+// ReadConfigFilePairs reads one file with the shared single-file config
+// parser (loadConfigFile) and returns one pair per key in first-occurrence
+// order; the last occurrence of a key wins. An absent file is an error
+// matching os.IsNotExist; a read failure is the parser's ReadError.
+func ReadConfigFilePairs(file string) ([]ConfigPair, error) {
+	if _, err := os.Stat(file); err != nil {
+		return nil, err
+	}
+	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0)}
+	loadConfigFile(file, "file", &ctx)
+	layer := ctx.Layers[len(ctx.Layers)-1]
+	if layer.ReadError != nil {
+		return nil, layer.ReadError
+	}
+	pairs := make([]ConfigPair, 0, len(ctx.Order))
+	for _, key := range ctx.Order {
+		entry := ctx.Entries[key]
+		pairs = append(pairs, ConfigPair{Key: key, Original: entry.Original, Value: entry.Value})
+	}
+	return pairs, nil
+}
+
 func splitLines(text string) []string {
 	if text == "" {
 		return nil
@@ -243,6 +281,11 @@ func CfgSource(ctx *Config, key string, env platform.Env) string {
 
 func ConfigKeyOk(key string) bool {
 	for _, scalar := range ConfigScalarKeys {
+		if scalar == key {
+			return true
+		}
+	}
+	for _, scalar := range jobMachineKeys {
 		if scalar == key {
 			return true
 		}
@@ -296,9 +339,20 @@ func ConfigValueOk(key, value string, env platform.Env, cwd string) bool {
 		return ConfigRolesOk(value, env, cwd)
 	case strings.HasPrefix(key, "lane.") && strings.HasSuffix(key, ".effort"):
 		return contains(EffortLadder, value)
+	case key == "job_timeout":
+		return jobTimeoutValueOk(value)
 	default:
 		return true
 	}
+}
+
+// jobTimeoutValueOk is the contract range for the default job budget: 1..1440 minutes.
+func jobTimeoutValueOk(value string) bool {
+	if !decimalRE.MatchString(value) {
+		return false
+	}
+	n, err := strconv.Atoi(value)
+	return err == nil && n >= 1 && n <= 1440
 }
 
 func contains(values []string, value string) bool {
