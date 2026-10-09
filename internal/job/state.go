@@ -44,6 +44,7 @@ type State struct {
 	Modo              string  `json:"modo,omitempty"`
 	WorkspaceID       string  `json:"workspace_id,omitempty"`
 	RootPane          string  `json:"root_pane,omitempty"`
+	WorkspaceClosed   bool    `json:"workspace_closed,omitempty"`
 	TimeoutMin        int     `json:"timeout_min,omitempty"`
 	StartedAt         string  `json:"started_at,omitempty"`
 	Orchestrator      string  `json:"orchestrator,omitempty"`

@@ -88,7 +88,8 @@ func (s *Supervisor) syncGitOnce() (int, bool, error) {
 		}
 	}
 	if head != s.lastHead {
-		s.lastHead = head
+		// lastHead is remembered only after the commits are announced: a
+		// failed listing leaves it unchanged so the next sync walks again.
 		commits, err := s.Git.Commits()
 		if err != nil {
 			s.frictionf(err.Error())
@@ -116,6 +117,7 @@ func (s *Supervisor) syncGitOnce() (int, bool, error) {
 			// commit of the job branch.
 			s.prTitle = commits[0].Titulo
 		}
+		s.lastHead = head
 	}
 	result, err := s.Git.Push()
 	if err != nil {
@@ -332,10 +334,16 @@ func (s *Supervisor) finalize(status string) {
 
 	// The workspace close is last: the supervisor process may end with
 	// the workspace; everything durable is already written.
-	if snap.State.WorkspaceID == "" || s.Herdr == nil {
+	if snap.State.WorkspaceID == "" || s.Herdr == nil || snap.State.WorkspaceClosed {
 		return
 	}
-	if err := s.Herdr.Close(snap.State.WorkspaceID); err != nil {
+	if err := s.Herdr.Close(snap.State.WorkspaceID); err == nil {
+		// Recorded so a later supervisor never closes the workspace twice;
+		// the process may end with the workspace right after this.
+		if _, err := s.Store.Record(s.ID, func(st *State) { st.WorkspaceClosed = true }); err != nil {
+			s.frictionf("job: finalize: " + err.Error())
+		}
+	} else {
 		// The close did not happen: the report says the workspace stayed
 		// open, and the retry closes it.
 		s.frictionf(err.Error())

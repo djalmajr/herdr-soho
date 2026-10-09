@@ -181,6 +181,13 @@ func (s *Supervisor) Run() (int, error) {
 		return ExitFailed, err
 	}
 	if done {
+		// A job that already ended may not have finished its release (a
+		// crash before the workspace close): finalize again; it skips the
+		// steps already done.
+		if snap, snapErr := s.Store.Snapshot(s.ID); snapErr == nil && isTerminalOutcome(snap.State.Status) && !snap.State.WorkspaceClosed {
+			s.finishWakes()
+			s.finalize(snap.State.Status)
+		}
 		return code, nil
 	}
 	// The job lane (and its max_workers bump) is set once, before the

@@ -243,6 +243,29 @@ func TestSuperviseGit(t *testing.T) {
 		assertSyncPostconditions(t, f.job)
 	})
 
+	t.Run("a failed commit listing does not hide the commits from the next sync", func(t *testing.T) {
+		f := newSupGitFixture(t, supGitGhRules)
+		f.job.commitIn(t, "feat: first")
+		base := f.sup.Git.Base
+		f.sup.Git.Base = "no-such-base"
+		if _, _, err := f.sup.syncGitOnce(); err != nil {
+			t.Fatalf("sync with a broken base: %v", err)
+		}
+		if n := countTipes(f.events(t), "commit"); n != 0 {
+			t.Fatalf("commit events = %d, want none while the listing fails", n)
+		}
+		f.sup.Git.Base = base
+		if _, _, err := f.sup.syncGitOnce(); err != nil {
+			t.Fatalf("sync: %v", err)
+		}
+		if n := countTipes(f.events(t), "commit"); n != 1 {
+			t.Fatalf("commit events = %d, want the commit announced once the listing works", n)
+		}
+		if n := countTipes(f.events(t), "pr_opened"); n != 1 {
+			t.Fatalf("pr_opened events = %d, want the draft pull request", n)
+		}
+	})
+
 	t.Run("a second commit pushes without another pull request", func(t *testing.T) {
 		f := newSupGitFixture(t, supGitGhRules)
 		f.job.commitIn(t, "feat: first")
@@ -903,10 +926,13 @@ func TestSuperviseRelease(t *testing.T) {
 			t.Fatalf("state = %+v, want done", st)
 		}
 
-		// The retry: the log is checked first, so no second cleanup, and
-		// the workspace closes once.
+		// The retry is a new supervisor process: Run sees the terminal job
+		// and finalizes it; the log is checked first, so no second cleanup,
+		// and the workspace closes once.
 		sup2 := f.supRestarted(t)
-		sup2.finalize(StatusDone)
+		if exit, err := sup2.Run(); err != nil || exit != 0 {
+			t.Fatalf("restarted Run = %d %v, want 0", exit, err)
+		}
 		if n := countTipes(f.events(t), "cleanup"); n != 1 {
 			t.Fatalf("cleanup events = %d, want still 1 after the retry", n)
 		}
@@ -916,6 +942,13 @@ func TestSuperviseRelease(t *testing.T) {
 		rep := f.report(t)
 		if limpeza := rep["limpeza"].(map[string]any); limpeza["workspace"] != "closed" {
 			t.Fatalf("report limpeza = %v, want the closed workspace", limpeza)
+		}
+		// A further restart after the close changes nothing: no second close.
+		if exit, err := f.supRestarted(t).Run(); err != nil || exit != 0 {
+			t.Fatalf("second restarted Run = %d %v, want 0", exit, err)
+		}
+		if len(f.herdr.CloseIDs) != 1 {
+			t.Fatalf("herdr close = %v, want still exactly one", f.herdr.CloseIDs)
 		}
 		assertSyncPostconditions(t, f.job)
 	})
