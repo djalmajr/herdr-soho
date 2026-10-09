@@ -141,6 +141,9 @@ func (p Preparer) Prepare(req PrepareRequest) (Prepared, error) {
 		return out, prepareError("not a git checkout")
 	}
 
+	if err := p.excludeJobDirs(checkout, local, gitEnv); err != nil {
+		return out, err
+	}
 	if _, err := p.cli("git", []string{"-C", checkout, "fetch", "--prune", "origin"}, net, gitEnv); err != nil {
 		return out, prepareError("fetch")
 	}
@@ -192,6 +195,59 @@ func (p Preparer) isGitCheckout(checkout string, timeout time.Duration, env plat
 		return false
 	}
 	return samePath(strings.TrimSpace(top), checkout)
+}
+
+// jobExcludeLines are the checkout paths the job family writes: the job
+// state root and the job worktrees. They go to the checkout's local
+// info/exclude (never a tracked .gitignore), so they never show as
+// untracked changes, in particular to a later workspace-mode job.
+var jobExcludeLines = []string{"/.herdr-soho/", "/.worktrees/"}
+
+// excludeJobDirs appends each missing jobExcludeLines entry to
+// <git-common-dir>/info/exclude; a retry adds nothing.
+func (p Preparer) excludeJobDirs(checkout string, timeout time.Duration, env platform.Env) error {
+	common, err := p.cli("git", []string{"-C", checkout, "rev-parse", "--path-format=absolute", "--git-common-dir"}, timeout, env)
+	if err != nil {
+		return prepareError("checkout")
+	}
+	file := filepath.Join(strings.TrimSpace(common), "info", "exclude")
+	existing, err := os.ReadFile(file)
+	if err != nil && !os.IsNotExist(err) {
+		return prepareError("checkout")
+	}
+	present := map[string]bool{}
+	for _, line := range strings.Split(strings.ReplaceAll(string(existing), "\r\n", "\n"), "\n") {
+		present[strings.TrimSpace(line)] = true
+	}
+	var add strings.Builder
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		add.WriteByte('\n')
+	}
+	missing := false
+	for _, line := range jobExcludeLines {
+		if !present[line] {
+			add.WriteString(line + "\n")
+			missing = true
+		}
+	}
+	if !missing {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return prepareError("checkout")
+	}
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return prepareError("checkout")
+	}
+	if _, err = f.WriteString(add.String()); err != nil {
+		_ = f.Close()
+		return prepareError("checkout")
+	}
+	if err = f.Close(); err != nil {
+		return prepareError("checkout")
+	}
+	return nil
 }
 
 // remoteDefaultBase parses `ref: refs/heads/<name>\tHEAD` from

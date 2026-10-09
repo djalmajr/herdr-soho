@@ -579,6 +579,41 @@ func TestPrepareWorkspaceMode(t *testing.T) {
 		}
 		assertNoJobRefs(t, f)
 	})
+	t.Run("job state and worktrees in the checkout are excluded, not dirty", func(t *testing.T) {
+		// The job state root (<checkout>/.herdr-soho) and the job worktrees
+		// (<checkout>/.worktrees) live inside the checkout; a later
+		// workspace-mode job must not see them as untracked changes.
+		f := newPrepareFixture(t, []fakecli.Rule{{Argv: []string{"auth", "status"}}})
+		checkout := f.cloneCheckout()
+		for _, dir := range []string{".herdr-soho/jobs/other", ".worktrees/job-other"} {
+			if err := os.MkdirAll(filepath.Join(checkout, dir), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(checkout, dir, "f"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := f.preparer().Prepare(f.req("main", "workspace")); err != nil {
+			t.Fatalf("Prepare: %v", err)
+		}
+		exclude, err := os.ReadFile(filepath.Join(checkout, ".git", "info", "exclude"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range []string{"/.herdr-soho/", "/.worktrees/"} {
+			if strings.Count(string(exclude), line+"\n") != 1 {
+				t.Fatalf("info/exclude = %q, want %s once", exclude, line)
+			}
+		}
+		// A retry adds nothing.
+		if _, err := f.preparer().Prepare(f.req("main", "workspace")); err != nil {
+			t.Fatalf("Prepare retry: %v", err)
+		}
+		again, _ := os.ReadFile(filepath.Join(checkout, ".git", "info", "exclude"))
+		if string(again) != string(exclude) {
+			t.Fatalf("retry changed info/exclude: %q -> %q", exclude, again)
+		}
+	})
 	t.Run("an untracked file is a dirty checkout", func(t *testing.T) {
 		f := newPrepareFixture(t, []fakecli.Rule{{Argv: []string{"auth", "status"}}})
 		checkout := f.cloneCheckout()
