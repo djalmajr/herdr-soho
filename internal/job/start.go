@@ -356,8 +356,10 @@ func (s Starter) failStored(store *Store, id, workspaceID string, err error) err
 }
 
 // closeWorkspace closes the job workspace after a post-create failure and
-// records the successful close on the state; its error only goes to
-// friction. It reports whether the close happened.
+// records the successful close on the state; its errors only go to
+// friction. It reports whether the close happened and was recorded: a
+// close whose WorkspaceClosed record failed is not reported closed, as the
+// recovery does, so the report keeps the workspace open.
 func (s Starter) closeWorkspace(store *Store, id, workspaceID string) bool {
 	if err := s.Herdr.Close(workspaceID); err != nil {
 		if s.Friction != nil {
@@ -365,8 +367,11 @@ func (s Starter) closeWorkspace(store *Store, id, workspaceID string) bool {
 		}
 		return false
 	}
-	if _, err := store.Record(id, func(st *State) { st.WorkspaceClosed = true }); err != nil && s.Friction != nil {
-		s.Friction("job: cannot record the job state: " + err.Error())
+	if _, err := store.Record(id, func(st *State) { st.WorkspaceClosed = true }); err != nil {
+		if s.Friction != nil {
+			s.Friction("job: cannot record the job state: " + err.Error())
+		}
+		return false
 	}
 	return true
 }

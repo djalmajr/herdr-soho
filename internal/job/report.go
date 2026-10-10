@@ -370,8 +370,12 @@ func readReportMD(dir string) (items []Item, parciais int, artefatos []Artefato,
 // spaces allowed) up to the next line starting with `#`, skipping fenced
 // code blocks with the reportItems fence rules. Lines are trimmed, empty
 // lines dropped, at most the first six are kept, each cut to the resumo
-// limit, joined with a newline; no section is "".
+// limit, joined with a newline; no section is "". CRLF and lone CR line
+// endings read as LF, so a report written on Windows gives the same
+// section.
 func reportResumo(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
 	lines := []string{}
 	inSection := false
 	inFence, fenceChar, fenceLen := false, byte(0), 0

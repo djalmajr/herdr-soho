@@ -444,3 +444,56 @@ func TestReportFactsStartCleanup(t *testing.T) {
 		}
 	})
 }
+
+// TestReportFactsResumoCRLF pins the summary of a report written with CRLF
+// line endings (a Windows report.md): the heading and the fence lines carry
+// a trailing \r, and the section must read the same as the LF report.
+func TestReportFactsResumoCRLF(t *testing.T) {
+	s, root := startedJob(t)
+	writeReportMD(t, root, strings.Join([]string{
+		"# report",
+		"```",
+		"## Resumo",
+		"a fenced heading that must not start the section",
+		"```",
+		"## Resumo",
+		"changed the loader.",
+		"```",
+		"a fenced line that must not appear",
+		"```",
+		"proved the gate.",
+		"## Itens",
+		"- [done] the item",
+		"",
+	}, "\r\n"))
+	rep, err := s.WriteReport("job-1", ReportFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "changed the loader.\nproved the gate."; rep.Resumo != want {
+		t.Fatalf("resumo = %q, want %q", rep.Resumo, want)
+	}
+}
+
+// TestStartCloseWorkspaceWithoutRecord pins the close of a post-create
+// start failure: a successful Herdr close whose WorkspaceClosed record
+// fails is not reported closed, so the callers keep limpeza.workspace open.
+// The record fails portably through an unreadable state.json.
+func TestStartCloseWorkspaceWithoutRecord(t *testing.T) {
+	s, root := startedJob(t)
+	if err := os.WriteFile(filepath.Join(root, "jobs", "job-1", "state.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := startFake()
+	var friction []string
+	starter := Starter{Herdr: fake, Friction: func(message string) { friction = append(friction, message) }}
+	if starter.closeWorkspace(s, "job-1", "w9") {
+		t.Fatal("closeWorkspace = true after the WorkspaceClosed record failed, want false")
+	}
+	if len(fake.CloseIDs) != 1 || fake.CloseIDs[0] != "w9" {
+		t.Fatalf("CloseIDs = %v, want [w9]", fake.CloseIDs)
+	}
+	if len(friction) != 1 || !strings.HasPrefix(friction[0], "job: cannot record the job state: ") {
+		t.Fatalf("friction = %v", friction)
+	}
+}
