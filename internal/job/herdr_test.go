@@ -1,6 +1,7 @@
 package job
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -61,6 +62,22 @@ func (f *herdrFixture) calls() []fakecli.Call {
 		f.t.Fatalf("read the herdr call log: %v", err)
 	}
 	return calls
+}
+
+// diagnoseRun describes a failed herdr call for a test failure message,
+// since the adapter's error drops the subprocess result: how many calls
+// reached the fake, and the RunResult of one diagnostic rerun of the same
+// argv with the adapter's timeout. The rerun is a second attempt, so it
+// can differ from the failed one; it only narrows the cause.
+func (f *herdrFixture) diagnoseRun(argv []string) string {
+	reached := len(f.calls())
+	result := platform.RunCli("herdr", argv, platform.RunOptions{Env: f.env, TimeoutMs: int(defaultHerdrTimeout / time.Millisecond)})
+	status := "nil"
+	if result.Status != nil {
+		status = strconv.Itoa(*result.Status)
+	}
+	return fmt.Sprintf("calls before the rerun=%d; rerun: not_found=%v status=%s signal=%q timed_out=%v error=%q stderr=%q",
+		reached, result.NotFound, status, result.Signal, result.TimedOut, result.Error, result.Stderr)
 }
 
 const (
@@ -427,7 +444,7 @@ func TestHerdrWorkspacesRunShortNames(t *testing.T) {
 				want := []string{"pane", "run", "w9:p1", arg}
 				f := newHerdrFixture(t, []fakecli.Rule{{Argv: want}})
 				if err := f.cli().Run("w9:p1", []string{arg}); err != nil {
-					t.Fatalf("Run(%q): %v", arg, err)
+					t.Fatalf("Run(%q): %v (%s)", arg, err, f.diagnoseRun(want))
 				}
 				calls := f.calls()
 				if len(calls) != 1 || !sameArgv(calls[0].Argv, want) {
