@@ -713,7 +713,32 @@ func TestGcListAndStopOrphanProcesses(t *testing.T) {
 	})
 }
 
+// TestProcsLockHeld proves the held-lock contract of the procs registry:
+// the lock is acquired synchronously before the command runs (exclusive
+// create, the same pid time content takeRegistryLock writes) and is held
+// for the whole subtest — only the t.Cleanup removes it, never a timer —
+// so the command meets it no matter how long its preflight takes.
 func TestProcsLockHeld(t *testing.T) {
+	// holdLock acquires the procs registry lock synchronously: the
+	// exclusive create is the acquisition assertion (an existing lock
+	// fails it), and only this cleanup removes the lock (the fixture state
+	// dir is a TempDir; nothing else is removed).
+	holdLock := func(t *testing.T, f *procsFixture) {
+		t.Helper()
+		lock := filepath.Join(f.state, "procs.tsv.lock")
+		file, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatalf("acquiring the lock: %v", err)
+		}
+		if _, err := fmt.Fprintf(file, "%d %s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339)); err != nil {
+			_ = file.Close()
+			t.Fatalf("writing the lock: %v", err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatalf("closing the lock: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Remove(lock) })
+	}
 	t.Run("release warns and keeps the lines", func(t *testing.T) {
 		f := newProcsFixture(t)
 		pid := f.sleeper(t)
@@ -722,19 +747,7 @@ func TestProcsLockHeld(t *testing.T) {
 		old := core.CopiesLockTimeout
 		core.CopiesLockTimeout = 300 * time.Millisecond
 		t.Cleanup(func() { core.CopiesLockTimeout = old })
-		lockPath := filepath.Join(f.state, "procs.tsv.lock")
-		hold := make(chan struct{})
-		go func() {
-			file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-			if err == nil {
-				_ = file.Close()
-			}
-			close(hold)
-			time.Sleep(1500 * time.Millisecond)
-			_ = os.Remove(lockPath)
-		}()
-		<-hold
-		time.Sleep(100 * time.Millisecond)
+		holdLock(t, f)
 		code, out, errOut := f.run(t, "release", "worker")
 		if code != 0 {
 			t.Fatalf("release must never fail for the lock: code=%d out=%q", code, out)
@@ -760,19 +773,7 @@ func TestProcsLockHeld(t *testing.T) {
 		old := core.CopiesLockTimeout
 		core.CopiesLockTimeout = 300 * time.Millisecond
 		t.Cleanup(func() { core.CopiesLockTimeout = old })
-		lockPath := filepath.Join(f.state, "procs.tsv.lock")
-		hold := make(chan struct{})
-		go func() {
-			file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-			if err == nil {
-				_ = file.Close()
-			}
-			close(hold)
-			time.Sleep(1500 * time.Millisecond)
-			_ = os.Remove(lockPath)
-		}()
-		<-hold
-		time.Sleep(100 * time.Millisecond)
+		holdLock(t, f)
 		code, out, errOut := f.run(t, "gc", "--yes")
 		if code != 4 {
 			t.Fatalf("gc --yes: code=%d out=%q; want 4", code, out)
@@ -788,6 +789,78 @@ func TestProcsLockHeld(t *testing.T) {
 		}
 		if rows := f.procsRows(t); len(rows) != 1 {
 			t.Fatalf("registry rows = %v; the lines stay", rows)
+		}
+	})
+	// The preflight (the agent identity read through herdr) is slower than
+	// the 1500 ms the old fixture timer removed the lock at: the lock must
+	// still be held when the release reaches the registry. The fixture's
+	// fake herdr is re-installed with the same rules newProcsFixture uses,
+	// only the agent get worker rule delayed 2000 ms — the preflight the
+	// release reads before the registry lock is attempted.
+	t.Run("a slow preflight still meets the held lock", func(t *testing.T) {
+		f := newProcsFixture(t)
+		bin := "herdr"
+		if runtime.GOOS == "windows" {
+			bin += ".exe"
+		}
+		// Install refuses only an existing executable (herdr / herdr.exe)
+		// and rewrites the config; the metadata uses the bare name
+		// (herdr.json, herdr.calls.jsonl). The old call log is removed so
+		// the call-log check sees only calls made after the re-install.
+		for _, file := range []string{bin, "herdr.json", "herdr.calls.jsonl"} {
+			if err := os.Remove(filepath.Join(f.fakeDir, file)); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("removing the installed fake %s: %v", file, err)
+			}
+		}
+		rules := []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`, Delay: 2000},
+			{Argv: []string{"agent", "get", "other"}, Stdout: `{"result":{"agent":{"name":"other","agent_status":"idle"}}}`},
+			{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+			{Argv: []string{"pane", "report-metadata", "p-other", "--source", "herdr-soho", "--clear-title"}},
+			{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
+			{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
+			{Argv: []string{"tab", "rename", "t1", "herd"}},
+		}
+		if _, err := fakecli.Install(t, f.fakeDir, "herdr", rules); err != nil {
+			t.Fatal(err)
+		}
+		pid := f.sleeper(t)
+		started, name, _ := platform.ProcInfo(pid, f.env)
+		f.writeProcs(t, core.ProcRow{Pid: pid, Started: started, Name: name, Owner: "worker", Pane: "p-worker", Created: core.FrictionISO(platform.Now())})
+		old := core.CopiesLockTimeout
+		core.CopiesLockTimeout = 300 * time.Millisecond
+		t.Cleanup(func() { core.CopiesLockTimeout = old })
+		holdLock(t, f)
+		code, out, errOut := f.run(t, "release", "worker")
+		if code != 0 {
+			t.Fatalf("release must never fail for the lock: code=%d out=%q", code, out)
+		}
+		if !strings.Contains(errOut, "the processes of 'worker' were not stopped") || !strings.Contains(errOut, "procs: registry is locked by another herdr-soho") {
+			t.Fatalf("stderr = %q; want the lock warning", errOut)
+		}
+		if !procAlive(t, f.env, pid) {
+			t.Fatal("the process was stopped while the lock was held")
+		}
+		if rows := f.procsRows(t); len(rows) != 1 {
+			t.Fatalf("registry rows = %v; the lines stay", rows)
+		}
+		if !strings.Contains(out, "released worker") {
+			t.Fatalf("output = %q; the release completes", out)
+		}
+		// The delayed rule must really be the one that ran: the fake's call
+		// log lists the agent get worker preflight.
+		calls, err := fakecli.ReadCalls(filepath.Join(f.fakeDir, "herdr.calls.jsonl"))
+		if err != nil {
+			t.Fatalf("reading the fake herdr call log: %v", err)
+		}
+		delayed := false
+		for _, call := range calls {
+			if strings.Join(call.Argv, " ") == "agent get worker" {
+				delayed = true
+			}
+		}
+		if !delayed {
+			t.Fatalf("the delayed agent get worker rule was not hit: %v", calls)
 		}
 	})
 }
