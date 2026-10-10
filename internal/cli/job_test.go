@@ -1375,17 +1375,35 @@ func TestJobSuperviseRunsTheSupervisor(t *testing.T) {
 		}
 	}
 	// The launcher resolves the override's symlinks, so it must point at a
-	// regular copy of the fake. The copy keeps the fake's own name, including
-	// the platform extension (.exe on Windows): the fake derives its config
-	// file name from its executable's base name.
-	fakeData, err := os.ReadFile(exe)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// regular file with the fake's own name, including the platform
+	// extension (.exe on Windows): the fake derives its config file name
+	// from its executable's base name. On Windows that file prefers a hard
+	// link of the prepared image (exe already is one; the running parent
+	// image is never linked), so the slow first exec of a fresh full copy
+	// is not paid again; when the link is unsupported it falls back to a
+	// byte copy (slower first exec, same behavior). On the other OSes it
+	// stays a byte copy.
 	realDir := t.TempDir()
 	real := filepath.Join(realDir, filepath.Base(exe))
-	if err := os.WriteFile(real, fakeData, 0o755); err != nil {
-		t.Fatal(err)
+	if runtime.GOOS == "windows" {
+		if err := os.Link(exe, real); err != nil {
+			t.Logf("falling back to an independent byte copy: %v", err)
+			fakeData, readErr := os.ReadFile(exe)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if writeErr := os.WriteFile(real, fakeData, 0o755); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+		}
+	} else {
+		fakeData, err := os.ReadFile(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(real, fakeData, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	env["HERDR_ENV"] = "1"
 	env["HERDR_SOHO_BIN"] = real
