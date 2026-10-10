@@ -645,6 +645,63 @@ func TestStartHeldStartLockReturnsTheDuplicate(t *testing.T) {
 	}
 }
 
+// TestStartHeldStartLockRefusesAChangedBrief: a start whose start.lock is
+// held by another live starter checks the supplied brief against the live
+// job's recorded canonical hash, like Store.Start: a different canonical
+// brief is the id-reused-with-a-different-brief conflict (exit 20) with no
+// store, and nothing is written or run.
+func TestStartHeldStartLockRefusesAChangedBrief(t *testing.T) {
+	f := newPrepareFixture(t, []fakecli.Rule{{Argv: []string{"auth", "status"}}})
+	f.cloneCheckout()
+	fake := startFake()
+	stateRoot := t.TempDir()
+	var friction []string
+	s := startStarter(t, f, fake, stateRoot, &friction)
+
+	// The job is recorded, as the live starter recorded it.
+	store := Open(stateRoot)
+	if _, err := store.Start("job-1", []byte(briefA)); err != nil {
+		t.Fatal(err)
+	}
+	jobDir, err := Dir(stateRoot, "job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeState, err := os.ReadFile(filepath.Join(jobDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeBrief, err := os.ReadFile(filepath.Join(jobDir, "brief.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder, err := tryStartLock(jobDir)
+	if err != nil {
+		t.Fatalf("hold the start lock: %v", err)
+	}
+	t.Cleanup(func() { closeStartLock(holder) })
+
+	_, store2, err := s.Start(startRequest("main", briefChanged))
+	wantExit(t, err, ExitBriefConflict, "job: id reused with a different brief")
+	if store2 != nil {
+		t.Fatalf("store = %v, want nil", store2.Root)
+	}
+	afterState, err := os.ReadFile(filepath.Join(jobDir, "state.json"))
+	if err != nil || !bytes.Equal(beforeState, afterState) {
+		t.Fatalf("state changed by the held start: %s", afterState)
+	}
+	afterBrief, err := os.ReadFile(filepath.Join(jobDir, "brief.json"))
+	if err != nil || !bytes.Equal(beforeBrief, afterBrief) {
+		t.Fatalf("brief changed by the held start: %s", afterBrief)
+	}
+	if len(fake.CreateCalls) != 0 || len(fake.RunCalls) != 0 {
+		t.Fatalf("the held start ran steps: CreateCalls=%d RunCalls=%d", len(fake.CreateCalls), len(fake.RunCalls))
+	}
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v", friction)
+	}
+}
+
 // TestTryStartLock: a held start.lock reports the distinct held result, and
 // it is free after the holder releases it. The hold comes from this same
 // process through a separate descriptor: the OS lock on a separately

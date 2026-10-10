@@ -119,9 +119,13 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		if !errors.Is(err, errStartLockHeld) {
 			return State{}, nil, err
 		}
-		// A live starter owns the job: return its current state as a
-		// duplicate, like the same-brief duplicate below. No other step
-		// runs.
+		// A live starter owns the job. The supplied brief is checked the
+		// way Store.Start checks it: it parses first, and a parse error
+		// is returned as is before the snapshot.
+		doc, err := parseBrief(req.Brief, req.ID)
+		if err != nil {
+			return State{}, nil, err
+		}
 		dupStore := Open(s.StateRoot(checkout))
 		snap, snapErr := dupStore.Snapshot(req.ID)
 		if snapErr != nil {
@@ -130,6 +134,13 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 			return State{}, nil, snapErr
 		}
 		st := snap.State
+		if st.BriefSHA256 != doc.Hash {
+			// The id was reused with a different canonical brief: the
+			// conflict Store.Start returns, with the job unchanged.
+			return State{}, nil, &ExitError{Code: ExitBriefConflict, Msg: "job: id reused with a different brief"}
+		}
+		// Same canonical brief: return the live state as a duplicate.
+		// No other step runs.
 		st.DuplicateOf = req.ID
 		return st, dupStore, nil
 	}
