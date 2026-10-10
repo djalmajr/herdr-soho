@@ -129,6 +129,26 @@ func (f *waitStatusFixture) calls(t *testing.T) []fakecli.Call {
 	return calls
 }
 
+// advancingWaitClock makes a wait --timeout deadline deterministic: it
+// replaces platform.Now (restored in t.Cleanup) with a clock that starts at
+// a fixed instant and advances by budget/20 on every call, so the deadline
+// lapses only after a bounded number of probe rounds instead of after real
+// host time. The deadline stays live as a regression detector: a "done never
+// reached" bug still ends quickly with the wrong status (code 9), never a
+// hang.
+func advancingWaitClock(t *testing.T, budget time.Duration) {
+	t.Helper()
+	base := time.Date(2026, 10, 3, 15, 26, 48, 0, time.UTC)
+	step := budget / 20
+	origNow := platform.Now
+	platform.Now = func() time.Time {
+		now := base
+		base = base.Add(step)
+		return now
+	}
+	t.Cleanup(func() { platform.Now = origNow })
+}
+
 func TestStatusJavaScriptCases(t *testing.T) {
 	const row = "worker\tp0a\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\timplementer\tbuild\n"
 	t.Run("status: no names with an empty roster exits 0 pointing at the state dir", func(t *testing.T) {
@@ -503,6 +523,7 @@ func TestWaitJavaScriptDoneReportCases(t *testing.T) {
 	t.Run("wait: a done report with partial items marks the JSON line and warns once", func(t *testing.T) { // JS: "wait: a done report with partial items marks the JSON line and warns once"
 		row := "review\tp0a\tclaude\treviewer\tanthropic\t\t\t\tmodel-x\t\t\treview\n"
 		f := newWaitStatusFixture(t, row, nil)
+		advancingWaitClock(t, 200*time.Millisecond)
 		body := "# Report\n\n| item | state |\n| --- | --- |\n| evidence | [partial] |\n"
 		writeReport(t, f, "review", "reviewer", body)
 		for run := 0; run < 2; run++ {
@@ -519,6 +540,7 @@ func TestWaitJavaScriptDoneReportCases(t *testing.T) {
 	t.Run("wait: a clean done report keeps the exact line of today", func(t *testing.T) { // JS: "wait: a clean done report keeps the exact line of today"
 		row := "worker\tp0a\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\t\t\n"
 		f := newWaitStatusFixture(t, row, nil)
+		advancingWaitClock(t, 200*time.Millisecond)
 		writeReport(t, f, "worker", "implementer", "# Report\nfinished\n")
 		code, out, stderr := f.runWait(t, "worker", "--timeout", "200")
 		wantReport := filepath.Join(f.state, "reports", "worker.md")
@@ -535,6 +557,7 @@ func TestWaitJavaScriptDoneReportCases(t *testing.T) {
 	t.Run("wait: the header and partial items coexist in the done line", func(t *testing.T) { // JS: "wait: the header and partial items coexist in the done line"
 		row := "review\tp0a\tclaude\treviewer\tanthropic\t\t\t\tmodel-x\t\t\t\n"
 		f := newWaitStatusFixture(t, row, nil)
+		advancingWaitClock(t, 200*time.Millisecond)
 		writeReport(t, f, "review", "reviewer", "findings: 1 (P0 0, P1 1, P2 0, P3 0) | verdict: fail\n\n| issue | [partial] |\n")
 		code, out, _ := f.runWait(t, "review", "--timeout", "200")
 		for _, key := range []string{`"verdict":"fail"`, `"findings":1`, `"severity":{"P0":0,"P1":1,"P2":0,"P3":0}`, `"partial":1`} {
@@ -549,6 +572,7 @@ func TestWaitJavaScriptDoneReportCases(t *testing.T) {
 	t.Run("wait: a review report without the header warns for all four review roles", func(t *testing.T) { // JS: "wait: a review report without the header warns for all four review roles"
 		rows := "review1\tp1\tclaude\treviewer\t\t\t\t\t\t\t\t\nreview2\tp2\tclaude\tsecurity-reviewer\t\t\t\t\t\t\t\nreview3\tp3\tclaude\tui-reviewer\t\t\t\t\t\t\t\nreview4\tp4\tclaude\tinspector\t\t\t\t\t\t\t\n"
 		f := newWaitStatusFixture(t, rows, nil)
+		advancingWaitClock(t, 200*time.Millisecond)
 		for _, agent := range []string{"review1", "review2", "review3", "review4"} {
 			writeReport(t, f, agent, "", "# Review\nfindings below\n")
 		}
@@ -852,6 +876,7 @@ func TestWaitRemainingExitCases(t *testing.T) {
 	})
 	t.Run("wait: a state change since the marker ends settled-no-report, no Enter", func(t *testing.T) { // JS: "wait: a state change since the marker ends settled-no-report, no Enter"
 		f := newWaitStatusFixture(t, row, []fakecli.Rule{{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"idle","state_change_seq":6}}}`}})
+		advancingWaitClock(t, 5*time.Second)
 		f.env["HERDR_SOHO_SETTLED_GRACE"] = "0"
 		if err := os.WriteFile(filepath.Join(f.state, "wait", "worker.not-received"), []byte("1 5 /tmp/worker-brief.md\n"), 0o600); err != nil {
 			t.Fatal(err)

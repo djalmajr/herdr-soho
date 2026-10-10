@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -34,6 +35,7 @@ func TestAgentStateClassification(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			env := newFake(t, "herdr", []fakecli.Rule{tc.rule})
+			readyProbe(t, env)
 			got := AgentState("x", env, fakeTimeout(100*time.Millisecond), nil)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("got %#v want %#v", got, tc.want)
@@ -45,6 +47,7 @@ func TestAgentStateClassification(t *testing.T) {
 func TestAgentStateFalseStatusIsMissing(t *testing.T) { // JS: "agent_status false is absent, while JS stringification remains false"
 	// Mutation captured: treating false as the string "false" accepts an unknown Herdr state.
 	env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Stdout: `{"result":{"agent":{"agent_status":false}}}`}})
+	readyProbe(t, env)
 	got := AgentState("x", env, fakeTimeout(time.Second), []time.Duration{})
 	if got != (AgentStateResult{State: "unavailable", Cause: "agent get returned no agent_status", Seq: ""}) {
 		t.Fatalf("AgentState(false)=%#v", got)
@@ -64,6 +67,7 @@ func TestAgentStateMissingCliAndNonIntegerSeq(t *testing.T) {
 	})
 	t.Run("JS: state_change_seq string is not an integer", func(t *testing.T) {
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Stdout: `{"result":{"agent":{"agent_status":"idle","state_change_seq":"7"}}}`}})
+		readyProbe(t, env)
 		got := AgentState("x", env, fakeTimeout(time.Second), nil)
 		if got.Seq != "" || got.State != "idle" {
 			t.Fatalf("got %#v", got)
@@ -71,6 +75,7 @@ func TestAgentStateMissingCliAndNonIntegerSeq(t *testing.T) {
 	})
 	t.Run("JS: state_change_seq fractional number is not an integer", func(t *testing.T) {
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Stdout: `{"result":{"agent":{"agent_status":"idle","state_change_seq":1.5}}}`}})
+		readyProbe(t, env)
 		got := AgentState("x", env, fakeTimeout(time.Second), nil)
 		if got.Seq != "" || got.State != "idle" {
 			t.Fatalf("got %#v", got)
@@ -82,6 +87,7 @@ func TestAgentStateMissingCliAndNonIntegerSeq(t *testing.T) {
 func TestAgentStateSequenceAndRetries(t *testing.T) {
 	t.Run("JS: agentState: state_change_seq is returned when it is an integer, else seq is empty", func(t *testing.T) {
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Stdout: `{"result":{"agent":{"agent_status":"idle","state_change_seq":3}}}`}})
+		readyProbe(t, env)
 		got := AgentState("x", env, fakeTimeout(time.Second), nil)
 		if got.Seq != int64(3) || got.State != "idle" {
 			t.Fatalf("got %#v", got)
@@ -103,6 +109,7 @@ func TestAgentStateSequenceAndRetries(t *testing.T) {
 	})
 	t.Run("JS: agentState retry waits for the configured pause", func(t *testing.T) {
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Call: 1, Code: 137}, {Argv: []string{"agent", "get", "x"}, Call: 2, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`}})
+		readyProbe(t, env)
 		start := time.Now()
 		got := AgentState("x", env, fakeTimeout(time.Second), []time.Duration{25 * time.Millisecond})
 		if got.State != "working" || time.Since(start) < 20*time.Millisecond {
@@ -112,6 +119,7 @@ func TestAgentStateSequenceAndRetries(t *testing.T) {
 	t.Run("JS: agentState timeout is unavailable and is not retried", func(t *testing.T) {
 		timeout := fakeTimeout(25 * time.Millisecond)
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Delay: timeoutDelay(timeout)}})
+		readyProbe(t, env)
 		got := AgentState("x", env, timeout, []time.Duration{time.Millisecond})
 		if got.State != "unavailable" || got.Cause != timeoutMsg("agent get", timeout) {
 			t.Fatalf("got %#v", got)
@@ -133,6 +141,7 @@ func TestHerdrCallsAndResults(t *testing.T) {
 		{Argv: []string{"agent", "prompt", "a", "hello"}, Stdout: "ok\n"},
 	}
 	env := newFake(t, "herdr", rules)
+	readyProbe(t, env)
 	if got := LiveAgents(env, fakeTimeout(time.Second)); len(got) != 1 {
 		t.Fatalf("agents: %#v", got)
 	} else if obj, ok := got[0].(*jsonjs.Object); !ok || !reflect.DeepEqual(obj.Keys(), []string{"name", "pane_id"}) {
@@ -179,6 +188,7 @@ func TestTM11HerdrRosterReads(t *testing.T) {
 			{Argv: []string{"tab", "list", "--workspace", "ws"}, Stdout: `{"result":{"tabs":[{"tab_id":"t1","label":"herd"}]}}`},
 			{Argv: []string{"agent", "read", "worker", "--source", "visible", "--lines", "20"}, Stdout: "screen\n"},
 		})
+		readyProbe(t, env)
 		if got := LiveAgents(env, time.Second); len(got) != 1 {
 			t.Fatalf("agents=%#v", got)
 		}
@@ -196,10 +206,12 @@ func TestTM11HerdrRosterReads(t *testing.T) {
 	t.Run(`JS: "herdr timeout: agentState is unavailable and liveAgents throws DieError 4"`, func(t *testing.T) {
 		timeout := fakeTimeout(25 * time.Millisecond)
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Delay: timeoutDelay(timeout)}})
+		readyProbe(t, env)
 		if got := AgentState("x", env, timeout, nil); got.State != "unavailable" || got.Cause != timeoutMsg("agent get", timeout) {
 			t.Fatalf("agentState timeout=%#v", got)
 		}
 		env = newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "list"}, Delay: timeoutDelay(timeout)}})
+		readyProbe(t, env)
 		defer catchDie(t, 4, timeoutMsg("agent list", timeout))
 		LiveAgents(env, timeout)
 	})
@@ -317,6 +329,7 @@ func TestAgentStateSignalMessagesAndStructuredErrorRetry(t *testing.T) {
 	} {
 		t.Run(fmt.Sprint(tc.code), func(t *testing.T) {
 			env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Code: tc.code}})
+			readyProbe(t, env)
 			got := AgentState("x", env, fakeTimeout(time.Second), []time.Duration{})
 			want := AgentStateResult{"unavailable", fmt.Sprintf("herdr agent get was killed (exit %d, %s: memory pressure or an external kill)", tc.code, tc.sig), ""}
 			if got != want {
@@ -341,6 +354,7 @@ func TestAgentStateSignalMessagesAndStructuredErrorRetry(t *testing.T) {
 	t.Run("timeout differs from signal exit", func(t *testing.T) {
 		timeout := fakeTimeout(25 * time.Millisecond)
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Delay: timeoutDelay(timeout)}})
+		readyProbe(t, env)
 		got := AgentState("x", env, timeout, []time.Duration{})
 		if got.Cause != timeoutMsg("agent get", timeout) {
 			t.Fatalf("got %#v", got)
@@ -372,6 +386,7 @@ func TestAgentStateJSONErrorValuesMatchJavaScript(t *testing.T) {
 	}
 	for _, tc := range cases {
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Stderr: tc.input, Code: 1}})
+		readyProbe(t, env)
 		got := AgentState("x", env, fakeTimeout(time.Second), []time.Duration{})
 		if got.Cause != tc.want {
 			t.Errorf("input %s: cause %q want %q", tc.input, got.Cause, tc.want)
@@ -379,6 +394,7 @@ func TestAgentStateJSONErrorValuesMatchJavaScript(t *testing.T) {
 	}
 	t.Run("numeric zero code is an error value after successful CLI exit", func(t *testing.T) {
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "x"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`, Stderr: `{"error":{"code":0}}`}})
+		readyProbe(t, env)
 		got := AgentState("x", env, fakeTimeout(time.Second), []time.Duration{})
 		if got.State != "unavailable" || got.Cause != "0:" {
 			t.Fatalf("got %#v", got)
@@ -401,11 +417,13 @@ func TestLiveAgentsFailureSemantics(t *testing.T) {
 	t.Run("JS: herdr timeout: liveAgents throws DieError 4", func(t *testing.T) {
 		timeout := fakeTimeout(25 * time.Millisecond)
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "list"}, Delay: timeoutDelay(timeout)}})
+		readyProbe(t, env)
 		defer catchDie(t, 4, timeoutMsg("agent list", timeout))
 		LiveAgents(env, timeout)
 	})
 	t.Run("JS: success without an agents array dies 4", func(t *testing.T) {
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "list"}, Stdout: `{"result":{}}`}})
+		readyProbe(t, env)
 		var recovered any
 		func() {
 			defer func() { recovered = recover() }()
@@ -418,6 +436,7 @@ func TestLiveAgentsFailureSemantics(t *testing.T) {
 	})
 	t.Run("JS: liveAgents passes through output and herdr exit code", func(t *testing.T) {
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"agent", "list"}, Stdout: "out\n", Stderr: "err\n", Code: 3}})
+		readyProbe(t, env)
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var stdout, stderr bytes.Buffer
 		platform.Stdout, platform.Stderr = &stdout, &stderr
@@ -482,6 +501,10 @@ func catchDie(t *testing.T, code int, contains string) {
 }
 func newFake(t *testing.T, name string, rules []fakecli.Rule) platform.Env {
 	t.Helper()
+	// The no-op readiness rule (argv ["__ready__"], no Call bound) backs
+	// readyProbe. It matches only that argv, so it leaves every other rule's
+	// per-argv call counting untouched.
+	rules = append(rules, fakecli.Rule{Argv: []string{"__ready__"}})
 	dir := t.TempDir()
 	if _, err := fakecli.Install(t, dir, name, rules); err != nil {
 		t.Fatal(err)
@@ -504,6 +527,25 @@ func fakeTimeout(timeout time.Duration) time.Duration {
 		return 5 * time.Second
 	}
 	return timeout
+}
+
+// readyProbe issues one no-deadline fake CLI call (the dedicated no-op rule
+// for argv ["__ready__"]) and waits for it right before a production timed
+// call, so a launch spike of the fixture's fake image is absorbed outside
+// the deadline. It is a readiness heuristic, not a deterministic guarantee:
+// a spike can still hit the timed call inside its window.
+func readyProbe(t *testing.T, env platform.Env) {
+	t.Helper()
+	name := "herdr"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	cmd := exec.Command(filepath.Join(env.Get("PATH"), name), "__ready__")
+	cmd.Env = env.List()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("readiness probe (no deadline) failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
 }
 
 func timeoutDelay(timeout time.Duration) int {
