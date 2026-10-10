@@ -489,6 +489,9 @@ func newTM3bHarnessAt(t *testing.T, root, briefText string) tm3bHarness {
 	env["HERDR_SOHO_PROMPT_SETTLE_SECONDS"] = "0"
 	env["HERDR_SOHO_BRIEF_LINT"] = "off"
 	env["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing", "herdr.sock")
+	// A race-instrumented fake child otherwise pauses for one second on
+	// exit; the harness sets only GORACE and leaves the rest of the env as built.
+	env["GORACE"] = fakecli.RaceOptions(env.List())
 	return tm3bHarness{root: root, state: state, ws: ws, role: role, brief: brief, env: env, ctx: &core.Config{Entries: map[string]core.ConfigEntry{}}}
 }
 

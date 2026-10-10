@@ -68,6 +68,7 @@ func hostileRuntimeEnv(t *testing.T, override string) (platform.Env, []string) {
 	if override != "" {
 		env["HERDR_SOHO_JS_RUNTIME"] = override
 	}
+	env["GORACE"] = fakecli.RaceOptions(env.List())
 	return env, records
 }
 

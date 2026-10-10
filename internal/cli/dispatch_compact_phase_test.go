@@ -100,6 +100,9 @@ func newCompactPhaseDispatchFixture(t *testing.T, root string, clockStep time.Du
 			"HERDR_SOCKET_PATH":                filepath.Join(root, "missing.sock"),
 		},
 	}
+	// A race-instrumented fake child otherwise pauses for one second on
+	// exit; the fixture sets only GORACE and leaves the rest of the env as built.
+	f.env["GORACE"] = fakecli.RaceOptions(f.env.List())
 	return f
 }
 

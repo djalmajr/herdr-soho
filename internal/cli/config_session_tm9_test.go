@@ -284,7 +284,20 @@ func TestTM9ParentTitleSubtests(t *testing.T) {
 		tc := tc
 		t.Run(tc.title, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run", "^"+tc.test+"$")
-			cmd.Env = os.Environ()
+			// The child re-runs the race-instrumented test binary and would
+			// otherwise pause for one second on exit; set only GORACE.
+			childEnv := os.Environ()
+			replaced := false
+			for i, entry := range childEnv {
+				if strings.HasPrefix(entry, "GORACE=") {
+					childEnv[i] = "GORACE=" + fakecli.RaceOptions(childEnv)
+					replaced = true
+				}
+			}
+			if !replaced {
+				childEnv = append(childEnv, "GORACE="+fakecli.RaceOptions(childEnv))
+			}
+			cmd.Env = childEnv
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("existing Go mirror %s failed: %v\n%s", tc.test, err, output)
