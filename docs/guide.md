@@ -164,6 +164,37 @@ herdr-soho collaborate finalize <assignment> --verdict accept|reject            
 
 **Shared implementation.** The native Go CLI owns collaboration policy, assignment validation, peer delivery and the state commands. Plugin entrypoints call those same rules; they do not implement a second policy engine. `capabilities --json` reports `worker_collaboration: 1`. No JavaScript or interpreter fallback is shipped.
 
+## Ephemeral jobs
+
+An ephemeral job is one self-contained orchestration run driven by a dispatcher, not a human inside Herdr. The authority for every command, flag, exit code, field name, event type and limit is `docs/job-contract.md`; this section is the working summary.
+
+**What a job is, and who drives it.** The dispatcher chooses the machine and runs `job start --id <id> --repo <org/repo>` on it, sending the JSON brief on stdin (`--brief <file|->`, where `-` is stdin). `job start` runs outside Herdr: it validates, prepares the isolated worktree at `<checkout>/.worktrees/job-<id>` on branch `job/<id>` (or `--mode workspace`, the checkout itself, only for jobs that change no code), resolves the team, opens the Herdr workspace `job-<id>` and starts `job supervise --id <id>` in its first pane, where the supervisor runs the `job-orchestrator` role. Nobody drives the job's panes by hand: the dispatcher talks only to the job through the commands below, never to the job's workers, and people give feedback to the dispatcher, which relays it to the job.
+
+**Reading and steering.** Every subcommand prints exactly one JSON line on stdout, except `events`, which prints JSON lines. `status`, `wait`, `collect`, `list` and `events` read files only and run under `HERDR_SOHO_NOWRITE=1`, while `amend`, `send`, `cancel` and `ack` write a control file under the job directory that the supervisor picks up, and none of them needs to run inside Herdr.
+
+- `job status --id <id>` — read-only: state, event count, last seq, pending decisions.
+- `job wait --id <id> [--timeout MS]` — blocks until a terminal state.
+- `job events --id <id> [--since <seq>] [--wait MS]` — the event log, the source of truth: the events with `seq > since` in order, long-polling with `--wait`, ending in the fixed `{"eventos":"fim","ultimo_seq":N,"estado":"<state>"}` line.
+- `job collect --id <id> [--md] [--verify]` — the final report (JSON, or `report.md` with `--md`).
+- `job amend --id <id> [<file>|-]` — feedback that changes the contract (goal, acceptance, decisions, constraints, scope) or answers a `question`/`blocked`; it becomes a formal amendment with a new report and unblocks the job. When in doubt, use `amend`.
+- `job send --id <id> [<file>|-]` — a non-blocking note to the job orchestrator; it does not unblock the job.
+- `job ack --id <id> --upto <seq>` — the dispatcher routed every decision up to `<seq>` (monotonic; a lower value is a no-op).
+- `job cancel --id <id> [--grace <seconds>]` — the job waits `--grace` seconds (default 120), then stops and reports what it has.
+- `job close --id <id> [--force]` — release the job (exits 24 while a decision is still unacknowledged; `--force` closes anyway).
+- `job list [--state <state>]` — job counts by state on this machine.
+
+**Machine configuration.** The keys in the user configuration file: `machine_label` (the canonical name of this machine, checked against the brief's `maquina`), `job_orgs` (the comma-separated organizations a job may check out; empty allows no organization), `job_repos_root` (checkout root, default `~/repo.git`, `%USERPROFILE%\repo.git` on Windows; checkouts live at `<root>/<org>/<repo>`), `job_timeout` (the default job budget in minutes, default 120) and `job_wake_cmd` (the optional wake hook, below). The team is configured per machine, not in the repository: in the user configuration directory (`$XDG_CONFIG_HOME/herdr-soho`, `%APPDATA%\herdr-soho` on Windows, otherwise `~/.config/herdr-soho`), `teams/example-org/example-repo.conf` holds the team for one repository on this machine and `teams/default.conf` the machine fallback. Resolution at `job start`: the repository file, else the machine default, else the repository's `.agents/herdr-soho.conf` when it sets at least one `lane.*.roles`, else exit 2 — a job never falls back to the built-in 2/3/4-pane presets.
+
+**Git.** Workers never commit or push, and this is the one intentional adaptation of the general rule that herdr-soho never commits or pushes: the job orchestrator commits once per integrated slice inside the job worktree, and only the job supervisor pushes — every new commit of `job/<id>` (it watches `HEAD` every 30 seconds; `job checkpoint` pushes immediately), never with `--force` — and opens one draft pull request. The supervisor never merges and never marks the pull request ready for review; a job that ends with no commit opens none.
+
+**Release (no automatic cleanup).** Closing a job releases processes only: on a terminal state the supervisor stops active collaborations, releases the workers and the job orchestrator, runs `gc --yes` for the job's registered copies and processes, and closes the Herdr workspace. The worktree, its local branch and `jobs/<id>/` are never removed automatically: `report.json` records `limpeza.worktree: "kept"` and the informational `removivel`, and removing them is the user's decision, done by hand.
+
+**Decisions and acknowledgement.** A relevant decision is published by the job orchestrator as a `decision` event and aggregated into `report.json` under `memoria.global` or `memoria.projeto` with its event `seq`. The dispatcher is the single maintainer of the shared memory: it classifies each decision, stores it, then calls `job ack --id <id> --upto <seq>`. A decision is pending while its `seq` is greater than `decisions_acked_seq`; `status` and `collect` report `decisions_pendentes`, and `job close` exits 24 while one is pending, listing the pending `seq` values.
+
+**The wake hook.** `job_wake_cmd` is an argv string, split on spaces and run without a shell, for the event types the contract marks as waking the dispatcher: the command gets the event JSON on stdin and the environment variables `HERDR_SOHO_JOB_ID`, `HERDR_SOHO_JOB_SEQ`, `HERDR_SOHO_JOB_EVENT` and `HERDR_SOHO_JOB_IDEMPOTENCY_KEY`. It is retried at most 3 times (after 10, 30 and 90 seconds), bounded by a timeout, and a failure is logged as friction and never fails the job; an absolute command path is allowed, values with spaces are not. Waking is best effort — a dispatcher that misses a wake is still correct with `job events`.
+
+**Requirements.** Herdr 0.9.1 or newer (0.9.3 or newer recommended on Windows). On Windows, `job start` never starts a Herdr server; when no running server is reachable it exits 4.
+
 ## Good to know
 
 - The role prompt is the worker's first message; the project's `CLAUDE.md`/`AGENTS.md`, hooks, and permission mode still apply.

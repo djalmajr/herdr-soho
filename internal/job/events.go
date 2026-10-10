@@ -135,7 +135,6 @@ func appendEvent(dir string, now time.Time, in EventIn) (Event, error) {
 		return Event{}, err
 	}
 	line = append(line, '\n')
-	// TODO(DJA-194): verify the wake hook runs only after this sync.
 	file, err := os.OpenFile(filepath.Join(dir, "events.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return Event{}, err

@@ -2,22 +2,27 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/job"
 	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
 // jobFix is one machine with an isolated HOME/XDG and a job_repos_root under
@@ -525,17 +530,17 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Valid inputs refuse after validation, before any write.
+	// supervise still validates and, outside a Herdr workspace, refuses
+	// before the job is looked up; amend, send, cancel and checkpoint now
+	// queue control requests (TestJobControl* below). That is the
+	// intentional adaptation of the phase-1 rows for DJA-194 slice 7b and
+	// the supervise row for slice 6c.
 	for _, args := range [][]string{
-		{"amend", "--id", "job-1", bodyFile},
-		{"send", "--id", "job-1", "-"},
-		{"cancel", "--id", "job-1"},
-		{"cancel", "--id", "job-1", "--grace", "120"},
-		{"checkpoint", "--id", "job-1"},
 		{"supervise", "--id", "job-1"},
+		{"supervise", "--id", "nope"},
 	} {
 		code, out, errOut := f.run(t, args...)
-		want := "herdr-soho: job " + args[0] + ": not available yet\n"
+		want := "herdr-soho: job supervise: run it inside the job's Herdr workspace\n"
 		if code != 2 || out != "" || errOut != want {
 			t.Fatalf("%v code=%d out=%q err=%q", args, code, out, errOut)
 		}
@@ -548,7 +553,6 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 		{"send", "--id", "nope", "-"},
 		{"cancel", "--id", "nope"},
 		{"checkpoint", "--id", "nope"},
-		{"supervise", "--id", "nope"},
 	} {
 		code, out, _ := f.run(t, args...)
 		if code != 3 || out != `{"status":"not_found"}`+"\n" {
@@ -573,6 +577,256 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 	code, _, _ = f.run(t)
 	if code != 2 {
 		t.Fatalf("bare job code=%d", code)
+	}
+}
+
+// jobControlStatusLine is the fresh status line of the fixture job after a
+// control request.
+const jobControlStatusLine = `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[]}` + "\n"
+
+// jobRunningStatusLine is the fixture job's status line once it is
+// running: the live path of job cancel, which queues the request for the
+// supervisor.
+const jobRunningStatusLine = `{"id":"job-1","status":"running","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[]}` + "\n"
+
+// TestJobControlAmendSendWriteRequests: amend and send queue the request
+// file with the exact body, print the fresh status line and exit 0; the
+// body caps, unknown ids and supervise refusal are unchanged.
+func TestJobControlAmendSendWriteRequests(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	ctl := filepath.Join(co, ".herdr-soho", "jobs", "job-1", "control")
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyFile, []byte("amend body\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errOut := f.run(t, "amend", "--id", "job-1", bodyFile)
+	if code != 0 || out != jobControlStatusLine || errOut != "" {
+		t.Fatalf("amend code=%d out=%q err=%q", code, out, errOut)
+	}
+	data, err := os.ReadFile(filepath.Join(ctl, "amend-000001.md"))
+	if err != nil || string(data) != "amend body\n" {
+		t.Fatalf("amend file: %q err=%v", data, err)
+	}
+
+	// send from stdin, then amend again: the counter crosses kinds.
+	old := jobStdin
+	jobStdin = strings.NewReader("send note\n")
+	t.Cleanup(func() { jobStdin = old })
+	code, out, errOut = f.run(t, "send", "--id", "job-1", "-")
+	if code != 0 || out != jobControlStatusLine || errOut != "" {
+		t.Fatalf("send code=%d out=%q err=%q", code, out, errOut)
+	}
+	data, err = os.ReadFile(filepath.Join(ctl, "send-000002.md"))
+	if err != nil || string(data) != "send note\n" {
+		t.Fatalf("send file: %q err=%v", data, err)
+	}
+	bodyFile2 := filepath.Join(t.TempDir(), "body2.md")
+	if err := os.WriteFile(bodyFile2, []byte("second amend"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ = f.run(t, "amend", "--id", "job-1", bodyFile2)
+	if code != 0 || out != jobControlStatusLine {
+		t.Fatalf("amend 2 code=%d out=%q", code, out)
+	}
+	data, err = os.ReadFile(filepath.Join(ctl, "amend-000003.md"))
+	if err != nil || string(data) != "second amend" {
+		t.Fatalf("amend 2 file: %q err=%v", data, err)
+	}
+
+	// The caps are unchanged: over 64 KiB amend and over 16 KiB send refuse
+	// with exit 2; the exact caps are accepted.
+	bigFile := filepath.Join(t.TempDir(), "big.md")
+	if err := os.WriteFile(bigFile, []byte(strings.Repeat("a", 64<<10+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = f.run(t, "amend", "--id", "job-1", bigFile)
+	if code != 2 || out != "" || !strings.Contains(errOut, "exceeds 64 KiB") {
+		t.Fatalf("big amend code=%d out=%q err=%q", code, out, errOut)
+	}
+	if err := os.WriteFile(bigFile, []byte(strings.Repeat("a", 64<<10)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, _ = f.run(t, "amend", "--id", "job-1", bigFile)
+	if code != 0 {
+		t.Fatalf("64 KiB amend code=%d", code)
+	}
+	old2 := jobStdin
+	jobStdin = strings.NewReader(strings.Repeat("b", 16<<10+1))
+	t.Cleanup(func() { jobStdin = old2 })
+	code, out, errOut = f.run(t, "send", "--id", "job-1", "-")
+	if code != 2 || out != "" || !strings.Contains(errOut, "exceeds 16 KiB") {
+		t.Fatalf("big send code=%d out=%q err=%q", code, out, errOut)
+	}
+
+	// Unknown ids are not_found, before any write.
+	code, out, errOut = f.run(t, "amend", "--id", "nope", bodyFile)
+	if code != 3 || out != `{"status":"not_found"}`+"\n" || errOut != "" {
+		t.Fatalf("unknown amend code=%d out=%q err=%q", code, out, errOut)
+	}
+	code, out, errOut = f.run(t, "send", "--id", "nope", "-")
+	if code != 3 || out != `{"status":"not_found"}`+"\n" || errOut != "" {
+		t.Fatalf("unknown send code=%d out=%q err=%q", code, out, errOut)
+	}
+
+	// supervise, outside a Herdr workspace, refuses (the phase-1 row
+	// adapted for slice 6c: the supervisor arrives in the same slice).
+	code, out, errOut = f.run(t, "supervise", "--id", "job-1")
+	if code != 2 || out != "" || errOut != "herdr-soho: job supervise: run it inside the job's Herdr workspace\n" {
+		t.Fatalf("supervise code=%d out=%q err=%q", code, out, errOut)
+	}
+}
+
+// TestJobControlCancelCheckpoint: cancel queues {"grace":120} by default
+// (or the --grace value), checkpoint queues the empty marker; a repeat while
+// one is pending is a no-op with exit 0; a terminal job refuses amend/send
+// with exit 2 and writes nothing for cancel/checkpoint. The cancel rows run
+// on a running job: an accepted or preparing job is a crashed start that
+// the cancel recovers (TestJobCancelRecoversTheCrashedStart).
+func TestJobControlCancelCheckpoint(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	ctl := filepath.Join(co, ".herdr-soho", "jobs", "job-1", "control")
+	f.setStatus(t, co, "job-1", "running")
+
+	code, out, errOut := f.run(t, "cancel", "--id", "job-1")
+	if code != 0 || out != jobRunningStatusLine || errOut != "" {
+		t.Fatalf("cancel code=%d out=%q err=%q", code, out, errOut)
+	}
+	data, err := os.ReadFile(filepath.Join(ctl, "cancel.json"))
+	if err != nil || string(data) != `{"grace":120}` {
+		t.Fatalf("cancel file: %q err=%v", data, err)
+	}
+
+	// A second cancel while one is pending is a no-op with exit 0: the
+	// first file stays with its original grace.
+	code, out, errOut = f.run(t, "cancel", "--id", "job-1", "--grace", "30")
+	if code != 0 || out != jobRunningStatusLine || errOut != "" {
+		t.Fatalf("cancel again code=%d out=%q err=%q", code, out, errOut)
+	}
+	data, _ = os.ReadFile(filepath.Join(ctl, "cancel.json"))
+	if string(data) != `{"grace":120}` {
+		t.Fatalf("cancel overwritten: %q", data)
+	}
+
+	// --grace applies to a fresh queue: retire the file, then ask again.
+	if err := os.Remove(filepath.Join(ctl, "cancel.json")); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ = f.run(t, "cancel", "--id", "job-1", "--grace", "30")
+	if code != 0 || out != jobRunningStatusLine {
+		t.Fatalf("cancel grace code=%d out=%q", code, out)
+	}
+	data, err = os.ReadFile(filepath.Join(ctl, "cancel.json"))
+	if err != nil || string(data) != `{"grace":30}` {
+		t.Fatalf("cancel grace file: %q err=%v", data, err)
+	}
+
+	code, out, errOut = f.run(t, "checkpoint", "--id", "job-1")
+	if code != 0 || out != jobRunningStatusLine || errOut != "" {
+		t.Fatalf("checkpoint code=%d out=%q err=%q", code, out, errOut)
+	}
+	data, err = os.ReadFile(filepath.Join(ctl, "checkpoint"))
+	if err != nil || len(data) != 0 {
+		t.Fatalf("checkpoint file: %q err=%v", data, err)
+	}
+	code, out, _ = f.run(t, "checkpoint", "--id", "job-1")
+	if code != 0 || out != jobRunningStatusLine {
+		t.Fatalf("checkpoint again code=%d out=%q", code, out)
+	}
+
+	// Unknown ids are not_found for all four subcommands.
+	for _, sub := range []string{"cancel", "checkpoint"} {
+		code, out, errOut := f.run(t, sub, "--id", "nope")
+		if code != 3 || out != `{"status":"not_found"}`+"\n" || errOut != "" {
+			t.Fatalf("%s code=%d out=%q err=%q", sub, code, out, errOut)
+		}
+	}
+
+	// A terminal job: amend and send refuse with exit 2, cancel and
+	// checkpoint are no-ops with exit 0 and write nothing.
+	f2 := newJobFix(t)
+	co2 := f2.checkout(t, "example-org", "example-repo")
+	f2.startJob(t, co2)
+	f2.setStatus(t, co2, "job-1", "done")
+	ctl2 := filepath.Join(co2, ".herdr-soho", "jobs", "job-1", "control")
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyFile, []byte("amend body\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = f2.run(t, "amend", "--id", "job-1", bodyFile)
+	if code != 2 || out != "" || !strings.Contains(errOut, "job is not active") {
+		t.Fatalf("terminal amend code=%d out=%q err=%q", code, out, errOut)
+	}
+	code, out, errOut = f2.run(t, "send", "--id", "job-1", bodyFile)
+	if code != 2 || out != "" || !strings.Contains(errOut, "job is not active") {
+		t.Fatalf("terminal send code=%d out=%q err=%q", code, out, errOut)
+	}
+	code, out, errOut = f2.run(t, "cancel", "--id", "job-1", "--grace", "30")
+	if code != 0 || out == "" || errOut != "" {
+		t.Fatalf("terminal cancel code=%d out=%q err=%q", code, out, errOut)
+	}
+	code, out, errOut = f2.run(t, "checkpoint", "--id", "job-1")
+	if code != 0 || out == "" || errOut != "" {
+		t.Fatalf("terminal checkpoint code=%d out=%q err=%q", code, out, errOut)
+	}
+	if entries, err := os.ReadDir(ctl2); err != nil || len(entries) != 0 {
+		t.Fatalf("terminal job wrote control files: %v err=%v", entries, err)
+	}
+
+	// A single stray positional argument is refused before any write:
+	// exit 2 naming the argument, nothing under control/.
+	t.Run("a stray positional argument is refused before any write", func(t *testing.T) {
+		f3 := newJobFix(t)
+		co3 := f3.checkout(t, "example-org", "example-repo")
+		f3.startJob(t, co3)
+		ctl3 := filepath.Join(co3, ".herdr-soho", "jobs", "job-1", "control")
+
+		for _, sub := range []string{"cancel", "checkpoint"} {
+			code, out, errOut := f3.run(t, sub, "--id", "job-1", "stray")
+			if code != 2 || out != "" || !strings.Contains(errOut, "job "+sub+": unexpected argument 'stray'") {
+				t.Fatalf("%s code=%d out=%q err=%q", sub, code, out, errOut)
+			}
+		}
+		// The store start pre-creates the control directory; the refusal
+		// must leave it without a single file.
+		if entries, err := os.ReadDir(ctl3); err == nil {
+			if len(entries) != 0 {
+				t.Fatalf("stray argument wrote control files: %v", entries)
+			}
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stray argument: %v", err)
+		}
+	})
+}
+
+// TestJobCancelRecoversTheCrashedStart: a job cancel of a crashed preparing
+// job (the starter died before the supervisor launched) recovers it instead
+// of queueing: the job ends failed with the report, the status line shows
+// failed, and nothing is queued for a supervisor that will never run.
+func TestJobCancelRecoversTheCrashedStart(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	// The crashed preparing start: no workspace id and no intent recorded
+	// (a crash before the intent), so there is nothing to close.
+	f.setStatus(t, co, "job-1", "preparing")
+	code, out, errOut := f.run(t, "cancel", "--id", "job-1")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, `"status":"failed"`) || !strings.Contains(out, `"motivo":"job: start interrupted"`) {
+		t.Fatalf("status line = %q", out)
+	}
+	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	if _, err := os.Stat(filepath.Join(jobDir, "report.json")); err != nil {
+		t.Fatalf("report.json: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(jobDir, "control", "cancel.json")); !os.IsNotExist(err) {
+		t.Fatalf("the cancel was queued anyway: %v", err)
 	}
 }
 
@@ -649,5 +903,609 @@ func TestJobUsage(t *testing.T) {
 	platform.Stdout, platform.Stderr = oldOut, oldErr
 	if code != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), "herdr-soho job") {
 		t.Fatalf("job --help code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+}
+
+// jobStartEE stages a non-dry-run job start: a real git on the fixture
+// PATH, a local bare remote with a main branch, an existing checkout
+// cloned from it, and fake gh and herdr binaries.
+type jobStartEE struct {
+	f        *jobFix
+	env      platform.Env
+	gitEnv   platform.Env
+	bare     string
+	checkout string
+	fakeDir  string
+	selfExe  string
+}
+
+// linkSystemGit puts the real git on the fixture PATH (symlink, or a copy
+// where symlinks are unavailable).
+func linkSystemGit(t *testing.T, dir string) {
+	t.Helper()
+	path, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("locate the system git: %v", err)
+	}
+	name := "git"
+	if runtime.GOOS == "windows" {
+		name = "git.exe"
+	}
+	target := filepath.Join(dir, name)
+	if err := os.Symlink(path, target); err != nil {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("reading the system git: %v", readErr)
+		}
+		if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
+			t.Fatalf("copying the system git: %v", writeErr)
+		}
+	}
+}
+
+// runGit runs a real git with the given env, bounded by a 60 s deadline.
+func runGit(t *testing.T, env platform.Env, dir string, args ...string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.WaitDelay = time.Second
+	cmd.Dir = dir
+	cmd.Env = env.List()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %s: %v", args, out, err)
+	}
+}
+
+func newJobStartEE(t *testing.T) *jobStartEE {
+	t.Helper()
+	f := newJobFix(t)
+	f.setMachine(t)
+	f.setTeam(t)
+	bin := filepath.Join(f.root, "bin")
+	linkSystemGit(t, bin)
+
+	// A hermetic git env for the fixture's own git commands.
+	gitEnv := f.env.Clone()
+	gitEnv["GIT_CONFIG_NOSYSTEM"] = "1"
+	gitEnv["GIT_CONFIG_GLOBAL"] = filepath.Join(f.root, "gitconfig")
+	gitEnv["GIT_AUTHOR_NAME"] = "fixture"
+	gitEnv["GIT_AUTHOR_EMAIL"] = "fixture@example.org"
+	gitEnv["GIT_COMMITTER_NAME"] = "fixture"
+	gitEnv["GIT_COMMITTER_EMAIL"] = "fixture@example.org"
+	if err := os.WriteFile(gitEnv["GIT_CONFIG_GLOBAL"], []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A bare remote with a main branch, then an existing checkout of it.
+	bare := filepath.Join(f.root, "bare.git")
+	seed := filepath.Join(f.root, "seed")
+	if err := os.MkdirAll(seed, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, gitEnv, f.root, "init", "-q", "--bare", bare)
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"commit", "-q", "--allow-empty", "-m", "init"},
+		{"branch", "-M", "main"},
+		{"remote", "add", "origin", bare},
+		{"push", "-q", "origin", "main"},
+	} {
+		runGit(t, gitEnv, seed, args...)
+	}
+	runGit(t, gitEnv, bare, "symbolic-ref", "HEAD", "refs/heads/main")
+	checkout := filepath.Join(f.repos, "example-org", "example-repo")
+	if err := os.MkdirAll(filepath.Dir(checkout), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, gitEnv, f.root, "clone", "-q", bare, checkout)
+
+	// Fake gh and herdr on a PATH that resolves them before the fixture git.
+	fakeDir := t.TempDir()
+	if _, err := fakecli.Install(t, fakeDir, "gh", []fakecli.Rule{{
+		Argv: []string{"auth", "status"},
+	}}); err != nil {
+		t.Fatalf("install the fake gh: %v", err)
+	}
+	worktree := filepath.Join(checkout, ".worktrees", "job-job-1")
+	// The reachability probe and the create-intent record both read the
+	// workspace list; the list is the contract's real shape.
+	herdrRules := []fakecli.Rule{
+		{Argv: []string{"workspace", "list"}, Stdout: `{"result":{"workspaces":[]}}`},
+		{Argv: []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--no-focus"},
+			Stdout: `{"result":{"workspace_id":"w9","root_pane":{"pane_id":"w9:p1"}}}`},
+		{Argv: []string{"pane", "run", "w9:p1"}, ArgvPrefix: true},
+	}
+	if _, err := fakecli.Install(t, fakeDir, "herdr", herdrRules); err != nil {
+		t.Fatalf("install the fake herdr: %v", err)
+	}
+	env := platform.Env{}
+	for _, item := range fakecli.Env(f.env.List(), fakeDir, fakecli.EnvOptions{SystemPath: bin}) {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && key != "" {
+			env[key] = value
+		}
+	}
+	selfExe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve the test executable: %v", err)
+	}
+	return &jobStartEE{f: f, env: env, gitEnv: gitEnv, bare: bare, checkout: checkout, fakeDir: fakeDir, selfExe: selfExe}
+}
+
+// herdrCalls reads the fake herdr call log; a missing log means no call.
+func (ee *jobStartEE) herdrCalls(t *testing.T) []fakecli.Call {
+	t.Helper()
+	calls, err := fakecli.ReadCalls(filepath.Join(ee.fakeDir, "herdr.calls.jsonl"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("read the herdr call log: %v", err)
+	}
+	return calls
+}
+
+func (ee *jobStartEE) start(t *testing.T, briefFile string) (int, string, string) {
+	t.Helper()
+	return ee.f.runEnv(t, ee.env, "start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", briefFile)
+}
+
+func TestJobStartStartsTheJob(t *testing.T) {
+	ee := newJobStartEE(t)
+	briefFile := ee.f.briefFile(t, jobStartBrief)
+	code, out, errOut := ee.start(t, briefFile)
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	if strings.Count(out, "\n") != 1 || !strings.HasSuffix(out, "\n") {
+		t.Fatalf("stdout = %q, want one line", out)
+	}
+	var line map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(out, "\n")), &line); err != nil {
+		t.Fatalf("status line: %v: %q", err, out)
+	}
+	if line["id"] != "job-1" || line["status"] != "running" || line["motivo"] != nil {
+		t.Fatalf("status line = %#v", line)
+	}
+	eventos, _ := line["eventos"].(map[string]any)
+	if eventos["total"] != float64(2) || eventos["ultimo_seq"] != float64(2) {
+		t.Fatalf("eventos = %#v", line["eventos"])
+	}
+	if _, ok := line["duplicate_of"]; ok {
+		t.Fatalf("duplicate_of on a fresh start: %#v", line)
+	}
+
+	// Exactly the contract's herdr calls: the reachability list, the
+	// create-intent list, the create, and the supervisor run.
+	calls := ee.herdrCalls(t)
+	if len(calls) != 4 {
+		t.Fatalf("herdr calls = %+v", calls)
+	}
+	worktree := filepath.Join(ee.checkout, ".worktrees", "job-job-1")
+	if want := []string{"workspace", "list"}; !reflect.DeepEqual(calls[0].Argv, want) {
+		t.Fatalf("call 0 = %v", calls[0].Argv)
+	}
+	if want := []string{"workspace", "list"}; !reflect.DeepEqual(calls[1].Argv, want) {
+		t.Fatalf("call 1 = %v", calls[1].Argv)
+	}
+	if want := []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--no-focus"}; !reflect.DeepEqual(calls[2].Argv, want) {
+		t.Fatalf("call 2 = %v", calls[2].Argv)
+	}
+	if want := []string{"pane", "run", "w9:p1", ee.selfExe, "job", "supervise", "--id", "job-1"}; !reflect.DeepEqual(calls[3].Argv, want) {
+		t.Fatalf("call 3 = %v", calls[3].Argv)
+	}
+	// gh ran exactly once: auth status.
+	ghCalls, err := fakecli.ReadCalls(filepath.Join(ee.fakeDir, "gh.calls.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ghCalls) != 1 || !reflect.DeepEqual(ghCalls[0].Argv, []string{"auth", "status"}) {
+		t.Fatalf("gh calls = %+v", ghCalls)
+	}
+
+	// The worktree exists on the job branch.
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	branchOut, err := exec.Command("git", "-C", worktree, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(branchOut) != "job/job-1\n" {
+		t.Fatalf("branch = %q", branchOut)
+	}
+
+	// The session file: the team pairs in order, mode 0600.
+	cfg := core.LoadConfig(ee.env, ee.checkout)
+	stateRoot := core.StateRootPath(&cfg, ee.env, ee.checkout)
+	session := filepath.Join(stateRoot, "w9", "session.conf")
+	raw, err := os.ReadFile(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "panes=3\nlane.build.roles=implementer\nlane.review.roles=reviewer\nlane.review.effort=high\n"
+	if string(raw) != want {
+		t.Fatalf("session.conf = %q, want %q", raw, want)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("session.conf mode = %v", info.Mode().Perm())
+		}
+	}
+
+	// The run facts in state.json.
+	machine, err := job.LoadMachine(platform.Current(), ee.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := ee.f.store(t, ee.checkout).Snapshot("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := snap.State
+	if st.Checkout != ee.checkout || st.Dir != worktree || st.Branch != "job/job-1" ||
+		st.Base != "main" || len(st.BaseSHA) != 40 || st.Modo != "worktree" ||
+		st.TimeoutMin != machine.TimeoutMin || st.WorkspaceID != "w9" || st.RootPane != "w9:p1" ||
+		st.StartedAt == "" {
+		t.Fatalf("run facts = %+v (timeout want %d)", st, machine.TimeoutMin)
+	}
+}
+
+func TestJobStartDuplicateAndConflict(t *testing.T) {
+	ee := newJobStartEE(t)
+	briefFile := ee.f.briefFile(t, jobStartBrief)
+	changed := ee.f.briefFile(t, strings.Replace(jobStartBrief, "Ship the change.", "Ship another change.", 1))
+
+	code, out, errOut := ee.start(t, briefFile)
+	if code != 0 || errOut != "" {
+		t.Fatalf("first code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, `"status":"running"`) {
+		t.Fatalf("first out=%q", out)
+	}
+
+	// The id is now held: the same brief returns duplicate_of and exits 0,
+	// without a second workspace.
+	code, out, errOut = ee.start(t, briefFile)
+	if code != 0 || errOut != "" {
+		t.Fatalf("duplicate code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, `"duplicate_of":"job-1"`) || !strings.Contains(out, `"status":"running"`) {
+		t.Fatalf("duplicate out=%q", out)
+	}
+	creates := 0
+	for _, call := range ee.herdrCalls(t) {
+		if len(call.Argv) >= 2 && call.Argv[0] == "workspace" && call.Argv[1] == "create" {
+			creates++
+		}
+	}
+	if creates != 1 {
+		t.Fatalf("workspace create calls = %d, want 1", creates)
+	}
+
+	// A changed brief is exit 20.
+	code, out, errOut = ee.start(t, changed)
+	if code != 20 || out != "" || !strings.Contains(errOut, "different brief") {
+		t.Fatalf("conflict code=%d out=%q err=%q", code, out, errOut)
+	}
+}
+
+// TestJobStartDuplicateRecoversTheCrashedStart: the duplicate job start of
+// a crashed preparing job (the start recorded the create intent, created
+// the workspace, and died before recording it) recovers it: the Herdr
+// lists the preexisting and the new job-job-1 workspaces, the recovery
+// closes exactly the new one, and the status line shows failed with
+// duplicate_of.
+func TestJobStartDuplicateRecoversTheCrashedStart(t *testing.T) {
+	ee := newJobStartEE(t)
+	store := ee.f.store(t, ee.checkout)
+	// The crashed preparing job: recorded, moved to preparing, with the
+	// create intent; the workspace it created is still open in the Herdr.
+	if _, err := store.Start("job-1", []byte(jobStartBrief)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition("job-1", job.StatusPreparing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Record("job-1", func(st *job.State) {
+		st.WorkspaceLabel = "job-job-1"
+		st.WorkspacePreexisting = []string{"w0"}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The fake Herdr lists the preexisting job-job-1 workspace (w0) and
+	// the crashed start's new one (w9), and accepts the close of w9.
+	configPath := filepath.Join(ee.fakeDir, "herdr.json")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var script struct {
+		Log          string         `json:"log"`
+		Rules        []fakecli.Rule `json:"rules"`
+		CaptureStdin bool           `json:"capture_stdin,omitempty"`
+		CaptureEnv   []string       `json:"capture_env,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &script); err != nil {
+		t.Fatal(err)
+	}
+	foundList := false
+	for i := range script.Rules {
+		if reflect.DeepEqual(script.Rules[i].Argv, []string{"workspace", "list"}) {
+			script.Rules[i].Stdout = `{"result":{"workspaces":[{"workspace_id":"w0","label":"job-job-1","pane_count":1},{"workspace_id":"w9","label":"job-job-1","pane_count":1}]}}`
+			foundList = true
+		}
+	}
+	if !foundList {
+		t.Fatal("the workspace list rule is missing")
+	}
+	script.Rules = append(script.Rules, fakecli.Rule{Argv: []string{"workspace", "close", "w9"}})
+	rewritten, err := json.Marshal(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, rewritten, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	briefFile := ee.f.briefFile(t, jobStartBrief)
+	code, out, errOut := ee.start(t, briefFile)
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, `"status":"failed"`) || !strings.Contains(out, `"duplicate_of":"job-1"`) ||
+		!strings.Contains(out, `"motivo":"job: start interrupted"`) {
+		t.Fatalf("status line = %q", out)
+	}
+	// The recovery made exactly the list and the close of the new
+	// workspace: no create, no pane run.
+	calls := ee.herdrCalls(t)
+	if len(calls) != 2 {
+		t.Fatalf("herdr calls = %+v", calls)
+	}
+	if want := []string{"workspace", "list"}; !reflect.DeepEqual(calls[0].Argv, want) {
+		t.Fatalf("call 0 = %v", calls[0].Argv)
+	}
+	if want := []string{"workspace", "close", "w9"}; !reflect.DeepEqual(calls[1].Argv, want) {
+		t.Fatalf("call 1 = %v", calls[1].Argv)
+	}
+	snap, err := store.Snapshot("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.State.Status != job.StatusFailed || snap.State.WorkspaceID != "w9" || !snap.State.WorkspaceClosed {
+		t.Fatalf("state = %+v", snap.State)
+	}
+	cfg := core.LoadConfig(ee.env, ee.checkout)
+	stateRoot := core.StateRootPath(&cfg, ee.env, ee.checkout)
+	if _, err := os.Stat(filepath.Join(stateRoot, "jobs", "job-1", "report.json")); err != nil {
+		t.Fatalf("report.json: %v", err)
+	}
+}
+
+// TestJobSuperviseCLIRefusals covers the supervisor entry: outside a Herdr
+// workspace it refuses before the job is looked up, an unknown id inside
+// one is not_found, and NOWRITE still refuses the writing subcommand.
+func TestJobSuperviseCLIRefusals(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	want := "herdr-soho: job supervise: run it inside the job's Herdr workspace\n"
+
+	// Outside Herdr, both a known and an unknown id refuse with exit 2.
+	for _, args := range [][]string{
+		{"supervise", "--id", "job-1"},
+		{"supervise", "--id", "nope"},
+	} {
+		code, out, errOut := f.run(t, args...)
+		if code != 2 || out != "" || errOut != want {
+			t.Fatalf("%v code=%d out=%q err=%q", args, code, out, errOut)
+		}
+	}
+
+	// Inside Herdr, an unknown id is not_found before the supervisor runs.
+	herdr := platform.Env{}
+	for name, value := range f.env {
+		herdr[name] = value
+	}
+	herdr["HERDR_ENV"] = "1"
+	code, out, errOut := f.runEnv(t, herdr, "supervise", "--id", "nope")
+	if code != 3 || out != `{"status":"not_found"}`+"\n" || errOut != "" {
+		t.Fatalf("unknown id code=%d out=%q err=%q", code, out, errOut)
+	}
+
+	// NOWRITE refuses the writing subcommand, even inside Herdr.
+	nowrite := platform.Env{}
+	for name, value := range herdr {
+		nowrite[name] = value
+	}
+	nowrite["HERDR_SOHO_NOWRITE"] = "1"
+	code, out, errOut = f.runEnv(t, nowrite, "supervise", "--id", "job-1")
+	if code != 2 || out != "" || !strings.Contains(errOut, "HERDR_SOHO_NOWRITE=1 is read-only: job supervise writes") {
+		t.Fatalf("NOWRITE code=%d out=%q err=%q", code, out, errOut)
+	}
+}
+
+// TestJobSuperviseRunsTheSupervisor runs the whole path: job supervise
+// builds the supervisor with the fake executable as the team command
+// runner, the supervisor spawns and dispatches the orchestrator, watches
+// it to done, copies the report and exits 0 with the done status line.
+func TestJobSuperviseRunsTheSupervisor(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+
+	// The start slice's run facts: a running job with its worktree dir.
+	body := fmt.Sprintf(`{"schema":1,"id":"job-1","status":"running","brief_sha256":"x","decisions_acked_seq":0,"motivo":null,"dir":%q}`+"\n", co)
+	if err := os.WriteFile(filepath.Join(jobDir, "state.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reportDir := t.TempDir()
+	reportPath := filepath.Join(reportDir, "report.md")
+	if err := os.WriteFile(reportPath, []byte("# Report — job\n\n- Item 1 [done] did the thing\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeDir := t.TempDir()
+	exe, err := fakecli.Install(t, fakeDir, "herdr-soho", []fakecli.Rule{
+		{Argv: []string{"session", "set", "lane.job.roles", "job-orchestrator"}},
+		{Argv: []string{"session", "set", "lane.job.panes", "1"}},
+		{Argv: []string{"config"}, Stdout: "KEY                VALUE                          SOURCE\nmax_workers        3                              defaults\n"},
+		{Argv: []string{"spawn", "job-orchestrator", "--cwd", co, "--approvals", "full", "--fresh"}, Stdout: `{"name":"orch-1","pane_id":"w9:p2","status":"ready"}` + "\n"},
+		{Argv: []string{"dispatch", "orch-1", filepath.Join(jobDir, "orchestrator-brief.md"), "--no-wait"}},
+		{Argv: []string{"status", "orch-1"}, Stdout: "orch-1\tdone\t" + reportPath + "\t-\t-\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := platform.Env{}
+	for name, value := range f.env {
+		env[name] = value
+	}
+	for _, item := range fakecli.Env(nil, fakeDir) {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && key != "" {
+			env[key] = value
+		}
+	}
+	// The launcher resolves the override's symlinks, so it must point at a
+	// regular copy of the fake. The copy keeps the fake's own name, including
+	// the platform extension (.exe on Windows): the fake derives its config
+	// file name from its executable's base name.
+	fakeData, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realDir := t.TempDir()
+	real := filepath.Join(realDir, filepath.Base(exe))
+	if err := os.WriteFile(real, fakeData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env["HERDR_ENV"] = "1"
+	env["HERDR_SOHO_BIN"] = real
+
+	code, out, errOut := f.runEnv(t, env, "supervise", "--id", "job-1")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, `"status":"done"`) || !strings.Contains(out, `"id":"job-1"`) {
+		t.Fatalf("status line out=%q", out)
+	}
+	// The orchestrator's report is the job report now, byte for byte.
+	copied, err := os.ReadFile(filepath.Join(jobDir, "report.md"))
+	if err != nil || string(copied) != "# Report — job\n\n- Item 1 [done] did the thing\n" {
+		t.Fatalf("report.md = %q err=%v", copied, err)
+	}
+	brief, err := os.ReadFile(filepath.Join(jobDir, "orchestrator-brief.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(brief), "- Job id: job-1\n") || !strings.Contains(string(brief), "herdr-soho job checkpoint --id job-1") {
+		t.Fatalf("orchestrator brief = %q", brief)
+	}
+	state, err := os.ReadFile(filepath.Join(jobDir, "state.json"))
+	if err != nil || !strings.Contains(string(state), `"status":"done"`) || !strings.Contains(string(state), `"orchestrator":"orch-1"`) {
+		t.Fatalf("state.json = %q err=%v", state, err)
+	}
+	events, err := os.ReadFile(filepath.Join(jobDir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tipo := range []string{`"tipo":"worker_spawned"`, `"tipo":"worker_done"`, `"tipo":"terminal"`} {
+		if !strings.Contains(string(events), tipo) {
+			t.Fatalf("events missing %s: %s", tipo, events)
+		}
+	}
+}
+
+// TestJobStartUnknownEnvelopeGoesOnlyToFriction pins the unknown
+// workspace-create envelope as friction-only: the start exits 4 with the
+// fixed stderr line, and the raw envelope reaches none of stdout, stderr,
+// state.json, or report.json — it lands in the job's friction.log as an
+// error line, never as a warning.
+func TestJobStartUnknownEnvelopeGoesOnlyToFriction(t *testing.T) {
+	ee := newJobStartEE(t)
+	configPath := filepath.Join(ee.fakeDir, "herdr.json")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var script struct {
+		Log          string         `json:"log"`
+		Rules        []fakecli.Rule `json:"rules"`
+		CaptureStdin bool           `json:"capture_stdin,omitempty"`
+		CaptureEnv   []string       `json:"capture_env,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &script); err != nil {
+		t.Fatal(err)
+	}
+	const secret = `{"result":{"token":"SECRET_MARKER_r2"}}`
+	found := false
+	for i := range script.Rules {
+		if len(script.Rules[i].Argv) >= 2 && script.Rules[i].Argv[0] == "workspace" && script.Rules[i].Argv[1] == "create" {
+			script.Rules[i].Stdout = secret
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("create rule missing")
+	}
+	rewritten, err := json.Marshal(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, rewritten, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	briefFile := ee.f.briefFile(t, jobStartBrief)
+	code, out, errOut := ee.start(t, briefFile)
+	if code != 4 {
+		t.Fatalf("code=%d out=%q err=%q, want exit 4", code, out, errOut)
+	}
+	const marker = "SECRET_MARKER_r2"
+	if strings.Contains(out, marker) {
+		t.Fatalf("stdout carries the raw envelope: %q", out)
+	}
+	if strings.Contains(errOut, marker) {
+		t.Fatalf("stderr carries the raw envelope: %q", errOut)
+	}
+	if !strings.Contains(errOut, "job: herdr workspace create returned an unknown result") {
+		t.Fatalf("stderr = %q, want the fixed unknown-result line", errOut)
+	}
+	cfg := core.LoadConfig(ee.env, ee.checkout)
+	stateRoot := core.StateRootPath(&cfg, ee.env, ee.checkout)
+	jobDir := filepath.Join(stateRoot, "jobs", "job-1")
+	for _, name := range []string{"state.json", "report.json"} {
+		body, err := os.ReadFile(filepath.Join(jobDir, name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if strings.Contains(string(body), marker) {
+			t.Fatalf("%s carries the raw envelope: %s", name, body)
+		}
+	}
+	friction, err := os.ReadFile(filepath.Join(jobDir, "friction.log"))
+	if err != nil {
+		t.Fatalf("friction.log: %v", err)
+	}
+	markerInFriction := false
+	for _, line := range strings.Split(string(friction), "\n") {
+		if !strings.Contains(line, marker) {
+			continue
+		}
+		markerInFriction = true
+		if !strings.Contains(line, "\terror(exit 4)\t") {
+			t.Fatalf("friction line carries the envelope outside the error sink: %q", line)
+		}
+	}
+	if !markerInFriction {
+		t.Fatalf("friction.log is missing the raw envelope: %s", friction)
 	}
 }

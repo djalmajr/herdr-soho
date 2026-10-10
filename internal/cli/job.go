@@ -71,10 +71,11 @@ var jobLifecycleStates = map[string]bool{
 
 const jobWaitBoundMS = 600000
 
-// cmdJob dispatches the job command family. It runs outside Herdr and never
-// calls Herdr: the read subcommands (status, wait, events, collect, list)
-// read files only; the writing subcommands validate their inputs and, in
-// this build, only start --dry-run, ack, close and note change state.
+// cmdJob dispatches the job command family. It runs outside Herdr; the
+// read subcommands (status, wait, events, collect, list) read files only;
+// start (without --dry-run) records the job, prepares the checkout, opens
+// the Herdr workspace and launches the supervisor; supervise runs the
+// supervisor inside the job's workspace; ack, close and note change state.
 func cmdJob(args []string, env platform.Env, cwd string) int {
 	if len(args) == 0 {
 		platform.Die("usage: job <status|wait|events|collect|list> --id <id> [--flags]", 2)
@@ -103,8 +104,21 @@ func cmdJob(args []string, env platform.Env, cwd string) int {
 		return jobClose(rest, env)
 	case "note":
 		return jobNote(rest, env)
+	case "amend":
+		return jobAmend(rest, env)
+	case "send":
+		return jobSend(rest, env)
+	case "cancel":
+		return jobCancel(rest, env)
+	case "checkpoint":
+		return jobCheckpoint(rest, env)
+	case "supervise":
+		return jobSupervise(rest, env)
 	default:
-		return jobRefusePhase2(sub, rest, env)
+		// Every subcommand in the flag spec has a case above; the spec
+		// check already refused the unknown ones.
+		platform.Die("job "+sub+": not available yet", 2)
+		return 0
 	}
 }
 
@@ -295,8 +309,9 @@ type jobStatusLine struct {
 		Total     int `json:"total"`
 		UltimoSeq int `json:"ultimo_seq"`
 	} `json:"eventos"`
-	DecisionsAckedSeq  int   `json:"decisions_acked_seq"`
-	DecisionsPendentes []int `json:"decisions_pendentes"`
+	DecisionsAckedSeq  int    `json:"decisions_acked_seq"`
+	DecisionsPendentes []int  `json:"decisions_pendentes"`
+	DuplicateOf        string `json:"duplicate_of,omitempty"`
 }
 
 func printJobStatusLine(snap job.Snapshot) {
@@ -306,6 +321,7 @@ func printJobStatusLine(snap job.Snapshot) {
 		Motivo:             snap.State.Motivo,
 		DecisionsAckedSeq:  snap.State.DecisionsAckedSeq,
 		DecisionsPendentes: snap.Pending,
+		DuplicateOf:        snap.State.DuplicateOf,
 	}
 	line.Eventos.Total = snap.EventTotal
 	line.Eventos.UltimoSeq = snap.LastSeq
@@ -729,43 +745,180 @@ func jobNote(args []string, env platform.Env) int {
 	return 0
 }
 
-// jobRefusePhase2 validates the phase-2 subcommand's inputs — including that
-// the job exists and, for amend/send, the body within its cap — and then
-// refuses: the side effects arrive in phase 2.
-//
-// TODO(DJA-194): phase 2 — amend, send, cancel, checkpoint and supervise.
-func jobRefusePhase2(sub string, args []string, env platform.Env) int {
-	vals, _, pos := parseJobFlags(sub, args)
+// jobSupervise runs the job supervisor: it requires the job's Herdr
+// workspace (HERDR_ENV=1), locates the job, builds the supervisor with this
+// executable as the team command runner and the job friction file as its
+// friction log, prints the job's status line and exits with the outcome
+// code.
+func jobSupervise(args []string, env platform.Env) int {
+	vals, _, pos := parseJobFlags("supervise", args)
 	if len(pos) > 1 {
-		platform.Die("job "+sub+": unexpected argument '"+pos[1]+"'", 2)
+		platform.Die("job supervise: unexpected argument '"+pos[1]+"'", 2)
 	}
-	id := jobRequiredID(sub, vals)
-	if sub == "amend" || sub == "send" {
-		if len(pos) != 1 {
-			platform.Die("job "+sub+": missing body (a file or -)", 2)
-		}
+	id := jobRequiredID("supervise", vals)
+	if env.Get("HERDR_ENV") != "1" {
+		platform.Die("job supervise: run it inside the job's Herdr workspace", 2)
 	}
-	if sub == "cancel" {
-		if raw, ok := vals["--grace"]; ok {
-			n, err := strconv.Atoi(raw)
-			if err != nil || n < 0 || n > 3600 {
-				platform.Die("job cancel: --grace must be an integer from 0 to 3600", 2)
-			}
-		}
+	store, err := locateJob(env, id)
+	if err != nil {
+		dieJob("supervise", err)
 	}
-	_, code := jobStoreOrNotFound(sub, id, env)
+	if store == nil {
+		printJobNotFound()
+		return job.ExitNotFound
+	}
+	// The friction file of the job; the callback writes in the existing
+	// friction format.
+	friction := func(message string) {
+		core.Warn(message, filepath.Join(store.Root, "jobs", id, "friction.log"))
+	}
+	sup, err := job.NewSupervisor(store, id, env, platform.LauncherPath(env), friction)
+	if err != nil {
+		dieJob("supervise", err)
+	}
+	// The machine's wake hook: an empty job_wake_cmd leaves Wake nil.
+	machine, err := job.LoadMachine(platform.Current(), env)
+	if err != nil {
+		dieJob("supervise", err)
+	}
+	if machine.WakeCmd != "" {
+		sup.Wake = &job.WakeHook{Cmd: machine.WakeCmd, JobID: id, Env: env, Friction: friction}
+	}
+	exit, runErr := sup.Run()
+	if runErr != nil {
+		friction("job: the job supervisor stopped with an error")
+	}
+	snap, err := store.Snapshot(id)
+	if err != nil {
+		dieJob("supervise", err)
+	}
+	printJobStatusLine(snap)
+	return exit
+}
+
+// jobControlStatus prints the fresh snapshot status line after a control
+// request: the store and id are known, so only a read failure dies.
+func jobControlStatus(sub string, store *job.Store, id string) {
+	snap, err := store.Snapshot(id)
+	if err != nil {
+		dieJob(sub, err)
+	}
+	printJobStatusLine(snap)
+}
+
+// jobAmend queues the amendment body (a file or -) as a control request and
+// prints the status line. The supervisor delivers it later and appends
+// amend_received; no event is written here and no Herdr call is made.
+func jobAmend(args []string, env platform.Env) int {
+	vals, _, pos := parseJobFlags("amend", args)
+	if len(pos) > 1 {
+		platform.Die("job amend: unexpected argument '"+pos[1]+"'", 2)
+	}
+	id := jobRequiredID("amend", vals)
+	if len(pos) != 1 {
+		platform.Die("job amend: missing body (a file or -)", 2)
+	}
+	store, code := jobStoreOrNotFound("amend", id, env)
 	if code != 0 {
 		return code
 	}
-	if sub == "amend" || sub == "send" {
-		limit := jobAmendBodyLimit
-		what := "64 KiB"
-		if sub == "send" {
-			limit, what = jobSendBodyLimit, "16 KiB"
-		}
-		jobReadBody(sub, "body", pos[0], limit, what)
+	body := jobReadBody("amend", "body", pos[0], jobAmendBodyLimit, "64 KiB")
+	if _, err := store.RequestAmend(id, body); err != nil {
+		dieJob("amend", err)
 	}
-	platform.Die("job "+sub+": not available yet", 2)
+	jobControlStatus("amend", store, id)
+	return 0
+}
+
+// jobSend queues the note body (a file or -) as a control request and prints
+// the status line. Like amend, it writes no event and makes no Herdr call.
+func jobSend(args []string, env platform.Env) int {
+	vals, _, pos := parseJobFlags("send", args)
+	if len(pos) > 1 {
+		platform.Die("job send: unexpected argument '"+pos[1]+"'", 2)
+	}
+	id := jobRequiredID("send", vals)
+	if len(pos) != 1 {
+		platform.Die("job send: missing body (a file or -)", 2)
+	}
+	store, code := jobStoreOrNotFound("send", id, env)
+	if code != 0 {
+		return code
+	}
+	body := jobReadBody("send", "body", pos[0], jobSendBodyLimit, "16 KiB")
+	if _, err := store.RequestSend(id, body); err != nil {
+		dieJob("send", err)
+	}
+	jobControlStatus("send", store, id)
+	return 0
+}
+
+// jobCancel queues the control cancel request; the default grace is 120
+// seconds when --grace is absent. A no-op cancel still prints the status
+// line and exits 0.
+func jobCancel(args []string, env platform.Env) int {
+	vals, _, pos := parseJobFlags("cancel", args)
+	if len(pos) != 0 {
+		platform.Die("job cancel: unexpected argument '"+pos[0]+"'", 2)
+	}
+	id := jobRequiredID("cancel", vals)
+	grace := 120
+	if raw, ok := vals["--grace"]; ok {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > 3600 {
+			platform.Die("job cancel: --grace must be an integer from 0 to 3600", 2)
+		}
+		grace = n
+	}
+	store, code := jobStoreOrNotFound("cancel", id, env)
+	if code != 0 {
+		return code
+	}
+	// A crashed start (accepted or preparing with no supervisor) has
+	// nothing left to cancel: the recovery ends the job failed before
+	// anything is queued. A live starter keeps the job: the recovery
+	// declines and the cancel queues as usual.
+	if snap, err := store.Snapshot(id); err == nil && (snap.State.Status == job.StatusAccepted || snap.State.Status == job.StatusPreparing) {
+		friction := func(message string) {
+			core.Warn(message, filepath.Join(store.Root, "jobs", id, "friction.log"))
+		}
+		rawFriction := func(message string) {
+			core.RecordFrictionError(message, job.ExitHerdr, filepath.Join(store.Root, "jobs", id, "friction.log"))
+		}
+		if _, recovered, err := job.NewStartRecovery(env, friction, rawFriction)(store, id); err != nil {
+			dieJob("cancel", err)
+		} else if recovered {
+			snap, err := store.Snapshot(id)
+			if err != nil {
+				dieJob("cancel", err)
+			}
+			printJobStatusLine(snap)
+			return 0
+		}
+	}
+	if _, err := store.RequestCancel(id, grace); err != nil {
+		dieJob("cancel", err)
+	}
+	jobControlStatus("cancel", store, id)
+	return 0
+}
+
+// jobCheckpoint queues the immediate-push marker and prints the status line.
+// A no-op checkpoint still exits 0.
+func jobCheckpoint(args []string, env platform.Env) int {
+	vals, _, pos := parseJobFlags("checkpoint", args)
+	if len(pos) != 0 {
+		platform.Die("job checkpoint: unexpected argument '"+pos[0]+"'", 2)
+	}
+	id := jobRequiredID("checkpoint", vals)
+	store, code := jobStoreOrNotFound("checkpoint", id, env)
+	if code != 0 {
+		return code
+	}
+	if _, err := store.RequestCheckpoint(id); err != nil {
+		dieJob("checkpoint", err)
+	}
+	jobControlStatus("checkpoint", store, id)
 	return 0
 }
 
@@ -861,17 +1014,9 @@ func jobStart(args []string, env platform.Env, cwd string) int {
 	if timeout == 0 {
 		timeout = machine.TimeoutMin
 	}
-	if !bare["--dry-run"] {
-		// TODO(DJA-194): phase 2 — prepare, create the workspace and supervise.
-		platform.Die("job start: only --dry-run is available in this build", 2)
-	}
 	resolvedBase := info.Base
 	if base != "" {
 		resolvedBase = base
-	}
-	var baseOut *string
-	if resolvedBase != "" {
-		baseOut = &resolvedBase
 	}
 	modo := "worktree"
 	if info.Modo != "" {
@@ -879,6 +1024,77 @@ func jobStart(args []string, env platform.Env, cwd string) int {
 	}
 	if modoFlag != "" {
 		modo = modoFlag
+	}
+	if !bare["--dry-run"] {
+		selfExe := platform.LauncherPath(env)
+		stateRootOf := func(checkout string) string {
+			cfg := core.LoadConfig(env, checkout)
+			return core.StateRootPath(&cfg, env, checkout)
+		}
+		// The friction file of the job; the callback is built once the id
+		// is valid and writes in the existing friction format.
+		friction := func(message string) {
+			core.Warn(message, filepath.Join(stateRootOf(checkout), "jobs", id, "friction.log"))
+		}
+		// The raw friction sink: the raw create envelope reaches the job
+		// friction log as an error line of the start's own exit code, and
+		// never stderr (the start ends with exit 4 there when it fires).
+		rawFriction := func(message string) {
+			core.RecordFrictionError(message, job.ExitHerdr, filepath.Join(stateRootOf(checkout), "jobs", id, "friction.log"))
+		}
+		store, err := locateJob(env, id)
+		if err != nil {
+			dieJob("start", err)
+		}
+		if store != nil {
+			// The id is already recorded: a duplicate returns the status
+			// line with duplicate_of, a different brief dies with 20.
+			st, err := store.Start(id, raw)
+			if err != nil {
+				dieJob("start", err)
+			}
+			// A duplicate still accepted or preparing is a crashed start
+			// (no supervisor will run it): the recovery ends it failed
+			// before the status line is printed.
+			if st.DuplicateOf != "" && (st.Status == job.StatusAccepted || st.Status == job.StatusPreparing) {
+				if _, _, err := job.NewStartRecovery(env, friction, rawFriction)(store, id); err != nil {
+					dieJob("start", err)
+				}
+			}
+			snap, err := store.Snapshot(id)
+			if err != nil {
+				dieJob("start", err)
+			}
+			snap.State.DuplicateOf = st.DuplicateOf
+			printJobStatusLine(snap)
+			return 0
+		}
+		starter := job.NewStarter(env, machine, selfExe, stateRootOf, friction, rawFriction)
+		st, store, err := starter.Start(job.StartRequest{
+			ID: id, Org: org, Repo: repoName, Base: resolvedBase, Mode: modo,
+			Brief: raw, TimeoutMin: timeout, Team: team,
+		})
+		if err != nil {
+			// The job's status line when the store and state exist (the
+			// failure wrote it), then the error on stderr with its code.
+			if store != nil {
+				if snap, err := store.Snapshot(id); err == nil {
+					printJobStatusLine(snap)
+				}
+			}
+			dieJob("start", err)
+		}
+		snap, err := store.Snapshot(id)
+		if err != nil {
+			dieJob("start", err)
+		}
+		snap.State.DuplicateOf = st.DuplicateOf
+		printJobStatusLine(snap)
+		return 0
+	}
+	var baseOut *string
+	if resolvedBase != "" {
+		baseOut = &resolvedBase
 	}
 	override := team.OverrideKeys
 	if override == nil {

@@ -454,7 +454,9 @@ func runDetectTM5Golden(t *testing.T, name string) {
 	ctx = core.LoadConfig(env, repo)
 	got := DetectJSON(&ctx, env, repo) + "\n"
 	got = normalizeDetectGoldenText(got, fixture)
-	wantOut := want.Steps[0].Out
+	// The frozen golden predates the shipped job-orchestrator role; the
+	// exact-insertion role oracle adapts the expected role_kinds entry.
+	wantOut := testutil.ApplyRoleOracleToDetectDocument(want.Steps[0].Out)
 	if want.Steps[0].RC != 0 || want.Steps[0].Err != "" || got != wantOut {
 		line := firstDifferentLine(got, wantOut)
 		t.Fatalf("scenario=%s detect differs at line %d\nGo:     %s\ngolden: %s", name, line, lineAt(got, line), lineAt(wantOut, line))

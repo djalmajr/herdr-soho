@@ -25,7 +25,9 @@ const (
 	StatusClosed    = "closed"
 )
 
-// State is the jobs/<id>/state.json document.
+// State is the jobs/<id>/state.json document. The fields from Checkout on
+// are run facts recorded by the start slice; they are optional so a job
+// without them serializes byte for byte as before.
 type State struct {
 	Schema            int     `json:"schema"`
 	ID                string  `json:"id"`
@@ -34,6 +36,33 @@ type State struct {
 	DecisionsAckedSeq int     `json:"decisions_acked_seq"`
 	Motivo            *string `json:"motivo"`
 	DuplicateOf       string  `json:"duplicate_of,omitempty"`
+	Checkout          string  `json:"checkout,omitempty"`
+	Dir               string  `json:"dir,omitempty"`
+	Branch            string  `json:"branch,omitempty"`
+	Base              string  `json:"base,omitempty"`
+	BaseSHA           string  `json:"base_sha,omitempty"`
+	Modo              string  `json:"modo,omitempty"`
+	// WorkspaceLabel and WorkspacePreexisting are the create intent, recorded
+	// before `herdr workspace create`: the label the job workspace gets and
+	// the ids of the workspaces that already had it. Start recovery
+	// identifies the job workspace by them when a crash left it unrecorded.
+	WorkspaceLabel       string   `json:"workspace_label,omitempty"`
+	WorkspacePreexisting []string `json:"workspace_preexisting,omitempty"`
+	WorkspaceID          string   `json:"workspace_id,omitempty"`
+	RootPane             string   `json:"root_pane,omitempty"`
+	WorkspaceClosed      bool     `json:"workspace_closed,omitempty"`
+	TimeoutMin           int      `json:"timeout_min,omitempty"`
+	StartedAt            string   `json:"started_at,omitempty"`
+	// Equipe is the team resolution the job ran with (the report's
+	// equipe field), recorded with the run facts: the source file and the
+	// brief override keys, an empty non-nil list when there are none.
+	Equipe *Equipe `json:"equipe,omitempty"`
+	// OrchestratorSpawnAt is the spawn intent, recorded before the job
+	// orchestrator is spawned: a restarted supervisor that finds it without
+	// Orchestrator recovers the spawn instead of spawning blindly.
+	OrchestratorSpawnAt string `json:"orchestrator_spawn_at,omitempty"`
+	Orchestrator        string `json:"orchestrator,omitempty"`
+	DispatchedAt        string `json:"dispatched_at,omitempty"`
 }
 
 // Store is the job state root (core.StateRootPath, not a workspace directory).

@@ -347,7 +347,6 @@ func TestJobStartValidationRefusals(t *testing.T) {
 		{name: "brief repo mismatch", args: []string{"start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", f.briefFile(t, otherRepo), "--dry-run"}},
 		{name: "brief id mismatch", args: []string{"start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", f.briefFile(t, otherID), "--dry-run"}},
 		{name: "unknown equipe key", args: []string{"start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", f.briefFile(t, unknownKey), "--dry-run"}, need: "unknown key"},
-		{name: "non-dry", args: []string{"start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", f.briefFile(t, jobStartBrief)}, need: "only --dry-run is available in this build"},
 	}
 	for _, tc := range cases {
 		code, out, errOut := f.run(t, tc.args...)
@@ -428,7 +427,8 @@ func TestJobWriteBodiesAndStubLimits(t *testing.T) {
 	for _, args := range [][]string{
 		{"cancel", "--id", "nope"},
 		{"checkpoint", "--id", "nope"},
-		{"supervise", "--id", "nope"},
+		// Phase 2 adaptation: supervise requires HERDR_ENV=1 before the job
+		// lookup, so an unknown id outside Herdr is exit 2, not not_found.
 	} {
 		code, out, _ := f.run(t, args...)
 		if code != 3 || out != `{"status":"not_found"}`+"\n" {
@@ -486,8 +486,10 @@ func TestJobAmendBoundedFileRead(t *testing.T) {
 	if err := os.WriteFile(atCap, []byte(strings.Repeat("x", jobAmendBodyLimit)), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Phase 2 adaptation: an accepted body now queues the amend request (exit 0,
+	// one status line) instead of the phase 1 "not available yet" refusal.
 	code, out, errOut := f.run(t, "amend", "--id", "job-1", atCap)
-	if code != 2 || out != "" || !strings.Contains(errOut, "not available yet") {
+	if code != 0 || !strings.Contains(out, `"id":"job-1"`) || errOut != "" {
 		t.Fatalf("at cap: code=%d out=%q err=%q", code, out, errOut)
 	}
 	overCap := filepath.Join(t.TempDir(), "over-cap.md")

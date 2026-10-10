@@ -1,18 +1,38 @@
 package job
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/djalmajr/herdr-soho/internal/reportscan"
 )
 
-// ReportFacts is the worktree snapshot used to fill limpeza.removivel.
-// Removivel is true only when the tree is clean and Head equals HeadRemoto.
+// ReportFacts is the worktree and job snapshot the supervisor passes in to
+// fill the report: the clean and head facts behind limpeza.removivel, the
+// commits, the draft pull request, the acceptance checks, the review, the
+// blockers, the team, the cost, the logs and the workspace release.
 type ReportFacts struct {
-	Clean      bool
-	Head       string
-	HeadRemoto string
-	Resumo     string
+	Clean         bool
+	Head          string
+	HeadRemoto    string
+	Resumo        string
+	Commits       []Commit
+	PR            *PullRequest
+	Testes        []Teste
+	Revisao       *Revisao
+	Blockers      []string
+	Equipe        *Equipe
+	Custo         *Custo
+	Logs          *Logs
+	Workspace     string
+	PanesFechados int
 }
 
 // PullRequest is the draft pull request recorded by a later slice.
@@ -22,7 +42,8 @@ type PullRequest struct {
 	Estado string `json:"estado,omitempty"`
 }
 
-// Report is the supervisor report.json document. It has no retencao_ate key.
+// Report is the supervisor report.json document. The field order is the
+// key order of the contract report example. It has no retencao_ate key.
 type Report struct {
 	Schema       int          `json:"schema"`
 	ID           string       `json:"id"`
@@ -36,11 +57,72 @@ type Report struct {
 	Head         string       `json:"head,omitempty"`
 	HeadRemoto   string       `json:"head_remoto,omitempty"`
 	Sincronizado bool         `json:"sincronizado"`
+	Commits      []Commit     `json:"commits"`
 	PR           *PullRequest `json:"pr"`
+	Itens        []Item       `json:"itens"`
+	Parciais     int          `json:"parciais"`
+	Testes       []Teste      `json:"testes"`
+	Revisao      *Revisao     `json:"revisao"`
+	Artefatos    []Artefato   `json:"artefatos"`
+	Blockers     []string     `json:"blockers"`
+	Perguntas    []string     `json:"perguntas"`
 	Memoria      Memoria      `json:"memoria"`
+	Equipe       *Equipe      `json:"equipe"`
 	Eventos      Eventos      `json:"eventos"`
+	Custo        *Custo       `json:"custo"`
+	Logs         *Logs        `json:"logs"`
 	Limpeza      Limpeza      `json:"limpeza"`
 	Publico      Publico      `json:"publico"`
+}
+
+// Item is one orchestrator report line carrying a completion marker, in
+// file order.
+type Item struct {
+	N      int    `json:"n"`
+	Item   string `json:"item"`
+	Estado string `json:"estado"`
+}
+
+// Teste is one acceptance check the supervisor ran.
+type Teste struct {
+	Cmd       string `json:"cmd"`
+	Resultado string `json:"resultado"`
+}
+
+// Revisao is the review verdict of another model family. Severity is
+// formatted exactly "P0 a, P1 b, P2 c, P3 d".
+type Revisao struct {
+	Verdict  string `json:"verdict"`
+	Findings int    `json:"findings"`
+	Severity string `json:"severity"`
+}
+
+// Artefato is a job artefact the supervisor hashed; the path is relative to
+// the job dir, which job collect --verify resolves.
+type Artefato struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+// Equipe is the team resolution the job ran with.
+type Equipe struct {
+	Fonte         string   `json:"fonte"`
+	OverrideBrief []string `json:"override_brief"`
+}
+
+// Custo is the job duration and worker count.
+type Custo struct {
+	Inicio   string `json:"inicio"`
+	Fim      string `json:"fim"`
+	DuracaoS int    `json:"duracao_s"`
+	Workers  int    `json:"workers"`
+}
+
+// Logs points at the job logs.
+type Logs struct {
+	ReportMD string `json:"report_md"`
+	StateDir string `json:"state_dir"`
+	Friction string `json:"friction"`
 }
 
 // MemItem is one decision suggestion for the dispatcher to route.
@@ -117,13 +199,45 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 		return Report{}, err
 	}
 	global, projeto, decisions := decisionAggregates(events)
-	// The report is built only from known facts: with no commits known (no
-	// head), the pull request is null and the motivo says so; the state
-	// motivo wins when set.
+	items, parciais, artefatos, mdResumo := readReportMD(dir)
+	// The report is built only from known facts: the motivo says so when
+	// the state carries none and either there are no git facts (no head,
+	// for example a workspace-mode job) or the commit list is known and
+	// empty with no pull request (a worktree job that ends with no commit
+	// ahead of the base). A nil commit list means the listing failed or
+	// was not run (the friction already names it) and is never labeled sem
+	// commits; a state motivo that is already set (a terminal motivo, a
+	// failure) is never overwritten.
+	noCommits := facts.PR == nil && facts.Commits != nil && len(facts.Commits) == 0
 	motivo := st.Motivo
-	if motivo == nil && facts.Head == "" {
+	if motivo == nil && (facts.Head == "" || noCommits) {
 		none := "sem commits"
 		motivo = &none
+	}
+	// The resumo is the supervisor's facts when it carries one; otherwise
+	// it is the `## Resumo` section of the orchestrator's report.md (the
+	// role is told to write it there), "" when the report has no section.
+	resumo := facts.Resumo
+	if resumo == "" {
+		resumo = mdResumo
+	}
+	// The branch and the base are the recorded run facts (the worktree
+	// branch, or the repository branch and base in the workspace mode);
+	// a job that failed before they were recorded keeps the branch the
+	// report has always carried and the brief's base. The team source is
+	// the same: the facts first, then the state record, null when the job
+	// failed before the record.
+	branch := st.Branch
+	if branch == "" {
+		branch = "job/" + st.ID
+	}
+	base := st.Base
+	if base == "" {
+		base = jsonString(fields, "base")
+	}
+	equipe := facts.Equipe
+	if equipe == nil {
+		equipe = st.Equipe
 	}
 	ids := []string{}
 	if origem, ok := fields["origem"].(map[string]any); ok {
@@ -131,20 +245,48 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 			ids = append(ids, ref)
 		}
 	}
+	if facts.PR != nil {
+		ids = append(ids, "PR#"+strconv.Itoa(facts.PR.Numero))
+	}
 	inSync := facts.Head != "" && facts.Head == facts.HeadRemoto
+	verdict := ""
+	if facts.Revisao != nil {
+		verdict = facts.Revisao.Verdict
+	}
+	commits := facts.Commits
+	if commits == nil {
+		commits = []Commit{}
+	}
+	testes := facts.Testes
+	if testes == nil {
+		testes = []Teste{}
+	}
+	blockers := facts.Blockers
+	if blockers == nil {
+		blockers = []string{}
+	}
 	return Report{
 		Schema:       1,
 		ID:           st.ID,
 		Status:       st.Status,
 		Motivo:       motivo,
-		Resumo:       facts.Resumo,
+		Resumo:       resumo,
 		Maquina:      jsonString(fields, "maquina"),
 		Repo:         jsonString(fields, "repo"),
-		Base:         jsonString(fields, "base"),
-		Branch:       "job/" + st.ID,
+		Base:         base,
+		Branch:       branch,
 		Head:         facts.Head,
 		HeadRemoto:   facts.HeadRemoto,
 		Sincronizado: inSync,
+		Commits:      commits,
+		PR:           facts.PR,
+		Itens:        items,
+		Parciais:     parciais,
+		Testes:       testes,
+		Revisao:      facts.Revisao,
+		Artefatos:    artefatos,
+		Blockers:     blockers,
+		Perguntas:    openQuestions(events),
 		Memoria: Memoria{
 			Lida:              []MemRead{},
 			Global:            global,
@@ -152,16 +294,21 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 			DecisionsTotal:    decisions,
 			DecisionsAckedSeq: st.DecisionsAckedSeq,
 		},
+		Equipe: equipe,
 		Eventos: Eventos{
 			Total:     len(events),
 			UltimoSeq: lastSeq(events),
 			Arquivo:   filepath.Join(dir, "events.jsonl"),
 		},
+		Custo: facts.Custo,
+		Logs:  facts.Logs,
 		Limpeza: Limpeza{
-			Worktree:  "kept",
-			Removivel: facts.Clean && inSync,
+			Workspace:     facts.Workspace,
+			Worktree:      "kept",
+			PanesFechados: facts.PanesFechados,
+			Removivel:     facts.Clean && inSync,
 		},
-		Publico: Publico{Blockers: []string{}, IDs: ids},
+		Publico: Publico{Verdict: verdict, Blockers: blockers, IDs: ids},
 	}, nil
 }
 
@@ -187,6 +334,157 @@ func decisionAggregates(events []Event) (global, projeto []MemItem, total int) {
 		}
 	}
 	return global, projeto, total
+}
+
+// reportItemFence mirrors the fence semantics of reportscan.PartialCount,
+// which does not export its fence tracking: the items and the partial count
+// must agree on which lines are inside a code block.
+var (
+	reportItemFenceOpen  = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
+	reportItemFenceClose = regexp.MustCompile("^ {0,3}(`{3,}|~{3,}) *$")
+	reportItemPrefix     = regexp.MustCompile(`^\s*(?:[-*][ \t]+|[0-9]+\.[ \t]+|\|[ \t]*)`)
+)
+
+// readReportMD reads the orchestrator report.md in the job dir: the marker
+// items, the partial count (reportscan's rule), the `## Resumo` section's
+// text and the artefact with the file's sha256. A missing or unreadable
+// file leaves all four empty.
+func readReportMD(dir string) (items []Item, parciais int, artefatos []Artefato, resumo string) {
+	items = []Item{}
+	artefatos = []Artefato{}
+	raw, err := os.ReadFile(filepath.Join(dir, "report.md"))
+	if err != nil {
+		return items, 0, artefatos, resumo
+	}
+	text := string(raw)
+	items = reportItems(text)
+	resumo = reportResumo(text)
+	parciais = reportscan.PartialCount(text)
+	sum := sha256.Sum256(raw)
+	artefatos = append(artefatos, Artefato{Path: "report.md", SHA256: hex.EncodeToString(sum[:])})
+	return items, parciais, artefatos, resumo
+}
+
+// reportResumo is the text of the `## Resumo` section of the orchestrator
+// report: the lines after the line that is exactly the heading (trailing
+// spaces allowed) up to the next line starting with `#`, skipping fenced
+// code blocks with the reportItems fence rules. Lines are trimmed, empty
+// lines dropped, at most the first six are kept, each cut to the resumo
+// limit, joined with a newline; no section is "". CRLF and lone CR line
+// endings read as LF, so a report written on Windows gives the same
+// section.
+func reportResumo(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lines := []string{}
+	inSection := false
+	inFence, fenceChar, fenceLen := false, byte(0), 0
+	for _, line := range strings.Split(text, "\n") {
+		open := reportItemFenceOpen.FindStringSubmatch(line)
+		if !inFence && open != nil {
+			inFence, fenceChar, fenceLen = true, open[1][0], len(open[1])
+			continue
+		}
+		if inFence {
+			if close := reportItemFenceClose.FindStringSubmatch(line); close != nil && close[1][0] == fenceChar && len(close[1]) >= fenceLen {
+				inFence = false
+			}
+			continue
+		}
+		if inSection && strings.HasPrefix(line, "#") {
+			break
+		}
+		if !inSection {
+			if strings.TrimRight(line, " ") == "## Resumo" {
+				inSection = true
+			}
+			continue
+		}
+		value := strings.TrimSpace(line)
+		if value == "" {
+			continue
+		}
+		lines = append(lines, cutRunes(value, resumoLimit))
+		if len(lines) == 6 {
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// reportItems extracts the orchestrator report items: the lines outside
+// fenced code blocks that carry exactly one of the [done], [partial] or
+// [skipped] markers, numbered in file order. The item text is the line with
+// the marker, the leading list and table syntax and the surrounding
+// whitespace removed, cut to 280 code points.
+func reportItems(text string) []Item {
+	items := []Item{}
+	inFence, fenceChar, fenceLen := false, byte(0), 0
+	for _, line := range strings.Split(text, "\n") {
+		open := reportItemFenceOpen.FindStringSubmatch(line)
+		if !inFence && open != nil {
+			inFence, fenceChar, fenceLen = true, open[1][0], len(open[1])
+			continue
+		}
+		if inFence {
+			if close := reportItemFenceClose.FindStringSubmatch(line); close != nil && close[1][0] == fenceChar && len(close[1]) >= fenceLen {
+				inFence = false
+			}
+			continue
+		}
+		estado := singleItemMarker(line)
+		if estado == "" {
+			continue
+		}
+		item := reportItemPrefix.ReplaceAllString(line, "")
+		items = append(items, Item{N: len(items) + 1, Item: cutRunes(strings.TrimSpace(item), resumoLimit), Estado: estado})
+	}
+	return items
+}
+
+// singleItemMarker reports the marker of a line carrying exactly one report
+// marker, or "" for a line with none or with two or more (a doubled marker
+// of the same kind included), which the brief skips.
+func singleItemMarker(line string) string {
+	total := strings.Count(line, "[done]") + strings.Count(line, "[partial]") + strings.Count(line, "[skipped]")
+	if total != 1 {
+		return ""
+	}
+	switch {
+	case strings.Contains(line, "[done]"):
+		return "done"
+	case strings.Contains(line, "[partial]"):
+		return "partial"
+	default:
+		return "skipped"
+	}
+}
+
+// openQuestions is the resumo of the question events with a seq greater than
+// the last unblocked event's seq, in seq order; empty when none is open.
+func openQuestions(events []Event) []string {
+	last := 0
+	for _, event := range events {
+		if event.Tipo == "unblocked" && event.Seq > last {
+			last = event.Seq
+		}
+	}
+	questions := []string{}
+	for _, event := range events {
+		if event.Tipo == "question" && event.Seq > last {
+			questions = append(questions, event.Resumo)
+		}
+	}
+	return questions
+}
+
+// cutRunes shortens value to at most limit code points, keeping the start.
+func cutRunes(value string, limit int) string {
+	if utf8.RuneCountInString(value) <= limit {
+		return value
+	}
+	runes := []rune(value)
+	return string(runes[:limit])
 }
 
 // refreshReport reconciles the stored report.json with the job log and
@@ -286,6 +584,27 @@ func readReport(dir string) (Report, error) {
 func saveReport(dir string, rep Report) error {
 	rep.Schema = 1
 	rep.Limpeza.Worktree = "kept"
+	// The contract fields are always present with empty values: a report
+	// written before they existed unmarshals them as nil, and the rewrite
+	// stores them empty rather than null.
+	if rep.Commits == nil {
+		rep.Commits = []Commit{}
+	}
+	if rep.Itens == nil {
+		rep.Itens = []Item{}
+	}
+	if rep.Testes == nil {
+		rep.Testes = []Teste{}
+	}
+	if rep.Artefatos == nil {
+		rep.Artefatos = []Artefato{}
+	}
+	if rep.Blockers == nil {
+		rep.Blockers = []string{}
+	}
+	if rep.Perguntas == nil {
+		rep.Perguntas = []string{}
+	}
 	raw, err := json.Marshal(rep)
 	if err != nil {
 		return err

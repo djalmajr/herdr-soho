@@ -36,7 +36,7 @@ go run ./cmd/herdr-soho install --version vX.Y.Z
 
 Run `herdr-soho env` once to resolve or materialize the embedded skill. To expose the skill to your agent's skill loader, copy the resource directory printed by `env` into that agent's supported skill directory, or keep an existing installed skill tree. `HERDR_SOHO_SKILL_DIR` selects an explicit resource tree. No second legacy skill is installed.
 
-All commands, including `collaborate`, `send` and `find`, run through the same Go CLI. The [guide](docs/guide.md#worker-collaboration) documents the review cycle and `worker_messages` policy.
+All commands, including `collaborate`, `send` and `find`, run through the same Go CLI. The [guide](docs/guide.md#worker-collaboration) documents the review cycle and `worker_messages` policy, and the [ephemeral job contract](docs/job-contract.md) specifies the dispatcher-driven `job` family (ephemeral jobs on a machine, with a draft pull request kept by the job supervisor).
 
 ## Migrating from herdr-agents
 
