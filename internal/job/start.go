@@ -186,6 +186,7 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		st.Modo = runMode(req.Mode)
 		st.TimeoutMin = req.TimeoutMin
 		st.StartedAt = startedAt
+		st.Equipe = &Equipe{Fonte: req.Team.Source, OverrideBrief: overrideBrief(req.Team.OverrideKeys)}
 	}); err != nil {
 		return State{}, store, s.failStored(store, req.ID, "", err)
 	}
@@ -235,6 +236,8 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 			s.Friction("job: the Herdr workspace was left open: its id is invalid")
 		}
 		_, _ = store.Fail(req.ID, "job: herdr workspace create returned an invalid workspace id", ExitHerdr)
+		// The workspace is left open on purpose; the report says so.
+		finishStartFailure(store, req.ID, "open", s.Friction)
 		return State{}, store, herdrExit("job: herdr workspace create returned an invalid workspace id")
 	}
 	// A crash in the window between Herdr.Create and the workspace id
@@ -256,15 +259,23 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 
 	// 10. Write the team into the workspace session file.
 	if err = writeSessionConf(filepath.Join(s.StateRoot(checkout), workspaceID, "session.conf"), req.Team.Pairs); err != nil {
-		s.closeToFriction(workspaceID)
+		workspace := "open"
+		if s.closeWorkspace(store, req.ID, workspaceID) {
+			workspace = "closed"
+		}
 		_, _ = store.Fail(req.ID, "job: cannot write the team session", ExitUsage)
+		finishStartFailure(store, req.ID, workspace, s.Friction)
 		return State{}, store, errUsage("job: cannot write the team session")
 	}
 
 	// 11. Launch the supervisor in the workspace's first pane.
 	if err = s.Panes.Run(rootPaneID, []string{s.SelfExe, "job", "supervise", "--id", req.ID}); err != nil {
-		s.closeToFriction(workspaceID)
+		workspace := "open"
+		if s.closeWorkspace(store, req.ID, workspaceID) {
+			workspace = "closed"
+		}
 		_, _ = store.Fail(req.ID, err.Error(), herdrExitCode(err))
+		finishStartFailure(store, req.ID, workspace, s.Friction)
 		return State{}, store, err
 	}
 
@@ -292,6 +303,16 @@ func runMode(mode string) string {
 	return "worktree"
 }
 
+// overrideBrief maps the team's brief override keys to the report form: an
+// empty non-nil slice when nil, the same mapping the job start --dry-run
+// JSON carries.
+func overrideBrief(keys []string) []string {
+	if keys == nil {
+		return []string{}
+	}
+	return keys
+}
+
 // prepareExitCode is the exit code a preparation failure ends the job
 // with: the code the error itself carries, else 22.
 func prepareExitCode(err error) int {
@@ -315,23 +336,83 @@ func exitCodeOr(err error, def int) int {
 // failStored ends a recorded job after a storage error (a state, event or
 // run-fact write failed): it closes the workspace when one was created and
 // fails the job with exit 2, best effort, so every failure after the job is
-// recorded still aims at a terminal state with report.json. The original
-// error is returned.
+// recorded still aims at a terminal state with report.json; the cleanup
+// event and the report rewrite record the close it made or the open it
+// left. The original error is returned.
 func (s Starter) failStored(store *Store, id, workspaceID string, err error) error {
+	workspace := ""
 	if workspaceID != "" {
-		s.closeToFriction(workspaceID)
+		if s.closeWorkspace(store, id, workspaceID) {
+			workspace = "closed"
+		} else {
+			workspace = "open"
+		}
 	}
 	if _, failErr := store.Fail(id, "job: cannot record the job state", ExitUsage); failErr != nil && s.Friction != nil {
 		s.Friction("job: cannot record the job failure: " + failErr.Error())
 	}
+	finishStartFailure(store, id, workspace, s.Friction)
 	return err
 }
 
-// closeToFriction closes the job workspace after a post-create failure;
-// its error only goes to friction.
-func (s Starter) closeToFriction(workspaceID string) {
-	if err := s.Herdr.Close(workspaceID); err != nil && s.Friction != nil {
-		s.Friction("job: cannot close the job workspace: " + err.Error())
+// closeWorkspace closes the job workspace after a post-create failure and
+// records the successful close on the state; its error only goes to
+// friction. It reports whether the close happened.
+func (s Starter) closeWorkspace(store *Store, id, workspaceID string) bool {
+	if err := s.Herdr.Close(workspaceID); err != nil {
+		if s.Friction != nil {
+			s.Friction("job: cannot close the job workspace: " + err.Error())
+		}
+		return false
+	}
+	if _, err := store.Record(id, func(st *State) { st.WorkspaceClosed = true }); err != nil && s.Friction != nil {
+		s.Friction("job: cannot record the job state: " + err.Error())
+	}
+	return true
+}
+
+// finishStartFailure writes the workspace outcome of a start failure into
+// the job log and the report, after the caller's terminal record
+// (store.Fail): the cleanup event — the same type and resumo the
+// supervisor's finalize appends — only when the log has none, so a retry
+// converges, and report.json rewritten so eventos and limpeza.workspace
+// are current ("closed" or "open"). An empty workspace is a failure
+// without a Herdr workspace (none created, none proven): the log and the
+// report stay as the terminal record left them. A write error only goes to
+// friction: the terminal record is already durable. The event order, the
+// resumo and the report field on every path are pinned by
+// TestReportFactsStartCleanup and the start_recover tests.
+func finishStartFailure(store *Store, id, workspace string, friction func(string)) {
+	if workspace == "" {
+		return
+	}
+	dir, err := Dir(store.Root, id)
+	if err != nil {
+		if friction != nil {
+			friction(err.Error())
+		}
+		return
+	}
+	events, err := readEvents(dir)
+	if err != nil {
+		if friction != nil {
+			friction("job: cannot read the job events: " + err.Error())
+		}
+		return
+	}
+	for _, event := range events {
+		if event.Tipo == "cleanup" {
+			return
+		}
+	}
+	if _, err := store.Append(id, EventIn{Tipo: "cleanup", Resumo: "processes released; worktree kept"}); err != nil {
+		if friction != nil {
+			friction(err.Error())
+		}
+		return
+	}
+	if _, err := store.WriteReport(id, ReportFacts{Workspace: workspace}); err != nil && friction != nil {
+		friction(err.Error())
 	}
 }
 
@@ -403,7 +484,11 @@ func RecoverStart(store *Store, id string, herdr herdrWorkspaces, friction, rawF
 // any new row with an id the job cannot name (invalid) leaves the identity
 // unproven: close nothing and say so to friction. The job ends failed
 // ("job: start interrupted", exit 19) and a pending cancel request retires
-// with the terminal record.
+// with the terminal record. After the terminal record the workspace
+// outcome is written to the log and the report: the cleanup event (the
+// supervisor's finalize type and resumo, appended only when the log has
+// none) and limpeza.workspace closed or open; a failure with no workspace
+// gets neither.
 func recoverStartLocked(store *Store, id string, herdr herdrWorkspaces, friction func(string)) (State, bool, error) {
 	snap, err := store.Snapshot(id)
 	if err != nil {
@@ -414,7 +499,11 @@ func recoverStartLocked(store *Store, id string, herdr herdrWorkspaces, friction
 		return st, false, nil
 	}
 	// The job workspace, closed only when its identity is proven.
+	// outcome is the report's limpeza.workspace ("closed" or "open");
+	// empty is a failure with no Herdr workspace to report (none created,
+	// none proven).
 	var workspaceID string
+	var outcome string
 	if st.WorkspaceID != "" {
 		// Proven by the record.
 		workspaceID = st.WorkspaceID
@@ -422,6 +511,7 @@ func recoverStartLocked(store *Store, id string, herdr herdrWorkspaces, friction
 		rows, err := herdr.List()
 		if err != nil {
 			// Fail closed: the list is unreadable, so no identity.
+			outcome = "open"
 			frictionStartAmbiguous(friction)
 		} else {
 			var candidates []string
@@ -442,6 +532,7 @@ func recoverStartLocked(store *Store, id string, herdr herdrWorkspaces, friction
 			case invalid || len(candidates) > 1:
 				// Fail closed: the identity is unproven (an invalid id
 				// or more than one candidate), so close nothing.
+				outcome = "open"
 				frictionStartAmbiguous(friction)
 			case len(candidates) == 1:
 				workspaceID = candidates[0]
@@ -457,18 +548,23 @@ func recoverStartLocked(store *Store, id string, herdr herdrWorkspaces, friction
 			if friction != nil {
 				friction("job: cannot close the job workspace: " + err.Error())
 			}
+			outcome = "open"
 		} else {
 			if _, err := store.Record(id, func(s *State) { s.WorkspaceClosed = true }); err != nil {
 				return State{}, false, err
 			}
+			outcome = "closed"
 		}
 	}
-	// The terminal record, then the pending cancel retires with it: the
-	// supervisor's retirement (control.go) is reused, not copied.
+	// The terminal record, then the cleanup append and the report rewrite
+	// so eventos and limpeza are current, then the pending cancel retires
+	// with the terminal record: the supervisor's retirement (control.go)
+	// is reused, not copied.
 	failed, err := store.Fail(id, "job: start interrupted", ExitFailed)
 	if err != nil {
 		return failed, false, err
 	}
+	finishStartFailure(store, id, outcome, friction)
 	(&Supervisor{Store: store, ID: id, Friction: friction}).retirePendingCancel()
 	return failed, true, nil
 }

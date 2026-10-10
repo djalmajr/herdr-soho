@@ -199,7 +199,7 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 		return Report{}, err
 	}
 	global, projeto, decisions := decisionAggregates(events)
-	items, parciais, artefatos := readReportMD(dir)
+	items, parciais, artefatos, mdResumo := readReportMD(dir)
 	// The report is built only from known facts: the motivo says so when
 	// the state carries none and either there are no git facts (no head,
 	// for example a workspace-mode job) or the commit list is known and
@@ -213,6 +213,31 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 	if motivo == nil && (facts.Head == "" || noCommits) {
 		none := "sem commits"
 		motivo = &none
+	}
+	// The resumo is the supervisor's facts when it carries one; otherwise
+	// it is the `## Resumo` section of the orchestrator's report.md (the
+	// role is told to write it there), "" when the report has no section.
+	resumo := facts.Resumo
+	if resumo == "" {
+		resumo = mdResumo
+	}
+	// The branch and the base are the recorded run facts (the worktree
+	// branch, or the repository branch and base in the workspace mode);
+	// a job that failed before they were recorded keeps the branch the
+	// report has always carried and the brief's base. The team source is
+	// the same: the facts first, then the state record, null when the job
+	// failed before the record.
+	branch := st.Branch
+	if branch == "" {
+		branch = "job/" + st.ID
+	}
+	base := st.Base
+	if base == "" {
+		base = jsonString(fields, "base")
+	}
+	equipe := facts.Equipe
+	if equipe == nil {
+		equipe = st.Equipe
 	}
 	ids := []string{}
 	if origem, ok := fields["origem"].(map[string]any); ok {
@@ -245,11 +270,11 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 		ID:           st.ID,
 		Status:       st.Status,
 		Motivo:       motivo,
-		Resumo:       facts.Resumo,
+		Resumo:       resumo,
 		Maquina:      jsonString(fields, "maquina"),
 		Repo:         jsonString(fields, "repo"),
-		Base:         jsonString(fields, "base"),
-		Branch:       "job/" + st.ID,
+		Base:         base,
+		Branch:       branch,
 		Head:         facts.Head,
 		HeadRemoto:   facts.HeadRemoto,
 		Sincronizado: inSync,
@@ -269,7 +294,7 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 			DecisionsTotal:    decisions,
 			DecisionsAckedSeq: st.DecisionsAckedSeq,
 		},
-		Equipe: facts.Equipe,
+		Equipe: equipe,
 		Eventos: Eventos{
 			Total:     len(events),
 			UltimoSeq: lastSeq(events),
@@ -321,21 +346,66 @@ var (
 )
 
 // readReportMD reads the orchestrator report.md in the job dir: the marker
-// items, the partial count (reportscan's rule) and the artefact with the
-// file's sha256. A missing or unreadable file leaves all three empty.
-func readReportMD(dir string) (items []Item, parciais int, artefatos []Artefato) {
+// items, the partial count (reportscan's rule), the `## Resumo` section's
+// text and the artefact with the file's sha256. A missing or unreadable
+// file leaves all four empty.
+func readReportMD(dir string) (items []Item, parciais int, artefatos []Artefato, resumo string) {
 	items = []Item{}
 	artefatos = []Artefato{}
 	raw, err := os.ReadFile(filepath.Join(dir, "report.md"))
 	if err != nil {
-		return items, 0, artefatos
+		return items, 0, artefatos, resumo
 	}
 	text := string(raw)
 	items = reportItems(text)
+	resumo = reportResumo(text)
 	parciais = reportscan.PartialCount(text)
 	sum := sha256.Sum256(raw)
 	artefatos = append(artefatos, Artefato{Path: "report.md", SHA256: hex.EncodeToString(sum[:])})
-	return items, parciais, artefatos
+	return items, parciais, artefatos, resumo
+}
+
+// reportResumo is the text of the `## Resumo` section of the orchestrator
+// report: the lines after the line that is exactly the heading (trailing
+// spaces allowed) up to the next line starting with `#`, skipping fenced
+// code blocks with the reportItems fence rules. Lines are trimmed, empty
+// lines dropped, at most the first six are kept, each cut to the resumo
+// limit, joined with a newline; no section is "".
+func reportResumo(text string) string {
+	lines := []string{}
+	inSection := false
+	inFence, fenceChar, fenceLen := false, byte(0), 0
+	for _, line := range strings.Split(text, "\n") {
+		open := reportItemFenceOpen.FindStringSubmatch(line)
+		if !inFence && open != nil {
+			inFence, fenceChar, fenceLen = true, open[1][0], len(open[1])
+			continue
+		}
+		if inFence {
+			if close := reportItemFenceClose.FindStringSubmatch(line); close != nil && close[1][0] == fenceChar && len(close[1]) >= fenceLen {
+				inFence = false
+			}
+			continue
+		}
+		if inSection && strings.HasPrefix(line, "#") {
+			break
+		}
+		if !inSection {
+			if strings.TrimRight(line, " ") == "## Resumo" {
+				inSection = true
+			}
+			continue
+		}
+		value := strings.TrimSpace(line)
+		if value == "" {
+			continue
+		}
+		lines = append(lines, cutRunes(value, resumoLimit))
+		if len(lines) == 6 {
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // reportItems extracts the orchestrator report items: the lines outside

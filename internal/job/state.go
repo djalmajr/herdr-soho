@@ -53,6 +53,10 @@ type State struct {
 	WorkspaceClosed      bool     `json:"workspace_closed,omitempty"`
 	TimeoutMin           int      `json:"timeout_min,omitempty"`
 	StartedAt            string   `json:"started_at,omitempty"`
+	// Equipe is the team resolution the job ran with (the report's
+	// equipe field), recorded with the run facts: the source file and the
+	// brief override keys, an empty non-nil list when there are none.
+	Equipe *Equipe `json:"equipe,omitempty"`
 	// OrchestratorSpawnAt is the spawn intent, recorded before the job
 	// orchestrator is spawned: a restarted supervisor that finds it without
 	// Orchestrator recovers the spawn instead of spawning blindly.

@@ -403,7 +403,11 @@ func startRequest(base string, brief string) StartRequest {
 	return StartRequest{
 		ID: "job-1", Org: prepOrg, Repo: prepRepo, Base: base, Mode: "worktree",
 		Brief: []byte(brief), TimeoutMin: 120,
-		Team: Team{Pairs: []TeamPair{{Key: "panes", Value: "3"}, {Key: "lane.build.roles", Value: "implementer"}}},
+		Team: Team{
+			Source:       "teams/example-org/example-repo.conf",
+			OverrideKeys: []string{"lane.build.roles"},
+			Pairs:        []TeamPair{{Key: "panes", Value: "3"}, {Key: "lane.build.roles", Value: "implementer"}},
+		},
 	}
 }
 
@@ -443,6 +447,12 @@ func TestStartSuccess(t *testing.T) {
 		st.Base != "main" || len(st.BaseSHA) != 40 || st.Modo != "worktree" ||
 		st.TimeoutMin != 120 || st.WorkspaceID != "w9" || st.RootPane != "w9:p1" {
 		t.Fatalf("run facts = %+v", st)
+	}
+	// The team source is recorded with the run facts: the source file and
+	// the brief override keys, an empty non-nil slice when there are none.
+	if st.Equipe == nil || st.Equipe.Fonte != "teams/example-org/example-repo.conf" ||
+		!reflect.DeepEqual(st.Equipe.OverrideBrief, []string{"lane.build.roles"}) {
+		t.Fatalf("equipe = %+v", st.Equipe)
 	}
 	// StartedAt is RFC 3339 with an explicit offset, taken from the store
 	// clock (the system clock here): fresh within a minute, never Z.
@@ -654,7 +664,9 @@ func TestStartPaneRunFailure(t *testing.T) {
 		*snap.State.Motivo != "job: herdr pane run failed" {
 		t.Fatalf("state = %q motivo %v", snap.State.Status, snap.State.Motivo)
 	}
-	failure, terminal := failEvents(t, stateRoot, "job-1")
+	// The start failure paths append the cleanup event after the terminal,
+	// so the pair is looked up by tipo, not by position.
+	failure, terminal := failAndTerminalEvents(t, stateRoot, "job-1")
 	if failure.Refs["motivo"] != "job: herdr pane run failed" || terminal.Refs["exit"] != "4" {
 		t.Fatalf("failure = %+v terminal = %+v", failure, terminal)
 	}
@@ -664,6 +676,14 @@ func TestStartPaneRunFailure(t *testing.T) {
 	}
 	if len(friction) != 1 || !strings.Contains(friction[0], "close down") {
 		t.Fatalf("friction = %v, want the close error only to friction", friction)
+	}
+	// The workspace stayed open: the report says so and the log carries the
+	// cleanup event the start failure appends.
+	if rep := reportJSON(t, stateRoot, "job-1"); rep.Limpeza.Workspace != "open" {
+		t.Fatalf("limpeza = %+v, want open", rep.Limpeza)
+	}
+	if tipos := eventTipos(t, stateRoot, "job-1"); !reflect.DeepEqual(tipos, []string{"accepted", "preparing", "failure", "terminal", "cleanup"}) {
+		t.Fatalf("event tipos = %v", tipos)
 	}
 }
 
@@ -693,7 +713,9 @@ func TestStartSessionFileFailure(t *testing.T) {
 		*snap.State.Motivo != "job: cannot write the team session" {
 		t.Fatalf("state = %q motivo %v", snap.State.Status, snap.State.Motivo)
 	}
-	_, terminal := failEvents(t, stateRoot, "job-1")
+	// The start failure paths append the cleanup event after the terminal,
+	// so the terminal is looked up by tipo, not by position.
+	_, terminal := failAndTerminalEvents(t, stateRoot, "job-1")
 	if terminal.Refs["exit"] != "2" {
 		t.Fatalf("terminal refs = %v", terminal.Refs)
 	}
@@ -703,6 +725,14 @@ func TestStartSessionFileFailure(t *testing.T) {
 	}
 	if len(friction) != 1 || !strings.Contains(friction[0], "close down") {
 		t.Fatalf("friction = %v", friction)
+	}
+	// The workspace stayed open: the report says so and the log carries the
+	// cleanup event the start failure appends.
+	if rep := reportJSON(t, stateRoot, "job-1"); rep.Limpeza.Workspace != "open" {
+		t.Fatalf("limpeza = %+v, want open", rep.Limpeza)
+	}
+	if tipos := eventTipos(t, stateRoot, "job-1"); !reflect.DeepEqual(tipos, []string{"accepted", "preparing", "failure", "terminal", "cleanup"}) {
+		t.Fatalf("event tipos = %v", tipos)
 	}
 }
 

@@ -1,6 +1,7 @@
 package job
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -88,11 +89,32 @@ func TestStartHostileWorkspaceID(t *testing.T) {
 				strings.Contains(friction[0], id) {
 				t.Fatalf("friction = %v", friction)
 			}
-			failure, terminal := failEvents(t, stateRoot, "job-1")
-			if failure.Refs["motivo"] != fixed || terminal.Refs["exit"] != "4" {
-				t.Fatalf("failure = %+v terminal = %+v", failure, terminal)
+			// The workspace is left open on purpose: the failure and the
+			// terminal record come first, then the cleanup event, and the
+			// report says the workspace stayed open.
+			events, err := readEvents(filepath.Join(stateRoot, "jobs", "job-1"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(events) < 3 {
+				t.Fatalf("events = %+v, want the failure, the terminal and the cleanup", events)
+			}
+			failure, terminal, cleanup := events[len(events)-3], events[len(events)-2], events[len(events)-1]
+			if failure.Tipo != "failure" || failure.Refs["motivo"] != fixed || terminal.Tipo != "terminal" || terminal.Refs["exit"] != "4" || cleanup.Tipo != "cleanup" {
+				t.Fatalf("failure = %+v terminal = %+v cleanup = %+v", failure, terminal, cleanup)
 			}
 			assertFailedReport(t, stateRoot, "job-1", fixed)
+			raw, err := os.ReadFile(filepath.Join(stateRoot, "jobs", "job-1", "report.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var rep Report
+			if err := json.Unmarshal(raw, &rep); err != nil {
+				t.Fatal(err)
+			}
+			if rep.Limpeza.Workspace != "open" {
+				t.Fatalf("limpeza.workspace = %q, want open", rep.Limpeza.Workspace)
+			}
 		})
 	}
 

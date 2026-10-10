@@ -13,8 +13,9 @@ import (
 )
 
 // crashedStartState leaves a job exactly where a crashed start left it:
-// accepted, moved to preparing, with the create intent recorded (the label
-// and the preexisting ids) but no workspace id.
+// accepted, moved to preparing with the preparing event the starter
+// appends, with the create intent recorded (the label and the preexisting
+// ids) but no workspace id.
 func crashedStartState(t *testing.T, root string) *Store {
 	t.Helper()
 	s := Open(root)
@@ -23,6 +24,9 @@ func crashedStartState(t *testing.T, root string) *Store {
 	}
 	if _, err := s.Transition("job-1", StatusPreparing); err != nil {
 		t.Fatalf("transition: %v", err)
+	}
+	if _, err := s.Append("job-1", EventIn{Tipo: "preparing", Resumo: "preparing checkout and worktree"}); err != nil {
+		t.Fatalf("preparing event: %v", err)
 	}
 	if _, err := s.Record("job-1", func(st *State) {
 		st.WorkspaceLabel = "job-job-1"
@@ -46,6 +50,58 @@ func countFailureEvents(t *testing.T, dir string) int {
 		}
 	}
 	return failures
+}
+
+// failAndTerminalEvents returns the failure and the terminal events of the
+// job log, looked up by tipo: the start failure paths append the cleanup
+// event after the terminal, so the positional last two are no longer the
+// pair.
+func failAndTerminalEvents(t *testing.T, root, id string) (failure, terminal Event) {
+	t.Helper()
+	events, err := readEvents(filepath.Join(root, "jobs", id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		switch event.Tipo {
+		case "failure":
+			failure = event
+		case "terminal":
+			terminal = event
+		}
+	}
+	if failure.Seq == 0 || terminal.Seq == 0 || failure.Seq >= terminal.Seq {
+		t.Fatalf("events = %+v, want the failure before the terminal", events)
+	}
+	return failure, terminal
+}
+
+// assertCleanupReport checks the start failure's workspace outcome: the
+// cleanup event last in the log with the supervisor's finalize resumo, and
+// the report's limpeza.workspace value ("" is the absent field: the failure
+// left no Herdr workspace).
+func assertCleanupReport(t *testing.T, root, id, workspace string) {
+	t.Helper()
+	events, err := readEvents(filepath.Join(root, "jobs", id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := events[len(events)-1]
+	if workspace == "" {
+		if last.Tipo == "cleanup" {
+			t.Fatalf("cleanup event on a failure without a workspace: %+v", last)
+		}
+		if rep := reportJSON(t, root, id); rep.Limpeza.Workspace != "" {
+			t.Fatalf("limpeza = %+v, want no workspace", rep.Limpeza)
+		}
+		return
+	}
+	if last.Tipo != "cleanup" || last.Resumo != "processes released; worktree kept" {
+		t.Fatalf("last event = %+v, want the cleanup with the finalize resumo", last)
+	}
+	if rep := reportJSON(t, root, id); rep.Limpeza.Workspace != workspace {
+		t.Fatalf("limpeza = %+v, want the workspace %q", rep.Limpeza, workspace)
+	}
 }
 
 // TestRecoverStartCrashAfterCreate pins the old gap end to end: the crash
@@ -123,10 +179,13 @@ func TestRecoverStartCrashAfterCreate(t *testing.T) {
 	if countFailureEvents(t, jobDir) != 1 {
 		t.Fatalf("failure events, want exactly one")
 	}
-	failEvent, terminal := failEvents(t, stateRoot, "job-1")
+	failEvent, terminal := failAndTerminalEvents(t, stateRoot, "job-1")
 	if failEvent.Refs["motivo"] != "job: start interrupted" || terminal.Refs["exit"] != "19" {
 		t.Fatalf("failure = %+v terminal = %+v", failEvent, terminal)
 	}
+	// The recovery closed the workspace: the log ends with the cleanup
+	// event and the report records it.
+	assertCleanupReport(t, stateRoot, "job-1", "closed")
 	if len(friction) != 0 {
 		t.Fatalf("friction = %v, want none", friction)
 	}
@@ -160,6 +219,7 @@ func TestRecoverStartAmbiguousFailsClosed(t *testing.T) {
 			t.Fatalf("friction = %v", friction)
 		}
 		assertFailedReport(t, root, "job-1", "job: start interrupted")
+		assertCleanupReport(t, root, "job-1", "open")
 	})
 	t.Run("a list error closes nothing", func(t *testing.T) {
 		root := t.TempDir()
@@ -186,6 +246,7 @@ func TestRecoverStartAmbiguousFailsClosed(t *testing.T) {
 			t.Fatalf("friction = %v", friction)
 		}
 		assertFailedReport(t, root, "job-1", "job: start interrupted")
+		assertCleanupReport(t, root, "job-1", "open")
 	})
 }
 
@@ -213,6 +274,7 @@ func TestRecoverStartInvalidLabeledIDsFailClosed(t *testing.T) {
 			t.Fatalf("friction = %v", friction)
 		}
 		assertFailedReport(t, root, "job-1", "job: start interrupted")
+		assertCleanupReport(t, root, "job-1", "open")
 	}
 	t.Run("one new labeled row with an invalid id closes nothing", func(t *testing.T) {
 		root := t.TempDir()
@@ -262,6 +324,7 @@ func TestRecoverStartZeroNewRows(t *testing.T) {
 		t.Fatalf("CloseIDs = %v friction = %v, want none", fake.CloseIDs, friction)
 	}
 	assertFailedReport(t, root, "job-1", "job: start interrupted")
+	assertCleanupReport(t, root, "job-1", "")
 }
 
 // TestRecoverStartRecordedWorkspaceID: a crash after the workspace id
@@ -308,6 +371,7 @@ func TestRecoverStartRecordedWorkspaceID(t *testing.T) {
 			t.Fatalf("ListReads = %d friction = %v, want 0 / none", fake.ListReads, friction)
 		}
 		assertFailedReport(t, root, "job-1", "job: start interrupted")
+		assertCleanupReport(t, root, "job-1", "closed")
 	})
 	t.Run("a close error goes to friction", func(t *testing.T) {
 		root := t.TempDir()
@@ -326,6 +390,7 @@ func TestRecoverStartRecordedWorkspaceID(t *testing.T) {
 			t.Fatalf("friction = %v", friction)
 		}
 		assertFailedReport(t, root, "job-1", "job: start interrupted")
+		assertCleanupReport(t, root, "job-1", "open")
 	})
 }
 
@@ -398,6 +463,9 @@ func TestRecoverStartRetryIsANoOp(t *testing.T) {
 	}
 	if countFailureEvents(t, filepath.Join(root, "jobs", "job-1")) != 1 {
 		t.Fatalf("failure events, want exactly one")
+	}
+	if countTipo(t, Open(root), "cleanup") != 1 {
+		t.Fatalf("cleanup events, want exactly one")
 	}
 	after, err := os.ReadFile(filepath.Join(root, "jobs", "job-1", "report.json"))
 	if err != nil || !bytes.Equal(report, after) {
@@ -475,6 +543,7 @@ func TestRecoverStartRetiresThePendingCancel(t *testing.T) {
 	if len(fake.CloseIDs) != 0 || len(friction) != 0 {
 		t.Fatalf("CloseIDs = %v friction = %v, want none (nothing to close)", fake.CloseIDs, friction)
 	}
+	assertCleanupReport(t, root, "job-1", "")
 	pending, err := s.PendingControl("job-1")
 	if err != nil {
 		t.Fatal(err)
