@@ -291,7 +291,7 @@ func parseScanFlags(args []string, opts *scanOpts) (pos []string, err error) {
 		case strings.HasPrefix(a, "--accept="):
 			v = a[len("--accept="):]
 		case strings.HasPrefix(a, "-") && a != "-":
-			return nil, fmt.Errorf("unknown flag %q", a)
+			return nil, fmt.Errorf("unknown flag at argument %d", i+1)
 		default:
 			pos = append(pos, a)
 		}
@@ -374,7 +374,7 @@ func parseAcceptEntry(line string) (acceptEntry, error) {
 	}
 	rule := parts[0]
 	if _, ok := acceptableRules[rule]; !ok {
-		return acceptEntry{}, fmt.Errorf("rule %q cannot be accepted", rule)
+		return acceptEntry{}, errors.New("rule field cannot be accepted")
 	}
 	off, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil || off < 0 {
@@ -503,12 +503,14 @@ func collectEntries(opts scanOpts) ([]entrySource, error) {
 // readDenyFile loads the --deny-file tokens. Blank lines and lines
 // starting with "#" are ignored; spaces at both ends are removed. A
 // token shorter than 4 bytes is a usage error and the message cites
-// the line number only, never the token. Each needle is stored
+// the line number only, never the token. Read failures become static
+// messages without the path: they are printed to the raw stderr
+// before the redacting writer exists. Each needle is stored
 // ASCII-lower-cased so the matching is ASCII case-insensitive.
 func readDenyFile(p string) ([]denyToken, error) {
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return nil, err
+		return nil, denyFileReadError(err)
 	}
 	var toks []denyToken
 	for i, line := range strings.Split(string(b), "\n") {
@@ -517,11 +519,26 @@ func readDenyFile(p string) ([]denyToken, error) {
 			continue
 		}
 		if len(line) < 4 {
-			return nil, fmt.Errorf("deny-file %s: line %d: token shorter than 4 bytes", p, i+1)
+			return nil, &denyLoadError{msg: fmt.Sprintf("deny-file: line %d: token shorter than 4 bytes", i+1)}
 		}
 		toks = append(toks, denyToken{line: i + 1, needle: asciiLower([]byte(line))})
 	}
 	return toks, nil
+}
+
+// denyFileReadError maps a --deny-file read failure to a static
+// message and the I/O exit class: a missing file, a permission
+// denial, a path that is a directory, or any other read failure. The
+// message names no path and no other user-controlled value.
+func denyFileReadError(err error) error {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return &denyLoadError{msg: "deny-file: not found", io: true}
+	case errors.Is(err, fs.ErrPermission):
+		return &denyLoadError{msg: "deny-file: permission denied", io: true}
+	default:
+		return &denyLoadError{msg: "deny-file: cannot be read", io: true}
+	}
 }
 
 // asciiLower lower-cases ASCII letters only: the bytes A-Z become
@@ -983,16 +1000,35 @@ func scanContent(r io.Reader, rules []scanRule, key, display string, toks []deny
 	return n, nil
 }
 
+// denyLoadError is a --deny-file load error whose message is static
+// (no path, no other user-controlled value), so it may be printed to
+// the raw stderr before the redacting writer exists. io selects the
+// exit class: true for I/O, false for usage.
+type denyLoadError struct {
+	msg string
+	io  bool
+}
+
+func (e *denyLoadError) Error() string { return e.msg }
+
 // reportLoadError maps a --deny-file or --accept-file load error to an
 // exit code: a missing or unreadable file is an I/O error, a short
-// token or a malformed entry is a usage error.
+// token or a malformed entry is a usage error. Deny-file errors carry
+// their class on the error itself; accept-file errors keep the
+// *fs.PathError test.
 func reportLoadError(w io.Writer, err error) int {
+	fmt.Fprintf(w, "imagecheck: %v\n", err)
+	var dl *denyLoadError
+	if errors.As(err, &dl) {
+		if dl.io {
+			return exitIO
+		}
+		return exitUsage
+	}
 	var pe *fs.PathError
 	if errors.As(err, &pe) {
-		fmt.Fprintf(w, "imagecheck: %v\n", err)
 		return exitIO
 	}
-	fmt.Fprintf(w, "imagecheck: %v\n", err)
 	return exitUsage
 }
 
@@ -1162,21 +1198,44 @@ func walkContext(dir string, allow []string, toks []denyToken, f *scanFindings) 
 		if err != nil {
 			return err
 		}
-		resolved := contextLinkName(rel, target)
-		for _, ln := range denyHitLines(target, toks) {
-			f.addMeta("deny-token:"+strconv.Itoa(ln), display, "link")
-		}
-		for _, ln := range denyHitLines(resolved, toks) {
-			f.addMeta("deny-token:"+strconv.Itoa(ln), display, "link")
-		}
-		for _, rule := range contentRuleHits(target, scanRules) {
-			f.addMeta(rule, display, "link")
-		}
-		if forbiddenName(resolved) {
-			f.addMeta("forbidden-name", display, "link")
-		}
+		checkContextLink(rel, target, filepath.Separator, display, toks, f)
 		return nil
 	})
+}
+
+// checkContextLink applies the symlink-target rules to one context
+// link: the deny-token checks and the content rules run on the raw
+// os.Readlink target and, when sep is not "/", on its slash form
+// (slashLinkTarget, where a backslash is the OS separator); the
+// resolved name gets the deny-token checks and the forbidden-name
+// check. All findings are recorded at @link; addMeta de-duplicates.
+// On Unix (sep == "/") the slash form equals the raw target, so the
+// findings and their order are exactly the historical ones.
+func checkContextLink(rel, target string, sep byte, display string, toks []denyToken, f *scanFindings) {
+	slashed := slashLinkTarget(target, sep)
+	resolved := contextLinkName(rel, slashed)
+	for _, ln := range denyHitLines(target, toks) {
+		f.addMeta("deny-token:"+strconv.Itoa(ln), display, "link")
+	}
+	if slashed != target {
+		for _, ln := range denyHitLines(slashed, toks) {
+			f.addMeta("deny-token:"+strconv.Itoa(ln), display, "link")
+		}
+	}
+	for _, ln := range denyHitLines(resolved, toks) {
+		f.addMeta("deny-token:"+strconv.Itoa(ln), display, "link")
+	}
+	for _, rule := range contentRuleHits(target, scanRules) {
+		f.addMeta(rule, display, "link")
+	}
+	if slashed != target {
+		for _, rule := range contentRuleHits(slashed, scanRules) {
+			f.addMeta(rule, display, "link")
+		}
+	}
+	if forbiddenName(resolved) {
+		f.addMeta("forbidden-name", display, "link")
+	}
 }
 
 // runImage scans a docker save archive: every layer entry and the
@@ -1353,17 +1412,20 @@ func scanLayer(layer io.Reader, index int, toks []denyToken, f *scanFindings) er
 }
 
 // credentialPath reports whether the remainder of name below root/ or
-// home/<user>/ is a known credential path or anything under .ssh/.
+// home/<user>/ is a known credential path or anything under .ssh/,
+// comparing the ASCII-folded remainder against the table (the fold of
+// the deny matcher).
 func credentialPath(name string) bool {
 	rest, ok := credentialRemainder(name)
 	if !ok {
 		return false
 	}
-	if strings.HasPrefix(rest, imageSshPrefix) {
+	folded := lowerASCIIString(rest)
+	if strings.HasPrefix(folded, imageSshPrefix) {
 		return true
 	}
 	for _, p := range imageCredentialPaths {
-		if rest == p {
+		if folded == p {
 			return true
 		}
 	}
@@ -1371,16 +1433,19 @@ func credentialPath(name string) bool {
 }
 
 // credentialRemainder strips the root/ or home/<user>/ prefix and
-// returns the remainder below it.
+// returns the remainder below it. The prefix is compared against the
+// ASCII-folded copy of name (root and home match case-insensitively,
+// the user segment is any non-empty segment); only the comparison is
+// folded, never the stored or printed name.
 func credentialRemainder(name string) (string, bool) {
-	rest := strings.TrimPrefix(name, "root/")
-	if rest != name {
-		return rest, true
+	folded := lowerASCIIString(name)
+	if strings.HasPrefix(folded, "root/") {
+		return name[len("root/"):], true
 	}
-	if !strings.HasPrefix(name, "home/") {
+	if !strings.HasPrefix(folded, "home/") {
 		return "", false
 	}
-	rest = name[len("home/"):]
+	rest := name[len("home/"):]
 	i := strings.IndexByte(rest, '/')
 	if i < 0 {
 		return "", false
@@ -1388,10 +1453,11 @@ func credentialRemainder(name string) (string, bool) {
 	return rest[i+1:], true
 }
 
-// gitDir reports whether any component of name is .git.
+// gitDir reports whether any component of name is .git, comparing
+// ASCII case-insensitively (the fold of the deny matcher).
 func gitDir(name string) bool {
 	for _, c := range strings.Split(name, "/") {
-		if c == ".git" {
+		if lowerASCIIString(c) == ".git" {
 			return true
 		}
 	}

@@ -1,6 +1,7 @@
 # Reviewed matches of `imagecheck image` for herdr-soho-base 0.1.0, linux-amd64.
 # Format: <rule> <offset> <length> sha256:<file sha256> <path>. Each entry
-# accepts one match in one exact file; any other match, any changed byte
+# accepts one match of one exact file at one path (in each layer holding
+# those same bytes there); any other match, any changed byte
 # and any entry that matches nothing fails the scan. Every match below was
 # classified with its value masked (rule, length, character classes,
 # neighbours, PEM structure) and the file traced to its pinned upstream

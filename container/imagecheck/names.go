@@ -175,9 +175,10 @@ func contentRuleHits(s string, rules []scanRule) []string {
 }
 
 // contextLinkName returns the normalized slash path a context symlink at
-// rel points at: an absolute target -> normalizeArchiveName(target with
-// slashes); a relative one -> normalizeArchiveName(path.Join(path.Dir(rel),
-// target with slashes)). target is what os.Readlink returned.
+// rel points at: an absolute target -> normalizeArchiveName(target);
+// a relative one -> normalizeArchiveName(path.Join(path.Dir(rel),
+// target)). target is a slash-separated link target, as passed by the
+// caller from slashLinkTarget.
 func contextLinkName(rel, target string) string {
 	if target == "" {
 		return ""
@@ -186,6 +187,18 @@ func contextLinkName(rel, target string) string {
 		return normalizeArchiveName(target)
 	}
 	return normalizeArchiveName(path.Join(path.Dir(rel), target))
+}
+
+// slashLinkTarget converts a symlink target read with os.Readlink on a
+// separator-based filesystem to slash form: when sep is not "/" every
+// sep byte is replaced with "/" (on Windows Readlink returns targets
+// with backslashes); otherwise target is returned unchanged, because on
+// Unix a backslash is a legal name byte and must stay.
+func slashLinkTarget(target string, sep byte) string {
+	if sep == '/' {
+		return target
+	}
+	return strings.ReplaceAll(target, string(sep), "/")
 }
 
 // redactDenyTokens replaces every ASCII case-insensitive occurrence of
