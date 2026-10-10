@@ -438,37 +438,49 @@ func TestSuperviseWakeDisabled(t *testing.T) {
 
 // TestSuperviseWakeQueueFullDefersTheRest: a full queue (256 slots) leaves
 // the rest of the events for the next tick and never blocks the loop; the
-// deferred events are processed once the worker drains.
+// deferred events are processed once the worker drains. Only the first and
+// the last event are waking questions, so the drain runs exactly two hook
+// subprocesses while the non-waking notes in between advance the cursor.
 func TestSuperviseWakeQueueFullDefersTheRest(t *testing.T) {
 	store, jobDir, clock, team, fakeDir, env := wakeSupFixture(t,
 		[]fakecli.Rule{{AnyArgs: true}},
 		fakecli.InstallOptions{CaptureEnv: wakeEnvKeys})
-	for i := 0; i < 257; i++ {
-		if _, err := store.Note("job-1", EventIn{Tipo: "question", Resumo: fmt.Sprintf("q%d", i)}); err != nil {
+	if _, err := store.Note("job-1", EventIn{Tipo: "question", Resumo: "first question"}); err != nil {
+		t.Fatal(err)
+	}
+	// The filler is non-waking, so the drained work is the two hook
+	// subprocesses for the questions at seq 2 and 258, not one per event.
+	for i := 0; i < 255; i++ {
+		if _, err := store.Note("job-1", EventIn{Tipo: "note", Resumo: fmt.Sprintf("n%d", i)}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if _, err := store.Note("job-1", EventIn{Tipo: "question", Resumo: "last question"}); err != nil {
+		t.Fatal(err)
 	}
 	var friction []string
 	sup := supSupervisor(store, clock, team, &friction)
 	sup.Wake = &WakeHook{Cmd: "wakehook", JobID: "job-1", Env: env}
 	sup.startWake()
-	// 258 events (accepted + 257 questions) against a 256-slot queue: one
-	// tick queues up to the capacity and leaves the rest; it never blocks.
+	// 258 events (accepted + question + 255 notes + question) against a
+	// 256-slot queue: one tick queues up to the capacity and leaves the
+	// rest; it never blocks.
 	n1, done, err := sup.dispatchWakes()
 	if err != nil || done || n1 < 256 || n1 >= 258 {
 		t.Fatalf("first dispatch: n=%d done=%v err=%v, want 256 or 257 (the rest waits for the next tick)", n1, done, err)
 	}
 	// The next tick queues the rest once the worker frees slots: wait
-	// (bounded) for three processed events, which frees at least the two
-	// deferred slots.
+	// (bounded) for the queue length to drop to at most cap-2, which frees
+	// at least the two deferred slots. The queue length is safe to read
+	// concurrently; the cursor file is replaced at every drained event and
+	// a concurrent read would race the replacement on Windows.
 	deadline := time.Now().Add(60 * time.Second)
 	for {
-		seq, _ := wakeSeqValue(t, jobDir)
-		if n, _ := strconv.Atoi(seq); n >= 3 {
+		if len(sup.wakeQueue) <= wakeQueueCap-2 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the worker freed no slots within 60s; wake.seq = %q", seq)
+			t.Fatalf("the worker freed no slots within 60s; queue length = %d", len(sup.wakeQueue))
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -480,11 +492,19 @@ func TestSuperviseWakeQueueFullDefersTheRest(t *testing.T) {
 		t.Fatalf("dispatches queued %d + %d = %d, want all 258 events", n1, n2, n1+n2)
 	}
 	sup.stopWake(30 * time.Second)
+	// stopWake's 30 s budget can expire with the worker still draining;
+	// assert it finished (wakeDone closed) before reading anything it
+	// writes.
+	select {
+	case <-sup.wakeDone:
+	default:
+		t.Fatalf("the wake worker did not drain within 30s")
+	}
 	if seq, ok := wakeSeqValue(t, jobDir); !ok || seq != "258" {
 		t.Fatalf("wake.seq = %q ok=%v, want 258 (every event, including the deferred ones)", seq, ok)
 	}
-	if got := hookSeqs(t, fakeDir); len(got) != 257 {
-		t.Fatalf("hook calls = %d, want 257 (one per question)", len(got))
+	if got := hookSeqs(t, fakeDir); !reflect.DeepEqual(got, []int{2, 258}) {
+		t.Fatalf("hook seqs = %v, want [2 258] (the in-flight question and the deferred one, in order)", got)
 	}
 	if len(friction) != 0 {
 		t.Fatalf("friction = %v, want none", friction)
