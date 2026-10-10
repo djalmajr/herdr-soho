@@ -231,14 +231,17 @@ func (c selfCLI) Release(name string) error {
 
 // ReleaseTeam releases every worker the roster lists except the job
 // orchestrator, which the supervisor releases on its own: it reads the
-// roster and force-releases the listed names one by one. The header row
-// and the "other live agents" block are skipped, and a failed roster read
-// or release is the fixed error.
+// roster and force-releases the listed names one by one, trying every
+// listed worker even after one release fails. The header row and the
+// "other live agents" block are skipped; a failed roster read is the fixed
+// error returned at once, and a failed release is the fixed error returned
+// after the last listed worker is tried.
 func (c selfCLI) ReleaseTeam() error {
 	out, err := c.step("release the team workers", "roster")
 	if err != nil {
 		return err
 	}
+	var failed error
 	for _, line := range strings.Split(out, "\n") {
 		// The "other live agents" block opens with a comment line and runs
 		// to the end of the output (including the layout line); nothing
@@ -252,11 +255,11 @@ func (c selfCLI) ReleaseTeam() error {
 		if len(fields) < 2 || fields[0] == "NAME" || fields[1] == "job-orchestrator" {
 			continue
 		}
-		if _, err := c.step("release the team workers", "release", fields[0], "--close", "--force"); err != nil {
-			return err
+		if _, err := c.step("release the team workers", "release", fields[0], "--close", "--force"); err != nil && failed == nil {
+			failed = err
 		}
 	}
-	return nil
+	return failed
 }
 
 // Roster reads the team roster for spawn recovery: the header row, one

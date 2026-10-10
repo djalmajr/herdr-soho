@@ -305,6 +305,63 @@ func TestTeamOpsDispatchAndRelease(t *testing.T) {
 	})
 }
 
+func TestTeamOpsReleaseTeam(t *testing.T) {
+	// The roster the team prints: the header row, the job orchestrator's
+	// row, three workers, then the "other live agents" block that runs to
+	// the end of the output.
+	roster := "NAME                 ROLE               KIND     PANE     TAB              STATE     REPORT       CWD TASK\n" +
+		"orch-1               job-orchestrator   job      w1:p2    Job              working   none         /work brief\n" +
+		"w-1                  implementer        worker   w1:p3    Impl             working   ready        /work brief\n" +
+		"w-2                  reviewer           worker   w1:p4    Rev              working   ready        /work brief\n" +
+		"w-3                  implementer        worker   w1:p5    Impl2            working   ready        /work brief\n" +
+		"\n# other live agents in workspace w1 (not spawned by this skill)\n" +
+		"other-agent          -                  null     w1:p6    Other            working            \n"
+
+	t.Run("a refused release does not skip the remaining workers", func(t *testing.T) {
+		f := newTeamOpsFix(t, []fakecli.Rule{
+			{Argv: []string{"roster"}, Stdout: roster},
+			{Argv: []string{"release", "w-1", "--close", "--force"}, Code: 10},
+			{Argv: []string{"release", "w-2", "--close", "--force"}},
+			{Argv: []string{"release", "w-3", "--close", "--force"}},
+		})
+		err := f.cli().ReleaseTeam()
+		wantExit(t, err, ExitHerdr, "job: cannot release the team workers")
+		assertTeamCalls(t, f, [][]string{
+			{"roster"},
+			{"release", "w-1", "--close", "--force"},
+			{"release", "w-2", "--close", "--force"},
+			{"release", "w-3", "--close", "--force"},
+		})
+	})
+
+	t.Run("every worker released returns nil", func(t *testing.T) {
+		f := newTeamOpsFix(t, []fakecli.Rule{
+			{Argv: []string{"roster"}, Stdout: roster},
+			{Argv: []string{"release", "w-1", "--close", "--force"}},
+			{Argv: []string{"release", "w-2", "--close", "--force"}},
+			{Argv: []string{"release", "w-3", "--close", "--force"}},
+		})
+		if err := f.cli().ReleaseTeam(); err != nil {
+			t.Fatalf("ReleaseTeam: %v", err)
+		}
+		assertTeamCalls(t, f, [][]string{
+			{"roster"},
+			{"release", "w-1", "--close", "--force"},
+			{"release", "w-2", "--close", "--force"},
+			{"release", "w-3", "--close", "--force"},
+		})
+	})
+
+	t.Run("a failed roster read releases nothing", func(t *testing.T) {
+		f := newTeamOpsFix(t, []fakecli.Rule{
+			{Argv: []string{"roster"}, Code: 7},
+		})
+		err := f.cli().ReleaseTeam()
+		wantExit(t, err, ExitHerdr, "job: cannot release the team workers")
+		assertTeamCalls(t, f, [][]string{{"roster"}})
+	})
+}
+
 func TestTeamOpsStatus(t *testing.T) {
 	t.Run("the state and report come from the agent's tab line", func(t *testing.T) {
 		out := "other-agent\tworking\t-\t42\t-\n" +
