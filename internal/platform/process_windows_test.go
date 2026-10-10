@@ -5,9 +5,7 @@ package platform
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -20,24 +18,9 @@ import (
 
 func TestRunCliWindowsTreeKill(t *testing.T) {
 	dir := t.TempDir()
-	baseExe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	fakeCli := filepath.Join(dir, "fakecli.exe")
-	data, err := os.ReadFile(baseExe)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(fakeCli, data, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	warmTreeKillFake(t, fakeCli)
+	helper := treeKillHelperExe(t)
+	treeKillFixtureWrapper(t, dir, helper)
 	pidFile := filepath.Join(dir, "pids.txt")
-	wrapper := filepath.Join(dir, "wrapper.cmd")
-	if err = os.WriteFile(wrapper, []byte("@echo off\r\n@\"%~dp0fakecli.exe\" -test.run=TestTreeKillFakeCliProcess\r\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	env := EnvFromOS()
 	setTestPath(env, dir+";"+testPath(env))
 	env["PATHEXT"] = ".EXE;.CMD;.BAT;.COM"
@@ -47,6 +30,7 @@ func TestRunCliWindowsTreeKill(t *testing.T) {
 	if env.Get("COMSPEC") == "" {
 		env["COMSPEC"] = `C:\Windows\System32\cmd.exe`
 	}
+	treeKillChainReady(t, env, dir)
 	started := time.Now()
 	result := RunCli("wrapper", nil, RunOptions{Platform: "win32", Env: env, TimeoutMs: 1000})
 	elapsed := time.Since(started)
@@ -255,23 +239,8 @@ func TestJobObjectLimitInformationLayout(t *testing.T) {
 
 func TestRunCliWindowsTaskkillFallbackKillsGrandchild(t *testing.T) { // Mutation captured: bypassing taskkill leaves the recorded grandchild active after timeout.
 	dir := t.TempDir()
-	baseExe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	fakeCli := filepath.Join(dir, "fakecli.exe")
-	data, err := os.ReadFile(baseExe)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(fakeCli, data, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	warmTreeKillFake(t, fakeCli)
-	wrapper := filepath.Join(dir, "wrapper.cmd")
-	if err = os.WriteFile(wrapper, []byte("@echo off\r\n@\"%~dp0fakecli.exe\" -test.run=TestTreeKillFakeCliProcess\r\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	helper := treeKillHelperExe(t)
+	treeKillFixtureWrapper(t, dir, helper)
 	pidFile := filepath.Join(dir, "fallback-pids.txt")
 	env := EnvFromOS()
 	setTestPath(env, dir+";"+testPath(env))
@@ -284,6 +253,7 @@ func TestRunCliWindowsTaskkillFallbackKillsGrandchild(t *testing.T) { // Mutatio
 		env["COMSPEC"] = `C:\Windows\System32\cmd.exe`
 	}
 	t.Cleanup(func() { cleanupRecordedProcesses(pidFile) })
+	treeKillChainReady(t, env, dir)
 	result := RunCli("wrapper", nil, RunOptions{Platform: "win32", Env: env, Cwd: dir, TimeoutMs: 1000})
 	if !result.TimedOut || result.Status != nil || result.Signal != "SIGTERM" || result.Error != "ETIMEDOUT" {
 		t.Fatalf("fallback timeout result = %#v; stderr=%q status=%s child env=%s", result, result.Stderr, treeKillStatus(result), treeKillChildEnv(env))
@@ -294,27 +264,18 @@ func TestRunCliWindowsTaskkillFallbackKillsGrandchild(t *testing.T) { // Mutatio
 	assertRecordedProcessesGone(t, pidFile)
 }
 
+// treeKillChildEnv renders the few environment values that diagnose a
+// failed tree-kill fixture without dumping the whole process environment:
+// the helper mode, its pid file, PATHEXT, and whether the fixture dir is
+// first on PATH.
 func treeKillChildEnv(env Env) string {
-	keys := []string{
-		"HERDR_SOHO_TREEKILL_FAKE_MODE",
-		"HERDR_SOHO_TREEKILL_PID_FILE",
-		"HERDR_SOHO_FAKECLI_CONFIG",
-		"PATHEXT",
-		"PATH",
-		"Path",
-		"COMSPEC",
-		"ComSpec",
-		"SystemRoot",
-		"SystemDrive",
-		"TMPDIR",
+	pidFile := env.Get("HERDR_SOHO_TREEKILL_PID_FILE")
+	pathFirst := false
+	if dir := filepath.Dir(pidFile); dir != "" && dir != "." {
+		pathFirst = strings.HasPrefix(env.Get("PATH"), dir+";")
 	}
-	var values []string
-	for _, key := range keys {
-		if value, ok := env[key]; ok {
-			values = append(values, fmt.Sprintf("%s=%q", key, value))
-		}
-	}
-	return strings.Join(values, " ")
+	return fmt.Sprintf("mode=%s pidFile=%s PATHEXT=%s pathFirst=%v",
+		env.Get("HERDR_SOHO_TREEKILL_FAKE_MODE"), filepath.Base(pidFile), env.Get("PATHEXT"), pathFirst)
 }
 
 func treeKillStatus(result RunResult) string {
@@ -330,56 +291,6 @@ func systemDirectory(env Env) string {
 		windowsDir = `C:\Windows`
 	}
 	return filepath.Join(windowsDir, "System32")
-}
-
-func TestTreeKillFakeCliProcess(t *testing.T) {
-	fmt.Fprintf(os.Stderr, "tree helper env: mode=%q pidfile=%q config=%q PATHEXT=%q PATH=%q Path=%q COMSPEC=%q ComSpec=%q SystemRoot=%q SystemDrive=%q TMPDIR=%q\n",
-		os.Getenv("HERDR_SOHO_TREEKILL_FAKE_MODE"), os.Getenv("HERDR_SOHO_TREEKILL_PID_FILE"), os.Getenv("HERDR_SOHO_FAKECLI_CONFIG"),
-		os.Getenv("PATHEXT"), os.Getenv("PATH"), os.Getenv("Path"), os.Getenv("COMSPEC"), os.Getenv("ComSpec"),
-		os.Getenv("SystemRoot"), os.Getenv("SystemDrive"), os.Getenv("TMPDIR"))
-	if pidFile := os.Getenv("HERDR_SOHO_TREEKILL_PID_FILE"); pidFile != "" {
-		_ = os.WriteFile(pidFile+"."+os.Getenv("HERDR_SOHO_TREEKILL_FAKE_MODE")+".started", []byte(fmt.Sprint(os.Getpid())), 0o600)
-	}
-	switch os.Getenv("HERDR_SOHO_TREEKILL_FAKE_MODE") {
-	case "complete":
-		input, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			t.Fatal(err)
-		}
-		fmt.Fprintln(os.Stdout, "tree-output", string(input))
-		fmt.Fprintln(os.Stderr, "tree-error")
-	case "parent":
-		fallthrough
-	case "parent-exits":
-		input, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			t.Fatal(err)
-		}
-		child := exec.Command(os.Args[0], "-test.run=TestTreeKillFakeCliProcess")
-		childEnv := make([]string, 0, len(os.Environ())+1)
-		for _, entry := range os.Environ() {
-			if !strings.HasPrefix(strings.ToUpper(entry), "HERDR_SOHO_TREEKILL_FAKE_MODE=") {
-				childEnv = append(childEnv, entry)
-			}
-		}
-		child.Env = append(childEnv, "HERDR_SOHO_TREEKILL_FAKE_MODE=grandchild")
-		child.Stdout, child.Stderr = os.Stdout, os.Stderr
-		if err := child.Start(); err != nil {
-			t.Fatalf("start descendant: %v", err)
-		}
-		pids := fmt.Sprintf("%d\n%d\n", os.Getpid(), child.Process.Pid)
-		if err := os.WriteFile(os.Getenv("HERDR_SOHO_TREEKILL_PID_FILE"), []byte(pids), 0o600); err != nil {
-			_ = child.Process.Kill()
-			t.Fatalf("record process ids: %v", err)
-		}
-		fmt.Fprintln(os.Stdout, "tree-output", string(input))
-		fmt.Fprintln(os.Stderr, "tree-error")
-		if os.Getenv("HERDR_SOHO_TREEKILL_FAKE_MODE") == "parent" {
-			time.Sleep(time.Hour) // not select{}: with no other goroutine the runtime aborts it as a deadlock
-		}
-	case "grandchild":
-		time.Sleep(time.Hour) // not select{}: with no other goroutine the runtime aborts it as a deadlock
-	}
 }
 
 func assertRecordedProcessesGone(t *testing.T, pidFile string) {
@@ -455,20 +366,8 @@ func terminateOwnedProcess(pid uint32) {
 	_, _ = syscall.WaitForSingleObject(process, uint32(2*time.Second/time.Millisecond))
 }
 
-// warmTreeKillFake runs the freshly copied test binary once before any timed
-// run: the first start of a new .exe on Windows can pay an antivirus scan
-// longer than the 1 s timeouts below, so the helper never reaches its pid
-// file. A timed test that still finds no pid file reports whether the helper
-// started at all (the .started marker).
-func warmTreeKillFake(t *testing.T, fakeCli string) {
-	t.Helper()
-	started := time.Now()
-	if out, err := exec.Command(fakeCli, "-test.run=^$").CombinedOutput(); err != nil {
-		t.Fatalf("warm %s: %v: %s", fakeCli, err, out)
-	}
-	t.Logf("first start of the copied test binary took %v", time.Since(started))
-}
-
+// treeKillStarted reports whether the helper reached its start marker;
+// used only in failure diagnostics.
 func treeKillStarted(pidFile string) string {
 	matches, _ := filepath.Glob(pidFile + ".*.started")
 	if len(matches) == 0 {
