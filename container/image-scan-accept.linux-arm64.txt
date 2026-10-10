@@ -1,0 +1,60 @@
+# Reviewed matches of `imagecheck image` for herdr-soho-base 0.1.0, linux-arm64.
+# Format: <rule> <offset> <length> sha256:<file sha256> <path>. Each entry
+# accepts one match in one exact file; any other match, any changed byte
+# and any entry that matches nothing fails the scan. Every match below was
+# classified with its value masked (rule, length, character classes,
+# neighbours, PEM structure) and the file traced to its pinned upstream
+# source; none is a credential of this build. Re-review and regenerate this
+# list whenever a pin changes.
+
+# Go distribution (go.dev/dl archive pinned by GO_SHA256_*; each file is
+# byte-identical to the same path in that archive): upstream example and
+# test keys of crypto/tls and crypto/x509. example_test.go holds the same
+# example EC key twice.
+private-key 4252 198 sha256:124502c6d274e25854e48b13c2f88caa74b42416a4bd76cd3fa21c2869e29bf3 usr/local/go/src/crypto/tls/example_test.go
+private-key 5395 198 sha256:124502c6d274e25854e48b13c2f88caa74b42416a4bd76cd3fa21c2869e29bf3 usr/local/go/src/crypto/tls/example_test.go
+private-key 0 198 sha256:4280dcaf02ddf203cc1e3179b872f2e2f130662437b2f525bb24dfab4e7fade3 usr/local/go/src/crypto/tls/testdata/example-key.pem
+private-key 0 198 sha256:2fea2ebe77388df61566fcd43eb0070dbff2842c8786a0e7906a13e5f10c3e65 usr/local/go/src/crypto/x509/platform_root_key.pem
+
+# GnuTLS (Debian package libgnutls30t64 from the pinned snapshot; the file
+# matches the package's dpkg md5sums): eight built-in self-test key vectors
+# (EC, RSA-2048, DSA, PKCS#8, Ed25519), NUL-separated in the read-only data.
+private-key 1767184 198 sha256:560c04722d04d0331b0eeda8a249491139ba46bf0e294897ebceb04993380596 usr/lib/aarch64-linux-gnu/libgnutls.so.30.40.3
+private-key 1768096 1645 sha256:560c04722d04d0331b0eeda8a249491139ba46bf0e294897ebceb04993380596 usr/lib/aarch64-linux-gnu/libgnutls.so.30.40.3
+private-key 1769776 1182 sha256:560c04722d04d0331b0eeda8a249491139ba46bf0e294897ebceb04993380596 usr/lib/aarch64-linux-gnu/libgnutls.so.30.40.3
+private-key 1770992 126 sha256:560c04722d04d0331b0eeda8a249491139ba46bf0e294897ebceb04993380596 usr/lib/aarch64-linux-gnu/libgnutls.so.30.40.3
+private-key 1771152 130 sha256:560c04722d04d0331b0eeda8a249491139ba46bf0e294897ebceb04993380596 usr/lib/aarch64-linux-gnu/libgnutls.so.30.40.3
+private-key 1771312 175 sha256:560c04722d04d0331b0eeda8a249491139ba46bf0e294897ebceb04993380596 usr/lib/aarch64-linux-gnu/libgnutls.so.30.40.3
+private-key 1772464 93 sha256:560c04722d04d0331b0eeda8a249491139ba46bf0e294897ebceb04993380596 usr/lib/aarch64-linux-gnu/libgnutls.so.30.40.3
+private-key 1772720 130 sha256:560c04722d04d0331b0eeda8a249491139ba46bf0e294897ebceb04993380596 usr/lib/aarch64-linux-gnu/libgnutls.so.30.40.3
+
+# libunistring (Debian package libunistring5, matches its dpkg md5sums): an
+# access-key-id shape inside a run of more than 90 consecutive upper-case
+# letters, a character table; not delimited, no digits.
+aws-access-key 1686406 20 sha256:26bda6bd707b57c7d02bb6331adda65906950d4ef8ad7ed82901a7cf81a4d44f usr/lib/aarch64-linux-gnu/libunistring.so.5.2.0
+
+# Node.js binary (nodejs.org archive pinned by NODE_SHA256_*; byte-identical
+# to bin/node of that archive): access-key-id shapes inside long base64 runs
+# of embedded data, with alphanumeric bytes on both sides; not delimited keys.
+aws-access-key 43275026 20 sha256:0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584 opt/node/bin/node
+aws-access-key 43275842 20 sha256:0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584 opt/node/bin/node
+aws-access-key 43276390 20 sha256:0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584 opt/node/bin/node
+aws-access-key 43750562 20 sha256:0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584 opt/node/bin/node
+aws-access-key 43751878 20 sha256:0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584 opt/node/bin/node
+aws-access-key 43829539 20 sha256:0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584 opt/node/bin/node
+aws-access-key 43832415 20 sha256:0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584 opt/node/bin/node
+aws-access-key 44171058 20 sha256:0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584 opt/node/bin/node
+
+# Codex CLI native binary (npm package @openai/codex codex-linux-arm64 0.162.1,
+# lockfile sha512 integrity verified; byte-identical to the package's
+# binary): token prefixes packed next to unrelated identifiers in the
+# read-only string table. The github-token matches are a ghr_ prefix
+# followed by a CamelCase identifier without digits, and github_pat_
+# followed by UPPER_SNAKE constant names (not the 22+59 fine-grained token
+# shape); the openai-key matches are sk-svcacct- followed by hyphenated
+# lower-case words, and (amd64 only) the compiled-in prefix constant
+# (verified upstream marker), also in the arm64 binary, run together with a
+# 19-letter word and UPPER_SNAKE constant names.
+github-token 199063400 40 sha256:071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5 opt/herdr-soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex
+openai-key 202520125 55 sha256:071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5 opt/herdr-soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex
+github-token 202562441 72 sha256:071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5 opt/herdr-soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex

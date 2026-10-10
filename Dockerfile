@@ -14,6 +14,9 @@ ARG DEBIAN_SNAPSHOT=20261005T000000Z
 
 ARG BASE_IMAGE_VERSION=0.1.0
 ARG HERDR_SOHO_VERSION=dev
+# Full commit SHA of the source the image was built from, recorded in the
+# org.opencontainers.image.revision label. Empty when not passed.
+ARG VCS_REF=
 
 ARG GO_VERSION=1.27.2
 ARG GO_SHA256_AMD64=ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5
@@ -92,10 +95,12 @@ RUN set -eu; \
       *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     mkdir -p /dl /out/bin; cd /dl; \
-    curl -fsSL --proto '=https' -o go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz"; \
-    curl -fsSL --proto '=https' -o node.txz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
-    curl -fsSL --proto '=https' -o claude "https://downloads.claude.ai/claude-code-releases/${CLAUDE_CODE_VERSION}/linux-${claude_arch}/claude"; \
-    curl -fsSL --proto '=https' -o grok "https://x.ai/cli/grok-${GROK_VERSION}-linux-${grok_arch}"; \
+    fetch() { curl -fsSL --proto '=https' --connect-timeout 30 --retry 5 --retry-delay 10 --retry-all-errors -o "$@"; }; \
+    fetch go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz"; \
+    fetch node.txz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
+    fetch claude "https://downloads.claude.ai/claude-code-releases/${CLAUDE_CODE_VERSION}/linux-${claude_arch}/claude"; \
+    fetch grok "https://x.ai/cli/grok-${GROK_VERSION}-linux-${grok_arch}" \
+      || fetch grok "https://storage.googleapis.com/grok-build-public-artifacts/cli/grok-${GROK_VERSION}-linux-${grok_arch}"; \
     printf '%s  %s\n' "${go_sum}" go.tgz "${node_sum}" node.txz "${claude_sum}" claude "${grok_sum}" grok | sha256sum -c -; \
     mkdir -p /out/go /out/node; \
     tar -xzf go.tgz -C /out/go --strip-components=1 --no-same-owner; \
@@ -136,6 +141,7 @@ RUN set -eu; \
 FROM os AS base
 ARG BASE_IMAGE_VERSION
 ARG HERDR_SOHO_VERSION
+ARG VCS_REF
 ARG DEBIAN_IMAGE
 ARG DEBIAN_SNAPSHOT
 COPY --from=fetch /out/go /usr/local/go
@@ -163,6 +169,7 @@ ENV PATH=/usr/local/go/bin:/opt/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbi
 LABEL org.opencontainers.image.title="herdr-soho-base" \
       org.opencontainers.image.description="herdr-soho CLI and skill, agent runner CLIs and build toolchain for one-container-per-job execution" \
       org.opencontainers.image.version="${BASE_IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.base.name="${DEBIAN_IMAGE}" \
       io.github.herdr-soho.cli.version="${HERDR_SOHO_VERSION}" \
       io.github.herdr-soho.debian.snapshot="${DEBIAN_SNAPSHOT}"

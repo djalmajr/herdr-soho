@@ -39,6 +39,16 @@ func runCompare(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "imagecheck: %v\n", err)
 		return 4
 	}
+	// Every layer blob must hash to its declared digests before anything
+	// is printed: a mismatch is an I/O error, not a finding.
+	if err := verifyLayers(args[0], imgA); err != nil {
+		fmt.Fprintf(stderr, "imagecheck: %v\n", err)
+		return 4
+	}
+	if err := verifyLayers(args[1], imgB); err != nil {
+		fmt.Fprintf(stderr, "imagecheck: %v\n", err)
+		return 4
+	}
 	cfgA, err := imgA.parseConfig()
 	if err != nil {
 		fmt.Fprintf(stderr, "imagecheck: %v\n", err)

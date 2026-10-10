@@ -3,14 +3,17 @@ package main
 import (
 	"archive/tar"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -31,6 +34,11 @@ const (
 	scanBlock   = 1 << 20
 	scanOverlap = 4 << 10
 )
+
+// maxPEMCarry is the most bytes the scanner may keep between windows
+// to complete an open PEM private-key marker; an open region longer
+// than this fails closed instead of being carried.
+var maxPEMCarry = 16 << 20
 
 // scanRule is one named content rule: a rule name and a byte regex.
 type scanRule struct {
@@ -111,89 +119,127 @@ type denyToken struct {
 	needle []byte
 }
 
-// finding is one deduplicated result line.
+// finding is one result line of a run: a name-rule finding (offset
+// -1), a deny-token finding, a metadata finding localized in a name,
+// link, uname, gname or pax field (never acceptable), or a per-match
+// content finding that carries the match length and the sha256 of the
+// file it came from.
 type finding struct {
-	rule   string
-	path   string
-	offset int64 // -1 for name rules, printed as "-"
-	accept bool
+	rule    string
+	display string // printed path: relative (context), layer<N>:name (image), "config", "archive:<name>"
+	key     string // match identity: relative path, entry name, "config", "archive:<name>"
+	off     int64  // -1 for name rules and metadata
+	length  int
+	sha     [32]byte
+	deny    bool
+	meta    bool
+	field   string // metadata field: "name", "link", "uname", "gname" or "pax"
+	accept  bool
 }
 
-// scanFindings collects the deduplicated findings and the summary
+// scanFindings collects the per-match findings and the summary
 // counters of one subcommand run.
 type scanFindings struct {
-	seen  map[string]bool
-	order []finding
-	files int
-	bytes int64
+	order     []finding
+	seenName  map[string]bool // (rule, key) for name rules
+	seenMeta  map[string]bool // (rule, display, field) for metadata
+	files     int
+	bytes     int64
+	unmatched []string
 }
 
 // newFindings starts an empty collector.
 func newFindings() *scanFindings {
-	return &scanFindings{seen: map[string]bool{}}
+	return &scanFindings{seenName: map[string]bool{}, seenMeta: map[string]bool{}}
 }
 
-// add records one finding. Name rules pass offset -1. The first
-// offset of each (rule, path) wins; later matches at other offsets of
-// the same path are dropped.
-func (f *scanFindings) add(rule, p string, offset int64) {
-	key := rule + "\x00" + p
-	if f.seen[key] {
+// addName records one name-rule finding; the first of each
+// (rule, key) wins.
+func (f *scanFindings) addName(rule, key string) {
+	k := rule + "\x00" + key
+	if f.seenName[k] {
 		return
 	}
-	f.seen[key] = true
-	f.order = append(f.order, finding{rule: rule, path: p, offset: offset})
+	f.seenName[k] = true
+	f.order = append(f.order, finding{rule: rule, display: key, key: key, off: -1})
 }
 
-// accept marks the finding (if any) of (p, rule) as accepted and
-// returns whether it existed.
-func (f *scanFindings) accept(p, rule string) bool {
-	for i := range f.order {
-		if f.order[i].rule == rule && f.order[i].path == p {
-			f.order[i].accept = true
-			return true
-		}
+// addContent records one content match of the file with key path,
+// after the file was fully read. Within one file the scanner already
+// deduplicated the same (rule, offset) and kept the larger length,
+// so every call is one finding. There is no cross-file deduplication:
+// the same key path in different layers, or a tar layer holding two
+// same-name entries, is different file content and must stay
+// separate. The match length and the file sha256 ride along so an
+// accept can bind to the exact reviewed bytes and the exact match.
+func (f *scanFindings) addContent(rule, display, key string, off int64, length int, sha [32]byte) {
+	f.order = append(f.order, finding{rule: rule, display: display, key: key, off: off, length: length, sha: sha})
+}
+
+// addDeny records the first deny-token hit of one file; the line
+// carries only the token's line number and the offset, never the
+// literal.
+func (f *scanFindings) addDeny(rule, display, key string, off int64) {
+	f.order = append(f.order, finding{rule: rule, display: display, key: key, off: off, deny: true})
+}
+
+// addMeta records one finding localized in a metadata field (name,
+// link, uname, gname or pax) of the entry named by display: the first
+// of each (rule, display, field) wins. Metadata findings are never
+// acceptable: an accept entry has no way to name them.
+func (f *scanFindings) addMeta(rule, display, field string) {
+	k := rule + "\x00" + display + "\x00@" + field
+	if f.seenMeta[k] {
+		return
 	}
-	return false
+	f.seenMeta[k] = true
+	f.order = append(f.order, finding{rule: rule, display: display, off: -1, meta: true, field: field})
 }
 
-// counts splits the findings into the non-accepted and the accepted.
-func (f *scanFindings) counts() (findings, accepted int) {
-	for _, x := range f.order {
-		if x.accept {
-			accepted++
-		} else {
-			findings++
-		}
-	}
-	return
-}
-
-// print writes one line per finding and the final summary line. It
-// never prints the matched content: only the kind, the rule, the path
-// and the byte offset.
+// print writes one line per finding (in discovery order; the matches
+// of one file in ascending offset, then rule name), then the
+// unmatched-accept lines in input order, then the summary line. It
+// never prints the matched content.
 func (f *scanFindings) print(w io.Writer) {
-	nf, na := f.counts()
+	nf, na := 0, 0
 	for _, x := range f.order {
-		kind := "finding"
 		if x.accept {
-			kind = "accepted"
+			na++
+		} else {
+			nf++
 		}
-		off := "-"
-		if x.offset >= 0 {
-			off = strconv.FormatInt(x.offset, 10)
+		switch {
+		case x.meta:
+			fmt.Fprintf(w, "finding\t%s\t%s\t@%s\n", x.rule, x.display, x.field)
+		case x.deny:
+			fmt.Fprintf(w, "finding\t%s\t%s\t%d\n", x.rule, x.display, x.off)
+		case x.off < 0:
+			fmt.Fprintf(w, "%s\t%s\t%s\t-\n", kindOf(x), x.rule, x.display)
+		default:
+			fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\tsha256:%x\n", kindOf(x), x.rule, x.display, x.off, x.length, x.sha)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", kind, x.rule, x.path, off)
 	}
-	fmt.Fprintf(w, "summary\tfiles=%d\tbytes=%d\tfindings=%d\taccepted=%d\n", f.files, f.bytes, nf, na)
+	for _, u := range f.unmatched {
+		fmt.Fprintln(w, u)
+	}
+	fmt.Fprintf(w, "summary\tfiles=%d\tbytes=%d\tfindings=%d\taccepted=%d\tunmatched=%d\n",
+		f.files, f.bytes, nf, na, len(f.unmatched))
+}
+
+// kindOf is the printed kind of one finding.
+func kindOf(x finding) string {
+	if x.accept {
+		return "accepted"
+	}
+	return "finding"
 }
 
 // scanOpts are the parsed flags of one subcommand run.
 type scanOpts struct {
-	allow      []string // context only; normalized without a trailing "/"
-	denyFile   string
-	acceptFile string // at most one
-	accept     []string
+	allow         []string // context only; normalized without a trailing "/"
+	denyFile      string
+	acceptFile    string // at most one
+	acceptEntries []acceptEntry
 }
 
 // parseScanFlags splits the subcommand arguments into the positional
@@ -250,10 +296,11 @@ func parseScanFlags(args []string, opts *scanOpts) (pos []string, err error) {
 			pos = append(pos, a)
 		}
 		if a == "--accept" || strings.HasPrefix(a, "--accept=") {
-			if err := checkAcceptSpec(v); err != nil {
-				return nil, err
+			e, err := parseAcceptEntry(v)
+			if err != nil {
+				return nil, fmt.Errorf("--accept %d: %v", len(opts.acceptEntries)+1, err)
 			}
-			opts.accept = append(opts.accept, v)
+			opts.acceptEntries = append(opts.acceptEntries, e)
 		}
 	}
 	return pos, nil
@@ -273,45 +320,191 @@ func normalizeAllow(v string) string {
 	return strings.TrimSuffix(strings.TrimSpace(v), "/")
 }
 
-// checkAcceptSpec validates one --accept <path>=<rule> spec. The split
-// happens at the last "=" because a rule name such as deny-token:12
-// contains no "=" but a path may contain one.
-func checkAcceptSpec(spec string) error {
-	eq := strings.LastIndex(spec, "=")
-	if eq <= 0 || eq == len(spec)-1 {
-		return fmt.Errorf("malformed --accept %q: expected <path>=<rule>", spec)
-	}
-	return nil
+// acceptableRules are the only content rules an accept entry may
+// bind to; deny tokens, name rules and config-env-secret can never
+// be accepted.
+var acceptableRules = map[string]bool{
+	"private-key":    true,
+	"anthropic-key":  true,
+	"openai-key":     true,
+	"xai-key":        true,
+	"github-token":   true,
+	"npm-token":      true,
+	"aws-access-key": true,
+	"slack-token":    true,
+	"google-api-key": true,
+	"host-path":      true,
 }
 
-// readAcceptFile loads a --accept-file: one <path>=<rule> entry per
-// line, with the same shape as --accept (split at the last "="). Blank
-// lines and lines starting with "#" are ignored; spaces at both ends
-// are removed. A malformed line is a usage error and the message cites
-// the line number only.
-func readAcceptFile(p string) ([]string, error) {
+// acceptEntry is one parsed --accept value or --accept-file line in
+// the <rule> <offset> <length> sha256:<hex> <path> form: it binds to
+// the individual match of the individual file bytes, so a match can
+// only be accepted against the exact reviewed bytes.
+type acceptEntry struct {
+	rule   string
+	offset int64
+	length int64
+	sha    [32]byte
+	path   string
+}
+
+// entrySource is one accept entry with the place it came from, used
+// for the usage errors and the unmatched-accept lines: a 1-based line
+// of the --accept-file or a 1-based --accept flag.
+type entrySource struct {
+	entry acceptEntry
+	kind  int
+	index int
+}
+
+const (
+	entryFromFile = iota
+	entryFromFlag
+)
+
+// layerPrefixRe matches the old layer-index path form (layer<N>:...).
+var layerPrefixRe = regexp.MustCompile(`^layer[0-9]+:`)
+
+// parseAcceptEntry validates one accept entry. Every message names
+// only what is wrong, never the entry text.
+func parseAcceptEntry(line string) (acceptEntry, error) {
+	parts := splitAcceptFields(line)
+	if len(parts) != 5 {
+		return acceptEntry{}, fmt.Errorf("expected 5 fields, got %d: the format is <rule> <offset> <length> sha256:<file-sha256> <path>", len(parts))
+	}
+	rule := parts[0]
+	if _, ok := acceptableRules[rule]; !ok {
+		return acceptEntry{}, fmt.Errorf("rule %q cannot be accepted", rule)
+	}
+	off, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || off < 0 {
+		return acceptEntry{}, fmt.Errorf("offset must be a decimal integer >= 0")
+	}
+	length, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || length < 1 {
+		return acceptEntry{}, fmt.Errorf("length must be a decimal integer >= 1")
+	}
+	shaField := parts[3]
+	if !strings.HasPrefix(shaField, "sha256:") || len(shaField) != len("sha256:")+64 {
+		return acceptEntry{}, fmt.Errorf("sha256 must be the prefix sha256: followed by exactly 64 lowercase hex characters")
+	}
+	var sha [32]byte
+	for i := 7; i < len(shaField); i++ {
+		c := shaField[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return acceptEntry{}, fmt.Errorf("sha256 must be the prefix sha256: followed by exactly 64 lowercase hex characters")
+		}
+	}
+	if _, err := hex.Decode(sha[:], []byte(shaField[7:])); err != nil {
+		return acceptEntry{}, fmt.Errorf("sha256 must be the prefix sha256: followed by exactly 64 lowercase hex characters")
+	}
+	if parts[4] == "" {
+		return acceptEntry{}, fmt.Errorf("path must not be empty")
+	}
+	if layerPrefixRe.MatchString(parts[4]) {
+		return acceptEntry{}, fmt.Errorf("path must not use the old layer-index form")
+	}
+	return acceptEntry{rule: rule, offset: off, length: length, sha: sha, path: parts[4]}, nil
+}
+
+// splitAcceptFields splits one accept entry on runs of spaces and
+// tabs; the path is the remainder of the line after the fourth
+// separator run and may contain spaces.
+func splitAcceptFields(line string) []string {
+	var parts []string
+	i, n := 0, len(line)
+	for f := 0; f < 4 && i < n; f++ {
+		for i < n && (line[i] == ' ' || line[i] == '\t') {
+			i++
+		}
+		start := i
+		for i < n && line[i] != ' ' && line[i] != '\t' {
+			i++
+		}
+		parts = append(parts, line[start:i])
+	}
+	for i < n && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	parts = append(parts, line[i:])
+	return parts
+}
+
+// readAcceptEntries loads a --accept-file: one accept entry per line
+// in the <rule> <offset> <length> sha256:<hex> <path> form. Lines are
+// trimmed at both ends; blank lines and lines starting with "#" are
+// ignored. A malformed line is a usage error and the message cites
+// the line number only, never the entry text. Each entry keeps the
+// 1-based line number it came from.
+func readAcceptEntries(p string) ([]entrySource, error) {
 	b, err := os.ReadFile(p)
 	if err != nil {
 		return nil, err
 	}
-	var specs []string
+	var out []entrySource
 	for i, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if err := checkAcceptSpec(line); err != nil {
-			return nil, fmt.Errorf("accept-file %s: line %d: malformed entry", p, i+1)
+		e, err := parseAcceptEntry(line)
+		if err != nil {
+			return nil, fmt.Errorf("accept-file %s: line %d: %v", p, i+1, err)
 		}
-		specs = append(specs, line)
+		out = append(out, entrySource{entry: e, kind: entryFromFile, index: i + 1})
 	}
-	return specs, nil
+	return out, nil
+}
+
+// posLabel renders one entry origin for the usage errors.
+func posLabel(kind, index int) string {
+	if kind == entryFromFile {
+		return "line " + strconv.Itoa(index)
+	}
+	return "flag " + strconv.Itoa(index)
+}
+
+// checkDuplicateEntries rejects the same five fields twice, whether
+// they come from the accept file, the flags or both. The message
+// cites the entry origins only, never the entry text.
+func checkDuplicateEntries(entries []entrySource) error {
+	seen := map[string]entrySource{}
+	for _, s := range entries {
+		k := s.entry.rule + "\x00" + strconv.FormatInt(s.entry.offset, 10) +
+			"\x00" + strconv.FormatInt(s.entry.length, 10) +
+			"\x00" + hex.EncodeToString(s.entry.sha[:]) + "\x00" + s.entry.path
+		if prev, ok := seen[k]; ok {
+			return fmt.Errorf("duplicate accept entry: %s and %s", posLabel(prev.kind, prev.index), posLabel(s.kind, s.index))
+		}
+		seen[k] = s
+	}
+	return nil
+}
+
+// collectEntries gathers the accept entries in input order — the
+// --accept-file lines first, then the --accept flags — and rejects
+// duplicates. A missing or unreadable accept file is an I/O error;
+// a malformed entry or a duplicate is a usage error.
+func collectEntries(opts scanOpts) ([]entrySource, error) {
+	var entries []entrySource
+	if opts.acceptFile != "" {
+		var err error
+		entries, err = readAcceptEntries(opts.acceptFile)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for i, e := range opts.acceptEntries {
+		entries = append(entries, entrySource{entry: e, kind: entryFromFlag, index: i + 1})
+	}
+	return entries, checkDuplicateEntries(entries)
 }
 
 // readDenyFile loads the --deny-file tokens. Blank lines and lines
 // starting with "#" are ignored; spaces at both ends are removed. A
 // token shorter than 4 bytes is a usage error and the message cites
-// the line number only, never the token.
+// the line number only, never the token. Each needle is stored
+// ASCII-lower-cased so the matching is ASCII case-insensitive.
 func readDenyFile(p string) ([]denyToken, error) {
 	b, err := os.ReadFile(p)
 	if err != nil {
@@ -326,9 +519,23 @@ func readDenyFile(p string) ([]denyToken, error) {
 		if len(line) < 4 {
 			return nil, fmt.Errorf("deny-file %s: line %d: token shorter than 4 bytes", p, i+1)
 		}
-		toks = append(toks, denyToken{line: i + 1, needle: []byte(line)})
+		toks = append(toks, denyToken{line: i + 1, needle: asciiLower([]byte(line))})
 	}
 	return toks, nil
+}
+
+// asciiLower lower-cases ASCII letters only: the bytes A-Z become
+// a-z and every other byte stays unchanged. It is not bytes.ToLower,
+// which would apply Unicode folding.
+func asciiLower(b []byte) []byte {
+	out := make([]byte, len(b))
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		out[i] = c
+	}
+	return out
 }
 
 // forbiddenName reports whether any path component of rel triggers the
@@ -376,12 +583,25 @@ func notAllowlisted(rel string, allow []string) bool {
 	return true
 }
 
-// contentScanner streams r in scanBlock chunks with a scanOverlap tail
-// of the previous chunk kept in front of the next one. Every rule and
-// deny token is reported at most once, at the absolute offset where
-// its first match starts; the overlap makes a match that crosses a
-// block boundary visible and the first-match rule drops the duplicate
-// report from the next window.
+// contentMatch is one match of the stream at its absolute start
+// offset; deny-token hits and fail-closed PEM findings carry no
+// length.
+type contentMatch struct {
+	rule   string
+	offset int64
+	length int
+	deny   bool
+}
+
+// contentScanner streams r in scanBlock chunks with a tail of the
+// previous chunk kept in front of the next one. Content rules are
+// reported per match, at their absolute start offset, deduplicated by
+// (rule, offset) with the larger length kept; the overlap makes a
+// match that crosses a block boundary visible. Deny tokens are
+// reported at most once per file and matched ASCII case-insensitively
+// (each window against an ASCII-lower-cased copy of itself). The
+// scanner also hashes the whole stream it read (every byte exactly
+// once, the overlap not hashed twice).
 type contentScanner struct {
 	r       io.Reader
 	pos     int64 // absolute offset of the start of buf
@@ -389,28 +609,33 @@ type contentScanner struct {
 	first   bool
 	rules   []scanRule
 	toks    []denyToken
-	done    map[string]bool // rule names already reported
-	overlap int             // tail kept between windows
-	onMatch func(rule string, offset int64)
+	done    map[string]bool // deny token names already found
+	seen    map[string]int  // (rule, offset) -> index into matches
+	matches []contentMatch
+	denyOff []contentMatch
+	failPEM []contentMatch
+	failSet map[int64]bool // fail-closed PEM marker offsets
+	overlap int            // default tail kept between windows
+	carry   int64          // start of the tail for the next window
+	hash    hash.Hash
 }
 
-// newContentScanner wraps r; report receives (rule, absolute offset)
-// for the first match of each rule and deny token.
-func newContentScanner(r io.Reader, rules []scanRule, toks []denyToken, report func(rule string, offset int64)) *contentScanner {
+// newContentScanner wraps r.
+func newContentScanner(r io.Reader, rules []scanRule, toks []denyToken) *contentScanner {
 	done := map[string]bool{}
 	for _, t := range toks {
 		done["deny-token:"+strconv.Itoa(t.line)] = false
 	}
-	// The tail must hold all but the last byte of the longest deny token,
-	// so a literal longer than scanOverlap that crosses a block boundary
-	// still lies whole inside one window.
+	// The tail must hold all but the last byte of the longest deny
+	// token, so a literal longer than scanOverlap that crosses a block
+	// boundary still lies whole inside one window.
 	overlap := scanOverlap
 	for _, t := range toks {
 		if n := len(t.needle) - 1; n > overlap {
 			overlap = n
 		}
 	}
-	return &contentScanner{r: r, first: true, rules: rules, toks: toks, done: done, overlap: overlap, onMatch: report}
+	return &contentScanner{r: r, first: true, rules: rules, toks: toks, done: done, seen: map[string]int{}, failSet: map[int64]bool{}, overlap: overlap}
 }
 
 // scan runs the stream to the end and returns how many new bytes it
@@ -424,9 +649,11 @@ func (s *contentScanner) scan() (int64, error) {
 			nb, err = readBlock(s.r)
 			chunk = nb
 		} else {
+			// The tail starts at s.carry, the position carryFor picked
+			// in the previous window.
 			tail := s.buf
-			if len(tail) > s.overlap {
-				tail = tail[len(tail)-s.overlap:]
+			if len(tail) > int(s.carry) {
+				tail = tail[int(s.carry):]
 			}
 			nb, err = readBlock(s.r)
 			if len(nb) == 0 {
@@ -446,8 +673,12 @@ func (s *contentScanner) scan() (int64, error) {
 		s.first = false
 		s.buf = chunk
 		total += int64(len(nb))
+		if s.hash != nil {
+			s.hash.Write(nb)
+		}
 		s.scanBuf()
 		if err == nil {
+			s.carry = s.carryFor()
 			continue
 		}
 		if err == io.EOF || errors.Is(err, io.ErrUnexpectedEOF) {
@@ -458,13 +689,46 @@ func (s *contentScanner) scan() (int64, error) {
 	return total, nil
 }
 
-// scanBuf reports the first match of every pending rule and deny
-// token inside the current window.
-func (s *contentScanner) scanBuf() {
-	for _, r := range s.rules {
-		if s.done[r.name] {
+// carryFor picks where the next window must start: the next window
+// must start no later than an open PEM marker, and deny tokens keep
+// their current rule (longest token minus one). The later start wins,
+// i.e. the shorter tail. An open marker whose tail would exceed
+// maxPEMCarry is not carried: a fail-closed private-key finding is
+// recorded at the marker instead.
+func (s *contentScanner) carryFor() int64 {
+	pos := int64(len(s.buf)) - int64(s.overlap)
+	if pos < 0 {
+		pos = 0 // a deny token longer than the window must not carry a negative tail
+	}
+	if pos > int64(len(s.buf)) {
+		pos = int64(len(s.buf))
+	}
+	// Walk every open marker in ascending order, not only the
+	// earliest: each marker whose open tail exceeds maxPEMCarry
+	// fails closed at the marker (once per absolute offset), and
+	// the first marker whose tail fits sets the carry; the later
+	// markers lie inside the carried tail.
+	for _, m := range pemOpenMarkers(s.buf) {
+		if int64(len(s.buf)-m) > int64(maxPEMCarry) {
+			abs := s.pos + int64(m)
+			if !s.failSet[abs] {
+				s.failSet[abs] = true
+				s.failPEM = append(s.failPEM, contentMatch{rule: "private-key", offset: abs, length: len(s.buf) - m})
+			}
 			continue
 		}
+		if int64(m) < pos {
+			pos = int64(m)
+		}
+		break
+	}
+	return pos
+}
+
+// scanBuf reports every match of every content rule and the first
+// occurrence of every deny token inside the current window.
+func (s *contentScanner) scanBuf() {
+	for _, r := range s.rules {
 		for _, m := range r.pattern.FindAllIndex(s.buf, -1) {
 			seg := s.buf[m[0]:m[1]]
 			if r.name == "aws-access-key" && string(seg) == awsDocsExample {
@@ -473,21 +737,169 @@ func (s *contentScanner) scanBuf() {
 			if r.name == "host-path" && string(seg) == "/home/agent" {
 				continue // the image's own home is not a host path
 			}
-			s.done[r.name] = true
-			s.onMatch(r.name, s.pos+int64(m[0]))
-			break
+			s.noteMatch(r.name, s.pos+int64(m[0]), m[1]-m[0])
 		}
 	}
+	if len(s.toks) == 0 {
+		return
+	}
+	bufLower := asciiLower(s.buf)
 	for _, t := range s.toks {
 		name := "deny-token:" + strconv.Itoa(t.line)
 		if s.done[name] {
 			continue
 		}
-		if i := bytes.Index(s.buf, t.needle); i >= 0 {
+		if i := bytes.Index(bufLower, t.needle); i >= 0 {
 			s.done[name] = true
-			s.onMatch(name, s.pos+int64(i))
+			s.denyOff = append(s.denyOff, contentMatch{rule: name, offset: s.pos + int64(i), deny: true})
 		}
 	}
+}
+
+// noteMatch records one content match at its absolute start offset;
+// the same (rule, offset) seen again keeps the larger length.
+func (s *contentScanner) noteMatch(rule string, offset int64, length int) {
+	k := rule + "\x00" + strconv.FormatInt(offset, 10)
+	if i, ok := s.seen[k]; ok {
+		if length > s.matches[i].length {
+			s.matches[i].length = length
+		}
+		return
+	}
+	s.seen[k] = len(s.matches)
+	s.matches = append(s.matches, contentMatch{rule: rule, offset: offset, length: length})
+}
+
+// results returns the file-level findings: the content matches and
+// the deny-token hits at their absolute offsets, ascending offset then
+// rule name. The caller adds them only after the file is fully read,
+// so each content finding can carry the file's sha256.
+func (s *contentScanner) results() []contentMatch {
+	out := make([]contentMatch, 0, len(s.matches)+len(s.denyOff)+len(s.failPEM))
+	out = append(out, s.matches...)
+	out = append(out, s.denyOff...)
+	out = append(out, s.failPEM...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].offset != out[j].offset {
+			return out[i].offset < out[j].offset
+		}
+		return out[i].rule < out[j].rule
+	})
+	return out
+}
+
+// digest returns the sha256 of the whole stream read so far.
+func (s *contentScanner) digest() [32]byte {
+	var d [32]byte
+	if s.hash != nil {
+		copy(d[:], s.hash.Sum(nil))
+	}
+	return d
+}
+
+// pemMarkerRe matches a PEM private-key BEGIN marker.
+var pemMarkerRe = regexp.MustCompile(`-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----`)
+
+// pemOpenMarkers returns the offsets of every BEGIN marker in buf
+// whose PEM grammar is still open at the end of buf — the end falls
+// inside the line break after the marker, a header line, the optional
+// blank line or the base64 run — in ascending order.
+func pemOpenMarkers(buf []byte) []int {
+	var out []int
+	for _, m := range pemMarkerRe.FindAllIndex(buf, -1) {
+		if s := pemOpenFrom(buf, m[0], m[1]); s >= 0 {
+			out = append(out, m[0])
+		}
+	}
+	return out
+}
+
+// pemOpenFrom walks the PEM grammar from the BEGIN marker that starts
+// at markerOff and ends at markerEnd. It returns 0 when the grammar
+// is still open at the end of buf (the end lies in a position that
+// may still grow into a body) and -1 when it is closed or invalid
+// before the end.
+func pemOpenFrom(buf []byte, markerOff, markerEnd int) int {
+	i := markerEnd
+	if i == len(buf) {
+		return 0 // the end is inside the line break after the marker
+	}
+	switch buf[i] {
+	case '\n':
+		i++
+	case '\r':
+		if i+1 == len(buf) {
+			return 0 // a lone trailing \r is open
+		}
+		if buf[i+1] != '\n' {
+			return -1 // a \r followed by a byte other than \n is closed
+		}
+		i += 2
+	default:
+		return -1 // no body follows this marker in the grammar
+	}
+	for {
+		// Header line: [A-Za-z-]+: [^\r\n]* followed by a line break,
+		// consumed whole ("\n" or "\r\n") so a CRLF line break does not
+		// leave its second half to be mistaken for the blank line.
+		j := i
+		for j < len(buf) && ((buf[j] >= 'A' && buf[j] <= 'Z') || (buf[j] >= 'a' && buf[j] <= 'z') || buf[j] == '-') {
+			j++
+		}
+		if j == i || j == len(buf) || buf[j] != ':' {
+			break
+		}
+		j++ // the ':'
+		for j < len(buf) && buf[j] != '\r' && buf[j] != '\n' {
+			j++
+		}
+		if j == len(buf) {
+			return 0 // the end is inside a header line
+		}
+		if buf[j] == '\r' {
+			if j+1 == len(buf) {
+				return 0 // the end is inside the CRLF line break after the header line
+			}
+			if buf[j+1] != '\n' {
+				return -1
+			}
+			j += 2
+		} else {
+			j++
+		}
+		i = j
+	}
+	// Optional blank line.
+	if i < len(buf) && (buf[i] == '\n' || buf[i] == '\r') {
+		if buf[i] == '\r' {
+			if i+1 == len(buf) {
+				return 0 // the end is inside the blank line
+			}
+			if buf[i+1] != '\n' {
+				return -1
+			}
+			i++
+		}
+		i++ // consume the blank line
+	}
+	// Base64 run: the end inside the run is open (the run may grow
+	// past the window, and the next window finds the full match with
+	// its full length); a run that ended before the end of the buffer
+	// is closed.
+	for i < len(buf) && isPEMBodyChar(buf[i]) {
+		i++
+	}
+	if i == len(buf) {
+		return 0
+	}
+	return -1
+}
+
+// isPEMBodyChar reports whether c is part of the base64 run: base64
+// characters or the line breaks inside it.
+func isPEMBodyChar(c byte) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+		c == '+' || c == '/' || c == '=' || c == '\r' || c == '\n'
 }
 
 // readBlock reads up to scanBlock bytes; a short read at the end of
@@ -501,14 +913,74 @@ func readBlock(r io.Reader) ([]byte, error) {
 	return buf[:n], err
 }
 
-// applyAccept marks every --accept <path>=<rule> pair; a spec that
-// matches no finding is not an error (it is a forward-looking
-// allowlist). The split is at the last "=".
-func applyAccept(f *scanFindings, specs []string) {
-	for _, spec := range specs {
-		eq := strings.LastIndex(spec, "=")
-		f.accept(spec[:eq], spec[eq+1:])
+// applyAccept marks every content finding that an accept entry binds
+// to exactly — same acceptable rule, key path, offset, length and
+// file sha256 — as accepted, and records every entry that binds to
+// nothing as an unmatched accept, in input order (accept-file lines
+// first, then the --accept flags). One entry may accept several
+// findings only when they are the same match of byte-identical files
+// at the same key path in different layers.
+func applyAccept(f *scanFindings, entries []entrySource) {
+	for _, s := range entries {
+		matched := false
+		for i := range f.order {
+			x := &f.order[i]
+			if x.accept || x.deny || x.meta || x.off < 0 {
+				continue
+			}
+			if x.rule != s.entry.rule || x.key != s.entry.path || x.off != s.entry.offset ||
+				int64(x.length) != s.entry.length || x.sha != s.entry.sha {
+				continue
+			}
+			x.accept = true
+			matched = true
+		}
+		if !matched {
+			kind := "accept-file"
+			if s.kind == entryFromFlag {
+				kind = "accept"
+			}
+			f.unmatched = append(f.unmatched, "unmatched-accept\t"+kind+"\t"+strconv.Itoa(s.index))
+		}
 	}
+}
+
+// finishScan maps the collected state to an exit code: any finding or
+// any unmatched accept entry fails the run.
+func finishScan(f *scanFindings) int {
+	if len(f.unmatched) > 0 {
+		return exitFindings
+	}
+	for _, x := range f.order {
+		if !x.accept {
+			return exitFindings
+		}
+	}
+	return exitOK
+}
+
+// scanContent streams the content of one file or layer entry through
+// the scanner and, only after the file was fully read, records the
+// per-match findings — each content finding carrying the match length
+// and the sha256 of the whole file — plus the deny-token hits. key is
+// the match identity (relative path, entry name or "config"); display
+// is the printed path.
+func scanContent(r io.Reader, rules []scanRule, key, display string, toks []denyToken, f *scanFindings) (int64, error) {
+	s := newContentScanner(r, rules, toks)
+	s.hash = sha256.New()
+	n, err := s.scan()
+	if err != nil {
+		return n, err
+	}
+	d := s.digest()
+	for _, m := range s.results() {
+		if m.deny {
+			f.addDeny(m.rule, display, key, m.offset)
+		} else {
+			f.addContent(m.rule, display, key, m.offset, m.length, d)
+		}
+	}
+	return n, nil
 }
 
 // reportLoadError maps a --deny-file or --accept-file load error to an
@@ -522,6 +994,41 @@ func reportLoadError(w io.Writer, err error) int {
 	}
 	fmt.Fprintf(w, "imagecheck: %v\n", err)
 	return exitUsage
+}
+
+// redactingWriter wraps an output writer so that every line passes
+// through redactDenyTokens before it reaches the destination: a deny
+// literal held by a path or an error message never reaches stdout or
+// stderr. Bytes are buffered to the next line break, so a literal
+// split across several small writes (fmt prints its segments
+// separately) is still redacted; the lines this package writes always
+// end with a newline, so nothing is left in the buffer at the end of a
+// run.
+type redactingWriter struct {
+	w       io.Writer
+	toks    []denyToken
+	pending []byte
+}
+
+// Write appends b to the pending line and redacts and forwards each
+// complete line it forms.
+func (r *redactingWriter) Write(b []byte) (int, error) {
+	if len(r.toks) == 0 {
+		return r.w.Write(b)
+	}
+	r.pending = append(r.pending, b...)
+	for {
+		i := bytes.IndexByte(r.pending, '\n')
+		if i < 0 {
+			break
+		}
+		line := r.pending[:i+1]
+		if _, err := r.w.Write([]byte(redactDenyTokens(string(line), r.toks))); err != nil {
+			return len(b), err
+		}
+		r.pending = r.pending[i+1:]
+	}
+	return len(b), nil
 }
 
 // runContext scans a build context directory for secrets, credential
@@ -546,14 +1053,6 @@ func runContext(args []string, stdout, stderr io.Writer) int {
 		usage(stderr)
 		return exitUsage
 	}
-	info, err := os.Stat(dir)
-	if err != nil || !info.IsDir() {
-		if err == nil {
-			err = fmt.Errorf("%s: not a directory", dir)
-		}
-		fmt.Fprintf(stderr, "imagecheck: %v\n", err)
-		return exitIO
-	}
 	var toks []denyToken
 	if opts.denyFile != "" {
 		toks, err = readDenyFile(opts.denyFile)
@@ -561,31 +1060,43 @@ func runContext(args []string, stdout, stderr io.Writer) int {
 			return reportLoadError(stderr, err)
 		}
 	}
-	var fileAccepts []string
-	if opts.acceptFile != "" {
-		fileAccepts, err = readAcceptFile(opts.acceptFile)
-		if err != nil {
-			return reportLoadError(stderr, err)
+	// From here on every line written to stdout or stderr passes
+	// through redactDenyTokens, so a deny literal held by a path or an
+	// error message never reaches the output.
+	out := &redactingWriter{w: stdout, toks: toks}
+	errOut := &redactingWriter{w: stderr, toks: toks}
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		if err == nil {
+			err = fmt.Errorf("%s: not a directory", dir)
 		}
+		fmt.Fprintf(errOut, "imagecheck: %v\n", err)
+		return exitIO
+	}
+	entries, err := collectEntries(opts)
+	if err != nil {
+		return reportLoadError(errOut, err)
 	}
 	f := newFindings()
 	if err := walkContext(dir, opts.allow, toks, f); err != nil {
-		fmt.Fprintf(stderr, "imagecheck: %v\n", err)
+		fmt.Fprintf(errOut, "imagecheck: %v\n", err)
 		return exitIO
 	}
-	applyAccept(f, append(fileAccepts, opts.accept...))
-	f.print(stdout)
-	if nf, _ := f.counts(); nf > 0 {
-		return exitFindings
-	}
-	return exitOK
+	applyAccept(f, entries)
+	f.print(out)
+	return finishScan(f)
 }
 
 // walkContext walks dir in lexical order. Every entry gets the
-// forbidden-name check; files and symlinks also get not-allowlisted;
-// only regular files are content-scanned (symlinks are never read,
-// avoiding cycles and duplicate content).
+// forbidden-name check and the deny-token check on its path; files
+// and symlinks also get not-allowlisted; a symlink's target text gets
+// the deny-token, content-rule and forbidden-name checks (the link is
+// never followed or read, avoiding cycles and duplicate content);
+// only regular files are content-scanned. An entry whose path holds a
+// deny literal is printed under its ordinal in the walk, which no
+// accept entry can name.
 func walkContext(dir string, allow []string, toks []denyToken, f *scanFindings) error {
+	ordinal := 0
 	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -598,44 +1109,72 @@ func walkContext(dir string, allow []string, toks []denyToken, f *scanFindings) 
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
+		defer func() { ordinal++ }()
+		display := rel
+		key := rel
+		if lines := denyHitLines(rel, toks); len(lines) > 0 {
+			display = redactedDisplay("", ordinal)
+			key = display
+			for _, ln := range lines {
+				f.addMeta("deny-token:"+strconv.Itoa(ln), display, "name")
+			}
+		}
 		if d.IsDir() {
 			if forbiddenName(rel) {
-				f.add("forbidden-name", rel, -1)
+				f.addName("forbidden-name", display)
 			}
 			return nil
 		}
 		f.files++
 		if forbiddenName(rel) {
-			f.add("forbidden-name", rel, -1)
+			f.addName("forbidden-name", display)
 		}
 		if notAllowlisted(rel, allow) {
-			f.add("not-allowlisted", rel, -1)
+			f.addName("not-allowlisted", display)
 		}
-		if !d.Type().IsRegular() {
-			// Symlinks and other entries: name rules only, the
-			// content is never read.
+		if d.Type().IsRegular() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if info.Size() == 0 {
+				return nil
+			}
+			file, err := os.Open(p)
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+			n, err := scanContent(file, scanRules, key, display, toks, f)
+			if err != nil {
+				return err
+			}
+			f.bytes += n
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		if info.Size() == 0 {
+		if d.Type()&fs.ModeSymlink == 0 {
+			// Fifos and other special entries: name rules only.
 			return nil
 		}
-		file, err := os.Open(p)
+		// Symlink: the target text is checked, the link itself is
+		// never followed or read.
+		target, err := os.Readlink(p)
 		if err != nil {
 			return err
 		}
-		defer file.Close()
-		s := newContentScanner(file, scanRules, toks, func(rule string, off int64) {
-			f.add(rule, rel, off)
-		})
-		n, err := s.scan()
-		if err != nil {
-			return err
+		resolved := contextLinkName(rel, target)
+		for _, ln := range denyHitLines(target, toks) {
+			f.addMeta("deny-token:"+strconv.Itoa(ln), display, "link")
 		}
-		f.bytes += n
+		for _, ln := range denyHitLines(resolved, toks) {
+			f.addMeta("deny-token:"+strconv.Itoa(ln), display, "link")
+		}
+		for _, rule := range contentRuleHits(target, scanRules) {
+			f.addMeta(rule, display, "link")
+		}
+		if forbiddenName(resolved) {
+			f.addMeta("forbidden-name", display, "link")
+		}
 		return nil
 	})
 }
@@ -662,13 +1201,6 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		usage(stderr)
 		return exitUsage
 	}
-	if info, err := os.Stat(archive); err != nil || !info.Mode().IsRegular() {
-		if err == nil {
-			err = fmt.Errorf("%s: not a regular file", archive)
-		}
-		fmt.Fprintf(stderr, "imagecheck: %v\n", err)
-		return exitIO
-	}
 	var toks []denyToken
 	if opts.denyFile != "" {
 		toks, err = readDenyFile(opts.denyFile)
@@ -676,16 +1208,25 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 			return reportLoadError(stderr, err)
 		}
 	}
-	var fileAccepts []string
-	if opts.acceptFile != "" {
-		fileAccepts, err = readAcceptFile(opts.acceptFile)
-		if err != nil {
-			return reportLoadError(stderr, err)
+	// From here on every line written to stdout or stderr passes
+	// through redactDenyTokens, so a deny literal held by a path or an
+	// error message never reaches the output.
+	out := &redactingWriter{w: stdout, toks: toks}
+	errOut := &redactingWriter{w: stderr, toks: toks}
+	if info, err := os.Stat(archive); err != nil || !info.Mode().IsRegular() {
+		if err == nil {
+			err = fmt.Errorf("%s: not a regular file", archive)
 		}
+		fmt.Fprintf(errOut, "imagecheck: %v\n", err)
+		return exitIO
+	}
+	entries, err := collectEntries(opts)
+	if err != nil {
+		return reportLoadError(errOut, err)
 	}
 	img, err := openSaved(archive)
 	if err != nil {
-		fmt.Fprintf(stderr, "imagecheck: %v\n", err)
+		fmt.Fprintf(errOut, "imagecheck: %v\n", err)
 		return exitIO
 	}
 	f := newFindings()
@@ -693,64 +1234,116 @@ func runImage(args []string, stdout, stderr io.Writer) int {
 		return scanLayer(layer, index, toks, f)
 	})
 	if walkErr != nil {
-		fmt.Fprintf(stderr, "imagecheck: %v\n", walkErr)
+		fmt.Fprintf(errOut, "imagecheck: %v\n", walkErr)
 		return exitIO
+	}
+	// The archive's index files (manifest.json and the other outer
+	// files) are scanned after the layers with the content rules and
+	// the deny tokens, like any file content: their findings are
+	// acceptable under the archive: display.
+	for i, o := range img.Others {
+		display := "archive:" + o.Name
+		key := display
+		if lines := denyHitLines(o.Name, toks); len(lines) > 0 {
+			display = redactedDisplay("archive:", i)
+			key = display
+			for _, ln := range lines {
+				f.addMeta("deny-token:"+strconv.Itoa(ln), display, "name")
+			}
+		}
+		f.files++
+		n, err := scanContent(bytes.NewReader(o.Data), scanRules, key, display, toks, f)
+		if err != nil {
+			fmt.Fprintf(errOut, "imagecheck: %v\n", err)
+			return exitIO
+		}
+		f.bytes += n
 	}
 	// The config is scanned after the layers; its content rules also
 	// cover history/created_by, plus the config-only rules.
 	if err := scanImageConfig(img, toks, f); err != nil {
-		fmt.Fprintf(stderr, "imagecheck: %v\n", err)
+		fmt.Fprintf(errOut, "imagecheck: %v\n", err)
 		return exitIO
 	}
-	applyAccept(f, append(fileAccepts, opts.accept...))
-	f.print(stdout)
-	if nf, _ := f.counts(); nf > 0 {
-		return exitFindings
-	}
-	return exitOK
+	applyAccept(f, entries)
+	f.print(out)
+	return finishScan(f)
 }
 
-// entryName normalizes a tar entry name: the leading "./" is removed
-// and the path cleaned (a directory's trailing "/" included).
-func entryName(h *tar.Header) string {
-	n := strings.TrimPrefix(h.Name, "./")
-	if n == "" {
-		n = "/"
-	}
-	return path.Clean(n)
-}
-
-// scanLayer scans one layer tar: every entry gets the image name rules
-// (whiteouts are ignored) and regular files are content-scanned.
+// scanLayer scans one layer tar. Every entry gets the deny-token and
+// content-rule checks on its metadata (name, link target, owner
+// names, PAX records), the image name rules on its normalized name and
+// on its link target (a genuine whiteout marker only records a
+// deletion and is skipped by those two rules), and regular files are
+// content-scanned. An entry whose raw or normalized name holds a deny
+// literal is printed under its ordinal in the layer, which no accept
+// entry can name.
 func scanLayer(layer io.Reader, index int, toks []denyToken, f *scanFindings) error {
+	prefix := "layer" + strconv.Itoa(index) + ":"
+	ordinal := 0
 	return walkTar(layer, func(h *tar.Header, content io.Reader) error {
-		name := entryName(h)
-		if strings.HasPrefix(path.Base(name), ".wh.") {
-			// Whiteout markers carry no content and no meaning.
-			return nil
+		defer func() { ordinal++ }()
+		name := normalizeArchiveName(h.Name)
+		display := prefix + name
+		key := name
+		if len(denyHitLines(h.Name, toks)) > 0 || len(denyHitLines(name, toks)) > 0 {
+			display = redactedDisplay(prefix, ordinal)
+			key = display
 		}
-		display := "layer" + strconv.Itoa(index) + ":" + name
-		if name != "/" {
+		// Deny literals and content rules over every metadata field.
+		for _, mf := range headerMetaFields(h) {
+			for _, ln := range denyHitLines(mf.Value, toks) {
+				f.addMeta("deny-token:"+strconv.Itoa(ln), display, mf.Field)
+			}
+			for _, rule := range contentRuleHits(mf.Value, scanRules) {
+				f.addMeta(rule, display, mf.Field)
+			}
+		}
+		// The raw fields can split a literal that a reader joins: the
+		// normalized name and the resolved link target are what get
+		// extracted ("dir/./x" and "dir//x" are "dir/x").
+		for _, ln := range denyHitLines(name, toks) {
+			f.addMeta("deny-token:"+strconv.Itoa(ln), display, "name")
+		}
+		if target := linkTargetName(name, h); target != "" {
+			for _, ln := range denyHitLines(target, toks) {
+				f.addMeta("deny-token:"+strconv.Itoa(ln), display, "link")
+			}
+		}
+		// A genuine whiteout records a deletion: its name is not
+		// credential or git material; a .wh. entry that is not a
+		// marker (non-empty, or not a regular file) gets everything,
+		// content included.
+		whiteout := isWhiteoutMarker(h, name)
+		if !whiteout && name != "/" {
 			if credentialPath(name) {
-				f.add("credential-path", display, -1)
+				f.addName("credential-path", display)
 			}
 			if gitDir(name) {
-				f.add("git-dir", display, -1)
+				f.addName("git-dir", display)
 			}
 		}
-		if h.Typeflag != tar.TypeReg {
-			// Non-regular entries (dirs, symlinks, links): name rules
-			// only, no content.
+		if target := linkTargetName(name, h); target != "" && !whiteout {
+			if credentialPath(target) {
+				f.addMeta("credential-path", display, "link")
+			}
+			if gitDir(target) {
+				f.addMeta("git-dir", display, "link")
+			}
+		}
+		// Every entry that carries data is content-scanned, whatever its
+		// type: a contiguous file ('7'), a sparse file or an unknown type
+		// with a body is extracted with that body by some reader, so the
+		// type alone never skips the scan. Directories, symlinks and hard
+		// links carry no data.
+		if h.Typeflag != tar.TypeReg && h.Size == 0 {
 			return nil
 		}
 		f.files++
 		if h.Size == 0 {
 			return nil
 		}
-		s := newContentScanner(content, scanRules, toks, func(rule string, off int64) {
-			f.add(rule, display, off)
-		})
-		n, err := s.scan()
+		n, err := scanContent(content, scanRules, key, display, toks, f)
 		if err != nil {
 			return err
 		}
@@ -814,10 +1407,7 @@ func scanImageConfig(img *savedImage, toks []denyToken, f *scanFindings) error {
 	rules := make([]scanRule, 0, len(scanRules)+len(hostPathRules))
 	rules = append(rules, scanRules...)
 	rules = append(rules, hostPathRules...)
-	s := newContentScanner(bytes.NewReader(img.Config), rules, toks, func(rule string, off int64) {
-		f.add(rule, "config", off)
-	})
-	if _, err := s.scan(); err != nil {
+	if _, err := scanContent(bytes.NewReader(img.Config), rules, "config", "config", toks, f); err != nil {
 		return err
 	}
 	// A config that does not parse cannot be checked for secret Env
@@ -832,7 +1422,7 @@ func scanImageConfig(img *savedImage, toks []denyToken, f *scanFindings) error {
 			continue
 		}
 		if envSecretName(name) {
-			f.add("config-env-secret:"+name, "config", -1)
+			f.addName("config-env-secret:"+name, "config")
 		}
 	}
 	return nil

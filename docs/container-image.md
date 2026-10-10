@@ -13,9 +13,9 @@ Herdr stays on the host. A host-side Herdr pane runs `docker exec -it` into the 
 | Go | `GO_VERSION`, `GO_SHA256_*` | `go.dev/dl` archive, SHA-256 from the official download index |
 | Node.js | `NODE_VERSION`, `NODE_SHA256_*` | `nodejs.org/dist` archive, SHA-256 from the release's `SHASUMS256.txt` |
 | Claude Code | `CLAUDE_CODE_VERSION`, `CLAUDE_CODE_SHA256_*` | Native build from `downloads.claude.ai/claude-code-releases/<version>/linux-<arch>/claude`, SHA-256 from that release's `manifest.json` (the source the official installer uses) |
-| Grok CLI | `GROK_VERSION`, `GROK_SHA256_*` | Release artifact `x.ai/cli/grok-<version>-linux-<arch>` (the official installer's source); upstream publishes no checksum, so the digest is recorded when the version is pinned |
+| Grok CLI | `GROK_VERSION`, `GROK_SHA256_*` | Release artifact `x.ai/cli/grok-<version>-linux-<arch>` (the official installer's source), or the same file from the installer's fallback host `storage.googleapis.com/grok-build-public-artifacts/cli/` when that download fails; upstream publishes no checksum, so the digest is recorded when the version is pinned |
 | Codex CLI | `CODEX_VERSION`, `container/runners/package-lock.json` | npm package `@openai/codex` and its platform package, installed with `npm ci` from the lockfile |
-| Pi | `PI_VERSION`, `container/runners/package-lock.json` | npm package `@earendil-works/pi-coding-agent`, installed with `npm ci --ignore-scripts` as its documentation recommends; the `protobufjs` override mirrors the official Pi installer's lockfile root |
+| Pi | `PI_VERSION`, `container/runners/package-lock.json` | npm package `@earendil-works/pi-coding-agent`, installed with `npm ci --ignore-scripts` as its documentation recommends; the `protobufjs` override is the one in the official Pi installer's `package.json` for that version; every other transitive version comes from this repository's own lockfile |
 | herdr-soho | `HERDR_SOHO_VERSION` | Built from the curated source in the build context with the release flags (`-trimpath -buildvcs=false -ldflags "-s -w -X …version=…"`) |
 | Dockerfile frontend | `# syntax=` line | `docker/dockerfile` pinned by digest |
 
@@ -50,13 +50,14 @@ docker buildx build --builder herdr-soho-base \
   --platform linux/arm64 \
   --build-arg SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" \
   --build-arg HERDR_SOHO_VERSION="$(git describe --tags --always)" \
+  --build-arg VCS_REF="$(git rev-parse HEAD)" \
   --provenance=false --sbom=false \
   --output type=docker,name=herdr-soho-base:0.1.0,dest=herdr-soho-base-0.1.0.tar,rewrite-timestamp=true \
   .
 docker load -i herdr-soho-base-0.1.0.tar
 ```
 
-Use `--platform linux/amd64` on an x86-64 host. Run each platform's image on a host of that architecture: under QEMU emulation of `linux/amd64` on an ARM host, the native Claude Code binary aborts at start (its Bun runtime crashes), while the other tools run. The tag carries `BASE_IMAGE_VERSION` (also the `org.opencontainers.image.version` label); bump both together when an input changes. Provenance and SBOM attestations are disabled because they record builder and context details; the inputs are documented here instead. `docker buildx rm herdr-soho-base` removes the builder when it is no longer needed.
+Use `--platform linux/amd64` on an x86-64 host. Run each platform's image on a host of that architecture: under QEMU emulation of `linux/amd64` on an ARM host, the native Claude Code binary aborts at start (its Bun runtime crashes), while the other tools run. The tag carries `BASE_IMAGE_VERSION` (also the `org.opencontainers.image.version` label); bump both together when an input changes. `VCS_REF` records the full source commit in the `org.opencontainers.image.revision` label, `HERDR_SOHO_VERSION` the `git describe` name in `io.github.herdr-soho.cli.version`, and `SOURCE_DATE_EPOCH` the image `created` time; the label is empty when `VCS_REF` is not passed. Provenance and SBOM attestations are disabled because they record builder and context details; the inputs are documented here instead. `docker buildx rm herdr-soho-base` removes the builder when it is no longer needed.
 
 To inspect the exact context the build receives, export the `build-context` stage:
 
@@ -85,12 +86,12 @@ sha256sum a.tar b.tar
 go run ./container/imagecheck compare a.tar b.tar
 ```
 
-Identical archive digests mean a bit-for-bit identical image: the same config (image ID), manifest and compressed layers. `compare` also works on two `docker save` archives and on builds exported under different names (the name is recorded in the archive's `index.json` and `manifest.json`, so their archive digests differ). It prints both image IDs and, when they differ, every differing config field, layer and file attribute (`mode`, `uid`, `mtime`, `content`, …); it exits 0 only when the configs, and so every layer digest, are identical.
+Identical archive digests mean a bit-for-bit identical image: the same config (image ID), manifest and compressed layers. `compare` also works on two `docker save` archives and on builds exported under different names (the name is recorded in the archive's `index.json` and `manifest.json`, so their archive digests differ). It first verifies both archives (see [Archive integrity](#archive-integrity)): every blob is hashed against its name and every layer's bytes against its recorded diff id, and a mismatch or a missing blob exits 4 before anything is printed. It then prints both image IDs and, when they differ, every differing config field, layer and file attribute (`mode`, `uid`, `mtime`, `content`, …); it exits 0 only when the image IDs are identical, which after that verification means every layer is identical too.
 
 The boundary of the claim:
 
 - The bit-for-bit result is verified for two builds on the same machine with the pinned builder and the same platform. Another BuildKit version, another platform or another exporter may produce different layer bytes; the inputs stay the same, the bytes are not promised. Each platform is its own image: `linux/amd64` and `linux/arm64` builds have different digests.
-- The inputs are immutable only while their sources serve them: a removed snapshot, release artifact or npm version stops the build rather than changing it, because every download is checked against its pinned digest.
+- The inputs are immutable only while their sources serve them: a removed snapshot, release artifact or npm version stops the build rather than changing it, because every download is checked against its pinned digest. Each download is retried up to five times, and the Grok binary falls back to the installer's second host; retries and the fallback can only change how long the build takes, never the bytes it accepts.
 - The Grok digest is a first-use pin: it proves later builds receive the bytes recorded at pin time, not that those bytes are authentic beyond the HTTPS download from the official host.
 - apt and npm can write caches, logs and timestamps; the Dockerfile removes the known ones. Any remaining difference is listed by `compare` rather than hidden.
 
@@ -107,19 +108,41 @@ go run ./container/imagecheck smoke --image herdr-soho-base:0.1.0 --spec contain
 
 `imagecheck` scans both ends of the build:
 
-- `imagecheck context <dir> --allow <prefix>…` scans an exported build context: every file must sit under an allowed prefix, no path component may be version control, local state, agent configuration or a credential file, and no file may contain a private key or a recognizable access token.
-- `imagecheck image <docker-save.tar>` scans every layer and the image config: no credential file in a home directory, no `.git` directory, no secret-looking environment variable with a value, no host home path in the config or history, and the same token patterns in every file.
+- `imagecheck context <dir> --allow <prefix>…` scans an exported build context: every file must sit under an allowed prefix, no path component may be version control, local state, agent configuration or a credential file, and no file may contain a private key or a recognizable access token. A symlink is never followed: its target text gets the token rules and the deny literals, and the path it points at gets the forbidden-name rule.
+- `imagecheck image <docker-save.tar>` scans every layer, the image config and the archive's own index files (`manifest.json`, `index.json`, `oci-layout` and the other non-layer files): no credential file in a home directory, no `.git` directory, no secret-looking environment variable with a value, no host home path in the config or history, and the token patterns in every entry that carries data, whatever its tar type. Member names are normalized the way an extractor writes them (a leading `/`, `./` or `..` cannot move a credential file out of the rule), and the credential and `.git` rules also apply to the path a symlink or hard link points at. A zero-size regular `.wh.` entry is a whiteout marker and records a deletion, so it is not judged as a credential file; any other `.wh.` entry is scanned like every file.
 
-Both take `--deny-file <path>`: a private file, kept outside the repository, with one literal per line (a canary, a host or user name, a private path, any name that must never ship). A match reports only the line number, never the literal. `--accept <path>=<rule>` and `--accept-file <path>` record reviewed false positives explicitly; the output still lists them as `accepted`.
+Each match is its own line: `finding <rule> <path> <offset> <length> sha256:<file>` for a match in file content, where the hash is the SHA-256 of the whole file; `finding <rule> <path> -` for a path rule; `finding <rule> <path> @<field>` for a match in tar metadata (`name`, `link`, `uname`, `gname` or `pax`). The output never contains a matched value. The summary line counts files, bytes, findings, accepted matches and unmatched accept entries; the exit code is 0 only when there is no finding and no unmatched accept entry.
 
-Third-party binaries and documentation in the image contain strings that look like secrets without being one: PEM headers used as format strings, upstream test keys shipped with the Go distribution, adjacent prefix strings in compiled runners, base64 data. `container/image-scan-accept.txt` lists each reviewed match for the `linux/arm64` and `linux/amd64` images, with the reason. Review a new match before adding it there; paths of vendored binaries differ per platform and version, so the list changes with the pins.
+### Deny literals
+
+Both subcommands take `--deny-file <path>`: a private file, kept outside the repository, with one literal per line (a canary, a host or user name, a private path, any name that must never ship). Literals match ASCII case-insensitively in file content and in every name the artifact exports: context directory, file and symlink names and symlink targets; layer member names, link targets, owner user and group names and PAX records (names and link targets both as recorded and as resolved, so `a/./b` or `a//b` cannot split a literal `a/b`); the image config; the archive index files and their names. A hit reports `deny-token:<line>` and where it was found, never the literal. A path that contains a literal is printed as `entry#<n>` (its position in the walk or in the layer), and every output and error line passes through the same redaction, so the literal does not reach the terminal or a log. Deny hits cannot be accepted.
+
+### Accepting reviewed matches
+
+Third-party binaries and data in the image contain strings that look like secrets without being one: upstream test keys shipped with the Go distribution, self-test vectors in libraries, token prefixes in the string tables of compiled runners, base64 data. `--accept <entry>` and `--accept-file <path>` record such matches after review, one entry per line:
+
+```text
+<rule> <offset> <length> sha256:<file sha256> <path>
+```
+
+An entry binds to exactly one match: the rule, the path inside the layer or context (`archive:<name>` for an archive index file), the byte offset, the match length and the SHA-256 of the whole file, all as printed by the scan. Another match in the same file, a changed byte anywhere in the file, the same path in another build, or the same bytes under another path are not covered and remain findings. An entry that matches nothing is printed as `unmatched-accept` and fails the scan, so a stale list does not linger. Only the token rules (`private-key`, `anthropic-key`, `openai-key`, `xai-key`, `github-token`, `npm-token`, `aws-access-key`, `slack-token`, `google-api-key`) and `host-path` can be accepted; deny literals, credential and `.git` paths, forbidden or non-allowlisted names, secret environment variables and metadata findings cannot. The layer index is not part of an entry, and accepted matches are still printed as `accepted`.
+
+`container/image-scan-accept.linux-arm64.txt` and `container/image-scan-accept.linux-amd64.txt` list the reviewed matches of each platform's image, grouped with the reason and the upstream source of each file. Because entries are bound to file bytes, every pin change that replaces one of those files makes its entries unmatched: scan without the list, review each new match without printing it (rule, length, surrounding structure, the file's upstream origin), and regenerate the platform's list from the scan output.
 
 ```sh
 go run ./container/imagecheck image herdr-soho-base-0.1.0.tar \
-  --accept-file container/image-scan-accept.txt --deny-file /path/outside/repo/deny.txt
+  --accept-file container/image-scan-accept.linux-arm64.txt --deny-file /path/outside/repo/deny.txt
 ```
 
-A useful negative test is a canary: put a file holding a unique literal in the checkout outside the allowlist, export the context, and confirm the scan with that literal in the deny file finds nothing; then add the literal to an allowed file in a copy of the exported context and confirm the scan reports it.
+### Archive integrity
+
+Before it scans or compares, `imagecheck` checks that a saved archive is internally consistent and fails with exit 4 otherwise: `manifest.json` names exactly one image; `index.json`, `oci-layout` and `repositories`, when present, parse; the config is a JSON object whose `rootfs.diff_ids` has one valid digest per manifest layer; no outer entry name repeats, the config and layers are regular entries, and no non-regular outer entry carries data; every `blobs/sha256/<hex>` blob hashes to its name, including blobs `manifest.json` does not name; `index.json`, when present, lists at least one image manifest, and each one is a blob in the archive that names the same config and the same layers, in order, as `manifest.json` (a nested index is refused), so an OCI reader and a `docker save` reader load the same image; and every layer's uncompressed bytes, to the end of the stream, hash to its recorded diff id. A missing blob is an error, not a skipped layer. The config is capped at 16 MiB; every other outer file it keeps in memory is capped at 16 MiB, and those other files together at 64 MiB; layers are streamed.
+
+### What the scans do not prove
+
+The token rules recognize known formats and the deny file lists known literals: a credential in another format, or one hidden inside compressed data within a file (a nested gzip or zip), is not detected; a nested uncompressed tar is scanned as raw bytes. Metadata findings cover what the archive records; a build tool that writes no owner names leaves nothing to check there.
+
+A useful negative test is a canary: put a file holding a unique literal in the checkout outside the allowlist, export the context, and confirm the scan with that literal in the deny file finds nothing; then add the literal to an allowed file, and to a file or directory name, in a copy of the exported context and confirm the scan reports each one.
 
 ## Running a job
 
@@ -153,10 +176,10 @@ docker rm -f job-42          # the job-42-* volumes stay until docker volume rm
 The image holds no credential, and nothing in the build accepts one: no build argument or `ENV` carries a key, and runner login files exist only in runtime volumes. Choose per runner:
 
 - **Interactive login.** Run the runner in the container (`docker exec -it job-42 claude`) and log in once; the login lands in that job's state volume, never in an image layer.
-- **Key files.** Mount each key read-only as a file. The Compose example declares `secrets:` entries, mounted at `/run/secrets/<name>`, with placeholder sources; point `ANTHROPIC_API_KEY_FILE`, `OPENAI_API_KEY_FILE` and `XAI_API_KEY_FILE` at files outside any checkout. Export a key only into the runner process: `docker exec -it job-42 sh -c 'ANTHROPIC_API_KEY="$(cat /run/secrets/anthropic_api_key)" exec claude'`.
+- **Key files.** Mount each key read-only as a file. The Compose example declares `secrets:` entries, mounted at `/run/secrets/<name>`, with placeholder sources; point `ANTHROPIC_API_KEY_FILE`, `OPENAI_API_KEY_FILE` and `XAI_API_KEY_FILE` at files outside any checkout. Export a key only into the runner process: `docker exec -it job-42 sh -c 'ANTHROPIC_API_KEY="$(cat /run/secrets/anthropic_api_key)" exec claude'`. File-based Compose secrets are bind mounts of the host file and keep its owner and mode: on a native Linux engine a `0600` key file owned by another UID is unreadable by `agent` (UID 1000), so give the file to UID 1000 or make it readable inside a directory only you can open. Docker Desktop for macOS presented such files as readable by `agent` in testing; check your own engine with `docker compose exec agent cat /run/secrets/<name> >/dev/null`.
 - **Other services.** The image does not include clients or configuration for additional services, such as a Hermes or Cinzel endpoint or an ai-memory server. A downstream image or the job's runtime adds the client; its endpoint, tokens and any runner MCP entry that references them are injected at run time only, the same way: a read-only secret file (the Compose example declares the placeholders `hermes_credentials`, `cinzel_credentials` and `ai_memory_credentials`, from `HERMES_CREDENTIALS_FILE`, `CINZEL_CREDENTIALS_FILE` and `AI_MEMORY_CREDENTIALS_FILE`) and configuration kept in the job's runner state volume. What each client expects in that file is defined by the client, not by this image.
 
-Avoid `environment:`, `docker run -e` and `--env-file` for keys: those values are stored in the container configuration and anyone who can run `docker inspect` (or `kubectl get pod -o yaml`) reads them. A key exported inside one `exec` is visible only through that process's environment. Never bind-mount a host runner configuration directory read-write into a job: it would share the host's sessions and let the job change them. Do not pass keys as build arguments; they would be recorded in the image history.
+Avoid `environment:`, `docker run -e` and `--env-file` for keys: those values are stored in the container configuration and anyone who can run `docker inspect` (or `kubectl get pod -o yaml`) reads them. A key exported inside one `exec` is not stored in the container configuration, but any process of the same user in that container, including another `docker exec` session, can read it from `/proc/<pid>/environ`; treat everyone who can `docker exec` into the job as able to read its keys. Never bind-mount a host runner configuration directory read-write into a job: it would share the host's sessions and let the job change them. Do not pass keys as build arguments; they would be recorded in the image history.
 
 ### Herdr panes
 

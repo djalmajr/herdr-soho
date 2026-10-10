@@ -56,11 +56,12 @@ func runCompareLines(t *testing.T, a, b string) (int, []string, string) {
 
 func TestCompareIdentical(t *testing.T) {
 	dir := t.TempDir()
-	cfg := compareTestConfig([]string{"sha256:aaa", "sha256:bbb"}, nil)
 	layers := [][]testEntry{
 		{{Name: "etc/", Dir: true}, {Name: "etc/hello", Body: "one"}},
 		{{Name: "usr/bin/tool", Body: "two", Mode: 0o755}},
 	}
+	diffIDs := honestDiffIDs(t, layers)
+	cfg := compareTestConfig(diffIDs, nil)
 	// Same content, different layer compression: the verdict must not
 	// depend on how the layer blobs are stored.
 	a := writeSavedArchive(t, dir, "a.tar", cfg, layers, false)
@@ -75,8 +76,8 @@ func TestCompareIdentical(t *testing.T) {
 	id := configID(t, cfg)
 	want := []string{
 		"config\t" + id + "\t" + id + "\tidentical",
-		"layer\t0\tsha256:aaa\tsha256:aaa\tsame",
-		"layer\t1\tsha256:bbb\tsha256:bbb\tsame",
+		"layer\t0\t" + diffIDs[0] + "\t" + diffIDs[0] + "\tsame",
+		"layer\t1\t" + diffIDs[1] + "\t" + diffIDs[1] + "\tsame",
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("lines = %q, want %q", lines, want)
@@ -90,14 +91,17 @@ func TestCompareIdentical(t *testing.T) {
 
 func TestCompareLayerMtimeDiffers(t *testing.T) {
 	dir := t.TempDir()
-	cfgA := compareTestConfig([]string{"sha256:aaa"}, nil)
-	cfgB := compareTestConfig([]string{"sha256:bbb"}, nil)
-	a := writeSavedArchive(t, dir, "a.tar", cfgA, [][]testEntry{
+	layersA := [][]testEntry{
 		{{Name: "etc/hello", Body: "one", ModTime: 1000}},
-	}, false)
-	b := writeSavedArchive(t, dir, "b.tar", cfgB, [][]testEntry{
+	}
+	layersB := [][]testEntry{
 		{{Name: "etc/hello", Body: "one", ModTime: 2000}},
-	}, false)
+	}
+	diffA, diffB := honestDiffIDs(t, layersA), honestDiffIDs(t, layersB)
+	cfgA := compareTestConfig(diffA, nil)
+	cfgB := compareTestConfig(diffB, nil)
+	a := writeSavedArchive(t, dir, "a.tar", cfgA, layersA, false)
+	b := writeSavedArchive(t, dir, "b.tar", cfgB, layersB, false)
 	code, lines, stderr := runCompareLines(t, a, b)
 	if code != 1 {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr)
@@ -105,7 +109,7 @@ func TestCompareLayerMtimeDiffers(t *testing.T) {
 	want := []string{
 		"config\t" + configID(t, cfgA) + "\t" + configID(t, cfgB) + "\tdifferent",
 		"config-field\trootfs",
-		"layer\t0\tsha256:aaa\tsha256:bbb\tdifferent",
+		"layer\t0\t" + diffA[0] + "\t" + diffB[0] + "\tdifferent",
 		"entry\t0\tetc/hello\tchanged:mtime",
 	}
 	if len(lines) != len(want) {
@@ -120,14 +124,17 @@ func TestCompareLayerMtimeDiffers(t *testing.T) {
 
 func TestCompareContentDiffersSameSize(t *testing.T) {
 	dir := t.TempDir()
-	cfgA := compareTestConfig([]string{"sha256:aaa"}, nil)
-	cfgB := compareTestConfig([]string{"sha256:bbb"}, nil)
-	a := writeSavedArchive(t, dir, "a.tar", cfgA, [][]testEntry{
+	layersA := [][]testEntry{
 		{{Name: "etc/data", Body: "abcd"}},
-	}, false)
-	b := writeSavedArchive(t, dir, "b.tar", cfgB, [][]testEntry{
+	}
+	layersB := [][]testEntry{
 		{{Name: "etc/data", Body: "abce"}},
-	}, false)
+	}
+	diffA, diffB := honestDiffIDs(t, layersA), honestDiffIDs(t, layersB)
+	cfgA := compareTestConfig(diffA, nil)
+	cfgB := compareTestConfig(diffB, nil)
+	a := writeSavedArchive(t, dir, "a.tar", cfgA, layersA, false)
+	b := writeSavedArchive(t, dir, "b.tar", cfgB, layersB, false)
 	code, lines, stderr := runCompareLines(t, a, b)
 	if code != 1 || stderr != "" {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr)
@@ -135,7 +142,7 @@ func TestCompareContentDiffersSameSize(t *testing.T) {
 	want := []string{
 		"config\t" + configID(t, cfgA) + "\t" + configID(t, cfgB) + "\tdifferent",
 		"config-field\trootfs",
-		"layer\t0\tsha256:aaa\tsha256:bbb\tdifferent",
+		"layer\t0\t" + diffA[0] + "\t" + diffB[0] + "\tdifferent",
 		"entry\t0\tetc/data\tchanged:content",
 	}
 	if len(lines) != len(want) {
@@ -150,14 +157,17 @@ func TestCompareContentDiffersSameSize(t *testing.T) {
 
 func TestCompareEntryAddedAndRemoved(t *testing.T) {
 	dir := t.TempDir()
-	cfgA := compareTestConfig([]string{"sha256:aaa"}, nil)
-	cfgB := compareTestConfig([]string{"sha256:bbb"}, nil)
-	a := writeSavedArchive(t, dir, "a.tar", cfgA, [][]testEntry{
+	layersA := [][]testEntry{
 		{{Name: "etc/keep", Body: "k"}, {Name: "etc/only-a", Body: "x"}},
-	}, false)
-	b := writeSavedArchive(t, dir, "b.tar", cfgB, [][]testEntry{
+	}
+	layersB := [][]testEntry{
 		{{Name: "etc/keep", Body: "k"}, {Name: "etc/only-b", Body: "y"}},
-	}, false)
+	}
+	diffA, diffB := honestDiffIDs(t, layersA), honestDiffIDs(t, layersB)
+	cfgA := compareTestConfig(diffA, nil)
+	cfgB := compareTestConfig(diffB, nil)
+	a := writeSavedArchive(t, dir, "a.tar", cfgA, layersA, false)
+	b := writeSavedArchive(t, dir, "b.tar", cfgB, layersB, false)
 	code, lines, stderr := runCompareLines(t, a, b)
 	if code != 1 || stderr != "" {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr)
@@ -167,7 +177,7 @@ func TestCompareEntryAddedAndRemoved(t *testing.T) {
 	want := []string{
 		"config\t" + configID(t, cfgA) + "\t" + configID(t, cfgB) + "\tdifferent",
 		"config-field\trootfs",
-		"layer\t0\tsha256:aaa\tsha256:bbb\tdifferent",
+		"layer\t0\t" + diffA[0] + "\t" + diffB[0] + "\tdifferent",
 		"entry\t0\tetc/only-a\tremoved",
 		"entry\t0\tetc/only-b\tadded",
 	}
@@ -186,14 +196,15 @@ func TestCompareConfigFieldDiffs(t *testing.T) {
 	// Same layers and diff ids; the configs differ in the nested "config"
 	// object, a key present only in a ("author") and the "history" value:
 	// the config-field lines must be alphabetical.
-	cfgA := compareTestConfig([]string{"sha256:x"}, map[string]any{
+	layers := [][]testEntry{{{Name: "etc/keep", Body: "k"}}}
+	diffID := honestDiffIDs(t, layers)[0]
+	cfgA := compareTestConfig([]string{diffID}, map[string]any{
 		"author":  "alice",
 		"history": []any{map[string]any{"created_by": "a"}},
 	})
-	cfgB := compareTestConfig([]string{"sha256:x"}, map[string]any{
+	cfgB := compareTestConfig([]string{diffID}, map[string]any{
 		"history": []any{map[string]any{"created_by": "b"}},
 	})
-	layers := [][]testEntry{{{Name: "etc/keep", Body: "k"}}}
 	a := writeSavedArchive(t, dir, "a.tar", cfgA, layers, false)
 	b := writeSavedArchive(t, dir, "b.tar", cfgB, layers, false)
 	code, lines, stderr := runCompareLines(t, a, b)
@@ -204,7 +215,7 @@ func TestCompareConfigFieldDiffs(t *testing.T) {
 		"config\t" + configID(t, cfgA) + "\t" + configID(t, cfgB) + "\tdifferent",
 		"config-field\tauthor",
 		"config-field\thistory",
-		"layer\t0\tsha256:x\tsha256:x\tsame",
+		"layer\t0\t" + diffID + "\t" + diffID + "\tsame",
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("lines = %q, want %q", lines, want)
@@ -218,15 +229,18 @@ func TestCompareConfigFieldDiffs(t *testing.T) {
 
 func TestCompareLayerCountDiffers(t *testing.T) {
 	dir := t.TempDir()
-	cfgA := compareTestConfig([]string{"sha256:aaa", "sha256:bbb"}, nil)
-	cfgB := compareTestConfig([]string{"sha256:aaa"}, nil)
-	a := writeSavedArchive(t, dir, "a.tar", cfgA, [][]testEntry{
+	layersA := [][]testEntry{
 		{{Name: "etc/a", Body: "1"}},
 		{{Name: "etc/b", Body: "2"}},
-	}, false)
-	b := writeSavedArchive(t, dir, "b.tar", cfgB, [][]testEntry{
+	}
+	layersB := [][]testEntry{
 		{{Name: "etc/a", Body: "1"}},
-	}, false)
+	}
+	diffA, diffB := honestDiffIDs(t, layersA), honestDiffIDs(t, layersB)
+	cfgA := compareTestConfig(diffA, nil)
+	cfgB := compareTestConfig(diffB, nil)
+	a := writeSavedArchive(t, dir, "a.tar", cfgA, layersA, false)
+	b := writeSavedArchive(t, dir, "b.tar", cfgB, layersB, false)
 	code, lines, stderr := runCompareLines(t, a, b)
 	if code != 1 || stderr != "" {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr)
@@ -235,7 +249,7 @@ func TestCompareLayerCountDiffers(t *testing.T) {
 		"config\t" + configID(t, cfgA) + "\t" + configID(t, cfgB) + "\tdifferent",
 		"config-field\trootfs",
 		"layers\t2\t1",
-		"layer\t0\tsha256:aaa\tsha256:aaa\tsame",
+		"layer\t0\t" + diffA[0] + "\t" + diffB[0] + "\tsame",
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("lines = %q, want %q", lines, want)
@@ -249,14 +263,17 @@ func TestCompareLayerCountDiffers(t *testing.T) {
 
 func TestCompareChangedAttributeOrder(t *testing.T) {
 	dir := t.TempDir()
-	cfgA := compareTestConfig([]string{"sha256:aaa"}, nil)
-	cfgB := compareTestConfig([]string{"sha256:bbb"}, nil)
-	a := writeSavedArchive(t, dir, "a.tar", cfgA, [][]testEntry{
+	layersA := [][]testEntry{
 		{{Name: "bin/tool", Body: "aaaa", Mode: 0o755}},
-	}, false)
-	b := writeSavedArchive(t, dir, "b.tar", cfgB, [][]testEntry{
+	}
+	layersB := [][]testEntry{
 		{{Name: "bin/tool", Body: "bbbb", Mode: 0o644}},
-	}, false)
+	}
+	diffA, diffB := honestDiffIDs(t, layersA), honestDiffIDs(t, layersB)
+	cfgA := compareTestConfig(diffA, nil)
+	cfgB := compareTestConfig(diffB, nil)
+	a := writeSavedArchive(t, dir, "a.tar", cfgA, layersA, false)
+	b := writeSavedArchive(t, dir, "b.tar", cfgB, layersB, false)
 	code, lines, stderr := runCompareLines(t, a, b)
 	if code != 1 || stderr != "" {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr)
@@ -269,8 +286,6 @@ func TestCompareChangedAttributeOrder(t *testing.T) {
 
 func TestCompareEntryLimit(t *testing.T) {
 	dir := t.TempDir()
-	cfgA := compareTestConfig([]string{"sha256:aaa"}, nil)
-	cfgB := compareTestConfig([]string{"sha256:bbb"}, nil)
 	const n = 503
 	// All n entries differ in content only: equal 4-byte bodies keep the
 	// size attribute out of the diff.
@@ -280,8 +295,13 @@ func TestCompareEntryLimit(t *testing.T) {
 		entriesA = append(entriesA, testEntry{Name: p, Body: "base"})
 		entriesB = append(entriesB, testEntry{Name: p, Body: fmt.Sprintf("v%03d", i)})
 	}
-	a := writeSavedArchive(t, dir, "a.tar", cfgA, [][]testEntry{entriesA}, false)
-	b := writeSavedArchive(t, dir, "b.tar", cfgB, [][]testEntry{entriesB}, false)
+	layersA := [][]testEntry{entriesA}
+	layersB := [][]testEntry{entriesB}
+	diffA, diffB := honestDiffIDs(t, layersA), honestDiffIDs(t, layersB)
+	cfgA := compareTestConfig(diffA, nil)
+	cfgB := compareTestConfig(diffB, nil)
+	a := writeSavedArchive(t, dir, "a.tar", cfgA, layersA, false)
+	b := writeSavedArchive(t, dir, "b.tar", cfgB, layersB, false)
 	code, lines, stderr := runCompareLines(t, a, b)
 	if code != 1 || stderr != "" {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr)
@@ -289,7 +309,7 @@ func TestCompareEntryLimit(t *testing.T) {
 	want := []string{
 		"config\t" + configID(t, cfgA) + "\t" + configID(t, cfgB) + "\tdifferent",
 		"config-field\trootfs",
-		"layer\t0\tsha256:aaa\tsha256:bbb\tdifferent",
+		"layer\t0\t" + diffA[0] + "\t" + diffB[0] + "\tdifferent",
 	}
 	for i := 0; i < maxEntryLines; i++ {
 		want = append(want, fmt.Sprintf("entry\t0\tf/%04d.txt\tchanged:content", i))
