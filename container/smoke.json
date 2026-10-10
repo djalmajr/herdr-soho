@@ -1,0 +1,27 @@
+{
+  "checks": [
+    {"name": "herdr-soho", "argv": ["herdr-soho", "--version"], "version_arg": "HERDR_SOHO_VERSION"},
+    {"name": "herdr-soho-help", "argv": ["herdr-soho", "--help"]},
+    {"name": "herdr-soho-skill", "argv": ["test", "-f", "/usr/local/share/herdr-soho/skills/herdr-soho/SKILL.md"]},
+    {"name": "claude", "argv": ["claude", "--version"], "version_arg": "CLAUDE_CODE_VERSION"},
+    {"name": "claude-help", "argv": ["claude", "--help"]},
+    {"name": "codex", "argv": ["codex", "--version"], "version_arg": "CODEX_VERSION"},
+    {"name": "codex-help", "argv": ["codex", "--help"]},
+    {"name": "grok", "argv": ["grok", "--version"], "version_arg": "GROK_VERSION"},
+    {"name": "grok-help", "argv": ["grok", "--help"]},
+    {"name": "pi", "argv": ["pi", "--version"], "version_arg": "PI_VERSION"},
+    {"name": "pi-help", "argv": ["pi", "--help"]},
+    {"name": "go", "argv": ["go", "version"], "version_arg": "GO_VERSION"},
+    {"name": "node", "argv": ["node", "--version"], "version_arg": "NODE_VERSION"},
+    {"name": "npm", "argv": ["npm", "--version"]},
+    {"name": "gcc", "argv": ["gcc", "--version"]},
+    {"name": "git", "argv": ["git", "--version"]},
+    {"name": "ssh", "argv": ["ssh", "-V"]},
+    {"name": "rg", "argv": ["rg", "--version"]},
+    {"name": "fd", "argv": ["fd", "--version"]},
+    {"name": "curl", "argv": ["curl", "--version"]},
+    {"name": "tini", "argv": ["tini", "--version"]},
+    {"name": "user", "argv": ["id", "-un"]},
+    {"name": "user-owns-home", "argv": ["test", "-O", "/home/agent"]}
+  ]
+}

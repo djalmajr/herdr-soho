@@ -1,0 +1,343 @@
+name: Container image
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - Dockerfile.dockerignore
+      - go.mod
+      - cmd/herdr-soho/**
+      - internal/**
+      - skills/herdr-soho/**
+      - container/**
+      - .github/workflows/container-image.yml
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - Dockerfile.dockerignore
+      - go.mod
+      - cmd/herdr-soho/**
+      - internal/**
+      - skills/herdr-soho/**
+      - container/**
+      - .github/workflows/container-image.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-image-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: Image (linux/${{ matrix.arch }})
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04, uname: x86_64 }
+          - { arch: arm64, runner: ubuntu-24.04-arm, uname: aarch64 }
+    runs-on: ${{ matrix.runner }}
+    env:
+      SOURCE_REPO: ${{ github.repository }}
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      TARGET_ARCH: ${{ matrix.arch }}
+      EXPECTED_UNAME: ${{ matrix.uname }}
+      BUILDKIT_IMAGE: moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+      IMAGE_NAME: herdr-soho-base:0.1.0
+      GOTOOLCHAIN: auto
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+    steps:
+      - name: Check out the exact commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "EXPECTED_SHA is not a 40-character lowercase hex SHA: ${EXPECTED_SHA}" >&2
+            exit 1
+          fi
+          git init -q .
+          git config core.autocrlf false
+          git remote add origin "https://github.com/${SOURCE_REPO}.git"
+          git fetch --no-tags --prune origin "+refs/tags/*:refs/tags/*" "$EXPECTED_SHA"
+          git checkout -q --detach "$EXPECTED_SHA"
+          head_sha=$(git rev-parse HEAD)
+          if [[ "$head_sha" != "$EXPECTED_SHA" ]]; then
+            echo "checkout mismatch: HEAD is $head_sha, expected $EXPECTED_SHA" >&2
+            exit 1
+          fi
+          dirty=$(git status --porcelain)
+          if [[ -n "$dirty" ]]; then
+            echo "checkout is not clean: $dirty" >&2
+            exit 1
+          fi
+      - name: Resolve source inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct HEAD)
+          HERDR_SOHO_VERSION=$(git describe --tags --always)
+          VCS_REF="$EXPECTED_SHA"
+          ARCHIVE="$RUNNER_TEMP/herdr-soho-base-linux-${TARGET_ARCH}.tar"
+          ACCEPT_FILE="container/image-scan-accept.linux-${TARGET_ARCH}.txt"
+          if [[ -z "$HERDR_SOHO_VERSION" || "$HERDR_SOHO_VERSION" =~ [^A-Za-z0-9._+-] ]]; then
+            echo "HERDR_SOHO_VERSION is empty or contains characters outside [A-Za-z0-9._+-]: ${HERDR_SOHO_VERSION}" >&2
+            exit 1
+          fi
+          if [[ ! -f "$ACCEPT_FILE" ]]; then
+            echo "accept file is missing: $ACCEPT_FILE" >&2
+            exit 1
+          fi
+          {
+            echo "SOURCE_TREE=$SOURCE_TREE"
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+            echo "HERDR_SOHO_VERSION=$HERDR_SOHO_VERSION"
+            echo "VCS_REF=$VCS_REF"
+            echo "ARCHIVE=$ARCHIVE"
+            echo "ACCEPT_FILE=$ACCEPT_FILE"
+          } >> "$GITHUB_ENV"
+          {
+            echo "SOURCE_TREE=$SOURCE_TREE"
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+            echo "HERDR_SOHO_VERSION=$HERDR_SOHO_VERSION"
+            echo "VCS_REF=$VCS_REF"
+            echo "ARCHIVE=$ARCHIVE"
+            echo "ACCEPT_FILE=$ACCEPT_FILE"
+            echo "blob Dockerfile: $(git rev-parse HEAD:Dockerfile)"
+            echo "blob Dockerfile.dockerignore: $(git rev-parse HEAD:Dockerfile.dockerignore)"
+            echo "blob container/smoke.json: $(git rev-parse HEAD:container/smoke.json)"
+            echo "blob $ACCEPT_FILE: $(git rev-parse "HEAD:$ACCEPT_FILE")"
+            echo "blob go.mod: $(git rev-parse HEAD:go.mod)"
+          }
+      - name: Check the native runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_uname=$(uname -m)
+          if [[ "$actual_uname" != "$EXPECTED_UNAME" ]]; then
+            echo "runner architecture mismatch: expected $EXPECTED_UNAME, got $actual_uname" >&2
+            exit 1
+          fi
+          DOCKER_SERVER_ARCH=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')
+          if [[ "$DOCKER_SERVER_ARCH" != "linux/${TARGET_ARCH}" ]]; then
+            echo "docker server mismatch: expected linux/${TARGET_ARCH}, got $DOCKER_SERVER_ARCH" >&2
+            exit 1
+          fi
+          echo "DOCKER_SERVER_ARCH=$DOCKER_SERVER_ARCH" >> "$GITHUB_ENV"
+          uname -a
+          docker version
+          docker buildx version
+          if [[ -d /proc/sys/fs/binfmt_misc ]]; then
+            echo "binfmt_misc entries:"
+            ls /proc/sys/fs/binfmt_misc
+          else
+            echo "binfmt_misc not available"
+          fi
+      - name: Resolve the Go toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v go >/dev/null 2>&1; then
+            echo "go is already on PATH"
+            exit 0
+          fi
+          if [[ "$TARGET_ARCH" = "amd64" ]]; then tool_arch=x64; else tool_arch=arm64; fi
+          tool_cache="${RUNNER_TOOL_CACHE:-}"
+          if [[ -z "$tool_cache" ]]; then
+            echo "go is not on PATH and RUNNER_TOOL_CACHE is unset" >&2
+            exit 1
+          fi
+          while IFS= read -r version_dir; do
+            if [[ -x "$version_dir/$tool_arch/bin/go" ]]; then
+              printf '%s\n' "$version_dir/$tool_arch/bin" >> "$GITHUB_PATH"
+              echo "added $version_dir/$tool_arch/bin to PATH"
+              exit 0
+            fi
+          done < <(find "$tool_cache/go" -mindepth 1 -maxdepth 1 -type d -name '1.25.*' 2>/dev/null | sort -rV)
+          echo "go is not on PATH and no Go 1.25 toolcache entry for $tool_arch was found" >&2
+          exit 1
+      - name: Create the pinned BuildKit builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILDER="herdr-soho-ci-${TARGET_ARCH}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "BUILDER=$BUILDER" >> "$GITHUB_ENV"
+          docker buildx create --name "$BUILDER" --driver docker-container --driver-opt "image=${BUILDKIT_IMAGE}" --bootstrap
+          docker buildx inspect "$BUILDER"
+          go version
+      - name: Build the image without cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build --builder "$BUILDER" --no-cache --platform "linux/${TARGET_ARCH}" \
+            --build-arg "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" \
+            --build-arg "HERDR_SOHO_VERSION=${HERDR_SOHO_VERSION}" \
+            --build-arg "VCS_REF=${VCS_REF}" \
+            --provenance=false --sbom=false \
+            --output "type=docker,name=${IMAGE_NAME},dest=${ARCHIVE},rewrite-timestamp=true" \
+            .
+      - name: Hash and load the archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE_SHA256=$(sha256sum "$ARCHIVE" | awk '{print $1}')
+          echo "ARCHIVE_SHA256=$ARCHIVE_SHA256" >> "$GITHUB_ENV"
+          echo "archive size: $(wc -c < "$ARCHIVE") bytes"
+          docker load -i "$ARCHIVE"
+          IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE_NAME")
+          echo "IMAGE_ID=$IMAGE_ID" >> "$GITHUB_ENV"
+          image_os=$(docker image inspect --format '{{.Os}}' "$IMAGE_NAME")
+          IMAGE_ARCH=$(docker image inspect --format '{{.Architecture}}' "$IMAGE_NAME")
+          IMAGE_REVISION=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE_NAME")
+          image_cli_version=$(docker image inspect --format '{{ index .Config.Labels "io.github.herdr-soho.cli.version" }}' "$IMAGE_NAME")
+          if [[ "$image_os" != "linux" ]]; then
+            echo "image OS mismatch: expected linux, got $image_os" >&2
+            exit 1
+          fi
+          if [[ "$IMAGE_ARCH" != "$TARGET_ARCH" ]]; then
+            echo "image architecture mismatch: expected $TARGET_ARCH, got $IMAGE_ARCH" >&2
+            exit 1
+          fi
+          if [[ "$IMAGE_REVISION" != "$EXPECTED_SHA" ]]; then
+            echo "image revision label mismatch: expected $EXPECTED_SHA, got $IMAGE_REVISION" >&2
+            exit 1
+          fi
+          if [[ "$image_cli_version" != "$HERDR_SOHO_VERSION" ]]; then
+            echo "image CLI version label mismatch: expected $HERDR_SOHO_VERSION, got $image_cli_version" >&2
+            exit 1
+          fi
+          echo "IMAGE_ARCH=$IMAGE_ARCH" >> "$GITHUB_ENV"
+          echo "IMAGE_REVISION=$IMAGE_REVISION" >> "$GITHUB_ENV"
+          echo "image created: $(docker image inspect --format '{{.Created}}' "$IMAGE_NAME")"
+      - name: Run the offline smoke checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          go run ./container/imagecheck smoke --image "$IMAGE_ID" --spec container/smoke.json \
+            --build-arg "HERDR_SOHO_VERSION=${HERDR_SOHO_VERSION}" 2>&1 | tee "$RUNNER_TEMP/smoke.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          smoke_exit=${statuses[0]}
+          if [[ "$smoke_exit" -ne 0 ]]; then
+            echo "smoke checks failed with exit $smoke_exit" >&2
+            exit "$smoke_exit"
+          fi
+          if [[ "${statuses[1]}" -ne 0 ]]; then
+            echo "writing the smoke log failed with exit ${statuses[1]}" >&2
+            exit 1
+          fi
+          total=$(jq '.checks | length' container/smoke.json)
+          summary_line=$(jq -R -c 'fromjson? | select(.summary == true)' "$RUNNER_TEMP/smoke.log" | tail -n 1)
+          checks=$(jq -r '.checks' <<<"$summary_line")
+          failed=$(jq -r '.failed' <<<"$summary_line")
+          passed=$(jq -R -c 'fromjson? | select(.ok == true)' "$RUNNER_TEMP/smoke.log" | wc -l | tr -d '[:space:]')
+          if [[ "$checks" != "$total" ]]; then
+            echo "smoke summary reports $checks checks, the spec has $total" >&2
+            exit 1
+          fi
+          if [[ "$failed" != "0" ]]; then
+            echo "smoke summary reports $failed failed checks" >&2
+            exit 1
+          fi
+          if [[ "$passed" != "$total" ]]; then
+            echo "smoke log has $passed ok check lines, expected $total" >&2
+            exit 1
+          fi
+          echo "SMOKE_SUMMARY=${passed}/${total} ok, exit ${smoke_exit}" >> "$GITHUB_ENV"
+      - name: Scan the image archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          go run ./container/imagecheck image "$ARCHIVE" --accept-file "$ACCEPT_FILE" 2>&1 | tee "$RUNNER_TEMP/image-scan.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          scan_exit=${statuses[0]}
+          if [[ "$scan_exit" -ne 0 ]]; then
+            echo "image archive scan failed with exit $scan_exit" >&2
+            exit "$scan_exit"
+          fi
+          if [[ "${statuses[1]}" -ne 0 ]]; then
+            echo "writing the image scan log failed with exit ${statuses[1]}" >&2
+            exit 1
+          fi
+          scan_summary=$(tail -n 1 "$RUNNER_TEMP/image-scan.log")
+          tab=$'\t'
+          clean_summary="^summary${tab}files=[0-9]+${tab}bytes=[0-9]+${tab}findings=0${tab}accepted=[0-9]+${tab}unmatched=0\$"
+          if [[ ! "$scan_summary" =~ $clean_summary ]]; then
+            echo "the image scan log does not end with a clean summary line" >&2
+            exit 1
+          fi
+          echo "IMAGE_SCAN_SUMMARY=${scan_summary//$'\t'/ }, exit ${scan_exit}" >> "$GITHUB_ENV"
+      - name: Scan the build context
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build --builder "$BUILDER" --no-cache --target build-context \
+            --output "type=local,dest=${RUNNER_TEMP}/context" .
+          set +e
+          go run ./container/imagecheck context "$RUNNER_TEMP/context" \
+            --allow go.mod --allow cmd/herdr-soho --allow internal --allow skills/herdr-soho \
+            --allow container/runners/package.json --allow container/runners/package-lock.json \
+            2>&1 | tee "$RUNNER_TEMP/context-scan.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          context_exit=${statuses[0]}
+          if [[ "$context_exit" -ne 0 ]]; then
+            echo "build context scan failed with exit $context_exit" >&2
+            exit "$context_exit"
+          fi
+          if [[ "${statuses[1]}" -ne 0 ]]; then
+            echo "writing the context scan log failed with exit ${statuses[1]}" >&2
+            exit 1
+          fi
+          context_summary=$(tail -n 1 "$RUNNER_TEMP/context-scan.log")
+          tab=$'\t'
+          clean_summary="^summary${tab}files=[0-9]+${tab}bytes=[0-9]+${tab}findings=0${tab}accepted=[0-9]+${tab}unmatched=0\$"
+          if [[ ! "$context_summary" =~ $clean_summary ]]; then
+            echo "the context scan log does not end with a clean summary line" >&2
+            exit 1
+          fi
+          echo "CONTEXT_SCAN_SUMMARY=${context_summary//$'\t'/ }, exit ${context_exit}" >> "$GITHUB_ENV"
+      - name: Publish the evidence summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Container image evidence"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Run | ${RUN_URL:-not reached} |"
+            echo "| Job | linux/${TARGET_ARCH:-not reached} |"
+            echo "| Event | ${GITHUB_EVENT_NAME:-not reached} |"
+            echo "| Source SHA | ${EXPECTED_SHA:-not reached} |"
+            echo "| Source tree | ${SOURCE_TREE:-not reached} |"
+            echo "| herdr-soho version | ${HERDR_SOHO_VERSION:-not reached} |"
+            echo "| SOURCE_DATE_EPOCH | ${SOURCE_DATE_EPOCH:-not reached} |"
+            echo "| Runner uname -m | $(uname -m) |"
+            echo "| Docker server arch | ${DOCKER_SERVER_ARCH:-not reached} |"
+            echo "| BuildKit image | ${BUILDKIT_IMAGE:-not reached} |"
+            echo "| Image ID | ${IMAGE_ID:-not reached} |"
+            echo "| Image architecture | ${IMAGE_ARCH:-not reached} |"
+            echo "| Image revision label | ${IMAGE_REVISION:-not reached} |"
+            echo "| Archive SHA-256 | ${ARCHIVE_SHA256:-not reached} |"
+            echo "| Smoke | ${SMOKE_SUMMARY:-not reached} |"
+            echo "| Image scan | ${IMAGE_SCAN_SUMMARY:-not reached} |"
+            echo "| Context scan | ${CONTEXT_SCAN_SUMMARY:-not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
+      - name: Remove the builder
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${BUILDER:-}" ]]; then
+            docker buildx rm "$BUILDER" || true
+          fi

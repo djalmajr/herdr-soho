@@ -1,0 +1,18 @@
+# Build-context allowlist for Dockerfile. Deny everything, then allow only
+# the sources the image build reads. Version control, local state, agent
+# configuration, credentials, briefs and documentation never enter the
+# context. `imagecheck context` verifies the result (docs/container-image.md).
+*
+!go.mod
+!cmd/herdr-soho
+!internal
+!skills/herdr-soho
+!container/runners/package.json
+!container/runners/package-lock.json
+
+# Re-exclude what the allowed trees hold but the build does not need.
+**/*_test.go
+**/testdata
+internal/testutil
+skills/herdr-soho/scripts
+**/.*

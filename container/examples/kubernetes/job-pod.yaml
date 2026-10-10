@@ -1,0 +1,68 @@
+# Sketch only: a future pod-per-job layout using the same base image. It is
+# not applied, deployed or tested against a cluster. Replace every
+# REPLACE_ME value; the Secret it references must be created separately and
+# is never part of the image.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: herdr-soho-job-REPLACE_ME
+  labels:
+    app.kubernetes.io/name: herdr-soho-job
+    herdr-soho/job: REPLACE_ME
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+    fsGroup: 1000
+  containers:
+    - name: agent
+      image: REPLACE_ME/herdr-soho-base@sha256:REPLACE_ME
+      imagePullPolicy: IfNotPresent
+      # Keep stdin and a TTY so a human can attach with
+      # `kubectl exec -it pod/herdr-soho-job-<id> -c agent -- claude`.
+      stdin: true
+      tty: true
+      workingDir: /workspace
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: runner-state
+          mountPath: /home/agent
+        - name: runner-credentials
+          mountPath: /run/secrets
+          readOnly: true
+  volumes:
+    # The job checkout; a PersistentVolumeClaim when the workspace must
+    # outlive the pod.
+    - name: workspace
+      emptyDir: {}
+    # Runner logins, sessions and settings; deleted with the pod.
+    - name: runner-state
+      emptyDir: {}
+    - name: runner-credentials
+      secret:
+        secretName: REPLACE_ME-runner-credentials
+        # Read-only files readable by the non-root user whether or not the
+        # cluster applies fsGroup to secret volumes.
+        defaultMode: 0444
+        optional: true
+        items:
+          - key: anthropic_api_key
+            path: anthropic_api_key
+          - key: openai_api_key
+            path: openai_api_key
+          - key: xai_api_key
+            path: xai_api_key
+          # Additional services; their clients are not in the base image.
+          - key: hermes_credentials
+            path: hermes_credentials
+          - key: cinzel_credentials
+            path: cinzel_credentials
+          - key: ai_memory_credentials
+            path: ai_memory_credentials
