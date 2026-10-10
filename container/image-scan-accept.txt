@@ -1,0 +1,28 @@
+# Reviewed false positives of `imagecheck image` for herdr-soho-base 0.1.0
+# (linux/arm64 and linux/amd64). Each entry is <path>=<rule> as printed by
+# the scan. Every match was inspected with the value masked; none is a
+# credential. Re-review and update this list whenever a pin changes.
+
+# Go distribution: upstream test keys used by crypto/tls examples and the
+# crypto/x509 platform verifier tests.
+layer2:usr/local/go/src/crypto/tls/example_test.go=private-key
+layer2:usr/local/go/src/crypto/tls/testdata/example-key.pem=private-key
+layer2:usr/local/go/src/crypto/x509/platform_root_key.pem=private-key
+
+# GnuTLS (Debian package): built-in self-test key vectors.
+layer1:usr/lib/aarch64-linux-gnu/libgnutls.so.30.40.3=private-key
+layer1:usr/lib/x86_64-linux-gnu/libgnutls.so.30.40.3=private-key
+
+# Binary data that happens to match the access-key-id shape (base64 blobs in
+# the Node.js binary, a table in libunistring).
+layer1:usr/lib/aarch64-linux-gnu/libunistring.so.5.2.0=aws-access-key
+layer1:usr/lib/x86_64-linux-gnu/libunistring.so.5.2.0=aws-access-key
+layer3:opt/node/bin/node=aws-access-key
+
+# Codex CLI native binary: token prefixes stored next to other identifiers
+# in its read-only string table (for example a list of GitHub token
+# prefixes, or a key prefix followed by unrelated constant names).
+layer7:opt/herdr-soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex=github-token
+layer7:opt/herdr-soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex=openai-key
+layer7:opt/herdr-soho/runners/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex=github-token
+layer7:opt/herdr-soho/runners/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex=openai-key
