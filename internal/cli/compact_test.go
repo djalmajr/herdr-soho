@@ -985,7 +985,10 @@ func TestCompactOpenCodeUndatedLineIsNotProof(t *testing.T) {
 // short timeout on its first poll), and any wait after the deadline still
 // sees time pass. If the reads never come (or the call log cannot be
 // read) within a bounded minute, the latch expires anyway and the test
-// fails explicitly, so the run under test always returns.
+// fails explicitly, so the run under test always returns. A test that
+// uses the helper claims behavior after the deadline, so it also fails
+// when the run ended before the latch expired (an early return, or a read
+// that arrived inside the deadline).
 func compactDeadlineAfterReads(t *testing.T, f *compactFixture, reads int) {
 	t.Helper()
 	logPath := filepath.Join(f.bin, "herdr.calls.jsonl")
@@ -1011,7 +1014,14 @@ func compactDeadlineAfterReads(t *testing.T, f *compactFixture, reads int) {
 		}
 		return time.Now().Add(time.Hour)
 	}
-	t.Cleanup(func() { platform.Now = saved })
+	t.Cleanup(func() {
+		platform.Now = saved
+		mu.Lock()
+		defer mu.Unlock()
+		if !expired {
+			t.Errorf("the deadline never passed: the run ended before the fake herdr logged %d screen reads", reads)
+		}
+	})
 }
 
 // TestCompactClaudeProofAfterDeadlineStillCompacted (edger): the proof shows
@@ -1079,6 +1089,9 @@ func TestCompactPiEndingOnLastRead(t *testing.T) {
 	value := compactJSON(t, out)
 	if value["kind"] != "pi" || value["status"] != "nothing-to-compact" {
 		t.Fatalf("json=%v", value)
+	}
+	if elapsed, ok := value["elapsed_ms"].(float64); !ok || elapsed < 500 {
+		t.Fatalf("elapsed_ms=%v want >= 500 (the ending came after the deadline): %v", value["elapsed_ms"], value)
 	}
 	calls := f.calls(t)
 	if n := countArgv(calls, []string{"pane", "send-text", "p1", "/compact"}); n != 1 {
