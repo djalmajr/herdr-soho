@@ -364,7 +364,9 @@ func (s *Supervisor) Run() (int, error) {
 		if intent != nil && !isTerminalOutcome(snap.State.Status) &&
 			snap.State.Status != StatusCollected && snap.State.Status != StatusClosed {
 			if intent.Status == StatusFailed {
-				s.fail(intent.Motivo, intent.Exit)
+				if err := s.fail(intent.Motivo, intent.Exit); err != nil {
+					return ExitFailed, err
+				}
 				return intent.Exit, nil
 			}
 			if snap.State.Status == StatusRunning || snap.State.Status == StatusBlocked {
@@ -416,7 +418,9 @@ func (s *Supervisor) Run() (int, error) {
 		return ExitFailed, err
 	} else if snap.State.Orchestrator == "" && snap.State.OrchestratorSpawnAt == "" {
 		if err := s.Ops.EnsureJobLane(); err != nil {
-			s.fail("job: cannot ensure the job lane", ExitHerdr)
+			if err := s.fail("job: cannot ensure the job lane", ExitHerdr); err != nil {
+				return ExitFailed, err
+			}
 			return ExitHerdr, nil
 		}
 	}
@@ -475,7 +479,9 @@ func (s *Supervisor) waitRunning() (int, bool, error) {
 		}
 		s.clockSleep(poll)
 	}
-	s.fail("job: supervisor started before the job was running", ExitFailed)
+	if err := s.fail("job: supervisor started before the job was running", ExitFailed); err != nil {
+		return ExitFailed, true, err
+	}
 	return ExitFailed, true, nil
 }
 
@@ -617,7 +623,9 @@ func (s *Supervisor) recoverOrchestrator(st State) (string, bool, error) {
 // and without releasing or closing a pane the supervisor did not prove is
 // the job's.
 func (s *Supervisor) failOrchestratorRecovery() (string, bool, error) {
-	s.fail("job: cannot establish the job orchestrator", ExitHerdr)
+	if err := s.fail("job: cannot establish the job orchestrator", ExitHerdr); err != nil {
+		return "", true, err
+	}
 	return "", true, nil
 }
 
@@ -655,7 +663,9 @@ func (s *Supervisor) appendWorkerSpawnedOnce(name string) error {
 func (s *Supervisor) spawnOrchestrator() (string, bool, error) {
 	name, err := s.Ops.SpawnOrchestrator()
 	if err != nil {
-		s.fail("job: cannot spawn the job orchestrator", ExitHerdr)
+		if err := s.fail("job: cannot spawn the job orchestrator", ExitHerdr); err != nil {
+			return "", true, err
+		}
 		return "", true, nil
 	}
 	if _, err = s.Store.Record(s.ID, func(st *State) { st.Orchestrator = name }); err != nil {
@@ -689,7 +699,9 @@ func (s *Supervisor) ensureDispatched(name string) (int, bool, error) {
 	}
 	brief, err := os.ReadFile(filepath.Join(jobDir, "brief.md"))
 	if err != nil {
-		s.fail("job: the job brief is missing", ExitFailed)
+		if err := s.fail("job: the job brief is missing", ExitFailed); err != nil {
+			return ExitFailed, true, err
+		}
 		return ExitFailed, true, nil
 	}
 	brief = append(brief, orchestratorBriefSection(s.ID)...)
@@ -698,7 +710,9 @@ func (s *Supervisor) ensureDispatched(name string) (int, bool, error) {
 		return 0, false, err
 	}
 	if err := s.Ops.Dispatch(name, path, false); err != nil {
-		s.fail("job: cannot dispatch the job orchestrator", ExitHerdr)
+		if err := s.fail("job: cannot dispatch the job orchestrator", ExitHerdr); err != nil {
+			return ExitFailed, true, err
+		}
 		return ExitHerdr, true, nil
 	}
 	// DispatchedAt comes from the store clock: RFC 3339 with an explicit
@@ -816,7 +830,9 @@ func (s *Supervisor) checkOrchestrator() (int, bool, error) {
 	case "gone", "settled-no-report", "not-received", "unavailable":
 		s.goneStreak++
 		if s.goneStreak >= 3 {
-			s.fail("job: the job orchestrator ended without a report", ExitFailed)
+			if err := s.fail("job: the job orchestrator ended without a report", ExitFailed); err != nil {
+				return ExitFailed, true, err
+			}
 			return ExitFailed, true, nil
 		}
 		return 0, false, nil
@@ -835,7 +851,9 @@ func (s *Supervisor) accumulate() (int, bool, error) {
 	if s.errStreak < 3 {
 		return 0, false, nil
 	}
-	s.fail("job: the job orchestrator ended without a report", ExitFailed)
+	if err := s.fail("job: the job orchestrator ended without a report", ExitFailed); err != nil {
+		return ExitFailed, true, err
+	}
 	return ExitFailed, true, nil
 }
 
@@ -921,7 +939,9 @@ func (s *Supervisor) onOrchestratorDone(st State, name, reportPath string) (int,
 		// A done state without a readable report counts like a gone one.
 		s.goneStreak++
 		if s.goneStreak >= 3 {
-			s.fail("job: the job orchestrator ended without a report", ExitFailed)
+			if err := s.fail("job: the job orchestrator ended without a report", ExitFailed); err != nil {
+				return ExitFailed, true, err
+			}
 			return ExitFailed, true, nil
 		}
 		return 0, false, nil
@@ -1109,19 +1129,45 @@ func (s *Supervisor) frictionUnknown(state string) {
 	s.Friction("job: the job orchestrator reports an unknown state '" + state + "'")
 }
 
-// fail records the failure (event, stored motivo, walk to failed, terminal
-// event, report) and never returns its error: the state is the truth, and
-// a failure to record it goes to friction only. The terminal intent and
-// the collaboration outcomes are persisted before the failure walk, so a
-// crash loses neither the outcome nor the partial facts. The failure
-// finalizes like every terminal outcome: final push, report, release,
-// cleanup, close.
-func (s *Supervisor) fail(motivo string, exit int) {
-	// The terminal intent, best effort: on error, friction and continue —
-	// the failure still has to be recorded.
+// fail records the failure and returns its store error: an unexpected
+// store failure (the state read, or the crossing write of a blocked exit)
+// exits through Run with the conservative failed code instead of being
+// retried, and the next supervisor start converges. From blocked the
+// failure exit settles the blocked interval and lands the failed terminal
+// intent in the same locked write as the blocked -> finishing crossing
+// (the contract's atomic crossing): the blocked tail goes to the blocked
+// clock and the anchor moves to the crossing, so a hard stop at the write
+// leaves either the pre-crossing blocked state (the tail still in flight,
+// no intent) or the committed finishing state (settled, re-anchored, with
+// the intent) — never the separate Record + Fail writes, which left the
+// blocked tail on neither clock. Any other status
+// records the intent first, best effort, and the Store.Fail walk runs
+// from that status as before.
+func (s *Supervisor) fail(motivo string, exit int) error {
 	intent := &TerminalIntent{Status: StatusFailed, Motivo: motivo, Exit: exit}
-	if _, err := s.Store.Record(s.ID, func(st *State) { st.TerminalIntent = intent }); err != nil {
-		s.frictionf("job: the supervisor could not record the terminal intent")
+	snap, err := s.Store.Snapshot(s.ID)
+	if err != nil {
+		// The status is unknown, so the unsettled walk must not run.
+		s.frictionf("job: the supervisor could not record the failure")
+		return err
+	}
+	if snap.State.Status == StatusBlocked {
+		// The failure exit from blocked: the settle, the re-anchor and the
+		// intent land with the crossing in one write; the Store.Fail walk
+		// then runs from finishing.
+		if err := s.settleAndTransitionWith(snap.State, StatusFinishing, true, func(st *State) { st.TerminalIntent = intent }); err != nil {
+			// The job stays blocked and unsettled: the failure walk refused
+			// to run from a state it could not cross, and the restart
+			// converges on the still-blocked job.
+			s.frictionf("job: the supervisor could not record the failure")
+			return err
+		}
+	} else {
+		// The terminal intent, best effort: on error, friction and continue
+		// — the failure still has to be recorded.
+		if _, err := s.Store.Record(s.ID, func(st *State) { st.TerminalIntent = intent }); err != nil {
+			s.frictionf("job: the supervisor could not record the terminal intent")
+		}
 	}
 	s.finalSync(StatusFailed)
 	// The collaboration capture, persisted before the failure walk; an
@@ -1148,4 +1194,5 @@ func (s *Supervisor) fail(motivo string, exit int) {
 	// before the release and the workspace close.
 	s.finishWakes()
 	s.finalize(StatusFailed)
+	return nil
 }
