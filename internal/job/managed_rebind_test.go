@@ -1,10 +1,12 @@
 package job
 
 import (
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -214,4 +216,75 @@ func TestBindLaunchRebind(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBindLaunchRebindRefusesUnknownAndBusy: a recorded supervisor whose
+// liveness reads as unknown, and a launch whose lock another holder keeps,
+// are never adopted, and the record stays byte for byte.
+func TestBindLaunchRebindRefusesUnknownAndBusy(t *testing.T) {
+	requireProcExec(t)
+	env := launchEnv(launchTestWorkspace, launchTestPane)
+	t.Run("unknown liveness keeps the record", func(t *testing.T) {
+		// A pid outside the platform range reads as unknown
+		// (platform.ProcStartIdentity), never as gone.
+		pid := math.MaxInt32 + 1
+		if _, _, live := platform.ProcStartIdentity(pid, platform.Env{}); live != platform.ProcUnknown {
+			t.Fatalf("pid %d reads %v, want unknown", pid, live)
+		}
+		f, store, sel := confirmedFixture(t, pid, "darwin:1.1", nil)
+		before := launchFile(t, f.dir)
+		bound, reason := BindLaunch(store, "job-1", env, sel)
+		if bound || reason != "the liveness of the supervisor that confirmed the launch is unknown" {
+			t.Fatalf("bound=%v reason=%q", bound, reason)
+		}
+		if string(launchFile(t, f.dir)) != string(before) {
+			t.Fatal("an unknown liveness changed the record")
+		}
+	})
+	holdLaunchLock := func(t *testing.T, dir string) {
+		t.Helper()
+		lock, err := openLaunchLock(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tryFlock(lock); err != nil {
+			t.Fatalf("hold launch.lock: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = funlock(lock)
+			_ = lock.Close()
+		})
+	}
+	t.Run("a held launch lock is not taken over through BindLaunch", func(t *testing.T) {
+		pid, started := goneProcess(t)
+		f, store, sel := confirmedFixture(t, pid, started, nil)
+		store.Clock = &launchTestClock{now: time.Date(2026, 10, 11, 13, 0, 0, 0, time.UTC)}
+		before := launchFile(t, f.dir)
+		holdLaunchLock(t, f.dir)
+		bound, reason := BindLaunch(store, "job-1", env, sel)
+		if bound || reason != "the launch lock stayed busy" {
+			t.Fatalf("bound=%v reason=%q", bound, reason)
+		}
+		if string(launchFile(t, f.dir)) != string(before) {
+			t.Fatal("a busy lock changed the record")
+		}
+	})
+	t.Run("a held launch lock stops the rebind itself", func(t *testing.T) {
+		pid, started := goneProcess(t)
+		f, store, sel := confirmedFixture(t, pid, started, nil)
+		store.Clock = &launchTestClock{now: time.Date(2026, 10, 11, 13, 0, 0, 0, time.UTC)}
+		selfStarted, selfExe, ok := selfIdentity(env)
+		if !ok {
+			t.Fatal("selfIdentity unreadable")
+		}
+		before := launchFile(t, f.dir)
+		holdLaunchLock(t, f.dir)
+		bound, reason := rebindLaunch(store, "job-1", env, launchBinding{Started: selfStarted, Exe: selfExe, Sel: sel})
+		if bound || reason != "the launch lock could not be taken" {
+			t.Fatalf("bound=%v reason=%q", bound, reason)
+		}
+		if string(launchFile(t, f.dir)) != string(before) {
+			t.Fatal("a busy lock changed the record")
+		}
+	})
 }

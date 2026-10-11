@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,5 +60,12 @@ func TestProcStartIdentity(t *testing.T) {
 	}
 	if id, n, l := ProcStartIdentity(0, env); id != "" || n != "" || l != ProcUnknown {
 		t.Fatalf("pid 0 = %q %q %v", id, n, l)
+	}
+	// A pid beyond the platform range is unknown, never the process whose
+	// pid it truncates to.
+	for _, pid := range []int{math.MaxInt32 + 1, 1<<32 + os.Getpid()} {
+		if id, n, l := ProcStartIdentity(pid, env); id != "" || n != "" || l != ProcUnknown {
+			t.Fatalf("pid %d = %q %q %v", pid, id, n, l)
+		}
 	}
 }

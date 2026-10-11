@@ -1,7 +1,11 @@
 package job
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -69,4 +73,69 @@ func TestUseLaunchSelectionLineage(t *testing.T) {
 	}
 	check("herdr", herdr.Env)
 	check("input", env)
+}
+
+// TestWakeHookEnvironmentIsTheServers: the wake command a bound supervisor
+// runs is a real process whose environment has no private name and every
+// generic selector exactly as the server's — the hook gets the environment
+// cli.Run built without the names (WithoutLaunchLocators), and binding the
+// supervisor to the selection does not touch it.
+func TestWakeHookEnvironmentIsTheServers(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	store := Open(root)
+	if _, err := store.Start("job-1", []byte(supTestBrief)); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := Dir(root, "job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	editState(t, dir, func(s *State) { s.Status, s.Dir, s.Modo = StatusRunning, t.TempDir(), "workspace" })
+	dump := filepath.Join(t.TempDir(), "wake-env.txt")
+	server := platform.Env{
+		"XDG_CONFIG_HOME": "/server/xdg", "HOME": "/server/home", "USERPROFILE": "/server/home", "APPDATA": "/server/appdata",
+		"PATH": os.Getenv("PATH"), managedHelperVar: "envdump", "JOB_ENV_DUMP": dump,
+		launchConfigBaseVar: "/starter/config", launchHomeVar: "/starter/home",
+	}
+	sel := ReadLaunchLocators(server).Selection
+	env := WithoutLaunchLocators(server)
+	sup, err := NewSupervisor(store, "job-1", env, self, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sup.Wake = &WakeHook{Cmd: self, JobID: "job-1", Env: env, Timeout: 30 * time.Second, Delays: []time.Duration{}}
+	sup.UseLaunchSelection(sel)
+	if attempts := sup.Wake.Run(Event{Seq: 1, Tipo: "terminal", Refs: map[string]string{}}); attempts != 1 {
+		t.Fatalf("wake attempts = %d", attempts)
+	}
+	data, err := os.ReadFile(dump)
+	if err != nil {
+		t.Fatalf("the wake command did not run: %v", err)
+	}
+	got := platform.Env{}
+	for _, kv := range strings.Split(string(data), "\n") {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			got[k] = v
+		}
+	}
+	for _, name := range []string{launchConfigBaseVar, launchHomeVar} {
+		if _, ok := got[name]; ok {
+			t.Fatalf("the wake command received %s", name)
+		}
+	}
+	for _, name := range []string{"XDG_CONFIG_HOME", "HOME", "USERPROFILE", "APPDATA"} {
+		if got[name] != server[name] {
+			t.Fatalf("wake %s=%q, want the server's %q", name, got[name], server[name])
+		}
+	}
+	if got["HERDR_SOHO_JOB_ID"] != "job-1" {
+		t.Fatalf("the wake command is not the hook's: %v", got["HERDR_SOHO_JOB_ID"])
+	}
+	if ops := sup.Ops.(selfCLI); ops.Env[launchConfigBaseVar] != "/starter/config" {
+		t.Fatal("the team commands did not receive the selection")
+	}
 }

@@ -18,8 +18,11 @@ import (
 func TestWaitRunningIgnoresFailWalkRunning(t *testing.T) {
 	root := t.TempDir()
 	store := crashedStartState(t, root)
+	// The store (the failure walk) and the supervisor (its polls) run in
+	// two goroutines, so each has its own fake clock: the store's only
+	// reads the time, the supervisor's only counts and reports sleeps.
+	store.Clock = &fakeClock{now: time.Date(2026, 10, 9, 10, 0, 0, 0, time.FixedZone("-03:00", -3*3600))}
 	clock := &fakeClock{now: time.Date(2026, 10, 9, 10, 0, 0, 0, time.FixedZone("-03:00", -3*3600))}
-	store.Clock = clock
 	// The private launch context this start issued: the guard runs for
 	// this supervisor only.
 	if _, err := issueLaunch(store, store.clock(), "job-1", "w9", "w9:p1"); err != nil {

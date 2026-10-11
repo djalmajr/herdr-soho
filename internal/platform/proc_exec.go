@@ -1,6 +1,9 @@
 package platform
 
-import "errors"
+import (
+	"errors"
+	"math"
+)
 
 // procExecMaxBytes bounds the argument area ProcExec reads for one pid.
 const procExecMaxBytes = 4 << 20
@@ -22,7 +25,7 @@ var errProcExecUnsupported = errors.New("platform: reading a process's executabl
 // liveness or start identity read: callers bracket it with two
 // ProcStartIdentity reads.
 func ProcExec(pid int) (exe string, argv []string, err error) {
-	if pid <= 0 {
+	if pid <= 0 || pid > math.MaxInt32 {
 		return "", nil, errors.New("platform: invalid pid")
 	}
 	exe, argv, err = procExec(pid)

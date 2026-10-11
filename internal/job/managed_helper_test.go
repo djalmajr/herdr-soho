@@ -35,6 +35,11 @@ func managedHelperMain() {
 		os.Exit(managedHelperParent())
 	case "child":
 		os.Exit(managedHelperChild())
+	case "envdump":
+		// The wake hook's command in TestWakeHookEnvironmentIsTheServers:
+		// record the environment it received.
+		_ = os.WriteFile(os.Getenv("JOB_ENV_DUMP"), []byte(strings.Join(os.Environ(), "\n")), 0o600)
+		os.Exit(0)
 	case "block":
 		buf := make([]byte, 1)
 		_, _ = os.Stdin.Read(buf)
