@@ -111,14 +111,15 @@ func RunTests(m *testing.M) {
 // production-call deadline), never by re-executed children that do not
 // install fakes (they never prepare an image). A fresh image's first exec
 // can take longer than a production CLI deadline, and the package's first
-// fake call must not pay it. The no-op child dispatches through Main's
-// existing routing via configEnv in directory form. On any failure it
+// fake call must not pay it. The no-op child is the prepared image
+// itself and dispatches through Main's existing routing via configEnv in
+// file form. On any failure it
 // returns the error so the caller reports one line and continues: the
 // warm-up is setup, not a test assertion, and the prepared copy stays
 // valid (a real problem still surfaces when a fixture executes it). On
 // non-Windows the fake is a symlink to the already-running test binary, so
 // there is nothing to warm.
-func warmPrepared(prepared string) error {
+func warmPrepared(prepared string) (err error) {
 	if runtime.GOOS != "windows" {
 		return nil
 	}
@@ -126,16 +127,23 @@ func warmPrepared(prepared string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
+	// The child runs the prepared image itself (its config is named by
+	// path, not by an executable name in this directory), so the directory
+	// only ever holds the script and the call log, both closed once the
+	// child has been waited for: nothing in it can still be held by the
+	// child's image when it is removed, and a removal failure is returned,
+	// never left behind silently.
+	defer func() {
+		if rerr := os.RemoveAll(dir); rerr != nil && err == nil {
+			err = fmt.Errorf("remove the warm directory: %w", rerr)
+		}
+	}()
+	config := filepath.Join(dir, "fakecli-warm.json")
 	scriptJSON, err := json.Marshal(script{Log: filepath.Join(dir, "fakecli-warm.calls.jsonl"), Rules: []Rule{{Argv: []string{"__fakecli_warm__"}}}})
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "fakecli-warm.json"), scriptJSON, 0o600); err != nil {
-		return err
-	}
-	target := filepath.Join(dir, "fakecli-warm.exe")
-	if err := os.Link(prepared, target); err != nil {
+	if err := os.WriteFile(config, scriptJSON, 0o600); err != nil {
 		return err
 	}
 	// The child must dispatch the warm script, not an inherited fixture
@@ -147,11 +155,13 @@ func warmPrepared(prepared string) error {
 			break
 		}
 	}
-	env = append(env, configEnv+"="+dir, "GORACE="+RaceOptions(os.Environ()))
+	env = append(env, configEnv+"="+config, "GORACE="+RaceOptions(os.Environ()))
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, target, "__fakecli_warm__")
+	cmd := exec.CommandContext(ctx, prepared, "__fakecli_warm__")
 	cmd.Env = env
+	// CombinedOutput waits for the child, so it has exited and been
+	// reaped before the directory is removed.
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("warm run timed out after 60s: %s", out)

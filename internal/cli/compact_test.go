@@ -974,6 +974,29 @@ func TestCompactOpenCodeUndatedLineIsNotProof(t *testing.T) {
 	}
 }
 
+// compactDeadlineAfterReads makes the compact wait's deadline pass after
+// exactly reads screen reads, whatever the speed of the fake herdr: the
+// clock stands still until the fake has logged that many reads (each read
+// is logged before it answers, so the count is final when the read
+// returns), then runs on in real time an hour later. The poll loop then
+// always makes the same reads before the deadline (a slow runner can
+// otherwise spend the whole short timeout on its first poll), and any
+// wait after the deadline still sees time pass.
+func compactDeadlineAfterReads(t *testing.T, f *compactFixture, reads int) {
+	t.Helper()
+	logPath := filepath.Join(f.bin, "herdr.calls.jsonl")
+	base := time.Now()
+	saved := platform.Now
+	platform.Now = func() time.Time {
+		calls, err := fakecli.ReadCalls(logPath)
+		if err != nil || countArgv(calls, compactReadArgv("worker")) < reads {
+			return base
+		}
+		return time.Now().Add(time.Hour)
+	}
+	t.Cleanup(func() { platform.Now = saved })
+}
+
 // TestCompactClaudeProofAfterDeadlineStillCompacted (edger): the proof shows
 // up only in the read after the deadline; the one last read runs the same
 // proofs, the compact ends as compacted (exit 0), and /compact is never sent
@@ -992,6 +1015,8 @@ func TestCompactClaudeProofAfterDeadlineStillCompacted(t *testing.T) {
 		{Argv: compactReadArgv("worker"), Call: 4, Stdout: compactScreens.claudeFresh},
 		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
 	})
+	// The pre-send read and two polls run before the deadline.
+	compactDeadlineAfterReads(t, f, 3)
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
 	if code != 0 || withoutShortTimeoutWarning(errText) != "" {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
@@ -1028,6 +1053,8 @@ func TestCompactPiEndingOnLastRead(t *testing.T) {
 		{Argv: compactReadArgv("worker"), Call: 4, Stdout: compactScreens.piNothing},
 		{Argv: []string{"agent", "get", "worker"}, Stdout: compactStateJSON("idle", 2)},
 	})
+	// The pre-send read and two polls run before the deadline.
+	compactDeadlineAfterReads(t, f, 3)
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
 	if code != 0 || withoutShortTimeoutWarning(errText) != "" {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
@@ -1054,6 +1081,8 @@ func TestCompactLastReadNothingTimesOut(t *testing.T) {
 		{Argv: []string{"pane", "send-keys", "p1", "Enter"}, Stdout: `{"result":{}}`},
 		{Argv: compactReadArgv("worker"), ArgvPrefix: true, Stdout: "old output line\n"},
 	})
+	// The pre-send read and two polls run before the deadline.
+	compactDeadlineAfterReads(t, f, 3)
 	code, out, errText := f.run(t, "compact", "worker", "--timeout", "500")
 	if code != 9 || withoutShortTimeoutWarning(errText) != "" {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
