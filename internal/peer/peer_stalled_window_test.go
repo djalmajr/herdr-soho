@@ -509,13 +509,45 @@ func TestSendStalledCodexHistoryDelivered(t *testing.T) {
 	}
 }
 
+// readSource returns the --source value of a `herdr agent read` argv, or
+// "" when the argv holds none.
+func readSource(argv []string) string {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == "--source" {
+			return argv[i+1]
+		}
+	}
+	return ""
+}
+
+// argvPair reports whether the argv holds the flag with the given value.
+func argvPair(argv []string, flag, value string) bool {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == flag && argv[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+// hasFlag reports whether the argv holds the flag, whatever its value.
+func hasFlag(argv []string, flag string) bool {
+	for _, a := range argv {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
 func TestIndependentFallbackBudget(t *testing.T) {
 	// The recent read's agent_not_idle fallback must not get a fresh copy of
-	// the budget the recent read already consumed: the window is 3s, the
-	// recent read fails at 2.5s, and the 10s fallback is due to be cut by
-	// the time then left (floored at 1s), so the send ends inside window +
-	// floor. The probe's bound is 4.3s; the unfixed fallback ran the full
-	// ~3s again and finished near 5.6s.
+	// the budget the recent read already consumed: the recent read fails at
+	// 2.5s of the 3s window and the 10s fallback is cut by the time then
+	// left (floored at 1s). The bound sits at the budget phase — the send's
+	// preparation calls are not part of the 3s budget — so the whole-send
+	// wall clock is not bounded here and the phase test
+	// TestReadScreenFallbackGetsTheRemainingBudget measures it.
 	recent := d15WindowRecent(1, "")
 	recent.Delay = 2500
 	recent.Stderr = notIdleErr
@@ -529,7 +561,89 @@ func TestIndependentFallbackBudget(t *testing.T) {
 	code, _, _ := f.run([]string{"send", d15Pane, "hello"})
 	elapsed := time.Since(start)
 	t.Logf("window=3s floor=1s elapsed=%s code=%d prompts=%d enters=%d", elapsed, code, remotePrompts(t, f), remoteEnters(t, f))
-	if code != 15 || elapsed > 4300*time.Millisecond {
-		t.Fatal("recent fallback reused the consumed budget")
+	if code != 15 {
+		t.Fatalf("the stalled send without proof keeps 15: code=%d", code)
+	}
+	if prompts := remotePrompts(t, f); prompts != 1 {
+		t.Fatalf("the window never resends the text: %d prompts", prompts)
+	}
+	if enters := remoteEnters(t, f); enters != 0 {
+		t.Fatalf("no key is pressed while the screen is stale: %d enters", enters)
+	}
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The expected recent → visible call sequence in the send: a --source
+	// recent-unwrapped read was made and the call right after the first one
+	// is a --source visible read without --lines. It does not prove the
+	// visible read is readScreen's fallback — a later diagnostic read
+	// matches the same shape; the fallback proof (it ran, the 1s floor,
+	// exactly two calls, 3500–4300 ms) is the direct
+	// TestReadScreenFallbackGetsTheRemainingBudget.
+	recentIdx := -1
+	for i, c := range calls {
+		if readSource(c.Argv) == "recent-unwrapped" {
+			recentIdx = i
+			break
+		}
+	}
+	if recentIdx < 0 {
+		t.Fatalf("no recent-unwrapped read in the call log: %d calls", len(calls))
+	}
+	if recentIdx+1 >= len(calls) {
+		t.Fatalf("no call right after the first recent read: %d calls", len(calls))
+	}
+	next := calls[recentIdx+1]
+	if readSource(next.Argv) != "visible" {
+		t.Fatalf("the call right after the first recent read is not a visible read: %v", next.Argv)
+	}
+	if hasFlag(next.Argv, "--lines") {
+		t.Fatalf("the visible read right after the first recent read carries --lines: %v", next.Argv)
+	}
+}
+
+func TestReadScreenFallbackGetsTheRemainingBudget(t *testing.T) {
+	// The bound sits at the budget phase: the send's preparation calls are
+	// not part of the 3s budget, so only this readScreen call is timed —
+	// the recent read fails at 2.5s of the 3s budget and the 10s fallback
+	// is cut by the time then left (floored at 1s), so the call ends inside
+	// window + floor + the 300ms bound; a fresh budget would run near 5.5s
+	// and time out after 3s.
+	recent := d15WindowRecent(1, "")
+	recent.Delay = 2500
+	recent.Stderr = notIdleErr
+	recent.Code = 1
+	fallback := d15WindowVisible(1, d15WindowStale)
+	fallback.Delay = 10000
+	f := newFixture(t, []fakecli.Rule{recent, fallback})
+	start := time.Now()
+	screen, cause := peer.ReadScreen("windows", "w0test:p0a", "recent-unwrapped", 67, f.env, 3000, nil)
+	elapsed := time.Since(start)
+	t.Logf("window=3s floor=1s elapsed=%s cause=%q", elapsed, cause)
+	if screen != "" {
+		t.Fatalf("the cut fallback read returns no screen: %q", screen)
+	}
+	if cause != "herdr agent read timed out after 1s" {
+		t.Fatalf("the fallback got the floored remaining budget, not a fresh one: %q", cause)
+	}
+	if elapsed < 3500*time.Millisecond || elapsed > 4300*time.Millisecond {
+		t.Fatalf("the budget phase runs window + floor: elapsed=%s", elapsed)
+	}
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("exactly two reads, the recent and its visible fallback: %d calls", len(calls))
+	}
+	if readSource(calls[0].Argv) != "recent-unwrapped" || !argvPair(calls[0].Argv, "--lines", "67") {
+		t.Fatalf("the first call is the recent read with --lines 67: %v", calls[0].Argv)
+	}
+	if readSource(calls[1].Argv) != "visible" {
+		t.Fatalf("the second call is the visible fallback: %v", calls[1].Argv)
+	}
+	if hasFlag(calls[1].Argv, "--lines") {
+		t.Fatalf("the fallback visible read carries --lines: %v", calls[1].Argv)
 	}
 }

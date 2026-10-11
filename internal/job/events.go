@@ -37,7 +37,7 @@ var eventTypes = map[string]bool{
 	"commit": true, "push": true, "pr_opened": true, "checkpoint": true,
 	"review_verdict": true, "question": true, "blocked": true, "unblocked": true,
 	"amend_received": true, "decision": true, "decision_acked": true,
-	"timeout_warning": true, "failure": true, "note": true, "terminal": true,
+	"timeout_warning": true, "blocked_warning": true, "failure": true, "note": true, "terminal": true,
 	"cleanup": true,
 }
 
@@ -135,7 +135,6 @@ func appendEvent(dir string, now time.Time, in EventIn) (Event, error) {
 		return Event{}, err
 	}
 	line = append(line, '\n')
-	// TODO(DJA-194): verify the wake hook runs only after this sync.
 	file, err := os.OpenFile(filepath.Join(dir, "events.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return Event{}, err

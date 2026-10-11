@@ -94,6 +94,9 @@ func runContextWarnDispatch(t *testing.T, kind, screen string, amend bool, envEx
 	for k, v := range envExtra {
 		env[k] = v
 	}
+	// A race-instrumented fake child otherwise pauses for one second on
+	// exit; the harness sets only GORACE and leaves the rest of the env as built.
+	env["GORACE"] = fakecli.RaceOptions(env.List())
 	if amend {
 		if err := os.WriteFile(filepath.Join(state, "ws", "last-report-worker"), []byte(filepath.Join(state, "ws", "reports", "worker-old.md")+"\n"), 0o600); err != nil {
 			t.Fatal(err)

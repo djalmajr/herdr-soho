@@ -749,11 +749,12 @@ func TestDispatchRemainingCases(t *testing.T) {
 	t.Run(`JS: "agentPrompt: stdout and stderr in write order, trailing newlines dropped (bash \"$(… 2>&1)\")"`, func(t *testing.T) {
 		// AgentPrompt runs with MergeOutput: both streams share one temp
 		// file, so the write order holds as in bash "$(… 2>&1)". The
-		// fixture is a re-executed copy of this test binary (no shell
-		// behind the name): the role marker env (handled in the package
-		// init) writes the two streams interleaved exactly like the old
-		// sh script did, and the ordering is the same file handle on
-		// every host.
+		// fixture is a re-executed image of this test binary (a hard link
+		// of the package's one prepared image on Windows; no shell behind
+		// the name): the role marker env (handled in the package init)
+		// writes the two streams interleaved exactly like the old sh
+		// script did, and the ordering is the same file handle on every
+		// host.
 		root, err := filepath.EvalSymlinks(t.TempDir())
 		if err != nil {
 			t.Fatal(err)
@@ -762,29 +763,45 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.Mkdir(bin, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		exe, err := os.Executable()
-		if err != nil {
-			t.Fatalf("locating the test binary: %v", err)
-		}
-		target := filepath.Join(bin, "herdr")
 		if runtime.GOOS == "windows" {
-			target += ".exe"
-		}
-		if runtime.GOOS == "windows" {
-			// A loaded parent image can prevent hard-link cleanup on Windows.
-			// Keep this fixture independent of the running parent image.
-			if data, readErr := os.ReadFile(exe); readErr != nil {
-				t.Fatalf("reading the test binary: %v", readErr)
-			} else if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
-				t.Fatalf("writing the fixture program: %v", writeErr)
+			// Windows prefers a hard link of the package's one prepared
+			// independent image (fakecli's byte copy in its own temp dir;
+			// the running parent image is never linked): no fresh full
+			// copy is written and its slow first exec is not paid. When a
+			// link is unsupported it falls back to an independent byte
+			// copy (slower first exec, same behavior). Install also
+			// writes bin/herdr.json, which the leftover check does not
+			// see (it globs root/.herdr-soho-out-* only). The env below
+			// carries no fakecli marker, so the re-execution runs the
+			// package init role, not the fake.
+			if _, err := fakecli.Install(t, bin, "herdr", nil); err != nil {
+				t.Logf("falling back to an independent byte copy: %v", err)
+				exePath, readErr := os.Executable()
+				if readErr != nil {
+					t.Fatalf("locating the test binary: %v", readErr)
+				}
+				data, readErr := os.ReadFile(exePath)
+				if readErr != nil {
+					t.Fatalf("reading the test binary: %v", readErr)
+				}
+				if writeErr := os.WriteFile(filepath.Join(bin, "herdr.exe"), data, 0o755); writeErr != nil {
+					t.Fatalf("writing the fixture program: %v", writeErr)
+				}
 			}
-		} else if err := os.Link(exe, target); err != nil {
-			data, readErr := os.ReadFile(exe)
-			if readErr != nil {
-				t.Fatalf("reading the test binary: %v", readErr)
+		} else {
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatalf("locating the test binary: %v", err)
 			}
-			if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
-				t.Fatalf("writing the fixture program: %v", writeErr)
+			target := filepath.Join(bin, "herdr")
+			if err := os.Link(exe, target); err != nil {
+				data, readErr := os.ReadFile(exe)
+				if readErr != nil {
+					t.Fatalf("reading the test binary: %v", readErr)
+				}
+				if writeErr := os.WriteFile(target, data, 0o755); writeErr != nil {
+					t.Fatalf("writing the fixture program: %v", writeErr)
+				}
 			}
 		}
 		r := herdr.AgentPrompt("w", "text", platform.Env{"PATH": bin, "TMPDIR": root, agentPromptRoleEnv: "ordered"})

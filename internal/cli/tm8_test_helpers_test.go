@@ -163,7 +163,9 @@ func runTM8ConfigGolden(t *testing.T, name string) {
 		wantErr := normalizeGoldenRootPathSeparators(strings.ReplaceAll(step.Err, root, "<ROOT>"))
 		if name == "roles-role" || name == "project-roles" {
 			out = strings.ReplaceAll(out, env.Get("HERDR_SOHO_SKILL_DIR"), "<SKILL>")
-			wantOut := strings.ReplaceAll(step.Out, env.Get("HERDR_SOHO_SKILL_DIR"), "<SKILL>")
+			// The frozen golden predates the shipped job-orchestrator role;
+			// the exact-insertion role oracle adapts the expected table row.
+			wantOut := testutil.ApplyRoleOracleToRolesTable(strings.ReplaceAll(step.Out, env.Get("HERDR_SOHO_SKILL_DIR"), "<SKILL>"))
 			if code != step.RC || out != wantOut || errOut != wantErr {
 				t.Fatalf("step %d args=%v code=%d/%d stdout=%q want %q stderr=%q want %q", i, step.Args, code, step.RC, out, wantOut, errOut, wantErr)
 			}

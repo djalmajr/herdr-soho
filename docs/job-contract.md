@@ -13,7 +13,7 @@ Every subcommand prints exactly one JSON line on stdout, except `events`, which 
 ```text
 herdr-soho job start   --id <id> --repo <org/repo> [--base <branch>] [--mode worktree|workspace]
                        [--brief <file|->] [--timeout <minutes>] [--dry-run]
-herdr-soho job status  --id <id>                      # read-only; state, event count, last seq, pending decisions
+herdr-soho job status  --id <id>                      # read-only; state, event count, last seq, pending decisions, partial collaborations
 herdr-soho job wait    --id <id> [--timeout MS]       # blocks until a terminal state
 herdr-soho job events  --id <id> [--since <seq>] [--wait MS]   # JSON lines; long-poll
 herdr-soho job collect --id <id> [--md] [--verify]    # final report (JSON, or report.md with --md)
@@ -41,7 +41,7 @@ Requirements: Herdr 0.9.1 or newer (0.9.3 or newer recommended on Windows). `cap
 - `--base`: `^[A-Za-z0-9._/-]{1,100}$` without `..`; defaults to the brief's `base`, then to the remote default branch.
 - `--mode worktree` (default): a worktree at `<checkout>/.worktrees/job-<id>` on branch `job/<id>` from `origin/<base>` after a fetch. `--mode workspace`: the checkout itself, only for jobs that change no code; a dirty or locked checkout is refused.
 - `--brief`: a file or `-` (stdin). A remote dispatcher sends the brief on stdin.
-- `--timeout`: wall-clock budget of the whole job in minutes, 1..1440 (default `job_timeout=120`). It is separate from the per-role timeouts; a worker's wait timeout never ends the job.
+- `--timeout`: the job's active budget in minutes, 1..1440 (default `job_timeout=120`). Time the job spends `blocked` does not count against it (see Budgets). It is separate from the per-role timeouts; a worker's wait timeout never ends the job.
 
 ### Exit codes
 
@@ -52,7 +52,7 @@ Requirements: Herdr 0.9.1 or newer (0.9.3 or newer recommended on Windows). `cap
 | 3 | unknown `--id` (`{"status":"not_found"}`) |
 | 4 | Herdr failure or unavailable (including no reachable Herdr server on Windows) |
 | 7 | `blocked`: a question, approval or dialog needs a person |
-| 9 | job `timeout` |
+| 9 | job `timeout`: the active budget or the blocked ceiling was exhausted (`motivo` tells which) |
 | 11 / 14 | `blocked` by quota / provider error (detail in `motivo`) |
 | 19 | `failed`: partial items with no pending decision, failed gates, or the job orchestrator ended without a report |
 | 20 | `--id` reused with a different brief (hash mismatch) |
@@ -117,7 +117,8 @@ Keys in the user configuration file:
 - `machine_label`: the canonical name of this machine, reported in `report.json` and checked against `brief.maquina` (examples: `machine-a`, `machine-b`).
 - `job_orgs`: comma-separated organizations a job may check out.
 - `job_repos_root`: checkout root (default `~/repo.git`, `%USERPROFILE%\repo.git` on Windows); checkouts live at `<root>/<org>/<repo>`.
-- `job_timeout`: default job timeout in minutes.
+- `job_timeout`: default active budget in minutes (default 120).
+- `job_blocked_timeout`: the blocked ceiling in minutes, 1..43200 (default 1440, 24 hours): the most time a job may spend `blocked` in total. An invalid value makes `job start` exit 2. The value in effect at `job start` is recorded with the job.
 - `job_wake_cmd`: an optional local wake hook command (see Events).
 
 When the checkout is missing, the job clones it into `<job_repos_root>/<org>/<repo>` only when the organization is in `job_orgs` and the machine already has working GitHub authentication; otherwise it exits 22. Every job also checks push access to the remote and `gh` authentication before any pane opens, because pushing is mandatory.
@@ -142,13 +143,28 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 
 - Idempotency: a lock per id. `start` again with the same brief hash returns the current state with `duplicate_of`; a different hash exits 20. Repeated `close`, `cancel`, `ack` and `checkpoint` calls with nothing to do exit 0.
 - Error reports: once `--id` is valid, every terminal state writes `report.json`, including preparation failures, timeouts and cancellations.
-- Cancel and timeout: the job orchestrator receives a "stop and report what you have" amendment, the job waits `--grace` seconds (default 120), commits and pushes leftovers, stops active collaborations, releases every worker with `--close --force`, and ends `canceled` (21) or `timeout` (9). A `timeout_warning` event fires at 80% of the budget.
-- Blocked jobs: a `blocked` job stays alive, with its job orchestrator in its pane, waiting for `job amend`; there is no automatic deadline, and the owner decides when to cancel it.
+- Cancel and timeout: the job orchestrator receives a "stop and report what you have" amendment, the job waits `--grace` seconds (default 120; 120 for a timeout), commits and pushes leftovers, finishes the job's collaborations (see Collaborations at the end of a job), releases every worker with `--close --force`, and ends `canceled` (21) or `timeout` (9). The state's `motivo` names the reason: `cancelado`, `tempo esgotado` (active budget) or `tempo de bloqueio esgotado` (blocked ceiling).
+- Blocked jobs: a `blocked` job stays alive, with its job orchestrator in its pane, waiting for `job amend`. It does not consume the active budget while it waits, but it consumes the blocked ceiling; when the ceiling is reached the job ends through the same stop path as a timeout. The owner may still cancel it at any time.
 - Unblocking: `job amend` on a `blocked` job sends a formal amendment and moves it back to `running` with the same workspace, worktree and pull request.
+
+### Budgets: active time and the blocked ceiling
+
+- A job has two separate clocks. The active clock counts every moment the job is not `blocked` (`accepted`, `preparing`, `running`, `finishing`) against `--timeout` (`job_timeout`). The blocked clock counts only the time spent `blocked`, against `job_blocked_timeout`. Each transition into or out of `blocked` settles the elapsed interval into the matching clock and starts the next interval in the same atomic state write, so a crash leaves either the state before the transition or the state after it, never a mix.
+- Blocking pauses the accrual of active time, not its enforcement: a job whose active time already reached 80% or 100% of `--timeout` before it was blocked still gets the warning or the timeout while it is blocked.
+- `timeout_warning` fires once per job at 80% of the active budget; blocked time never brings a job closer to it. At 100% the stop path ends the job `timeout` with `motivo` `tempo esgotado`.
+- `blocked_warning` fires once per job at 80% of the blocked ceiling. At 100% the stop path ends the job `timeout` (exit 9) with `motivo` `tempo de bloqueio esgotado`. When both budgets are exhausted in the same check, the active timeout wins.
+- Both clocks and the warnings already emitted are persisted with the job, so a restarted supervisor continues them: it neither resets nor double-counts an interval, and it emits a missing warning once. The clocks are measured on the monotonic clock; a wall clock that moves backwards between supervisor runs never shortens or extends a budget.
+
+### Collaborations at the end of a job
+
+- On every terminal path (`done`, `failed`, `timeout`, `canceled`, including a supervisor restarted on that path), before the terminal status becomes visible, the supervisor asks each active collaboration the job owns to finish: the same stop amendment as a cancel goes to its participants that belong to the job's team. A collaboration is owned by the job only when its record names the job's Herdr workspace and the job's repository root; any other record is never asked, stopped or reported.
+- It then waits for those collaborations within the existing grace: the cancel's `--grace` or the timeout's grace on the stop path, 120 seconds after the orchestrator's report on `done` and `failed`. The deadline is never restarted.
+- When the wait ends, it records one entry per owned collaboration under `colaboracoes` in `state.json` and `report.json`, with the evidence it can read safely (phase, round, revision, the last event, its report path and recorded hash, a fresh hash of report files inside the job's report directories and worktree, at most 8 MiB; the trusted base a report directory hangs from (the job's state directory, the system temporary directory, or the worktree itself) is resolved as given, its own links included, while every directory appended under that base must be a real directory, checked on the directory actually opened, so replacing one with a link, or with something that is not a directory such as a named pipe, directly or behind a link, is refused without waiting; the report file is opened through that opened directory, where a relative link that stays inside it is followed and a link that leaves it or any absolute link is refused, and a file that is not a regular file, such as a named pipe, is refused without waiting), and the outcome: `finished` (the job orchestrator ended it, with its verdict), `partial` (still active when the grace ended) or `unavailable` (its record could not be read or enumerated). An unreadable record counts as `unavailable` only when its id is already known to the job or its raw record still shows the job's own workspace and root, and is otherwise reported as friction only. A `partial` or `unavailable` entry is never presented as accepted work.
+- Only after those facts are persisted does the job reach its terminal status. The supervisor then interrupts the collaborations it recorded as `partial` (`collaborate stop`, then `finalize --verdict reject`; never `accept`) and records `finalized_by_supervisor`, releases the workers and closes the workspace, so no pane or process of the job is left behind. A later interruption never rewrites a recorded outcome.
 
 ### Release (no automatic cleanup)
 
-- Closing a job releases processes only. On a terminal state (`done`, `failed`, `canceled`, `timeout`), right after the final push, the supervisor stops active collaborations, releases workers and the job orchestrator, runs `gc --yes` for the job's registered copies and processes, and closes the Herdr workspace (`herdr workspace close`).
+- Closing a job releases processes only. On a terminal state (`done`, `failed`, `canceled`, `timeout`), right after the final push, the supervisor finishes the job's collaborations (above), releases workers and the job orchestrator, runs `gc --yes` for the job's registered copies and processes, and closes the Herdr workspace (`herdr workspace close`). When the job's collaborations cannot be enumerated by the end of the grace, every collaboration already known to the job keeps its recorded outcome or is recorded `unavailable`, and the job still reaches its outcome, but the interruption, the release, `gc` and the workspace close are refused and a friction line names the failure; the workspace stays open until a later supervisor pass can enumerate the collaborations and finish them.
 - Job folders and worktrees are never removed automatically. The worktree, its local branch and `jobs/<id>/` stay on the machine; `report.json` records `limpeza.worktree: "kept"` and sets `limpeza.removivel` to true only when the tree is clean and `HEAD` equals `origin/job/<id>` (informational only). The remote branch and the pull request are never touched.
 - Removing a worktree or a job folder is the user's decision, done by hand (`git worktree remove`, `gc`, `clean --older-than`). `clean --older-than` never removes `jobs/<id>/` while a decision is still unacknowledged.
 
@@ -158,6 +174,18 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 - The dispatcher is the single maintainer of the shared memory: it classifies each decision, stores it, then calls `job ack --id <id> --upto <seq>` (monotonic; a lower value is a no-op).
 - A decision is pending while its `seq` is greater than `decisions_acked_seq`. `status` and `collect` report `decisions_pendentes`.
 - `job close` with a pending decision exits 24 and lists the pending `seq` values; `--force` closes anyway and records a `cleanup` event with `motivo=force_sem_ack`.
+
+## Status
+
+`job status` and `job wait` print one line:
+
+```json
+{"id":"TASK-123-7f3a","status":"done","motivo":null,"eventos":{"total":42,"ultimo_seq":42},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":true,"partial_collaborations":["c-0123456789abcdef"]}
+```
+
+- `partial` is always present: `true` when at least one of the job's collaborations ended `partial` or `unavailable`, otherwise `false`.
+- `partial_collaborations` is always present: the IDs of those collaborations, sorted and without duplicates; `[]` when there are none. A job whose state predates these fields reads as `false` and `[]`, and the read changes nothing.
+- The two fields are published before the terminal status, so a reader that sees `done` (or any terminal status) already sees the final partial facts, and they are never removed later. `report.json` carries the same two values and is written before the terminal status is saved in `state.json`; a crash between the two writes leaves the job `finishing` with its recorded outcome, and the restarted supervisor writes both again.
 
 ## Report
 
@@ -177,6 +205,8 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
   "pr": { "numero": 12, "url": "<pull request url>", "estado": "draft" },
   "itens": [{ "n": 1, "item": "...", "estado": "done" }],
   "parciais": 0,
+  "partial": false,
+  "partial_collaborations": [],
   "testes": [{ "cmd": "go test ./...", "resultado": "pass" }],
   "revisao": { "verdict": "pass", "findings": 1, "severity": "P0 0, P1 0, P2 1, P3 0" },
   "artefatos": [{ "path": "report.md", "sha256": "<hex>" }],
@@ -197,11 +227,12 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 }
 ```
 
-- `done`: every item `[done]` or `[skipped]` with a reason, the acceptance checks pass, the review (from another model family) passes when code changed, and `sincronizado` is true.
+- `done`: every item `[done]` or `[skipped]` with a reason, the acceptance checks pass, the review (from another model family) passes when code changed, and `sincronizado` is true. When the job orchestrator completed but a collaboration was still partial after the graceful closure, the job is still `done` (exit 0) and says so explicitly: `partial: true` and the collaboration IDs in `partial_collaborations`, with the detail in `colaboracoes`. A dispatcher must read those fields; `done` alone does not mean every collaboration finished.
 - `failed`: partial items with no pending decision, a failed check or review, or a job orchestrator that settled without a report or disappeared.
 - `blocked`: an unresolved question, dialog, quota or provider error; the question goes in `perguntas`.
 - `memoria.global` holds suggestions that may apply beyond this repository; `memoria.projeto` holds notes that apply only to it. The job never writes them anywhere else; the dispatcher routes them.
 - `limpeza.removivel` is informational: true when the job worktree is clean and in sync with `origin/job/<id>`, so the user can remove it safely. Nothing is removed automatically.
+- `partial` and `partial_collaborations`: as in Status; `colaboracoes` (present only when the job had collaborations) holds the per-collaboration evidence and outcome. `parciais` keeps counting the `[partial]` items of the orchestrator's report; partial items with no pending decision still end the job `failed`.
 - `publico` is built from an allowlist of fields. It is the only part of a report that may appear on a public forge.
 
 ## Events
@@ -235,7 +266,8 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 | `amend_received` | supervisor | no | an `amend` or `send` was delivered (`refs.seq_ref`) |
 | `decision` | orchestrator | yes | a relevant decision (`job note --tipo decision`) |
 | `decision_acked` | supervisor | no | `job ack` received |
-| `timeout_warning` | supervisor | yes | 80% of the job budget used |
+| `timeout_warning` | supervisor | yes | 80% of the active budget used (blocked time excluded) |
+| `blocked_warning` | supervisor | yes | 80% of the blocked ceiling used |
 | `failure` | supervisor | yes | preparation failure, worker gone, failed acceptance check, no report |
 | `note` | orchestrator | no | an observation that is not a decision |
 | `terminal` | supervisor | yes | final state (`refs.motivo`, `refs.exit`) |

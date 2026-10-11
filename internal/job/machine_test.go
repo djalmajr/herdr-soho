@@ -22,6 +22,7 @@ func TestMachineConfig(t *testing.T) {
 			"job_orgs=",
 			"job_repos_root=~/repo.git",
 			"job_timeout=120",
+			"job_blocked_timeout=1440",
 			"job_wake_cmd=",
 		} {
 			if !strings.Contains(text, line) {
@@ -38,7 +39,7 @@ func TestMachineConfig(t *testing.T) {
 	t.Run("known keys and timeout bounds", func(t *testing.T) {
 		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skillDir(t)}
 		cwd := t.TempDir()
-		for _, key := range []string{"machine_label", "job_orgs", "job_repos_root", "job_timeout", "job_wake_cmd"} {
+		for _, key := range []string{"machine_label", "job_orgs", "job_repos_root", "job_timeout", "job_blocked_timeout", "job_wake_cmd"} {
 			if !core.ConfigKeyOk(key) {
 				t.Errorf("ConfigKeyOk(%q) = false", key)
 			}
@@ -61,6 +62,13 @@ func TestMachineConfig(t *testing.T) {
 			{"job_timeout", "0", false},
 			{"job_timeout", "1441", false},
 			{"job_timeout", "90m", false},
+			{"job_blocked_timeout", "1", true},
+			{"job_blocked_timeout", "1440", true},
+			{"job_blocked_timeout", "43200", true},
+			{"job_blocked_timeout", "0", false},
+			{"job_blocked_timeout", "43201", false},
+			{"job_blocked_timeout", "90m", false},
+			{"job_blocked_timeout", "1.5", false},
 			{"machine_label", "machine-a", true},
 			{"machine_label", "a#b", false},
 			{"job_orgs", "example-org, other-org", true},
@@ -80,7 +88,7 @@ func TestMachineConfig(t *testing.T) {
 	t.Run("defaults expand the checkout root", func(t *testing.T) {
 		f := newMachineFix(t)
 		got := f.must(t, "linux")
-		if got.Label != "" || len(got.Orgs) != 0 || got.TimeoutMin != 120 || got.WakeCmd != "" {
+		if got.Label != "" || len(got.Orgs) != 0 || got.TimeoutMin != 120 || got.BlockedTimeoutMin != 1440 || got.WakeCmd != "" {
 			t.Fatalf("defaults = %+v", got)
 		}
 		if got.ReposRoot != filepath.Join(f.home, "repo.git") {
@@ -99,9 +107,9 @@ func TestMachineConfig(t *testing.T) {
 
 	t.Run("user file and environment", func(t *testing.T) {
 		f := newMachineFix(t)
-		writeTeamFile(t, platform.UserConfigPath("linux", f.env), "machine_label=from-file\njob_orgs=example-org, other-org\njob_repos_root=/data/repos\njob_timeout=90\njob_wake_cmd=echo hi\n")
+		writeTeamFile(t, platform.UserConfigPath("linux", f.env), "machine_label=from-file\njob_orgs=example-org, other-org\njob_repos_root=/data/repos\njob_timeout=90\njob_blocked_timeout=720\njob_wake_cmd=echo hi\n")
 		got := f.must(t, "linux")
-		if got.Label != "from-file" || got.TimeoutMin != 90 || got.WakeCmd != "echo hi" || got.ReposRoot != "/data/repos" {
+		if got.Label != "from-file" || got.TimeoutMin != 90 || got.BlockedTimeoutMin != 720 || got.WakeCmd != "echo hi" || got.ReposRoot != "/data/repos" {
 			t.Fatalf("user = %+v", got)
 		}
 		if err := got.AllowsOrg("example-org"); err != nil {
@@ -152,6 +160,14 @@ func TestMachineConfig(t *testing.T) {
 		if got.TimeoutMin != 1440 || teamCode(got.AllowsOrg("example-org")) != -1 {
 			t.Fatalf("upper bound = %+v", got)
 		}
+		writeTeamFile(t, platform.UserConfigPath("linux", f.env), "job_blocked_timeout=0\n")
+		if _, err := LoadMachine("linux", f.env); teamCode(err) != 2 {
+			t.Fatalf("blocked timeout 0: %v", err)
+		}
+		writeTeamFile(t, platform.UserConfigPath("linux", f.env), "job_blocked_timeout=43201\n")
+		if _, err := LoadMachine("linux", f.env); teamCode(err) != 2 {
+			t.Fatalf("blocked timeout 43201: %v", err)
+		}
 	})
 
 	t.Run("windows checkout root uses USERPROFILE", func(t *testing.T) {
@@ -168,9 +184,9 @@ func TestMachineConfig(t *testing.T) {
 	})
 	t.Run("project session and environment never change the user file", func(t *testing.T) {
 		f := newMachineFix(t)
-		writeTeamFile(t, platform.UserConfigPath("linux", f.env), "machine_label=user-label\njob_orgs=user-org\njob_repos_root=/data/user\njob_timeout=77\njob_wake_cmd=echo user\n")
-		writeTeamFile(t, filepath.Join(f.cwd, ".agents", "herdr-soho.conf"), "machine_label=project-label\njob_orgs=project-org\njob_repos_root=/data/project\njob_timeout=66\njob_wake_cmd=echo project\n")
-		writeTeamFile(t, filepath.Join(f.cwd, ".herdr-soho", "ws1", "session.conf"), "machine_label=session-label\njob_orgs=session-org\njob_repos_root=/data/session\njob_timeout=55\njob_wake_cmd=echo session\n")
+		writeTeamFile(t, platform.UserConfigPath("linux", f.env), "machine_label=user-label\njob_orgs=user-org\njob_repos_root=/data/user\njob_timeout=77\njob_blocked_timeout=720\njob_wake_cmd=echo user\n")
+		writeTeamFile(t, filepath.Join(f.cwd, ".agents", "herdr-soho.conf"), "machine_label=project-label\njob_orgs=project-org\njob_repos_root=/data/project\njob_timeout=66\njob_blocked_timeout=660\njob_wake_cmd=echo project\n")
+		writeTeamFile(t, filepath.Join(f.cwd, ".herdr-soho", "ws1", "session.conf"), "machine_label=session-label\njob_orgs=session-org\njob_repos_root=/data/session\njob_timeout=55\njob_blocked_timeout=550\njob_wake_cmd=echo session\n")
 		env := platform.Env{}
 		for name, value := range f.env {
 			env[name] = value
@@ -180,12 +196,13 @@ func TestMachineConfig(t *testing.T) {
 		env["HERDR_SOHO_JOB_ORGS"] = "env-org"
 		env["HERDR_SOHO_JOB_REPOS_ROOT"] = "/data/env"
 		env["HERDR_SOHO_JOB_TIMEOUT"] = "45"
+		env["HERDR_SOHO_JOB_BLOCKED_TIMEOUT"] = "450"
 		env["HERDR_SOHO_JOB_WAKE_CMD"] = "echo env"
 		got, err := LoadMachine("linux", env)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Label != "user-label" || len(got.Orgs) != 1 || got.Orgs[0] != "user-org" || got.ReposRoot != "/data/user" || got.TimeoutMin != 77 || got.WakeCmd != "echo user" {
+		if got.Label != "user-label" || len(got.Orgs) != 1 || got.Orgs[0] != "user-org" || got.ReposRoot != "/data/user" || got.TimeoutMin != 77 || got.BlockedTimeoutMin != 720 || got.WakeCmd != "echo user" {
 			t.Fatalf("machine = %+v", got)
 		}
 		if err := got.Admit("", "user-org", "example-repo"); err != nil {
@@ -218,9 +235,10 @@ func TestMachineConfig(t *testing.T) {
 		f.env["HERDR_SOHO_JOB_ORGS"] = "env-org"
 		f.env["HERDR_SOHO_JOB_REPOS_ROOT"] = "/data/env"
 		f.env["HERDR_SOHO_JOB_TIMEOUT"] = "45"
+		f.env["HERDR_SOHO_JOB_BLOCKED_TIMEOUT"] = "450"
 		f.env["HERDR_SOHO_JOB_WAKE_CMD"] = "echo env"
 		got := f.must(t, "linux")
-		if got.Label != "" || len(got.Orgs) != 0 || got.ReposRoot != filepath.Join(f.home, "repo.git") || got.TimeoutMin != 120 || got.WakeCmd != "" {
+		if got.Label != "" || len(got.Orgs) != 0 || got.ReposRoot != filepath.Join(f.home, "repo.git") || got.TimeoutMin != 120 || got.BlockedTimeoutMin != 1440 || got.WakeCmd != "" {
 			t.Fatalf("machine = %+v", got)
 		}
 	})
@@ -235,11 +253,12 @@ func TestMachineConfig(t *testing.T) {
 			got[pair.Key] = pair.Value
 		}
 		for key, want := range map[string]string{
-			"machine_label":  defaultMachineLabel,
-			"job_orgs":       defaultJobOrgs,
-			"job_repos_root": defaultJobReposRoot,
-			"job_timeout":    defaultJobTimeout,
-			"job_wake_cmd":   defaultJobWakeCmd,
+			"machine_label":       defaultMachineLabel,
+			"job_orgs":            defaultJobOrgs,
+			"job_repos_root":      defaultJobReposRoot,
+			"job_timeout":         defaultJobTimeout,
+			"job_blocked_timeout": defaultJobBlockedTimeout,
+			"job_wake_cmd":        defaultJobWakeCmd,
 		} {
 			if value := got[key]; value != want {
 				t.Errorf("config.defaults %s = %q, want %q", key, value, want)

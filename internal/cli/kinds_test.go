@@ -20,7 +20,9 @@ func commandFakeEnv(t *testing.T, rules map[string][]fakecli.Rule) platform.Env 
 			t.Fatal(err)
 		}
 	}
-	return platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+	env["GORACE"] = fakecli.RaceOptions(env.List())
+	return env
 }
 func TestKindsCommands(t *testing.T) {
 	t.Run("kinds table uses installed fake executables", func(t *testing.T) { // JS: "kinds CLI: table with fake CLIs on PATH (installed yes/no)"

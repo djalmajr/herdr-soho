@@ -350,8 +350,10 @@ func runGoTests(ctx context.Context, o Options, temporary, modulePath string, ex
 	// rebuild the package; the owned binaries are removed with the scratch.
 	binaries := map[string]string{}
 	packageOrder := []string{}
+	queued := map[string]bool{}
 	for _, probe := range expected {
-		if binaries[probe.pkg] == "" {
+		if !queued[probe.pkg] {
+			queued[probe.pkg] = true
 			packageOrder = append(packageOrder, probe.pkg)
 		}
 	}

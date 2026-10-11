@@ -301,6 +301,15 @@ func TestDoctorTM6CLIAndParity(t *testing.T) {
 				// 1 + max_workers (PLAN §9 A9); the frozen JS golden says panes. In
 				// these strict-default fixtures the team is panes-1 workers.
 				wantOut := tm6SplitCapAgainstTeam(want.Out)
+				// The frozen golden predates the shipped job-orchestrator
+				// role; the exact-insertion role oracle adapts the expected
+				// role_kinds entry of the setup --detect output.
+				wantOut = testutil.ApplyRoleOracleToDetectDocument(wantOut)
+				if tc.golden == "kinds-lanes-off" {
+					// With lanes=off the shipped job-orchestrator role adds its
+					// kind to "kinds in use"; see role_oracle.go.
+					wantOut = testutil.ApplyRoleOracleToLanesOffDoctor(wantOut)
+				}
 				if code != want.RC || out != wantOut || errOut != want.Err {
 					want.Out = wantOut
 					t.Fatalf("golden %s step %d args=%v\ncode=%d want=%d\nstdout difference: %s\nstderr difference: %s\nstdout=%q\nwant=%q\nstderr=%q\nwant=%q", tc.golden, i, want.Args, code, want.RC, firstGoldenLineDifference(out, want.Out), firstGoldenLineDifference(errOut, want.Err), out, want.Out, errOut, want.Err)

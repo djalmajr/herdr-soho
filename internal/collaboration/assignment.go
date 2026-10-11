@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -99,7 +100,9 @@ func (s Store) Read(id string) (Assignment, error) {
 	if err != nil {
 		return Assignment{}, err
 	}
-	raw, err := os.ReadFile(file)
+	// A regular file only, opened without blocking: a FIFO planted at the
+	// record's path is refused instead of holding the reader.
+	raw, err := platform.ReadRegularFile(file)
 	if err != nil {
 		return Assignment{}, err
 	}
@@ -134,6 +137,87 @@ func validate(a Assignment) error {
 		return errors.New("collaboration requires different participants and model families")
 	}
 	return nil
+}
+
+// UnreadableAssignment is one collaboration record that ListActive could
+// not read or validate: the id and the read or validation cause.
+type UnreadableAssignment struct {
+	ID    string
+	Cause string
+}
+
+// claimReadLimit bounds the raw claim read of one record: the ownership
+// proof never reads more than 1 MiB of the record.
+const claimReadLimit = 1 << 20
+
+// ReadClaim is the bounded raw ownership claim of one collaboration
+// record: it reads at most claimReadLimit bytes of the record's
+// assignment.json and unmarshals only the workspace and root fields, so a
+// record the full read refuses (a hostile shape, an invalid field, a torn
+// write) still proves its ownership when its claim stands. It never locks
+// and never writes, and it never validates the rest of the record: an
+// invalid id, a missing record, a record that is not a regular file, an
+// overlong record or a non-JSON record is an error with the fields left
+// empty.
+func (s Store) ReadClaim(id string) (workspace, root string, err error) {
+	file, err := s.Path(id)
+	if err != nil {
+		return "", "", err
+	}
+	f, err := platform.OpenRegularFile(file)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(f, claimReadLimit))
+	if err != nil {
+		return "", "", err
+	}
+	var claim struct {
+		Workspace string `json:"workspace"`
+		Root      string `json:"root"`
+	}
+	if err := json.Unmarshal(raw, &claim); err != nil {
+		return "", "", fmt.Errorf("unreadable collaboration %s claim: %w", id, err)
+	}
+	return claim.Workspace, claim.Root, nil
+}
+
+// ListActive returns every active assignment in the store directory, with
+// the unreadable records: a per-record read or validation failure comes
+// back in unreadable, not as an error; a directory-level read error is err
+// (a path in the directory's place that is not a directory included); an
+// absent directory is (nil, nil, nil). It never locks and never creates
+// the directory, and it ignores entries that are not collaboration ids.
+func (s Store) ListActive() (active []Assignment, unreadable []UnreadableAssignment, err error) {
+	entries, err := os.ReadDir(s.directory())
+	if errors.Is(err, os.ErrNotExist) {
+		// Only a path that is really absent is "no collaborations": some
+		// systems (Windows) report a regular file in the directory's place
+		// as not found, and that is a directory-level failure, never an
+		// empty store.
+		if _, lerr := os.Lstat(s.directory()); lerr == nil {
+			return nil, nil, errors.New("collaboration directory is not a directory")
+		}
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !assignmentID.MatchString(entry.Name()) {
+			continue
+		}
+		a, err := s.Read(entry.Name())
+		if err != nil {
+			unreadable = append(unreadable, UnreadableAssignment{ID: entry.Name(), Cause: err.Error()})
+			continue
+		}
+		if a.Active() {
+			active = append(active, a)
+		}
+	}
+	return active, unreadable, nil
 }
 
 func (s Store) ActiveFor(pane string) (*Assignment, error) {

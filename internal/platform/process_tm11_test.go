@@ -3,7 +3,6 @@
 package platform
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 )
 
 func TestTM11WindowsTreeKillCases(t *testing.T) {
+	helper := treeKillHelperExe(t)
 	for _, tc := range []struct {
 		title      string
 		mode       string
@@ -25,7 +25,7 @@ func TestTM11WindowsTreeKillCases(t *testing.T) {
 		{title: `runCli win32 (simulated): default mode — a grandchild holding the pipes cannot hold the call past the timeout`, mode: "parent-exits", grandchild: true},
 	} {
 		t.Run(`JS: "`+tc.title+`"`, func(t *testing.T) {
-			dir, wrapper, env := tm11WindowsFake(t)
+			dir, wrapper, env := tm11WindowsFake(t, helper)
 			if tc.grandchild {
 				env["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "parent-exits"
 				// The helper records its PIDs here; the grandchild outlives the
@@ -33,6 +33,7 @@ func TestTM11WindowsTreeKillCases(t *testing.T) {
 				pidFile := filepath.Join(dir, "grandchild-pids.txt")
 				env["HERDR_SOHO_TREEKILL_PID_FILE"] = pidFile
 				t.Cleanup(func() { cleanupRecordedProcesses(pidFile) })
+				treeKillChainReady(t, env, dir)
 				started := time.Now()
 				got := RunCli(wrapper, nil, RunOptions{Env: env, Platform: "win32", Cwd: dir, TimeoutMs: 5000})
 				if time.Since(started) >= 3*time.Second || got.Status == nil || *got.Status != 0 || got.TimedOut || got.Error != "" {
@@ -49,6 +50,7 @@ func TestTM11WindowsTreeKillCases(t *testing.T) {
 			pidFile := filepath.Join(dir, "pids.txt")
 			env["HERDR_SOHO_TREEKILL_PID_FILE"] = pidFile
 			t.Cleanup(func() { cleanupRecordedProcesses(pidFile) })
+			treeKillChainReady(t, env, dir)
 			got := RunCli(wrapper, nil, RunOptions{Env: env, Platform: "win32", Cwd: dir, Input: tc.input, MergeOutput: tc.merge, OutputFiles: tc.files, TimeoutMs: 1000})
 			if got.Status != nil || got.Signal != "SIGTERM" || !got.TimedOut || got.Error != "ETIMEDOUT" || !strings.Contains(got.Stdout, "tree-output") {
 				t.Fatalf("timeout result=%#v", got)
@@ -60,11 +62,12 @@ func TestTM11WindowsTreeKillCases(t *testing.T) {
 		})
 	}
 	t.Run(`JS: "runCli (Windows only): a .cmd that hangs past the timeout returns the timeout shape and no process of the tree survives"`, func(t *testing.T) {
-		dir, wrapper, env := tm11WindowsFake(t)
+		dir, wrapper, env := tm11WindowsFake(t, helper)
 		pidFile := filepath.Join(dir, "windows-only-pids.txt")
 		env["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "parent"
 		env["HERDR_SOHO_TREEKILL_PID_FILE"] = pidFile
 		t.Cleanup(func() { cleanupRecordedProcesses(pidFile) })
+		treeKillChainReady(t, env, dir)
 		got := RunCli(wrapper, []string{"a"}, RunOptions{Env: env, Platform: "win32", Cwd: dir, TimeoutMs: 1000})
 		if got.Status != nil || got.Signal != "SIGTERM" || !got.TimedOut || got.Error != "ETIMEDOUT" || !strings.Contains(got.Stdout, "tree-output") {
 			t.Fatalf("Windows .cmd timeout result=%#v", got)
@@ -73,26 +76,10 @@ func TestTM11WindowsTreeKillCases(t *testing.T) {
 	})
 }
 
-func tm11WindowsFake(t *testing.T) (string, string, Env) {
+func tm11WindowsFake(t *testing.T, helper string) (string, string, Env) {
 	t.Helper()
 	dir := t.TempDir()
-	baseExe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(baseExe)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fakeCli := filepath.Join(dir, "fakecli.exe")
-	if err := os.WriteFile(fakeCli, data, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	warmTreeKillFake(t, fakeCli)
-	wrapper := filepath.Join(dir, "wrapper.cmd")
-	if err := os.WriteFile(wrapper, []byte("@echo off\r\n@\"%~dp0fakecli.exe\" -test.run=TestTreeKillFakeCliProcess\r\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	wrapper := treeKillFixtureWrapper(t, dir, helper)
 	env := EnvFromOS()
 	setTestPath(env, dir+";"+testPath(env))
 	env["PATHEXT"] = ".EXE;.CMD;.BAT;.COM"

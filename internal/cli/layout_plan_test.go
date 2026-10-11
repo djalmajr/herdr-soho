@@ -16,6 +16,58 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
+// layoutPlanEnv is the Env the layout-plan tests load config with: the
+// skill directory plus HOME, USERPROFILE, XDG_CONFIG_HOME and APPDATA each
+// pointed at a fresh empty directory under t.TempDir(), so the user-config
+// layer resolves inside the test's own tree and a machine user config (a
+// live split_max_panes, for example) never overrides the defaults.
+func layoutPlanEnv(t *testing.T) platform.Env {
+	t.Helper()
+	root := t.TempDir()
+	for _, name := range []string{"home", "userprofile", "xdg", "appdata"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return platform.Env{
+		"HERDR_SOHO_SKILL_DIR": testSkillDir(t),
+		"HOME":                 filepath.Join(root, "home"),
+		"USERPROFILE":          filepath.Join(root, "userprofile"),
+		"XDG_CONFIG_HOME":      filepath.Join(root, "xdg"),
+		"APPDATA":              filepath.Join(root, "appdata"),
+	}
+}
+
+func TestLayoutPlanEnvIsHermetic(t *testing.T) {
+	t.Run(`layout-plan test env: the user config resolves into the temp root, not the machine user`, func(t *testing.T) {
+		env := layoutPlanEnv(t)
+		root := filepath.Dir(env["XDG_CONFIG_HOME"])
+		if got := filepath.Clean(platform.UserConfigPath(platform.Current(), env)); !strings.HasPrefix(got, root+string(filepath.Separator)) {
+			t.Fatalf("user config %q is not inside the temp root %q", got, root)
+		}
+		ctx := core.LoadConfig(env, t.TempDir())
+		entry, ok := ctx.Entries["split_max_panes"]
+		if !ok || entry.Value != "4" || entry.Source != "defaults" {
+			t.Fatalf("split_max_panes value=%q source=%q; want 4 from the defaults (the live user file must not be read)", entry.Value, entry.Source)
+		}
+	})
+	t.Run(`a split_max_panes planted in the helper's own user config is read`, func(t *testing.T) {
+		env := layoutPlanEnv(t)
+		userFile := platform.UserConfigPath(platform.Current(), env)
+		if err := os.MkdirAll(filepath.Dir(userFile), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(userFile, []byte("split_max_panes=6\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctx := core.LoadConfig(env, t.TempDir())
+		entry, ok := ctx.Entries["split_max_panes"]
+		if !ok || entry.Value != "6" || entry.Source != "user" {
+			t.Fatalf("split_max_panes value=%q source=%q; want 6 from the planted user file (the helper must control the user layer)", entry.Value, entry.Source)
+		}
+	})
+}
+
 func TestLayoutPlanFixture(t *testing.T) {
 	t.Run(`Go: layout plan reports the largest candidate and grid for a fixture`, func(t *testing.T) {
 		dir := t.TempDir()
@@ -24,7 +76,8 @@ func TestLayoutPlanFixture(t *testing.T) {
 		if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SPLIT_MAX_PANES": "6", "HERDR_SOHO_SKILL_DIR": testSkillDir(t)}
+		env := layoutPlanEnv(t)
+		env["HERDR_SOHO_SPLIT_MAX_PANES"] = "6"
 		ctx := core.LoadConfig(env, dir)
 		old := platform.Stdout
 		var out bytes.Buffer
@@ -51,7 +104,7 @@ func TestLayoutPlanFullFixtureMatrix(t *testing.T) {
 			if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			env := platform.Env{"HERDR_SOHO_SKILL_DIR": testSkillDir(t)}
+			env := layoutPlanEnv(t)
 			if cap != "" {
 				env["HERDR_SOHO_SPLIT_MAX_PANES"] = cap
 			}
@@ -130,7 +183,7 @@ func TestLayoutPlanJSBoundaryCases(t *testing.T) {
 			if err := os.WriteFile(file, []byte(tc.raw), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			env := platform.Env{"HERDR_SOHO_SKILL_DIR": testSkillDir(t)}
+			env := layoutPlanEnv(t)
 			ctx := core.LoadConfig(env, dir)
 			old := platform.Stdout
 			var out bytes.Buffer
@@ -194,7 +247,7 @@ func TestParityLayoutPlanSixFixturesByteForByte(t *testing.T) {
 			if err := os.WriteFile(file, []byte(fixture.raw), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			env := platform.Env{"HERDR_SOHO_SKILL_DIR": testSkillDir(t)}
+			env := layoutPlanEnv(t)
 			if fixture.cap != "" {
 				env["HERDR_SOHO_SPLIT_MAX_PANES"] = fixture.cap
 			}

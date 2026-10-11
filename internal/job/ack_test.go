@@ -569,19 +569,13 @@ func TestAckCloseReportKeepsOutcome(t *testing.T) {
 				}
 			}
 			dir := filepath.Join(root, "jobs", "job-1")
-			// Crash the report rename after the terminal state is saved, then
-			// close the job while the report is still missing.
-			previous := renameAtomic
-			renameAtomic = func(from, to string) error {
-				if strings.HasSuffix(to, "report.json") {
-					return errors.New("crash")
-				}
-				return previous(from, to)
+			// A terminal state without a report, as an older binary that
+			// saved the state before the report left it after a crash (the
+			// current transition publishes the report first), then close
+			// the job while the report is still missing.
+			if err := writeStatus(root, "job-1", terminal); err != nil {
+				t.Fatal(err)
 			}
-			if _, err := s.Transition("job-1", terminal); err == nil {
-				t.Fatal("expected the report rename crash")
-			}
-			renameAtomic = previous
 			st, err := s.Close("job-1", false)
 			if err != nil || st.Status != StatusClosed {
 				t.Fatalf("close: %+v err=%v", st, err)
@@ -684,12 +678,15 @@ func TestAckCloseRetryRefreshesReport(t *testing.T) {
 			}
 		}
 		dir := filepath.Join(root, "jobs", "job-1")
-		// The terminal publish and the ack refresh both crash: the state is
-		// done and the log holds the ack, but no report.json was ever saved.
-		restore := crashReportRename()
-		if _, err := s.Transition("job-1", StatusDone); err == nil {
-			t.Fatal("expected the report rename crash")
+		// A done state without a report, as an older binary that saved the
+		// state before the report left it after a crash (the current
+		// transition publishes the report first); the ack refresh crashes
+		// too: the state is done and the log holds the ack, but no
+		// report.json was ever saved.
+		if err := writeStatus(root, "job-1", StatusDone); err != nil {
+			t.Fatal(err)
 		}
+		restore := crashReportRename()
 		if _, err := s.Ack("job-1", 1); err == nil {
 			t.Fatal("expected the report rename crash")
 		}

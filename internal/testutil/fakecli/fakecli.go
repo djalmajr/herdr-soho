@@ -3,10 +3,13 @@
 package fakecli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -103,6 +106,73 @@ func RunTests(m *testing.M) {
 	os.Exit(code)
 }
 
+// warmPrepared pays the cold first-execution cost of the prepared Windows
+// image: the cold first execution is paid once per process that prepares
+// the image, during the first Install (fixture setup, outside any
+// production-call deadline), never by re-executed children that do not
+// install fakes (they never prepare an image). A fresh image's first exec
+// can take longer than a production CLI deadline, and the package's first
+// fake call must not pay it. The no-op child is the prepared image
+// itself and dispatches through Main's existing routing via configEnv in
+// file form. On any failure it
+// returns the error so the caller reports one line and continues: the
+// warm-up is setup, not a test assertion, and the prepared copy stays
+// valid (a real problem still surfaces when a fixture executes it). On
+// non-Windows the fake is a symlink to the already-running test binary, so
+// there is nothing to warm.
+func warmPrepared(prepared string) (err error) {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	dir, err := os.MkdirTemp("", "herdr-fakecli-warm-")
+	if err != nil {
+		return err
+	}
+	// The child runs the prepared image itself (its config is named by
+	// path, not by an executable name in this directory), so the directory
+	// only ever holds the script and the call log, both closed once the
+	// child has been waited for: nothing in it can still be held by the
+	// child's image when it is removed, and a removal failure is returned
+	// (joined with the run's own error), never left behind silently.
+	defer func() {
+		if rerr := os.RemoveAll(dir); rerr != nil {
+			err = errors.Join(err, fmt.Errorf("remove the warm directory: %w", rerr))
+		}
+	}()
+	config := filepath.Join(dir, "fakecli-warm.json")
+	scriptJSON, err := json.Marshal(script{Log: filepath.Join(dir, "fakecli-warm.calls.jsonl"), Rules: []Rule{{Argv: []string{"__fakecli_warm__"}}}})
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(config, scriptJSON, 0o600); err != nil {
+		return err
+	}
+	// The child must dispatch the warm script, not an inherited fixture
+	// config, and must not pay the race exit pause itself.
+	env := os.Environ()
+	for i, entry := range env {
+		if key, _, ok := strings.Cut(entry, "="); ok && strings.EqualFold(key, configEnv) {
+			env = append(env[:i:i], env[i+1:]...)
+			break
+		}
+	}
+	env = append(env, configEnv+"="+config, "GORACE="+RaceOptions(os.Environ()))
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, prepared, "__fakecli_warm__")
+	cmd.Env = env
+	// CombinedOutput waits for the child, so it has exited and been
+	// reaped before the directory is removed.
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("warm run timed out after 60s: %s", out)
+	}
+	if err != nil {
+		return fmt.Errorf("warm run: %v: %s", err, out)
+	}
+	return nil
+}
+
 func prepareBinary() error {
 	prepareOnce.Do(func() {
 		bin, err := os.Executable()
@@ -128,6 +198,14 @@ func prepareBinary() error {
 			return
 		}
 		preparedBinary = target
+		// Warm the image now, in the process that prepared it (the first
+		// Install): re-executed children that go through RunTests but never
+		// install a fake must not pay this cold start. A warm failure only
+		// reports one line; prepareErr stays nil because the prepared copy
+		// is still valid.
+		if err := warmPrepared(target); err != nil {
+			fmt.Fprintf(os.Stderr, "fakecli: warming the prepared image failed: %v\n", err)
+		}
 	})
 	return prepareErr
 }
@@ -190,6 +268,27 @@ func InstallWithOptions(t testing.TB, dir, name string, rules []Rule, options In
 	return target, nil
 }
 
+// RaceOptions returns the GORACE value a re-executed fake or fixture child
+// should run with: the detector options found in base's GORACE entries
+// (any key case), without any atexit_sleep_ms option, followed by
+// atexit_sleep_ms=0. Race-instrumented test binaries otherwise pause for
+// one second on exit; every other detector option is kept.
+func RaceOptions(base []string) string {
+	raceOptions := []string{}
+	for _, v := range base {
+		key, value, ok := strings.Cut(v, "=")
+		if !ok || strings.ToUpper(key) != "GORACE" {
+			continue
+		}
+		for _, option := range strings.Fields(value) {
+			if !strings.HasPrefix(option, "atexit_sleep_ms=") {
+				raceOptions = append(raceOptions, option)
+			}
+		}
+	}
+	return strings.Join(append(raceOptions, "atexit_sleep_ms=0"), " ")
+}
+
 // Env returns a copy of base with the fake enabled and its directory first on PATH.
 func Env(base []string, dir string, options ...EnvOptions) []string {
 	option := EnvOptions{}
@@ -198,20 +297,11 @@ func Env(base []string, dir string, options ...EnvOptions) []string {
 	}
 	out := make([]string, 0, len(base)+3)
 	inherited := sameEnvironment(base, os.Environ())
-	var raceOptions []string
 	for _, v := range base {
-		key, value, ok := strings.Cut(v, "=")
+		key, _, ok := strings.Cut(v, "=")
 		if ok {
 			upperKey := strings.ToUpper(key)
-			if upperKey == "GORACE" {
-				for _, option := range strings.Fields(value) {
-					if !strings.HasPrefix(option, "atexit_sleep_ms=") {
-						raceOptions = append(raceOptions, option)
-					}
-				}
-				continue
-			}
-			if upperKey == "PATH" || strings.EqualFold(key, configEnv) || upperKey == "HERDR_SOCKET_PATH" || (inherited && strings.HasPrefix(upperKey, "HERDR_")) {
+			if upperKey == "GORACE" || upperKey == "PATH" || strings.EqualFold(key, configEnv) || upperKey == "HERDR_SOCKET_PATH" || (inherited && strings.HasPrefix(upperKey, "HERDR_")) {
 				continue
 			}
 		}
@@ -229,8 +319,7 @@ func Env(base []string, dir string, options ...EnvOptions) []string {
 	// Race-instrumented test binaries otherwise pause for one second on
 	// exit, which changes the short-lived CLI contract. Keep race detection
 	// and the caller's other detector options; remove only that exit delay.
-	raceOptions = append(raceOptions, "atexit_sleep_ms=0")
-	out = append(out, "PATH="+path, configEnv+"="+dir, "HERDR_SOCKET_PATH="+filepath.Join(dir, "herdr.sock"), "GORACE="+strings.Join(raceOptions, " "))
+	out = append(out, "PATH="+path, configEnv+"="+dir, "HERDR_SOCKET_PATH="+filepath.Join(dir, "herdr.sock"), "GORACE="+RaceOptions(base))
 	return out
 }
 

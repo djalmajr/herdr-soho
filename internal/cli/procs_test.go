@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -32,12 +33,13 @@ type procsFixture struct {
 }
 
 // The fixture processes are the test binary itself, re-executed in a
-// fixture role: no shell, no external sleep, no interpreter. The copies
-// are named sleep and sh, so the process table prints the same command
-// base names the old fixtures printed. The role rides in test-private
-// environment (argv carries only the test flag), and the fakecli config
-// marker is stripped from the re-execution (a re-executed test binary
-// that inherits it would dispatch as the fake instead of the role).
+// fixture role: no shell, no external sleep, no interpreter. The
+// executables are named sleep and sh, so the process table prints the
+// same command base names the old fixtures printed. The role rides in
+// test-private environment (argv carries only the test flag), and the
+// fakecli config marker is stripped from the re-execution (a re-executed
+// test binary that inherits it would dispatch as the fake instead of the
+// role).
 const (
 	procsHelperRoleEnv = "HERDR_PROCS_HELPER_ROLE"
 	procsHelperArg1Env = "HERDR_PROCS_HELPER_ARG1"
@@ -121,32 +123,50 @@ func blockForever() {
 	os.Exit(1) // unreachable: the read blocks until a signal stops the process
 }
 
-// helperExe places an independent copy of the test binary under dir/name
-// so ps prints name as the command base name, exactly like the old sleep/
-// sh fixtures did: a hard link when supported (Unix), a byte copy
-// otherwise, and on Windows always a byte copy. A loaded parent image can
-// keep a hard-linked fixture in use on Windows Server CI; an independent
-// copy leaves fixture cleanup independent of the parent's lifetime.
+// helperExe places an executable under dir/name so ps prints name as the
+// command base name, exactly like the old sleep/sh fixtures did: a hard
+// link of the test binary when supported (Unix), a byte copy otherwise,
+// and on Windows a hard link of the package's one prepared independent
+// image (fakecli's byte copy of the test binary in its own temp dir) —
+// the running parent image is never linked. When a link is unsupported
+// it falls back to an independent byte copy (slower first exec, same
+// behavior). A loaded parent image can keep a hard-linked fixture in use
+// on Windows Server CI; the prepared image leaves fixture cleanup
+// independent of the parent's lifetime, and the slow first exec of a
+// fresh full copy is paid once per package instead of once per fixture.
 func helperExe(t *testing.T, dir, name string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		// The prepared image's hard link: Install appends .exe to the
+		// bare name and may already have written name.json by the time a
+		// failed link returns (dir/name.exe itself does not exist then);
+		// both are harmless — spawnHelper and the tree role strip
+		// HERDR_SOHO_FAKECLI_CONFIG from the re-execution, so the
+		// fixture never dispatches as the fake.
+		exe, err := fakecli.Install(t, dir, name, nil)
+		if err != nil {
+			t.Logf("falling back to an independent byte copy: %v", err)
+			exePath, readErr := os.Executable()
+			if readErr != nil {
+				t.Fatalf("locating the test binary: %v", readErr)
+			}
+			data, readErr := os.ReadFile(exePath)
+			if readErr != nil {
+				t.Fatalf("reading the test binary: %v", readErr)
+			}
+			target := filepath.Join(dir, name+".exe")
+			if writeErr := os.WriteFile(target, data, 0o700); writeErr != nil {
+				t.Fatalf("writing the fixture copy: %v", writeErr)
+			}
+			return target
+		}
+		return exe
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("locating the test binary: %v", err)
 	}
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
 	target := filepath.Join(dir, name)
-	if runtime.GOOS == "windows" {
-		// A loaded parent image can prevent hard-link cleanup on Windows.
-		// Keep this fixture independent of the running parent image.
-		if data, readErr := os.ReadFile(exe); readErr != nil {
-			t.Fatalf("reading the test binary: %v", readErr)
-		} else if writeErr := os.WriteFile(target, data, 0o700); writeErr != nil {
-			t.Fatalf("writing the fixture copy: %v", writeErr)
-		}
-		return target
-	}
 	if err := os.Link(exe, target); err != nil {
 		data, readErr := os.ReadFile(exe)
 		if readErr != nil {
@@ -713,7 +733,32 @@ func TestGcListAndStopOrphanProcesses(t *testing.T) {
 	})
 }
 
+// TestProcsLockHeld proves the held-lock contract of the procs registry:
+// the lock is acquired synchronously before the command runs (exclusive
+// create, the same pid time content takeRegistryLock writes) and is held
+// for the whole subtest — only the t.Cleanup removes it, never a timer —
+// so the command meets it no matter how long its preflight takes.
 func TestProcsLockHeld(t *testing.T) {
+	// holdLock acquires the procs registry lock synchronously: the
+	// exclusive create is the acquisition assertion (an existing lock
+	// fails it), and only this cleanup removes the lock (the fixture state
+	// dir is a TempDir; nothing else is removed).
+	holdLock := func(t *testing.T, f *procsFixture) {
+		t.Helper()
+		lock := filepath.Join(f.state, "procs.tsv.lock")
+		file, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatalf("acquiring the lock: %v", err)
+		}
+		if _, err := fmt.Fprintf(file, "%d %s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339)); err != nil {
+			_ = file.Close()
+			t.Fatalf("writing the lock: %v", err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatalf("closing the lock: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Remove(lock) })
+	}
 	t.Run("release warns and keeps the lines", func(t *testing.T) {
 		f := newProcsFixture(t)
 		pid := f.sleeper(t)
@@ -722,19 +767,7 @@ func TestProcsLockHeld(t *testing.T) {
 		old := core.CopiesLockTimeout
 		core.CopiesLockTimeout = 300 * time.Millisecond
 		t.Cleanup(func() { core.CopiesLockTimeout = old })
-		lockPath := filepath.Join(f.state, "procs.tsv.lock")
-		hold := make(chan struct{})
-		go func() {
-			file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-			if err == nil {
-				_ = file.Close()
-			}
-			close(hold)
-			time.Sleep(1500 * time.Millisecond)
-			_ = os.Remove(lockPath)
-		}()
-		<-hold
-		time.Sleep(100 * time.Millisecond)
+		holdLock(t, f)
 		code, out, errOut := f.run(t, "release", "worker")
 		if code != 0 {
 			t.Fatalf("release must never fail for the lock: code=%d out=%q", code, out)
@@ -760,19 +793,7 @@ func TestProcsLockHeld(t *testing.T) {
 		old := core.CopiesLockTimeout
 		core.CopiesLockTimeout = 300 * time.Millisecond
 		t.Cleanup(func() { core.CopiesLockTimeout = old })
-		lockPath := filepath.Join(f.state, "procs.tsv.lock")
-		hold := make(chan struct{})
-		go func() {
-			file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-			if err == nil {
-				_ = file.Close()
-			}
-			close(hold)
-			time.Sleep(1500 * time.Millisecond)
-			_ = os.Remove(lockPath)
-		}()
-		<-hold
-		time.Sleep(100 * time.Millisecond)
+		holdLock(t, f)
 		code, out, errOut := f.run(t, "gc", "--yes")
 		if code != 4 {
 			t.Fatalf("gc --yes: code=%d out=%q; want 4", code, out)
@@ -788,6 +809,78 @@ func TestProcsLockHeld(t *testing.T) {
 		}
 		if rows := f.procsRows(t); len(rows) != 1 {
 			t.Fatalf("registry rows = %v; the lines stay", rows)
+		}
+	})
+	// The preflight (the agent identity read through herdr) is slower than
+	// the 1500 ms the old fixture timer removed the lock at: the lock must
+	// still be held when the release reaches the registry. The fixture's
+	// fake herdr is re-installed with the same rules newProcsFixture uses,
+	// only the agent get worker rule delayed 2000 ms — the preflight the
+	// release reads before the registry lock is attempted.
+	t.Run("a slow preflight still meets the held lock", func(t *testing.T) {
+		f := newProcsFixture(t)
+		bin := "herdr"
+		if runtime.GOOS == "windows" {
+			bin += ".exe"
+		}
+		// Install refuses only an existing executable (herdr / herdr.exe)
+		// and rewrites the config; the metadata uses the bare name
+		// (herdr.json, herdr.calls.jsonl). The old call log is removed so
+		// the call-log check sees only calls made after the re-install.
+		for _, file := range []string{bin, "herdr.json", "herdr.calls.jsonl"} {
+			if err := os.Remove(filepath.Join(f.fakeDir, file)); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("removing the installed fake %s: %v", file, err)
+			}
+		}
+		rules := []fakecli.Rule{
+			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`, Delay: 2000},
+			{Argv: []string{"agent", "get", "other"}, Stdout: `{"result":{"agent":{"name":"other","agent_status":"idle"}}}`},
+			{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+			{Argv: []string{"pane", "report-metadata", "p-other", "--source", "herdr-soho", "--clear-title"}},
+			{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
+			{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
+			{Argv: []string{"tab", "rename", "t1", "herd"}},
+		}
+		if _, err := fakecli.Install(t, f.fakeDir, "herdr", rules); err != nil {
+			t.Fatal(err)
+		}
+		pid := f.sleeper(t)
+		started, name, _ := platform.ProcInfo(pid, f.env)
+		f.writeProcs(t, core.ProcRow{Pid: pid, Started: started, Name: name, Owner: "worker", Pane: "p-worker", Created: core.FrictionISO(platform.Now())})
+		old := core.CopiesLockTimeout
+		core.CopiesLockTimeout = 300 * time.Millisecond
+		t.Cleanup(func() { core.CopiesLockTimeout = old })
+		holdLock(t, f)
+		code, out, errOut := f.run(t, "release", "worker")
+		if code != 0 {
+			t.Fatalf("release must never fail for the lock: code=%d out=%q", code, out)
+		}
+		if !strings.Contains(errOut, "the processes of 'worker' were not stopped") || !strings.Contains(errOut, "procs: registry is locked by another herdr-soho") {
+			t.Fatalf("stderr = %q; want the lock warning", errOut)
+		}
+		if !procAlive(t, f.env, pid) {
+			t.Fatal("the process was stopped while the lock was held")
+		}
+		if rows := f.procsRows(t); len(rows) != 1 {
+			t.Fatalf("registry rows = %v; the lines stay", rows)
+		}
+		if !strings.Contains(out, "released worker") {
+			t.Fatalf("output = %q; the release completes", out)
+		}
+		// The delayed rule must really be the one that ran: the fake's call
+		// log lists the agent get worker preflight.
+		calls, err := fakecli.ReadCalls(filepath.Join(f.fakeDir, "herdr.calls.jsonl"))
+		if err != nil {
+			t.Fatalf("reading the fake herdr call log: %v", err)
+		}
+		delayed := false
+		for _, call := range calls {
+			if strings.Join(call.Argv, " ") == "agent get worker" {
+				delayed = true
+			}
+		}
+		if !delayed {
+			t.Fatalf("the delayed agent get worker rule was not hit: %v", calls)
 		}
 	})
 }
@@ -861,5 +954,97 @@ func TestProcsEmptyRegistrySaysSo(t *testing.T) {
 	code, out, errOut := f.run(t, "procs")
 	if code != 0 || out != "no registered processes\n" || errOut != "" {
 		t.Fatalf("procs: code=%d out=%q err=%q; want no registered processes", code, out, errOut)
+	}
+}
+
+// TestProcsHelperImageIsALinkOfThePreparedImage pins the fixture
+// identity: sleep and sh keep the base names the process table prints,
+// and the one sleeper this test starts reads as that base name, is
+// killed, and is reaped with the reap proved by the process state (not
+// by an ignored Wait error), so at the Windows remove below no process
+// this test started is running from that link. On Windows the fixtures
+// are additionally hard links of the package's one prepared image
+// (never of the running parent image), and the link is removable.
+func TestProcsHelperImageIsALinkOfThePreparedImage(t *testing.T) {
+	f := newProcsFixture(t)
+	sleepBase := "sleep"
+	shBase := "sh"
+	if runtime.GOOS == "windows" {
+		sleepBase = "sleep.exe"
+		shBase = "sh.exe"
+	}
+	if got := filepath.Base(f.sleepExe); got != sleepBase {
+		t.Fatalf("base of sleepExe = %q; want %q", got, sleepBase)
+	}
+	if got := filepath.Base(f.shExe); got != shBase {
+		t.Fatalf("base of shExe = %q; want %q", got, shBase)
+	}
+	// The one owned sleeper: spawnHelper is used directly so the test
+	// holds the *exec.Cmd for the Kill and the reap; its cleanup
+	// tolerates the already-reaped process.
+	cmd := spawnHelper(t, f.env, f.sleepExe, "sleeper")
+	if !procAlive(t, f.env, cmd.Process.Pid) {
+		t.Fatal("the sleeper is not alive")
+	}
+	started, name, ok := platform.ProcInfo(cmd.Process.Pid, f.env)
+	if !ok {
+		t.Fatal("the sleeper is not readable")
+	}
+	// The same name the procs table line asserts (TestProcsListStates).
+	if name != filepath.Base(f.sleepExe) {
+		t.Fatalf("ProcInfo name = %q (started %q); want the table base name %q", name, started, filepath.Base(f.sleepExe))
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("killing the sleeper: %v", err)
+	}
+	// The reap is proven by the wait status (normal exit on Windows, a
+	// signal on Unix) plus the pid's absence, not by the Wait error.
+	waitErr := cmd.Wait()
+	if cmd.ProcessState == nil {
+		t.Fatalf("the sleeper was not reaped (wait err %v)", waitErr)
+	}
+	ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok || !(ws.Exited() || ws.Signaled()) {
+		t.Fatalf("the sleeper was not reaped (wait err %v, process state %v)", waitErr, cmd.ProcessState.String())
+	}
+	if procAlive(t, f.env, cmd.Process.Pid) {
+		t.Fatalf("the sleeper is still alive after Kill and Wait (wait err %v)", waitErr)
+	}
+	if runtime.GOOS == "windows" {
+		// Both fixtures are links of the one prepared image, and
+		// neither is the running parent image. The single sleeper was
+		// killed and reaped above, so at the remove no process this
+		// test started is running from that link.
+		sleepInfo, err := os.Stat(f.sleepExe)
+		if err != nil {
+			t.Fatalf("stat sleep: %v", err)
+		}
+		shInfo, err := os.Stat(f.shExe)
+		if err != nil {
+			t.Fatalf("stat sh: %v", err)
+		}
+		if !os.SameFile(sleepInfo, shInfo) {
+			t.Fatal("sleep and sh are not links of the one prepared image")
+		}
+		parentExe, err := os.Executable()
+		if err != nil {
+			t.Fatalf("locating the test binary: %v", err)
+		}
+		parentInfo, err := os.Stat(parentExe)
+		if err != nil {
+			t.Fatalf("stat the test binary: %v", err)
+		}
+		if os.SameFile(sleepInfo, parentInfo) {
+			t.Fatal("the fixture links the running parent image")
+		}
+		// The link is removable: no process this test started is
+		// running from it (the sleeper was reaped above), and this
+		// process (the running parent image) is still up.
+		if err := os.Remove(f.sleepExe); err != nil {
+			t.Fatalf("removing the fixture link: %v", err)
+		}
+		if _, err := os.Lstat(f.sleepExe); !os.IsNotExist(err) {
+			t.Fatalf("lstat after the remove: %v; want not-exist", err)
+		}
 	}
 }

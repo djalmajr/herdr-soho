@@ -208,6 +208,7 @@ func TestWaitParityRemainingCases(t *testing.T) {
 		}
 		for _, names := range [][]string{{"quota", "provider", "blocked"}, {"blocked", "provider", "quota"}, {"provider", "blocked", "quota"}} {
 			f := newWaitStatusFixture(t, rows, rules)
+			advancingWaitClock(t, 5*time.Second)
 			if err := os.WriteFile(filepath.Join(f.state, "wait", "blocked.blocked"), []byte(""), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -231,6 +232,7 @@ func TestWaitParityRemainingCases(t *testing.T) {
 			"blocked\tp0c\tclaude\timplementer\tanthropic\t\t\t\tmodel-x\t\timplementer\tbuild\n"
 		for _, names := range [][]string{{"provider", "blocked"}, {"blocked", "provider"}} {
 			f := newWaitStatusFixture(t, pairRows, rules)
+			advancingWaitClock(t, 5*time.Second)
 			if err := os.WriteFile(filepath.Join(f.state, "wait", "blocked.blocked"), []byte(""), 0o600); err != nil {
 				t.Fatal(err)
 			}

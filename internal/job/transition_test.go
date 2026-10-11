@@ -256,7 +256,10 @@ func TestTransitionsTerminalReportRetry(t *testing.T) {
 				}
 			}
 			dir := filepath.Join(root, "jobs", "job-1")
-			// Crash the report rename after the terminal state is saved.
+			// Crash the report rename: the report is published before the
+			// terminal state (DJA-194 contract adaptation: a reader that sees
+			// the outcome in state.json finds report.json already carrying
+			// it), so the crash leaves the job finishing with no report.
 			previous := renameAtomic
 			renameAtomic = func(from, to string) error {
 				if strings.HasSuffix(to, "report.json") {
@@ -268,18 +271,41 @@ func TestTransitionsTerminalReportRetry(t *testing.T) {
 			if _, err := s.Transition("job-1", terminal); err == nil {
 				t.Fatal("expected the report rename crash")
 			}
-			stateBefore, err := os.ReadFile(filepath.Join(dir, "state.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
 			st, err := readState(dir)
-			if err != nil || st.Status != terminal {
-				t.Fatalf("state after crash: %+v err=%v, want %s", st, err, terminal)
+			if err != nil || st.Status != StatusFinishing {
+				t.Fatalf("state after crash: %+v err=%v, want finishing", st, err)
 			}
 			if _, err := os.Stat(filepath.Join(dir, "report.json")); !os.IsNotExist(err) {
 				t.Fatalf("report after crash: %v", err)
 			}
 			renameAtomic = previous
+			st, err = s.Transition("job-1", terminal)
+			if err != nil || st.Status != terminal {
+				t.Fatalf("retry after the crash: %+v err=%v", st, err)
+			}
+			if rep, err := readReport(dir); err != nil || rep.Status != terminal {
+				t.Fatalf("report after the retry: %+v err=%v, want %s", rep, err, terminal)
+			}
+			// A terminal state without a report, as an older binary that
+			// saved the state before the report left it after a crash: the
+			// retry republishes the report and leaves state.json unchanged.
+			s, root = startedJob(t)
+			for _, status := range []string{StatusPreparing, StatusRunning, StatusFinishing} {
+				if _, err := s.Transition("job-1", status); err != nil {
+					t.Fatalf("to %s: %v", status, err)
+				}
+			}
+			dir = filepath.Join(root, "jobs", "job-1")
+			if err := writeStatus(root, "job-1", terminal); err != nil {
+				t.Fatal(err)
+			}
+			stateBefore, err := os.ReadFile(filepath.Join(dir, "state.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "report.json")); !os.IsNotExist(err) {
+				t.Fatalf("report before the legacy retry: %v", err)
+			}
 			st, err = s.Transition("job-1", terminal)
 			if err != nil || st.Status != terminal {
 				t.Fatalf("retry: %+v err=%v", st, err)
@@ -319,19 +345,13 @@ func TestTransitionsCollectedReportKeepsOutcome(t *testing.T) {
 				}
 			}
 			dir := filepath.Join(root, "jobs", "job-1")
-			// Crash the report rename after the terminal state is saved, then
-			// leave the outcome to collected while the report is still missing.
-			previous := renameAtomic
-			renameAtomic = func(from, to string) error {
-				if strings.HasSuffix(to, "report.json") {
-					return errors.New("crash")
-				}
-				return previous(from, to)
+			// A terminal state without a report, as an older binary that
+			// saved the state before the report left it after a crash (the
+			// current transition publishes the report first), then leave the
+			// outcome to collected while the report is still missing.
+			if err := writeStatus(root, "job-1", terminal); err != nil {
+				t.Fatal(err)
 			}
-			if _, err := s.Transition("job-1", terminal); err == nil {
-				t.Fatal("expected the report rename crash")
-			}
-			renameAtomic = previous
 			st, err := s.Transition("job-1", StatusCollected)
 			if err != nil || st.Status != StatusCollected {
 				t.Fatalf("collected: %+v err=%v", st, err)

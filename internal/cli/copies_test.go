@@ -110,6 +110,9 @@ func newCopiesFixture(t *testing.T, agentRules []fakecli.Rule) *copiesFixture {
 		"HERDR_SOHO_FAKECLI_CONFIG": fakeDir,
 		"PATH":                      strings.Join([]string{fakeDir, gitBin, "/usr/bin", "/bin"}, string(os.PathListSeparator)),
 	}
+	// A race-instrumented fake child otherwise pauses for one second on
+	// exit; the fixture sets only GORACE and leaves the rest of the env as built.
+	env["GORACE"] = fakecli.RaceOptions(env.List())
 	return &copiesFixture{root: root, repo: repo, worktree: worktree, home: home, tmp: tmp, state: state, skill: skill, env: env, cwd: repo}
 }
 

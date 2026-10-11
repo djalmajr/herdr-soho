@@ -25,7 +25,9 @@ const (
 	StatusClosed    = "closed"
 )
 
-// State is the jobs/<id>/state.json document.
+// State is the jobs/<id>/state.json document. The fields from Checkout on
+// are run facts recorded by the start slice; they are optional so a job
+// without them serializes byte for byte as before.
 type State struct {
 	Schema            int     `json:"schema"`
 	ID                string  `json:"id"`
@@ -34,6 +36,70 @@ type State struct {
 	DecisionsAckedSeq int     `json:"decisions_acked_seq"`
 	Motivo            *string `json:"motivo"`
 	DuplicateOf       string  `json:"duplicate_of,omitempty"`
+	Checkout          string  `json:"checkout,omitempty"`
+	Dir               string  `json:"dir,omitempty"`
+	Branch            string  `json:"branch,omitempty"`
+	Base              string  `json:"base,omitempty"`
+	BaseSHA           string  `json:"base_sha,omitempty"`
+	Modo              string  `json:"modo,omitempty"`
+	// WorkspaceLabel and WorkspacePreexisting are the create intent, recorded
+	// before `herdr workspace create`: the label the job workspace gets and
+	// the ids of the workspaces that already had it. Start recovery
+	// identifies the job workspace by them when a crash left it unrecorded.
+	WorkspaceLabel       string   `json:"workspace_label,omitempty"`
+	WorkspacePreexisting []string `json:"workspace_preexisting,omitempty"`
+	WorkspaceID          string   `json:"workspace_id,omitempty"`
+	RootPane             string   `json:"root_pane,omitempty"`
+	WorkspaceClosed      bool     `json:"workspace_closed,omitempty"`
+	TimeoutMin           int      `json:"timeout_min,omitempty"`
+	StartedAt            string   `json:"started_at,omitempty"`
+	// IntervalStart is the wall ts of the current budget interval's start.
+	// The interval kind needs no field of its own: it is blocked iff the
+	// status is blocked (steady state), so the anchor moves only with the
+	// settled counters, at every blocked-boundary crossing.
+	IntervalStart string `json:"interval_start,omitempty"`
+	// BudgetActiveMs and BudgetBlockedMs are the cumulative settled active
+	// and blocked time in milliseconds (every status except blocked is
+	// active), measured on the monotonic clock; the in-flight interval is
+	// settled only at the next boundary crossing, so sub-second intervals
+	// never truncate away.
+	BudgetActiveMs  int64 `json:"budget_active_ms,omitempty"`
+	BudgetBlockedMs int64 `json:"budget_blocked_ms,omitempty"`
+	// BlockedTimeoutMin is the job's blocked budget in minutes, recorded
+	// at start and immutable for the job's life, like TimeoutMin; 0 on a
+	// state that predates it, which checks the machine default at check
+	// time.
+	BlockedTimeoutMin int `json:"blocked_timeout_min,omitempty"`
+	// Equipe is the team resolution the job ran with (the report's
+	// equipe field), recorded with the run facts: the source file and the
+	// brief override keys, an empty non-nil list when there are none.
+	Equipe *Equipe `json:"equipe,omitempty"`
+	// OrchestratorSpawnAt is the spawn intent, recorded before the job
+	// orchestrator is spawned: a restarted supervisor that finds it without
+	// Orchestrator recovers the spawn instead of spawning blindly.
+	OrchestratorSpawnAt string `json:"orchestrator_spawn_at,omitempty"`
+	Orchestrator        string `json:"orchestrator,omitempty"`
+	DispatchedAt        string `json:"dispatched_at,omitempty"`
+	// The collaboration terminal facts (supervise_collab.go), persisted
+	// before the terminal status becomes visible and never erased: the
+	// outcomes one persisted outcome per job collaboration, the owned ids
+	// observed when the ask ran (sorted, unique), and the terminal intent
+	// the outcome converges to on a restart. All omitempty, so a state
+	// without them serializes byte for byte as before.
+	Colaboracoes   []CollaborationOutcome `json:"colaboracoes,omitempty"`
+	CollabIDs      []string               `json:"collab_ids,omitempty"`
+	TerminalIntent *TerminalIntent        `json:"terminal_intent,omitempty"`
+}
+
+// TerminalIntent is the terminal outcome a supervisor process committed to
+// before it could record it: the status, the stored motivo and the exit
+// code. A restarted supervisor converges on it instead of re-deriving the
+// outcome, so a crash between the intent and the terminal transition loses
+// neither the outcome nor its partial facts.
+type TerminalIntent struct {
+	Status string `json:"status"`
+	Motivo string `json:"motivo,omitempty"`
+	Exit   int    `json:"exit"`
 }
 
 // Store is the job state root (core.StateRootPath, not a workspace directory).
@@ -146,7 +212,7 @@ var transitions = map[string]map[string]bool{
 // Transition moves a job along one allowed lifecycle edge. The closed edge
 // runs the shared close checks (pending decisions, cleanup audit, report
 // refresh); a transition into a terminal outcome publishes report.json in
-// the same locked operation.
+// the same locked operation, before the terminal state.json.
 func (s *Store) Transition(id, to string) (State, error) {
 	var st State
 	err := s.withExisting(id, func(dir string) error {
@@ -178,6 +244,78 @@ func (s *Store) Transition(id, to string) (State, error) {
 			}
 		}
 		st.Status = to
+		if isTerminalOutcome(to) {
+			// The report is published before the terminal state: a reader
+			// that sees the outcome in state.json (status, wait) finds
+			// report.json already carrying it with the partial facts. A
+			// crash between the two leaves the state still finishing, and
+			// the retry republishes the report before the state.
+			if err = refreshReport(dir, st); err != nil {
+				return err
+			}
+			return saveState(dir, st)
+		}
+		if err = saveState(dir, st); err != nil {
+			return err
+		}
+		return s.refreshIfWrote(dir, st, true)
+	})
+	return st, err
+}
+
+// TransitionSettle moves a job along one allowed lifecycle edge and applies
+// settle to the moved state inside the same locked write: the status change
+// and the settle land together, so a crash can never leave the transition
+// without the settle (or the settle without the transition) — a window the
+// separate Transition + Record writes left, which a restart would misread
+// as an in-flight interval of the new status's kind. The blocked-boundary
+// crossings use it for the budget interval settle (the counters and the
+// re-anchor), so the anchor always names the start of the interval of the
+// current status's kind. settle may not change ID, Status, BriefSHA256 or
+// DecisionsAckedSeq: the stored values are restored after settle runs, like
+// Record. A retry of a terminal-outcome transition republishes the report
+// and settles nothing (the settle ran once, with the edge).
+func (s *Store) TransitionSettle(id, to string, settle func(*State)) (State, error) {
+	var st State
+	err := s.withExisting(id, func(dir string) error {
+		var err error
+		st, err = readState(dir)
+		if err != nil {
+			return err
+		}
+		if st.Status == to && isTerminalOutcome(to) {
+			// Idempotent retry of a transition whose report publish
+			// crashed: the state is already the terminal outcome, so
+			// republish the report and leave it unchanged.
+			return refreshReport(dir, st)
+		}
+		if !transitions[st.Status][to] {
+			return errUsage("job: transition " + st.Status + " -> " + to + " is not allowed")
+		}
+		if to == StatusClosed {
+			closed, closeErr := s.closeLocked(dir, st, false)
+			st = closed
+			return closeErr
+		}
+		if to == StatusCollected && isTerminalOutcome(st.Status) {
+			if err = refreshReport(dir, st); err != nil {
+				return err
+			}
+		}
+		st.Status = to
+		saved := st
+		settle(&st)
+		st.ID = saved.ID
+		st.Status = saved.Status
+		st.BriefSHA256 = saved.BriefSHA256
+		st.DecisionsAckedSeq = saved.DecisionsAckedSeq
+		if isTerminalOutcome(to) {
+			// The report before the terminal state, as in Transition.
+			if err = refreshReport(dir, st); err != nil {
+				return err
+			}
+			return saveState(dir, st)
+		}
 		if err = saveState(dir, st); err != nil {
 			return err
 		}
