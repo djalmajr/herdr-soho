@@ -163,6 +163,12 @@ func TestSuperviseWakeBlockingHookNeverDelaysLoop(t *testing.T) {
 	sup.Wake = &WakeHook{Cmd: "wakehook", JobID: "job-1", Env: env, Timeout: 2 * time.Second, Delays: []time.Duration{}}
 	sup.Wake.Friction = func(msg string) { friction = append(friction, msg) }
 
+	// Pay the fixture's re-exec cost in setup, outside the timed window:
+	// the 1 s bound below measures the watch loop while the hook is in
+	// flight, not the hook child's first execution (the warmPrepared
+	// principle; the warm-up runs its own fake in its own directory, so
+	// the test's call log and rules are untouched).
+	warmWakeImage(t, env)
 	start := time.Now()
 	func() {
 		defer func() {
@@ -378,18 +384,18 @@ func TestSuperviseWakeStopWakeBounded(t *testing.T) {
 		if elapsed := time.Since(start); elapsed < 250*time.Millisecond || elapsed >= 2*time.Second {
 			t.Fatalf("stopWake took %s, want the ~300ms timer bound (the worker needs 3s)", elapsed)
 		}
-		// The worker is still draining: wait for it (bounded: one 3 s
-		// attempt), so the test ends with no surviving goroutine.
-		deadline := time.Now().Add(6 * time.Second)
-		for {
-			if seq, ok := wakeSeqValue(t, jobDir); ok && seq == "2" {
-				break
-			}
-			if time.Now().After(deadline) {
-				seq, _ := wakeSeqValue(t, jobDir)
-				t.Fatalf("the worker did not drain within 6s; wake.seq = %q", seq)
-			}
-			time.Sleep(50 * time.Millisecond)
+		// The worker is still draining: wait on its completion signal
+		// (wakeDone, closed when the worker leaves the queue) with the same
+		// 6 s bound the old file poll used — the cursor file is read only
+		// after the worker is gone, so the read never races its atomic
+		// replace, and the test ends with no surviving goroutine.
+		select {
+		case <-sup.wakeDone:
+		case <-time.After(6 * time.Second):
+			t.Fatal("the worker did not drain within 6s")
+		}
+		if seq, ok := wakeSeqValue(t, jobDir); !ok || seq != "2" {
+			t.Fatalf("wake.seq = %q ok=%v, want 2 after the drain", seq, ok)
 		}
 		if len(wakeHookCalls(t, fakeDir)) != 1 {
 			t.Fatalf("hook calls = %d, want 1", len(wakeHookCalls(t, fakeDir)))

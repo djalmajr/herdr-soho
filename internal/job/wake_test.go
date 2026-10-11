@@ -58,6 +58,31 @@ func wakeHookCalls(t *testing.T, fakeDir string) []fakecli.Call {
 	return calls
 }
 
+// warmWakeImage re-execs the prepared fake image once in a throwaway
+// fixture right before a timed window. The fixture's re-exec cost is
+// paid in setup, outside the window the assertion measures (the
+// warmPrepared principle: the cold first execution is never paid by a
+// re-executed child inside a production-call deadline). The warm-up runs
+// its own fake in its own directory, so the test's call log and rules are
+// untouched.
+func warmWakeImage(t *testing.T, env platform.Env) {
+	t.Helper()
+	dir := t.TempDir()
+	if _, err := fakecli.Install(t, dir, "wakehook", []fakecli.Rule{{AnyArgs: true}}); err != nil {
+		t.Fatalf("install the warm-up wake hook: %v", err)
+	}
+	warm := env.Clone()
+	warm["PATH"] = dir
+	// Point the warm-up child at its own config dir: the inherited config
+	// env would make it dispatch the test's rules and log to the test's
+	// call log.
+	warm["HERDR_SOHO_FAKECLI_CONFIG"] = dir
+	hook := WakeHook{Cmd: "wakehook", JobID: "job-1", Env: warm, Delays: []time.Duration{}}
+	if attempts := hook.Run(wakeEvent("question", nil)); attempts != 1 {
+		t.Fatalf("warm-up run: attempts=%d, want 1", attempts)
+	}
+}
+
 func wakeEvent(tipo string, refs map[string]string) Event {
 	return Event{Seq: 7, TS: "2026-01-01T12:00:00-03:00", Tipo: tipo, Resumo: "short text", Refs: refs}
 }
@@ -452,6 +477,9 @@ func TestWakeFailingHookNeverChangesJob(t *testing.T) {
 // clock.
 func TestWakeScheduleComesOnlyFromSleep(t *testing.T) {
 	_, env := newWakeHookEnv(t, []fakecli.Rule{{AnyArgs: true, Code: 5}})
+	// Pay the fixture's re-exec cost in setup, outside the timed window:
+	// the four measured attempts are the only real time Run may spend.
+	warmWakeImage(t, env)
 	var sleeps []time.Duration
 	hook := WakeHook{
 		Cmd:   "wakehook fast-fail",
