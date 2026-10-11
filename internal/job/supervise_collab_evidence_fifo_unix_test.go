@@ -33,7 +33,7 @@ func TestSuperviseCollabHashEvidenceFifo(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := hashEvidence([]string{allowed}, fifo)
+		_, _, err := hashEvidence(plainEvidenceRoots(allowed), fifo)
 		done <- err
 	}()
 	select {

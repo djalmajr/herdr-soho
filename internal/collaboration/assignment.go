@@ -100,7 +100,9 @@ func (s Store) Read(id string) (Assignment, error) {
 	if err != nil {
 		return Assignment{}, err
 	}
-	raw, err := os.ReadFile(file)
+	// A regular file only, opened without blocking: a FIFO planted at the
+	// record's path is refused instead of holding the reader.
+	raw, err := platform.ReadRegularFile(file)
 	if err != nil {
 		return Assignment{}, err
 	}
@@ -154,14 +156,15 @@ const claimReadLimit = 1 << 20
 // record the full read refuses (a hostile shape, an invalid field, a torn
 // write) still proves its ownership when its claim stands. It never locks
 // and never writes, and it never validates the rest of the record: an
-// invalid id, a missing record, an overlong record or a non-JSON record
-// is an error with the fields left empty.
+// invalid id, a missing record, a record that is not a regular file, an
+// overlong record or a non-JSON record is an error with the fields left
+// empty.
 func (s Store) ReadClaim(id string) (workspace, root string, err error) {
 	file, err := s.Path(id)
 	if err != nil {
 		return "", "", err
 	}
-	f, err := os.Open(file)
+	f, err := platform.OpenRegularFile(file)
 	if err != nil {
 		return "", "", err
 	}

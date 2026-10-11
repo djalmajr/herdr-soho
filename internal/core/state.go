@@ -349,7 +349,9 @@ func RosterReplacePane(dir, oldPane, newPane string) {
 
 func LastReportPath(dir, agent string) string { return filepath.Join(dir, "last-report-"+agent) }
 func LastReport(dir, agent string) string {
-	raw, err := platform.ReadTextFile(LastReportPath(dir, agent))
+	// The marker is a regular file only, opened without blocking: a FIFO
+	// planted at its path reads as no marker instead of holding the reader.
+	raw, err := platform.ReadRegularTextFile(LastReportPath(dir, agent))
 	if err != nil {
 		return ""
 	}

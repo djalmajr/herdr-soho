@@ -277,6 +277,12 @@ func (s *Supervisor) recordIntervalAnchor(st State) error {
 // would misread as an in-flight interval of the new status's kind. The
 // process's virtual base moves to the crossing instant.
 func (s *Supervisor) settleAndTransition(st State, to string, finishedBlocked bool) error {
+	return s.settleAndTransitionWith(st, to, finishedBlocked, nil)
+}
+
+// settleAndTransitionWith is settleAndTransition with extra facts (update,
+// may be nil) recorded in the same locked write as the crossing.
+func (s *Supervisor) settleAndTransitionWith(st State, to string, finishedBlocked bool, update func(*State)) error {
 	if err := s.ensureIntervalBase(st); err != nil {
 		return err
 	}
@@ -293,6 +299,9 @@ func (s *Supervisor) settleAndTransition(st State, to string, finishedBlocked bo
 			st.BudgetActiveMs += ms
 		}
 		st.IntervalStart = s.Clock.Now().Format(time.RFC3339Nano)
+		if update != nil {
+			update(st)
+		}
 	}); err != nil {
 		return err
 	}
@@ -905,7 +914,9 @@ func (s *Supervisor) onOrchestratorDone(st State, name, reportPath string) (int,
 		// decision to be resolved, and derives nothing again.
 		return 0, false, nil
 	}
-	raw, err := os.ReadFile(reportPath)
+	// A regular file only, opened without blocking: a FIFO at the report
+	// path reads as no report instead of holding the supervisor.
+	raw, err := platform.ReadRegularFile(reportPath)
 	if err != nil {
 		// A done state without a readable report counts like a gone one.
 		s.goneStreak++
@@ -971,7 +982,11 @@ const decisionsPendingMotivo = "decisions pending"
 // intent and the motivo (either may be nil: left unchanged) in the same
 // locked state write; a job already finishing records them with one
 // Record. Either way the job is never durably finishing without what the
-// restart converges on.
+// restart converges on. Entering finishing from blocked is a
+// blocked-boundary crossing like any other: the blocked interval settles
+// into the blocked clock and the anchor moves to the crossing in the same
+// write, so time spent blocked is never charged to the active budget (from
+// running, both sides are active and nothing settles, as before).
 func (s *Supervisor) enterFinishing(intent *TerminalIntent, motivo *string) error {
 	update := func(st *State) {
 		if intent != nil {
@@ -988,6 +1003,9 @@ func (s *Supervisor) enterFinishing(intent *TerminalIntent, motivo *string) erro
 	if snap.State.Status == StatusFinishing {
 		_, err = s.Store.Record(s.ID, update)
 		return err
+	}
+	if snap.State.Status == StatusBlocked {
+		return s.settleAndTransitionWith(snap.State, StatusFinishing, true, update)
 	}
 	_, err = s.Store.TransitionSettle(s.ID, StatusFinishing, update)
 	return err

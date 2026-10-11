@@ -41,7 +41,7 @@ func TestSuperviseCollabHashEvidenceHostilePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The second allowed root does not exist: the read skips it.
-	roots := []string{allowed, filepath.Join(root, "missing")}
+	roots := plainEvidenceRoots(allowed, filepath.Join(root, "missing"))
 	outside := filepath.Join(root, "outside")
 	writeEvidenceTarget(t, filepath.Join(outside, "outside.md"), "outside target")
 
@@ -128,7 +128,7 @@ func TestSuperviseCollabHashEvidenceHostilePaths(t *testing.T) {
 // fresh sha256.
 func TestSuperviseCollabHashEvidenceSymlinkedRoot(t *testing.T) {
 	// Catches the mutation "a symlinked allowed root is trusted" (the
-	// decision-1 revert in collabEvidenceRoots): the symlinked reports
+	// component check in openEvidenceRoot removed): the symlinked reports
 	// directory would then become the allowed root and the outside file
 	// would be read and hashed.
 	outside := t.TempDir()
@@ -175,4 +175,14 @@ func TestSuperviseCollabHashEvidenceSymlinkedRoot(t *testing.T) {
 	if sum != hex.EncodeToString(want[:]) {
 		t.Fatalf("sha256 = %s, want %s", sum, hex.EncodeToString(want[:]))
 	}
+}
+
+// plainEvidenceRoots is the allowed roots as trusted bases with no
+// appended component, the shape of the job worktree root.
+func plainEvidenceRoots(paths ...string) []collabEvidenceRoot {
+	roots := make([]collabEvidenceRoot, 0, len(paths))
+	for _, p := range paths {
+		roots = append(roots, collabEvidenceRoot{base: p})
+	}
+	return roots
 }

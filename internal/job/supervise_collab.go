@@ -38,9 +38,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/djalmajr/herdr-soho/internal/collaboration"
 	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
 // maxEvidenceBytes bounds every evidence read of the terminal step: a
@@ -511,12 +513,18 @@ func outcomeIDs(outcomes []CollaborationOutcome) []string {
 // collabEvidenceRoot is one allowed directory as a trusted base plus the
 // components the code appends to it: only the base may resolve through
 // symlinks (the job workspace state dir, os.TempDir() — itself a
-// symlinked path on macOS — or the job worktree); a symlink among the
-// appended components makes the root refuse, so a reports directory that
-// is a symlink to an outside directory never becomes an allowed root.
+// symlinked path on macOS — or the job worktree); every appended component
+// must be a real directory, checked on the handle that is actually opened
+// (openEvidenceRoot), so a reports directory that is, or is swapped for, a
+// symlink never becomes an allowed root.
 type collabEvidenceRoot struct {
 	base   string
 	suffix string
+}
+
+// path is the lexical path of the root: the base with the suffix appended.
+func (r collabEvidenceRoot) path() string {
+	return filepath.Join(r.base, r.suffix)
 }
 
 // collabEvidenceRoots are the allowed directories of one evidence read,
@@ -524,100 +532,114 @@ type collabEvidenceRoot struct {
 // being validated): the collaboration store's reports directory, the
 // routing reports directory of the job workspace (the location the
 // workers outside the job worktree publish their reports to), and the job
-// worktree itself when it is an absolute path. A root is refused —
-// skipped, exactly like a missing root — when its trusted base does not
-// resolve or any appended component is a symlink; nothing about the
-// refused root's target is published.
-func collabEvidenceRoots(st State, stateDir string) []string {
-	pairs := []collabEvidenceRoot{
+// worktree itself when it is an absolute path (a base with no suffix). A
+// root that cannot be opened as described in openEvidenceRoot is skipped
+// by the read, exactly like a missing root.
+func collabEvidenceRoots(st State, stateDir string) []collabEvidenceRoot {
+	roots := []collabEvidenceRoot{
 		{base: stateDir, suffix: "reports"},
 		{base: os.TempDir(), suffix: filepath.Join("herdr-soho", st.WorkspaceID, "reports")},
 	}
 	if filepath.IsAbs(st.Dir) {
-		// The job worktree is itself a trusted base: the whole root may
-		// resolve through symlinks.
-		pairs = append(pairs, collabEvidenceRoot{base: st.Dir})
-	}
-	roots := make([]string, 0, len(pairs))
-	for _, pair := range pairs {
-		if !collabEvidenceRootStands(pair) {
-			continue
-		}
-		roots = append(roots, filepath.Join(pair.base, pair.suffix))
+		roots = append(roots, collabEvidenceRoot{base: st.Dir})
 	}
 	return roots
 }
 
-// collabEvidenceRootStands reports whether the root's appended components
-// stand without a symlink: the trusted base resolves (through its own,
-// trusted symlinks) and the full root resolves to exactly the base
-// resolution with the same suffix appended; a symlink among the appended
-// components resolves to a different place and refuses the root.
-func collabEvidenceRootStands(pair collabEvidenceRoot) bool {
-	if pair.base == "" {
-		return false
+// evidenceComponentOpenedHook and evidenceRootOpenedHook are the test
+// seams of the root-open windows: the first is called with a component's
+// name right after its handle is opened and before the component check,
+// the second right after the whole root is opened and before the file is
+// opened through it; that is where a concurrent replacement interleaves.
+var (
+	evidenceComponentOpenedHook func(name string)
+	evidenceRootOpenedHook      func()
+)
+
+// openEvidenceRoot opens the root as an os.Root bound to a real directory:
+// the trusted base is opened (its own symlinks resolve), then each
+// appended component is opened through the parent's handle, which refuses
+// a component that escapes the parent, and the component is accepted only
+// when the parent's Lstat of its name shows a real directory (not a
+// symlink) that is the same file as the handle just opened. A component
+// swapped before the open is refused by the escape check or the Lstat; a
+// component swapped after the open no longer matches the handle and is
+// refused; the check always concerns the handle the read then uses.
+func openEvidenceRoot(r collabEvidenceRoot) (*os.Root, error) {
+	if r.base == "" {
+		return nil, errEvidenceOutside
 	}
-	realBase, err := filepath.EvalSymlinks(pair.base)
+	cur, err := os.OpenRoot(r.base)
 	if err != nil {
-		return false
+		return nil, err
 	}
-	realRoot, err := filepath.EvalSymlinks(filepath.Join(pair.base, pair.suffix))
-	if err != nil {
-		return false
+	if r.suffix == "" {
+		return cur, nil
 	}
-	return realRoot == filepath.Join(realBase, pair.suffix)
+	for _, name := range strings.Split(filepath.ToSlash(r.suffix), "/") {
+		next, err := cur.OpenRoot(name)
+		if err != nil {
+			_ = cur.Close()
+			return nil, err
+		}
+		if evidenceComponentOpenedHook != nil {
+			evidenceComponentOpenedHook(name)
+		}
+		link, lerr := cur.Lstat(name)
+		opened, oerr := next.Stat(".")
+		_ = cur.Close()
+		if lerr != nil || oerr != nil || !link.IsDir() || link.Mode()&os.ModeSymlink != 0 || !os.SameFile(link, opened) {
+			_ = next.Close()
+			return nil, errEvidenceOutside
+		}
+		cur = next
+	}
+	return cur, nil
 }
 
 // hashEvidence returns the accepted absolute path and the fresh sha256 of
 // one evidence report read under the allowed roots, or an error. The path
 // must be non-empty and absolute; for the first allowed root where the
 // path is local (checked lexically: filepath.Rel and filepath.IsLocal),
-// the pre-open stat through the root must show a regular file — a FIFO or
-// other non-regular path is refused without being opened, because an open
-// of a FIFO would block the read, and an escaping symlink is refused by
-// the root — and the file is opened through os.OpenRoot with the per-OS
-// non-blocking flags, which refuses a symlink that escapes the root and
-// keeps a FIFO swapped in after the check from blocking the open; the
-// opened file must be a regular file of at most maxEvidenceBytes bytes,
-// and the hash is computed through a limit reader that refuses a longer
-// read. The root stat follows symlinks inside the root, so a symlink
-// resolving inside the root still stands. Every refusal — a missing or
-// unreadable root, a missing file, a symlink escape, a non-regular file,
-// or an overlong file — is the same error: the evidence is outside the
-// allowed directories, and nothing about the target is published.
-func hashEvidence(allowedRoots []string, path string) (string, string, error) {
+// the root is opened bound to a real directory (openEvidenceRoot), the
+// file is opened through that handle with the non-blocking read mode (a
+// FIFO can never hold the read) — the handle refuses a symlink that
+// escapes the root, and a symlink resolving inside the root still stands —
+// and the opened file must be a regular file of at most maxEvidenceBytes
+// bytes, checked on the opened handle, with the hash computed through a
+// limit reader that refuses a longer read. Every refusal — a missing,
+// unreadable or symlinked root, a missing file, a symlink escape, a
+// non-regular file, or an overlong file — is the same error: the evidence
+// is outside the allowed directories, and nothing about the target is
+// published.
+func hashEvidence(allowedRoots []collabEvidenceRoot, path string) (string, string, error) {
 	if path == "" || !filepath.IsAbs(path) {
 		return "", "", errors.New("evidence path is not an absolute path")
 	}
 	cleaned := filepath.Clean(path)
 	for _, root := range allowedRoots {
-		if root == "" {
+		if root.base == "" {
 			continue
 		}
-		rel, err := filepath.Rel(root, cleaned)
+		rel, err := filepath.Rel(root.path(), cleaned)
 		if err != nil || !filepath.IsLocal(rel) {
 			continue
 		}
-		r, err := os.OpenRoot(root)
+		r, err := openEvidenceRoot(root)
 		if err != nil {
-			// The root is missing or unreadable: skip it.
+			// The root is missing, unreadable or not a real directory:
+			// skip it.
 			continue
 		}
-		// The pre-open regular check through the root: a FIFO or other
-		// non-regular path is refused before the open, and an escaping
-		// symlink is refused by the root here.
-		info, err := r.Stat(rel)
-		if err != nil || !info.Mode().IsRegular() {
-			_ = r.Close()
-			continue
+		if evidenceRootOpenedHook != nil {
+			evidenceRootOpenedHook()
 		}
-		f, err := r.OpenFile(rel, evidenceOpenFlags, 0)
-		if err != nil {
-			_ = r.Close()
-			continue
-		}
+		f, err := r.OpenFile(rel, platform.ReadOnlyNonBlocking, 0)
 		_ = r.Close()
-		info, err = f.Stat()
+		if err != nil {
+			continue
+		}
+		info, err := f.Stat()
 		if err != nil || !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > maxEvidenceBytes {
 			_ = f.Close()
 			continue

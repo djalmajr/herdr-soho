@@ -832,11 +832,15 @@ func TestSuperviseBudgetCrashWindowReanchor(t *testing.T) {
 		// The first budget check re-anchored the missing anchor to now and
 		// counted the in-flight interval as zero: no negative counter, no
 		// double count, and the alert and ceiling ran on the fresh marks.
-		if st.IntervalStart != "2026-10-09T10:00:00-03:00" {
-			t.Fatalf("re-anchored interval_start = %q, want 10:00:00 (the fresh re-anchor)", st.IntervalStart)
+		// The stop's crossing out of blocked into finishing (t180) settles
+		// exactly the re-anchored blocked interval (10:00:00..10:03:00) into
+		// the blocked clock and re-anchors to the crossing; the unknown
+		// interval before the re-anchor stays lost, never double-counted.
+		if st.IntervalStart != "2026-10-09T10:03:00-03:00" {
+			t.Fatalf("interval_start = %q, want 10:03:00 (the crossing into finishing)", st.IntervalStart)
 		}
-		if st.BudgetActiveMs != 0 || st.BudgetBlockedMs != 0 {
-			t.Fatalf("counters = active %d / blocked %d ms, want 0 / 0 (the unknown interval is lost, never double-counted)", st.BudgetActiveMs, st.BudgetBlockedMs)
+		if st.BudgetActiveMs != 0 || st.BudgetBlockedMs != 180000 {
+			t.Fatalf("counters = active %d / blocked %d ms, want 0 / 180000 (only the re-anchored blocked interval)", st.BudgetActiveMs, st.BudgetBlockedMs)
 		}
 		events := mustEvents(t, jobDir)
 		if n := countTipe(events, "blocked_warning"); n != 1 {
@@ -960,18 +964,20 @@ func TestSuperviseBudgetCrashWindowReanchor(t *testing.T) {
 		if code != ExitTimeout {
 			t.Fatalf("code = %d, want %d", code, ExitTimeout)
 		}
-		// No re-anchor: the recorded anchor stays, and the in-flight
-		// interval counts from it (30 s already elapsed). Nothing settles
-		// (the stop ends the job before any unblock crossing).
+		// No re-anchor: the recorded anchor stands, and the in-flight
+		// interval counts from it (30 s already elapsed). The only crossing
+		// is the stop's exit from blocked into finishing (10:02:30), which
+		// settles the whole blocked interval from the recorded anchor
+		// (09:59:30..10:02:30) into the blocked clock and re-anchors there.
 		st := supState(t, store)
 		if st.Status != StatusTimeout {
 			t.Fatalf("state = %+v, want the terminal timeout", st)
 		}
-		if st.IntervalStart != "2026-10-09T09:59:30-03:00" {
-			t.Fatalf("interval_start = %q, want the recorded anchor unchanged", st.IntervalStart)
+		if st.IntervalStart != "2026-10-09T10:02:30-03:00" {
+			t.Fatalf("interval_start = %q, want 10:02:30 (the crossing into finishing)", st.IntervalStart)
 		}
-		if st.BudgetActiveMs != 0 || st.BudgetBlockedMs != 0 {
-			t.Fatalf("counters = active %d / blocked %d ms, want 0 / 0 (no crossing settles)", st.BudgetActiveMs, st.BudgetBlockedMs)
+		if st.BudgetActiveMs != 0 || st.BudgetBlockedMs != 180000 {
+			t.Fatalf("counters = active %d / blocked %d ms, want 0 / 180000 (the blocked interval from the recorded anchor)", st.BudgetActiveMs, st.BudgetBlockedMs)
 		}
 		events := mustEvents(t, jobDir)
 		if n := countTipe(events, "blocked_warning"); n != 1 {
