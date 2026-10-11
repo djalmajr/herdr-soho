@@ -5,6 +5,7 @@ package fakecli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -131,11 +132,11 @@ func warmPrepared(prepared string) (err error) {
 	// path, not by an executable name in this directory), so the directory
 	// only ever holds the script and the call log, both closed once the
 	// child has been waited for: nothing in it can still be held by the
-	// child's image when it is removed, and a removal failure is returned,
-	// never left behind silently.
+	// child's image when it is removed, and a removal failure is returned
+	// (joined with the run's own error), never left behind silently.
 	defer func() {
-		if rerr := os.RemoveAll(dir); rerr != nil && err == nil {
-			err = fmt.Errorf("remove the warm directory: %w", rerr)
+		if rerr := os.RemoveAll(dir); rerr != nil {
+			err = errors.Join(err, fmt.Errorf("remove the warm directory: %w", rerr))
 		}
 	}()
 	config := filepath.Join(dir, "fakecli-warm.json")

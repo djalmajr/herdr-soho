@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -978,19 +979,35 @@ func TestCompactOpenCodeUndatedLineIsNotProof(t *testing.T) {
 // exactly reads screen reads, whatever the speed of the fake herdr: the
 // clock stands still until the fake has logged that many reads (each read
 // is logged before it answers, so the count is final when the read
-// returns), then runs on in real time an hour later. The poll loop then
-// always makes the same reads before the deadline (a slow runner can
-// otherwise spend the whole short timeout on its first poll), and any
-// wait after the deadline still sees time pass.
+// returns), then a one-way latch expires it for good and the clock runs on
+// in real time an hour later. The poll loop then always makes the same
+// reads before the deadline (a slow runner can otherwise spend the whole
+// short timeout on its first poll), and any wait after the deadline still
+// sees time pass. If the reads never come (or the call log cannot be
+// read) within a bounded minute, the latch expires anyway and the test
+// fails explicitly, so the run under test always returns.
 func compactDeadlineAfterReads(t *testing.T, f *compactFixture, reads int) {
 	t.Helper()
 	logPath := filepath.Join(f.bin, "herdr.calls.jsonl")
 	base := time.Now()
+	failsafe := base.Add(time.Minute)
+	var mu sync.Mutex
+	expired := false
 	saved := platform.Now
 	platform.Now = func() time.Time {
-		calls, err := fakecli.ReadCalls(logPath)
-		if err != nil || countArgv(calls, compactReadArgv("worker")) < reads {
-			return base
+		mu.Lock()
+		defer mu.Unlock()
+		if !expired {
+			calls, err := fakecli.ReadCalls(logPath)
+			switch {
+			case err == nil && countArgv(calls, compactReadArgv("worker")) >= reads:
+				expired = true
+			case time.Now().After(failsafe):
+				expired = true
+				t.Errorf("the fake herdr did not log %d screen reads within a minute (last read error: %v); the deadline was forced to pass", reads, err)
+			default:
+				return base
+			}
 		}
 		return time.Now().Add(time.Hour)
 	}
