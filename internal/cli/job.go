@@ -87,31 +87,31 @@ func cmdJob(args []string, env platform.Env, cwd string, launch job.LaunchLocato
 	}
 	switch sub {
 	case "status":
-		return jobStatus(rest, env)
+		return jobStatus(rest, env, cwd)
 	case "wait":
-		return jobWait(rest, env)
+		return jobWait(rest, env, cwd)
 	case "events":
-		return jobEvents(rest, env)
+		return jobEvents(rest, env, cwd)
 	case "collect":
-		return jobCollect(rest, env)
+		return jobCollect(rest, env, cwd)
 	case "list":
 		return jobList(rest, env)
 	case "start":
 		return jobStart(rest, env, cwd)
 	case "ack":
-		return jobAck(rest, env)
+		return jobAck(rest, env, cwd)
 	case "close":
-		return jobClose(rest, env)
+		return jobClose(rest, env, cwd)
 	case "note":
-		return jobNote(rest, env)
+		return jobNote(rest, env, cwd)
 	case "amend":
-		return jobAmend(rest, env)
+		return jobAmend(rest, env, cwd)
 	case "send":
-		return jobSend(rest, env)
+		return jobSend(rest, env, cwd)
 	case "cancel":
-		return jobCancel(rest, env)
+		return jobCancel(rest, env, cwd)
 	case "checkpoint":
-		return jobCheckpoint(rest, env)
+		return jobCheckpoint(rest, env, cwd)
 	case "supervise":
 		return jobSupervise(rest, env, launch)
 	default:
@@ -279,6 +279,59 @@ func locateJob(env platform.Env, id string, sel core.UserSelection) (*job.Store,
 	return hit, nil
 }
 
+// locateOwnJob is the lookup of the job subcommands that take --id (all
+// but start and supervise): every checkout under job_repos_root, as
+// locateJob scans them, plus at most one own-checkout anchor
+// (job.OwnCheckoutStore: the job whose recorded directory cwd lies in).
+// The anchor is gathered on every lookup, not only on a miss, and the
+// candidates are merged by the real path of their store root: none is
+// nil (not_found), one is that store, and more than one distinct store is
+// exit 2 before anything reads the job or writes.
+func locateOwnJob(env platform.Env, cwd, id string) (*job.Store, error) {
+	if _, err := job.Dir("", id); err != nil {
+		return nil, err
+	}
+	stores, err := allJobStores(env, core.UserSelection{})
+	if err != nil {
+		return nil, err
+	}
+	var hits []*job.Store
+	for _, store := range stores {
+		if _, err := os.Stat(filepath.Join(store.Root, "jobs", id, "state.json")); err == nil {
+			hits = append(hits, store)
+		}
+	}
+	if anchor := job.OwnCheckoutStore(env, cwd, id); anchor != nil {
+		hits = append(hits, anchor)
+	}
+	var hit *job.Store
+	seen := map[string]bool{}
+	for _, store := range hits {
+		key := storeIdentity(store.Root)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if hit != nil {
+			return nil, &platform.ExitError{Code: 2, Msg: "job: id " + id + " exists in more than one checkout"}
+		}
+		hit = store
+	}
+	return hit, nil
+}
+
+// storeIdentity is the real path of a store root, or its clean absolute
+// path when it cannot be resolved.
+func storeIdentity(root string) string {
+	if real, err := filepath.EvalSymlinks(root); err == nil {
+		return filepath.Clean(real)
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		return abs
+	}
+	return filepath.Clean(root)
+}
+
 // dieJob maps a *job.ExitError or *platform.ExitError to platform.Die; any
 // other error dies with exit 2 and its message.
 func dieJob(sub string, err error) {
@@ -347,10 +400,11 @@ func printJobStatusLine(snap job.Snapshot) {
 	_, _ = fmt.Fprintln(platform.Stdout, string(raw))
 }
 
-// jobSnapshotOrNotFound locates the job and returns its snapshot; an unknown
-// id prints the contract's not_found line and returns 3.
-func jobSnapshotOrNotFound(sub, id string, env platform.Env) (job.Snapshot, int) {
-	store, err := locateJob(env, id, core.UserSelection{})
+// jobSnapshotOrNotFound locates the job (locateOwnJob) and returns its
+// snapshot; an unknown id prints the contract's not_found line and
+// returns 3.
+func jobSnapshotOrNotFound(sub, id string, env platform.Env, cwd string) (job.Snapshot, int) {
+	store, err := locateOwnJob(env, cwd, id)
 	if err != nil {
 		dieJob(sub, err)
 		return job.Snapshot{}, 0
@@ -371,10 +425,10 @@ func jobSnapshotOrNotFound(sub, id string, env platform.Env) (job.Snapshot, int)
 	return snap, 0
 }
 
-// jobStoreOrNotFound locates the job store; an unknown id prints the
-// not_found line and returns (nil, 3).
-func jobStoreOrNotFound(sub, id string, env platform.Env) (*job.Store, int) {
-	store, err := locateJob(env, id, core.UserSelection{})
+// jobStoreOrNotFound locates the job store (locateOwnJob); an unknown id
+// prints the not_found line and returns (nil, 3).
+func jobStoreOrNotFound(sub, id string, env platform.Env, cwd string) (*job.Store, int) {
+	store, err := locateOwnJob(env, cwd, id)
 	if err != nil {
 		dieJob(sub, err)
 		return nil, 0
@@ -386,13 +440,13 @@ func jobStoreOrNotFound(sub, id string, env platform.Env) (*job.Store, int) {
 	return store, 0
 }
 
-func jobStatus(args []string, env platform.Env) int {
+func jobStatus(args []string, env platform.Env, cwd string) int {
 	vals, _, pos := parseJobFlags("status", args)
 	if len(pos) != 0 {
 		platform.Die("job status: unexpected argument '"+pos[0]+"'", 2)
 	}
 	id := jobRequiredID("status", vals)
-	snap, code := jobSnapshotOrNotFound("status", id, env)
+	snap, code := jobSnapshotOrNotFound("status", id, env, cwd)
 	if code != 0 {
 		return code
 	}
@@ -400,14 +454,14 @@ func jobStatus(args []string, env platform.Env) int {
 	return 0
 }
 
-func jobWait(args []string, env platform.Env) int {
+func jobWait(args []string, env platform.Env, cwd string) int {
 	vals, _, pos := parseJobFlags("wait", args)
 	if len(pos) != 0 {
 		platform.Die("job wait: unexpected argument '"+pos[0]+"'", 2)
 	}
 	id := jobRequiredID("wait", vals)
 	bound := jobMSValue("wait", "--timeout", vals, jobWaitBoundMS)
-	store, code := jobStoreOrNotFound("wait", id, env)
+	store, code := jobStoreOrNotFound("wait", id, env, cwd)
 	if code != 0 {
 		return code
 	}
@@ -457,7 +511,7 @@ func jobOutcomeExit(status string) int {
 	}
 }
 
-func jobEvents(args []string, env platform.Env) int {
+func jobEvents(args []string, env platform.Env, cwd string) int {
 	vals, _, pos := parseJobFlags("events", args)
 	if len(pos) != 0 {
 		platform.Die("job events: unexpected argument '"+pos[0]+"'", 2)
@@ -465,7 +519,7 @@ func jobEvents(args []string, env platform.Env) int {
 	id := jobRequiredID("events", vals)
 	since := jobSinceValue("events", vals)
 	bound := jobMSValue("events", "--wait", vals, 0)
-	store, code := jobStoreOrNotFound("events", id, env)
+	store, code := jobStoreOrNotFound("events", id, env, cwd)
 	if code != 0 {
 		return code
 	}
@@ -479,13 +533,13 @@ func jobEvents(args []string, env platform.Env) int {
 	return 0
 }
 
-func jobCollect(args []string, env platform.Env) int {
+func jobCollect(args []string, env platform.Env, cwd string) int {
 	vals, bare, pos := parseJobFlags("collect", args)
 	if len(pos) != 0 {
 		platform.Die("job collect: unexpected argument '"+pos[0]+"'", 2)
 	}
 	id := jobRequiredID("collect", vals)
-	store, code := jobStoreOrNotFound("collect", id, env)
+	store, code := jobStoreOrNotFound("collect", id, env, cwd)
 	if code != 0 {
 		return code
 	}
@@ -621,7 +675,7 @@ func jobReadBody(sub, what, path string, cap int, limit string) []byte {
 
 // jobAck acknowledges the decisions up to --upto (a no-op when lower or
 // equal) and prints the values after the call, from a fresh snapshot.
-func jobAck(args []string, env platform.Env) int {
+func jobAck(args []string, env platform.Env, cwd string) int {
 	vals, _, pos := parseJobFlags("ack", args)
 	if len(pos) != 0 {
 		platform.Die("job ack: unexpected argument '"+pos[0]+"'", 2)
@@ -635,7 +689,7 @@ func jobAck(args []string, env platform.Env) int {
 	if err != nil || upto < 1 {
 		platform.Die("job ack: --upto must be an integer of at least 1", 2)
 	}
-	store, code := jobStoreOrNotFound("ack", id, env)
+	store, code := jobStoreOrNotFound("ack", id, env, cwd)
 	if code != 0 {
 		return code
 	}
@@ -665,13 +719,13 @@ func jobAck(args []string, env platform.Env) int {
 // jobClose moves a terminal or collected job to closed. Pending decisions
 // without --force print the state with the seqs listed and exit 24; close
 // is state-only in this phase (no Herdr, process or workspace release).
-func jobClose(args []string, env platform.Env) int {
+func jobClose(args []string, env platform.Env, cwd string) int {
 	vals, bare, pos := parseJobFlags("close", args)
 	if len(pos) != 0 {
 		platform.Die("job close: unexpected argument '"+pos[0]+"'", 2)
 	}
 	id := jobRequiredID("close", vals)
-	store, code := jobStoreOrNotFound("close", id, env)
+	store, code := jobStoreOrNotFound("close", id, env, cwd)
 	if code != 0 {
 		return code
 	}
@@ -731,7 +785,7 @@ func jobParseRefs(sub string, vals map[string]string) map[string]string {
 
 // jobNote appends one orchestrator event and prints the stored event as one
 // JSON line. The escopo/decision rules stay in the package (appendEvent).
-func jobNote(args []string, env platform.Env) int {
+func jobNote(args []string, env platform.Env, cwd string) int {
 	vals, _, pos := parseJobFlags("note", args)
 	id := jobRequiredID("note", vals)
 	tipo, ok := vals["--tipo"]
@@ -751,7 +805,7 @@ func jobNote(args []string, env platform.Env) int {
 		resumo = pos[0]
 	}
 	refs := jobParseRefs("note", vals)
-	store, code := jobStoreOrNotFound("note", id, env)
+	store, code := jobStoreOrNotFound("note", id, env, cwd)
 	if code != 0 {
 		return code
 	}
@@ -874,7 +928,7 @@ func jobControlStatus(sub string, store *job.Store, id string) {
 // jobAmend queues the amendment body (a file or -) as a control request and
 // prints the status line. The supervisor delivers it later and appends
 // amend_received; no event is written here and no Herdr call is made.
-func jobAmend(args []string, env platform.Env) int {
+func jobAmend(args []string, env platform.Env, cwd string) int {
 	vals, _, pos := parseJobFlags("amend", args)
 	if len(pos) > 1 {
 		platform.Die("job amend: unexpected argument '"+pos[1]+"'", 2)
@@ -883,7 +937,7 @@ func jobAmend(args []string, env platform.Env) int {
 	if len(pos) != 1 {
 		platform.Die("job amend: missing body (a file or -)", 2)
 	}
-	store, code := jobStoreOrNotFound("amend", id, env)
+	store, code := jobStoreOrNotFound("amend", id, env, cwd)
 	if code != 0 {
 		return code
 	}
@@ -897,7 +951,7 @@ func jobAmend(args []string, env platform.Env) int {
 
 // jobSend queues the note body (a file or -) as a control request and prints
 // the status line. Like amend, it writes no event and makes no Herdr call.
-func jobSend(args []string, env platform.Env) int {
+func jobSend(args []string, env platform.Env, cwd string) int {
 	vals, _, pos := parseJobFlags("send", args)
 	if len(pos) > 1 {
 		platform.Die("job send: unexpected argument '"+pos[1]+"'", 2)
@@ -906,7 +960,7 @@ func jobSend(args []string, env platform.Env) int {
 	if len(pos) != 1 {
 		platform.Die("job send: missing body (a file or -)", 2)
 	}
-	store, code := jobStoreOrNotFound("send", id, env)
+	store, code := jobStoreOrNotFound("send", id, env, cwd)
 	if code != 0 {
 		return code
 	}
@@ -921,7 +975,7 @@ func jobSend(args []string, env platform.Env) int {
 // jobCancel queues the control cancel request; the default grace is 120
 // seconds when --grace is absent. A no-op cancel still prints the status
 // line and exits 0.
-func jobCancel(args []string, env platform.Env) int {
+func jobCancel(args []string, env platform.Env, cwd string) int {
 	vals, _, pos := parseJobFlags("cancel", args)
 	if len(pos) != 0 {
 		platform.Die("job cancel: unexpected argument '"+pos[0]+"'", 2)
@@ -935,7 +989,7 @@ func jobCancel(args []string, env platform.Env) int {
 		}
 		grace = n
 	}
-	store, code := jobStoreOrNotFound("cancel", id, env)
+	store, code := jobStoreOrNotFound("cancel", id, env, cwd)
 	if code != 0 {
 		return code
 	}
@@ -970,13 +1024,13 @@ func jobCancel(args []string, env platform.Env) int {
 
 // jobCheckpoint queues the immediate-push marker and prints the status line.
 // A no-op checkpoint still exits 0.
-func jobCheckpoint(args []string, env platform.Env) int {
+func jobCheckpoint(args []string, env platform.Env, cwd string) int {
 	vals, _, pos := parseJobFlags("checkpoint", args)
 	if len(pos) != 0 {
 		platform.Die("job checkpoint: unexpected argument '"+pos[0]+"'", 2)
 	}
 	id := jobRequiredID("checkpoint", vals)
-	store, code := jobStoreOrNotFound("checkpoint", id, env)
+	store, code := jobStoreOrNotFound("checkpoint", id, env, cwd)
 	if code != 0 {
 		return code
 	}

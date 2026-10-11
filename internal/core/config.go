@@ -476,6 +476,19 @@ func StateRootPath(ctx *Config, env platform.Env, cwd string) string {
 	return filepath.Clean(dir)
 }
 
+// SessionStateRootPath is the state root under which a command run from
+// cwd with env looks up its session file: StateRootPath over the layers
+// LoadConfig reads before the session (defaults, the environment's user
+// file and the project file), exactly the root SessionConfPath joins the
+// workspace to.
+func SessionStateRootPath(env platform.Env, cwd string) string {
+	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0, 3)}
+	for _, layer := range baseConfigLayerPaths(env, cwd, UserSelection{}) {
+		loadConfigFile(layer.File, layer.Source, &ctx)
+	}
+	return StateRootPath(&ctx, env, cwd)
+}
+
 func StateDirSetting(ctx *Config, env platform.Env, cwd string) string {
 	if value := env.Get("HERDR_SOHO_STATE_DIR"); value != "" {
 		return value

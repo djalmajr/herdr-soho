@@ -68,6 +68,10 @@ type Supervisor struct {
 	// refuse a running or blocked state written inside a failure
 	// (Store.Fail's walk).
 	PrivateLaunch bool
+	// actorEnv is the supervisor's own environment, without the private
+	// names: the environment of every agent pane of the job workspace
+	// (actor_session.go). Set with PrivateLaunch.
+	actorEnv platform.Env
 
 	// Git sync and release: the git sync of the job branch — nil in
 	// workspace mode, which runs no git at all — and the Herdr adapter
@@ -430,6 +434,10 @@ func (s *Supervisor) Run() (int, error) {
 			return ExitHerdr, nil
 		}
 	}
+	// The workspace's own session file carries the job team and state
+	// root for the agents (actor_session.go): after the job lane, before
+	// the orchestrator, again on every restart.
+	s.pinActorSession()
 	name, done, err := s.ensureOrchestrator()
 	if err != nil {
 		return ExitFailed, err

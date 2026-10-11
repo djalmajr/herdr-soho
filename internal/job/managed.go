@@ -209,6 +209,7 @@ func launchMismatch(rec launchRecord, id string, store *Store, env platform.Env,
 func (s *Supervisor) UseLaunchSelection(sel core.UserSelection) {
 	s.PrivateLaunch = true
 	if ops, ok := s.Ops.(selfCLI); ok {
+		s.actorEnv = ops.Env.Clone()
 		ops.Env = withLaunchLocators(ops.Env, sel)
 		s.Ops = ops
 	}
