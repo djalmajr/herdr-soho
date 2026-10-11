@@ -33,6 +33,10 @@ type ReportFacts struct {
 	Logs          *Logs
 	Workspace     string
 	PanesFechados int
+	// Colaboracoes are the outcomes of the job's own worker collaborations
+	// ended on the terminal path (supervise_collab.go); nil when the job
+	// had none.
+	Colaboracoes []CollaborationOutcome
 }
 
 // PullRequest is the draft pull request recorded by a later slice.
@@ -67,12 +71,17 @@ type Report struct {
 	Blockers     []string     `json:"blockers"`
 	Perguntas    []string     `json:"perguntas"`
 	Memoria      Memoria      `json:"memoria"`
-	Equipe       *Equipe      `json:"equipe"`
-	Eventos      Eventos      `json:"eventos"`
-	Custo        *Custo       `json:"custo"`
-	Logs         *Logs        `json:"logs"`
-	Limpeza      Limpeza      `json:"limpeza"`
-	Publico      Publico      `json:"publico"`
+	// Colaboracoes is the array of the job's own worker collaborations
+	// ended on the terminal path, one outcome each (supervise_collab.go);
+	// omitted when the job had none. It is kept as stored by every later
+	// rewrite (refreshReport and the collected/closed transitions).
+	Colaboracoes []CollaborationOutcome `json:"colaboracoes,omitempty"`
+	Equipe       *Equipe                `json:"equipe"`
+	Eventos      Eventos                `json:"eventos"`
+	Custo        *Custo                 `json:"custo"`
+	Logs         *Logs                  `json:"logs"`
+	Limpeza      Limpeza                `json:"limpeza"`
+	Publico      Publico                `json:"publico"`
 }
 
 // Item is one orchestrator report line carrying a completion marker, in
@@ -294,7 +303,8 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 			DecisionsTotal:    decisions,
 			DecisionsAckedSeq: st.DecisionsAckedSeq,
 		},
-		Equipe: equipe,
+		Colaboracoes: facts.Colaboracoes,
+		Equipe:       equipe,
 		Eventos: Eventos{
 			Total:     len(events),
 			UltimoSeq: lastSeq(events),

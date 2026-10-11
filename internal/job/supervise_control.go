@@ -159,6 +159,7 @@ func (s *Supervisor) beginStop(kind string, grace time.Duration) {
 		if err := s.Ops.Dispatch(name, path, true); err != nil && s.Friction != nil {
 			s.Friction("job: the supervisor cannot dispatch the stop amendment")
 		}
+		s.askCollaborations()
 	}
 	s.stopping = kind
 	s.stopDeadline = s.Clock.Monotonic() + int64(grace.Nanoseconds())

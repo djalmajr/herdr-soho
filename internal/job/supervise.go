@@ -69,6 +69,12 @@ type Supervisor struct {
 	Git   *GitSync
 	Herdr herdrWorkspaces
 
+	// ProjectRoot is the trusted project root the supervisor binds the
+	// collaborations it owns on (supervise_collab.go): the same root
+	// resolution the CLI uses for collaborations, never derived from an
+	// assignment record; an empty root owns nothing.
+	ProjectRoot string
+
 	// Git sync bookkeeping (pushNow, the immediate push ask of job
 	// checkpoint, is declared with the control fields): the ticks since the
 	// last sync, the last synced head, the announced
@@ -111,6 +117,12 @@ type Supervisor struct {
 	warnedBlocked   bool
 	intervalBase    int64
 	intervalBaseSet bool
+
+	// collabAsked guards the single ask of the job's active collaborations
+	// in this process (supervise_collab.go): a restarted supervisor
+	// re-asks once in its own process, the same accepted bound as the stop
+	// amendment.
+	collabAsked bool
 }
 
 // NewSupervisor wires the production supervisor over a recorded job: the
@@ -127,12 +139,13 @@ func NewSupervisor(store *Store, id string, env platform.Env, selfExe string, fr
 		return nil, errUsage("job: the job has no worktree directory")
 	}
 	s := &Supervisor{
-		Store:    store,
-		ID:       id,
-		Ops:      selfCLI{Exe: selfExe, Dir: snap.State.Dir, Env: env},
-		Clock:    store.clock(),
-		Friction: friction,
-		Herdr:    newHerdrCLI(env, friction),
+		Store:       store,
+		ID:          id,
+		Ops:         selfCLI{Exe: selfExe, Dir: snap.State.Dir, Env: env},
+		Clock:       store.clock(),
+		Friction:    friction,
+		Herdr:       newHerdrCLI(env, friction),
+		ProjectRoot: platform.StateProjectRoot(env, snap.State.Dir),
 	}
 	if snap.State.Modo != "workspace" && snap.State.Branch != "" {
 		// A branch job without a recorded branch has no push refspec, so

@@ -136,6 +136,42 @@ func validate(a Assignment) error {
 	return nil
 }
 
+// UnreadableAssignment is one collaboration record that ListActive could
+// not read or validate: the id and the read or validation cause.
+type UnreadableAssignment struct {
+	ID    string
+	Cause string
+}
+
+// ListActive returns every active assignment in the store directory, with
+// the unreadable records: a per-record read or validation failure comes
+// back in unreadable, not as an error; a directory-level read error is err;
+// an absent directory is (nil, nil, nil). It never locks and never creates
+// the directory, and it ignores entries that are not collaboration ids.
+func (s Store) ListActive() (active []Assignment, unreadable []UnreadableAssignment, err error) {
+	entries, err := os.ReadDir(s.directory())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !assignmentID.MatchString(entry.Name()) {
+			continue
+		}
+		a, err := s.Read(entry.Name())
+		if err != nil {
+			unreadable = append(unreadable, UnreadableAssignment{ID: entry.Name(), Cause: err.Error()})
+			continue
+		}
+		if a.Active() {
+			active = append(active, a)
+		}
+	}
+	return active, unreadable, nil
+}
+
 func (s Store) ActiveFor(pane string) (*Assignment, error) {
 	entries, err := os.ReadDir(s.directory())
 	if errors.Is(err, os.ErrNotExist) {

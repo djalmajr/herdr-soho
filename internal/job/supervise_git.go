@@ -290,6 +290,29 @@ func (s *Supervisor) finalize(status string) {
 		return
 	}
 	facts := s.reportFacts(snap.State, events, jobDir)
+	// The collaboration terminal step (supervise_collab.go), between the
+	// report facts and the report write: the job's active collaborations
+	// are asked to finish (the stop path already asked in beginStop) and
+	// waited on the shared deadline — the stop deadline for cancel and
+	// timeout, one defaultTimeoutGrace from now for done and failed —
+	// until they are finished, and their outcomes, with the last event's
+	// evidence and the fresh hash, are persisted through this report write
+	// BEFORE any Store.Stop or Store.Finalize, so a crash between the
+	// persistence and the settlement loses no outcome. The unsettled ones
+	// are ended (Stop + Finalize reject) and the confirmed facts rewritten
+	// only after the write, and then the release runs with every readable
+	// collaboration finished.
+	collabDeadline := s.Clock.Monotonic() + int64(defaultTimeoutGrace.Nanoseconds())
+	if s.stopping != "" {
+		// Cancel and timeout share the stop deadline: the ask ran in
+		// beginStop, and the stop's end is the collaboration's grace end;
+		// an orchestrator that reports done early keeps the rest of the
+		// deadline for the participants.
+		collabDeadline = s.stopDeadline
+	}
+	if outcomes := s.endCollaborations(collabDeadline); len(outcomes) > 0 {
+		facts.Colaboracoes = outcomes
+	}
 	if snap.State.WorkspaceID != "" {
 		// The release, the cleanup, and the workspace close apply to jobs
 		// with a recorded Herdr workspace; a legacy job without one ends
@@ -300,6 +323,16 @@ func (s *Supervisor) finalize(status string) {
 	if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
 		s.frictionf("job: finalize: " + err.Error())
 		return
+	}
+	// End the unsettled collaborations and record the confirmed facts;
+	// the snapshot is already durable, so a failure here is friction and
+	// the retry rewrites it before the release.
+	if len(facts.Colaboracoes) > 0 {
+		facts.Colaboracoes = s.settleCollaborations(facts.Colaboracoes)
+		if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
+			s.frictionf("job: finalize: " + err.Error())
+			return
+		}
 	}
 
 	// Release: the job orchestrator, then the remaining workers, then
