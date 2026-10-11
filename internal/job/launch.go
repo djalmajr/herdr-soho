@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -39,6 +40,29 @@ import (
 // cannot confirm (none, already confirmed, revoked, stale, another pane,
 // unreadable, lock busy) leaves the record as it is and the supervisor
 // continues exactly as before this record existed.
+//
+// Files: launch.json and launch.lock are used only when they are regular
+// files of at most maxLaunchBytes, never through a symlink, and the opened
+// handle must be the file the path names (os.SameFile against an Lstat), so
+// a FIFO, a device, a directory, a symlink or an oversized file at either
+// path cannot block a step or redirect it outside the job directory; such
+// a file is treated like an unreadable record.
+//
+// Threat model: both files are private to the job directory and protected
+// only by their 0600 mode and the directory's owner. Any process of the same
+// user can read the nonce or write the record. The confirmation therefore
+// fences stale, duplicated, mismatched and late launches of cooperating
+// herdr-soho processes; it is not an authenticated proof against another
+// process running as the same user.
+//
+// Time: every wait on launch.lock is bounded by a deadline read on the
+// monotonic clock; once a try succeeds, the guarded step (local reads and
+// one atomic write) runs even if the deadline has just passed. The starter's
+// decision is made in the revoke critical section: a confirmation written
+// before that section takes the lock is accepted even when it landed after
+// the nominal wait (an allowed linearization race, not a late expiry), and
+// none is accepted after it. The bound is on how long the starter waits,
+// not a guarantee about the latest moment a confirmation can be accepted.
 
 // launchFileName is the private record; launchLockName its lock.
 const (
@@ -68,8 +92,47 @@ const (
 	launchRevokeWait = 5 * time.Second
 )
 
+// maxLaunchBytes caps launch.json and launch.lock (the record is a few
+// hundred bytes; the lock file is empty).
+const maxLaunchBytes = 4096
+
 // errLaunchLockBusy is a launch.lock that stayed held until the deadline.
 var errLaunchLockBusy = errors.New("job: the launch lock stayed busy")
+
+// errLaunchFile is a launch.json or launch.lock that is not a private
+// regular file of at most maxLaunchBytes at its own path.
+var errLaunchFile = errors.New("job: launch file is not a private regular file")
+
+// openLaunchLock opens <dir>/launch.lock, creating it 0600, only as a
+// regular file of at most maxLaunchBytes that is the file the path names:
+// an existing non-regular entry (a symlink included) is refused before the
+// open, the open neither follows a symlink nor blocks on a FIFO where the
+// system has them, and the opened handle is compared with a fresh Lstat.
+func openLaunchLock(dir string) (*os.File, error) {
+	path := filepath.Join(dir, launchLockName)
+	if pre, err := os.Lstat(path); err == nil && !pre.Mode().IsRegular() {
+		return nil, errLaunchFile
+	}
+	f, err := os.OpenFile(path, launchLockOpenFlags, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err == nil && (!info.Mode().IsRegular() || info.Size() > maxLaunchBytes) {
+		err = errLaunchFile
+	}
+	if err == nil {
+		post, lerr := os.Lstat(path)
+		if lerr != nil || !post.Mode().IsRegular() || !os.SameFile(info, post) {
+			err = errLaunchFile
+		}
+	}
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
+}
 
 // launchRecord is the content of launch.json.
 type launchRecord struct {
@@ -101,13 +164,15 @@ func newLaunchNonce() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-// withLaunchLock runs fn holding <dir>/launch.lock. The lock is only tried
-// without blocking; a held lock is retried every launchLockRetry until the
-// clock's monotonic reading reaches until, and then errLaunchLockBusy is
-// returned without running fn.
+// withLaunchLock runs fn holding <dir>/launch.lock (openLaunchLock). The
+// lock is only tried without blocking; a held lock is retried every
+// launchLockRetry until the clock's monotonic reading reaches until, and
+// then errLaunchLockBusy is returned without running fn. A successful try
+// runs fn at once, even just after until (see Time above). A lock file
+// that cannot be opened as a private regular file fails at once.
 func withLaunchLock(dir string, clock Clock, until int64, fn func() error) error {
 	for {
-		f, err := os.OpenFile(filepath.Join(dir, launchLockName), os.O_CREATE|os.O_RDWR, 0o600)
+		f, err := openLaunchLock(dir)
 		if err != nil {
 			return err
 		}
@@ -131,14 +196,34 @@ func withLaunchLock(dir string, clock Clock, until int64, fn func() error) error
 }
 
 // readLaunch reads the record in dir; ok is false when the file is absent.
-// An unreadable or malformed file is an error.
+// The record is read only as a regular file of at most maxLaunchBytes that
+// is the file the path names (an Lstat, a non-blocking regular open, and
+// os.SameFile between them), so a symlink, a FIFO or an oversized file is
+// an error like a malformed one.
 func readLaunch(dir string) (launchRecord, bool, error) {
-	data, err := os.ReadFile(filepath.Join(dir, launchFileName))
+	path := filepath.Join(dir, launchFileName)
+	pre, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return launchRecord{}, false, nil
 		}
 		return launchRecord{}, false, err
+	}
+	if !pre.Mode().IsRegular() || pre.Size() > maxLaunchBytes {
+		return launchRecord{}, false, errLaunchFile
+	}
+	f, err := platform.OpenRegularFile(path)
+	if err != nil {
+		return launchRecord{}, false, errLaunchFile
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil || !os.SameFile(pre, info) {
+		return launchRecord{}, false, errLaunchFile
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxLaunchBytes+1))
+	if err != nil || len(data) > maxLaunchBytes {
+		return launchRecord{}, false, errLaunchFile
 	}
 	var rec launchRecord
 	if err := json.Unmarshal(data, &rec); err != nil || rec.V != launchVersion {
@@ -340,6 +425,18 @@ func ConfirmLaunch(store *Store, id string, env platform.Env) (confirmed bool, r
 			reason = "the launch belongs to another workspace or pane"
 			return nil
 		}
+		// The starter holds start.lock for its whole wait. An absent lock
+		// file is a starter that never ran or is gone; a lock file that is
+		// not a regular file is not tried at all.
+		startInfo, statErr := os.Lstat(filepath.Join(dir, "start.lock"))
+		if os.IsNotExist(statErr) {
+			reason = "the launch is stale: its starter is gone"
+			return nil
+		}
+		if statErr != nil || !startInfo.Mode().IsRegular() {
+			reason = "the start lock is unreadable"
+			return nil
+		}
 		lock, lockErr := tryStartLock(dir)
 		if lockErr == nil {
 			closeStartLock(lock)
@@ -368,10 +465,13 @@ func ConfirmLaunch(store *Store, id string, env platform.Env) (confirmed bool, r
 
 // awaitLaunch waits for the supervisor's confirmation of rec until the
 // monotonic deadline (wait from now, read on clock), polling every poll,
-// then ends the wait with revokeLaunch. Every lock try in the wait is
-// bounded by the same deadline and the revoke by launchRevokeWait, so the
-// step ends within wait plus launchRevokeWait plus one poll, whatever
-// another process does with launch.lock. No goroutine is left behind.
+// then ends the wait with revokeLaunch. Every lock wait is bounded by the
+// same deadline and the revoke's by launchRevokeWait, each overshooting by
+// less than one launchLockRetry, so the starter's waiting ends within wait
+// plus launchRevokeWait plus one poll plus two launchLockRetry (and the
+// local file operations), whatever another process does with launch.lock.
+// No goroutine is left behind. A confirmation that wins the revoke's
+// critical section is accepted even after the nominal wait (see Time).
 // accepted is true only for rec's own confirmed record; err is a launch
 // that could not be fenced. The starter calls it with defaultLaunchWait,
 // defaultLaunchPoll and the store clock.

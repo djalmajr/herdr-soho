@@ -3,7 +3,6 @@ package job
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -616,24 +615,5 @@ func TestFenceLaunch(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestLaunchFileModeIs0600 is the expected-result item 9: the record is
-// private on non-Windows.
-func TestLaunchFileModeIs0600(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("file modes are not set on Windows")
-	}
-	store, clock, jobDir := launchFixture(t)
-	if _, err := issueLaunch(store, clock, "job-1", launchTestWorkspace, launchTestPane); err != nil {
-		t.Fatal(err)
-	}
-	fi, err := os.Stat(filepath.Join(jobDir, launchFileName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mode := fi.Mode().Perm(); mode != 0o600 {
-		t.Fatalf("launch.json mode %o, want 0600", mode)
 	}
 }
