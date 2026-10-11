@@ -351,14 +351,11 @@ func (s *Supervisor) endStop(st State) (int, bool, error) {
 	}
 	// The stop's motivo replaces whatever the state carries (a block's
 	// question, an earlier stop) for every kind, before the job moves on:
-	// the terminal state never keeps a stale block motivo.
-	if _, err := s.Store.Record(s.ID, func(st *State) { st.Motivo = &motivo }); err != nil {
+	// the terminal state never keeps a stale block motivo. The motivo and
+	// the terminal intent land in the same write that enters finishing, so
+	// a crash never leaves the job finishing without its stop outcome.
+	if err := s.enterFinishing(&TerminalIntent{Status: status, Motivo: motivo, Exit: exit}, &motivo); err != nil {
 		return 0, true, err
-	}
-	if st.Status != StatusFinishing {
-		if _, err := s.Store.Transition(s.ID, StatusFinishing); err != nil {
-			return 0, true, err
-		}
 	}
 	return s.finishOutcome(status, motivo, exit)
 }

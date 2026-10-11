@@ -131,6 +131,13 @@ type Supervisor struct {
 	// terminal job (a restart) has not captured and runs the capture in
 	// finalize instead.
 	collabEnded bool
+
+	// collabUnenumerated records that this process's capture could not
+	// enumerate the job's collaborations by the deadline: finalize then
+	// refuses the settlement, the release, the cleanup and the workspace
+	// close exactly as a fresh process's failed capture does, and a later
+	// supervisor pass retries the capture.
+	collabUnenumerated bool
 }
 
 // NewSupervisor wires the production supervisor over a recorded job: the
@@ -361,6 +368,15 @@ func (s *Supervisor) Run() (int, error) {
 				return ExitFailed, err
 			}
 			return code, nil
+		}
+		// The pending-decision path entered finishing with its motivo and
+		// no intent, and a crash came before the crossing to blocked:
+		// complete it, then watch the blocked job as usual.
+		if intent == nil && snap.State.Status == StatusFinishing &&
+			snap.State.Motivo != nil && *snap.State.Motivo == decisionsPendingMotivo {
+			if _, _, err := s.blockOnPendingDecisions(snap.State, snap.State.Orchestrator); err != nil {
+				return ExitFailed, err
+			}
 		}
 	}
 	code, done, err := s.waitRunning()
@@ -884,7 +900,7 @@ func (s *Supervisor) unblockOrchestrator(st State) (int, bool, error) {
 // the job dir, the worker_done event lands, the job moves to finishing, and
 // the outcome follows the partial count and the pending decisions.
 func (s *Supervisor) onOrchestratorDone(st State, name, reportPath string) (int, bool, error) {
-	if st.Status == StatusBlocked && st.Motivo != nil && *st.Motivo == "decisions pending" {
+	if st.Status == StatusBlocked && st.Motivo != nil && *st.Motivo == decisionsPendingMotivo {
 		// The outcome was already derived: the loop keeps waiting for the
 		// decision to be resolved, and derives nothing again.
 		return 0, false, nil
@@ -915,10 +931,14 @@ func (s *Supervisor) onOrchestratorDone(st State, name, reportPath string) (int,
 	}); err != nil {
 		return 0, true, err
 	}
-	if _, err := s.Store.Transition(s.ID, StatusFinishing); err != nil {
-		return 0, true, err
-	}
+	// The outcome is derived before the job enters finishing, and the
+	// entry records it in the same locked write: a crash can never leave
+	// the job finishing without the terminal intent (or, for the pending
+	// path, without the motivo the restart completes the crossing from).
 	if partials == 0 {
+		if err := s.enterFinishing(&TerminalIntent{Status: StatusDone}, nil); err != nil {
+			return 0, true, err
+		}
 		return s.finishOutcome(StatusDone, "", 0)
 	}
 	snap, err := s.Store.Snapshot(s.ID)
@@ -930,26 +950,65 @@ func (s *Supervisor) onOrchestratorDone(st State, name, reportPath string) (int,
 		// blocked, until the decision lands; the loop keeps running. The
 		// active interval (finishing counts as active) settles and
 		// re-anchors with the crossing, in one locked write.
-		if err := s.settleAndTransition(st, StatusBlocked, false); err != nil {
+		motivo := decisionsPendingMotivo
+		if err := s.enterFinishing(nil, &motivo); err != nil {
 			return 0, true, err
 		}
-		motivo := "decisions pending"
-		if _, err := s.Store.Record(s.ID, func(st *State) { st.Motivo = &motivo }); err != nil {
-			return 0, true, err
-		}
-		if _, err := s.Store.Append(s.ID, EventIn{
-			Tipo: "blocked",
-			Refs: map[string]string{"agente": name, "motivo": motivo},
-		}); err != nil {
-			return 0, true, err
-		}
-		return 0, false, nil
+		return s.blockOnPendingDecisions(st, name)
 	}
 	motivo := "itens parciais"
-	if _, err := s.Store.Record(s.ID, func(st *State) { st.Motivo = &motivo }); err != nil {
+	if err := s.enterFinishing(&TerminalIntent{Status: StatusFailed, Motivo: motivo, Exit: ExitFailed}, &motivo); err != nil {
 		return 0, true, err
 	}
 	return s.finishOutcome(StatusFailed, motivo, ExitFailed)
+}
+
+// decisionsPendingMotivo is the motivo of a job whose orchestrator
+// finished with partial items that still have an open decision.
+const decisionsPendingMotivo = "decisions pending"
+
+// enterFinishing moves the job to finishing and records the terminal
+// intent and the motivo (either may be nil: left unchanged) in the same
+// locked state write; a job already finishing records them with one
+// Record. Either way the job is never durably finishing without what the
+// restart converges on.
+func (s *Supervisor) enterFinishing(intent *TerminalIntent, motivo *string) error {
+	update := func(st *State) {
+		if intent != nil {
+			st.TerminalIntent = intent
+		}
+		if motivo != nil {
+			st.Motivo = motivo
+		}
+	}
+	snap, err := s.Store.Snapshot(s.ID)
+	if err != nil {
+		return err
+	}
+	if snap.State.Status == StatusFinishing {
+		_, err = s.Store.Record(s.ID, update)
+		return err
+	}
+	_, err = s.Store.TransitionSettle(s.ID, StatusFinishing, update)
+	return err
+}
+
+// blockOnPendingDecisions completes the pending-decision path from
+// finishing: the crossing to blocked (the active interval settles and
+// re-anchors in the same write) and the blocked event. A restart over a
+// job left finishing with the pending motivo and no terminal intent (a
+// crash between the two writes) completes it the same way.
+func (s *Supervisor) blockOnPendingDecisions(st State, name string) (int, bool, error) {
+	if err := s.settleAndTransition(st, StatusBlocked, false); err != nil {
+		return 0, true, err
+	}
+	if _, err := s.Store.Append(s.ID, EventIn{
+		Tipo: "blocked",
+		Refs: map[string]string{"agente": name, "motivo": decisionsPendingMotivo},
+	}); err != nil {
+		return 0, true, err
+	}
+	return 0, false, nil
 }
 
 // finishOutcome commits the terminal outcome in the contract order: the
@@ -980,6 +1039,7 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 	outcomes, capErr := s.endCollaborations(s.collabDeadline())
 	if capErr != nil {
 		s.frictionf("job: the supervisor cannot enumerate the collaborations: " + capErr.Error())
+		s.collabUnenumerated = true
 	}
 	s.collabEnded = true
 	if err := s.persistCollabOutcomes(outcomes); err != nil {
@@ -1052,6 +1112,7 @@ func (s *Supervisor) fail(motivo string, exit int) {
 	outcomes, capErr := s.endCollaborations(s.collabDeadline())
 	if capErr != nil {
 		s.frictionf("job: the supervisor cannot enumerate the collaborations: " + capErr.Error())
+		s.collabUnenumerated = true
 	}
 	s.collabEnded = true
 	if err := s.persistCollabOutcomes(outcomes); err != nil {

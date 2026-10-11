@@ -212,7 +212,7 @@ var transitions = map[string]map[string]bool{
 // Transition moves a job along one allowed lifecycle edge. The closed edge
 // runs the shared close checks (pending decisions, cleanup audit, report
 // refresh); a transition into a terminal outcome publishes report.json in
-// the same locked operation.
+// the same locked operation, before the terminal state.json.
 func (s *Store) Transition(id, to string) (State, error) {
 	var st State
 	err := s.withExisting(id, func(dir string) error {
@@ -244,6 +244,17 @@ func (s *Store) Transition(id, to string) (State, error) {
 			}
 		}
 		st.Status = to
+		if isTerminalOutcome(to) {
+			// The report is published before the terminal state: a reader
+			// that sees the outcome in state.json (status, wait) finds
+			// report.json already carrying it with the partial facts. A
+			// crash between the two leaves the state still finishing, and
+			// the retry republishes the report before the state.
+			if err = refreshReport(dir, st); err != nil {
+				return err
+			}
+			return saveState(dir, st)
+		}
 		if err = saveState(dir, st); err != nil {
 			return err
 		}
@@ -298,6 +309,13 @@ func (s *Store) TransitionSettle(id, to string, settle func(*State)) (State, err
 		st.Status = saved.Status
 		st.BriefSHA256 = saved.BriefSHA256
 		st.DecisionsAckedSeq = saved.DecisionsAckedSeq
+		if isTerminalOutcome(to) {
+			// The report before the terminal state, as in Transition.
+			if err = refreshReport(dir, st); err != nil {
+				return err
+			}
+			return saveState(dir, st)
+		}
 		if err = saveState(dir, st); err != nil {
 			return err
 		}

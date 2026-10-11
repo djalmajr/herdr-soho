@@ -306,6 +306,13 @@ func (s *Supervisor) finalize(status string) {
 	// the workspace close are refused: the close is what guarantees no
 	// orphan pane, and it runs only when the enumeration succeeded.
 	var settleSrc []CollaborationOutcome
+	if s.collabUnenumerated {
+		// This process's capture could not enumerate the collaborations:
+		// the known ids are persisted already; the settlement, the
+		// release, the cleanup and the workspace close are refused, as on
+		// the fresh-process path below.
+		return
+	}
 	if s.collabEnded {
 		settleSrc = snap.State.Colaboracoes
 	} else {

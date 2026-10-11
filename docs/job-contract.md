@@ -164,7 +164,7 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 
 ### Release (no automatic cleanup)
 
-- Closing a job releases processes only. On a terminal state (`done`, `failed`, `canceled`, `timeout`), right after the final push, the supervisor finishes the job's collaborations (above), releases workers and the job orchestrator, runs `gc --yes` for the job's registered copies and processes, and closes the Herdr workspace (`herdr workspace close`).
+- Closing a job releases processes only. On a terminal state (`done`, `failed`, `canceled`, `timeout`), right after the final push, the supervisor finishes the job's collaborations (above), releases workers and the job orchestrator, runs `gc --yes` for the job's registered copies and processes, and closes the Herdr workspace (`herdr workspace close`). When the job's collaborations cannot be enumerated by the end of the grace, every collaboration already known to the job keeps its recorded outcome or is recorded `unavailable`, and the job still reaches its outcome, but the interruption, the release, `gc` and the workspace close are refused and a friction line names the failure; the workspace stays open until a later supervisor pass can enumerate the collaborations and finish them.
 - Job folders and worktrees are never removed automatically. The worktree, its local branch and `jobs/<id>/` stay on the machine; `report.json` records `limpeza.worktree: "kept"` and sets `limpeza.removivel` to true only when the tree is clean and `HEAD` equals `origin/job/<id>` (informational only). The remote branch and the pull request are never touched.
 - Removing a worktree or a job folder is the user's decision, done by hand (`git worktree remove`, `gc`, `clean --older-than`). `clean --older-than` never removes `jobs/<id>/` while a decision is still unacknowledged.
 
@@ -185,7 +185,7 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 
 - `partial` is always present: `true` when at least one of the job's collaborations ended `partial` or `unavailable`, otherwise `false`.
 - `partial_collaborations` is always present: the IDs of those collaborations, sorted and without duplicates; `[]` when there are none. A job whose state predates these fields reads as `false` and `[]`, and the read changes nothing.
-- The two fields are published before the terminal status, so a reader that sees `done` (or any terminal status) already sees the final partial facts, and they are never removed later. `report.json` carries the same two values.
+- The two fields are published before the terminal status, so a reader that sees `done` (or any terminal status) already sees the final partial facts, and they are never removed later. `report.json` carries the same two values and is written before the terminal status is saved in `state.json`; a crash between the two writes leaves the job `finishing` with its recorded outcome, and the restarted supervisor writes both again.
 
 ## Report
 

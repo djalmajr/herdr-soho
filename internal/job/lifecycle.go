@@ -46,10 +46,11 @@ func (s *Store) Record(id string, update func(*State)) (State, error) {
 
 // Fail moves a job to failed under one job lock: a failure event (resumo
 // and refs.motivo are the motivo), the stored motivo, the walk along
-// existing edges to failed with a save after each step, a terminal event
-// (refs.motivo, refs.exit), and the report. A job already failed only
-// republishes the report and appends no event; any other terminal or later
-// status is refused with exit 2.
+// existing edges to failed with a save after each intermediate step, a
+// terminal event (refs.motivo, refs.exit, at most once), the report, and
+// the failed state last. A job already failed only republishes the report
+// and appends no event; any other terminal or later status is refused with
+// exit 2.
 func (s *Store) Fail(id, motivo string, exit int) (State, error) {
 	var st State
 	err := s.withExisting(id, func(dir string) error {
@@ -79,19 +80,35 @@ func (s *Store) Fail(id, motivo string, exit int) (State, error) {
 				return errUsage("job: transition " + st.Status + " -> failed is not allowed")
 			}
 			st.Status = next
-			if err := saveState(dir, st); err != nil {
-				return err
+			if next != StatusFailed {
+				if err := saveState(dir, st); err != nil {
+					return err
+				}
 			}
 		}
 		// The terminal event carries the outcome in refs; it has no resumo
-		// of its own, so no user-facing text is invented here.
-		if _, err = appendEventFn(dir, s.clock().Now(), EventIn{
-			Tipo: "terminal",
-			Refs: map[string]string{"motivo": motivo, "exit": strconv.Itoa(exit)},
-		}); err != nil {
+		// of its own, so no user-facing text is invented here. It lands at
+		// most once: a crash before the failed state was saved leaves it
+		// in the log, and the retry does not append a second one.
+		events, err := readEvents(dir)
+		if err != nil {
 			return err
 		}
-		return refreshReport(dir, st)
+		if !hasTipo(events, "terminal") {
+			if _, err = appendEventFn(dir, s.clock().Now(), EventIn{
+				Tipo: "terminal",
+				Refs: map[string]string{"motivo": motivo, "exit": strconv.Itoa(exit)},
+			}); err != nil {
+				return err
+			}
+		}
+		// The report is published before the failed state, as in
+		// Transition: a reader that sees failed in state.json finds
+		// report.json already carrying it with the partial facts.
+		if err = refreshReport(dir, st); err != nil {
+			return err
+		}
+		return saveState(dir, st)
 	})
 	return st, err
 }
