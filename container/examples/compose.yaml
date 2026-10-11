@@ -1,0 +1,71 @@
+# One container per job, built FROM the herdr-soho base image (or the base
+# itself). Start one Compose project per job so each job gets its own
+# container, network and state volumes:
+#
+#   docker compose -p job-<id> --env-file <job>.env -f container/examples/compose.yaml up -d
+#   docker compose -p job-<id> -f container/examples/compose.yaml exec agent claude
+#   docker compose -p job-<id> -f container/examples/compose.yaml down      # keep runner state
+#   docker compose -p job-<id> -f container/examples/compose.yaml down -v   # delete runner state
+#
+# macos.env.example and windows.env.example show the variables. Nothing here
+# sets a credential: secrets are read-only files under /run/secrets, read by
+# the runner process at exec time (docs/container-image.md, "Credentials").
+name: herdr-soho-job
+
+services:
+  agent:
+    image: ${HERDR_SOHO_IMAGE:-herdr-soho-base:0.1.0}
+    pull_policy: never
+    # The image's entrypoint is tini; the default command idles so that
+    # runner sessions are started with `exec`, one per Herdr pane.
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    volumes:
+      # The job's checkout, read-write. Bind-mounted from the host.
+      - type: bind
+        source: ${JOB_WORKSPACE:?set JOB_WORKSPACE to the job checkout on the host}
+        target: /workspace
+      # Runner state (logins, sessions, settings) per job, retained across
+      # `down` and removed by `down -v`.
+      - claude-state:/home/agent/.claude
+      - codex-state:/home/agent/.codex
+      - grok-state:/home/agent/.grok
+      - pi-state:/home/agent/.pi
+    secrets:
+      - source: anthropic_api_key
+        target: anthropic_api_key
+      - source: openai_api_key
+        target: openai_api_key
+      - source: xai_api_key
+        target: xai_api_key
+      - source: hermes_credentials
+        target: hermes_credentials
+      - source: cinzel_credentials
+        target: cinzel_credentials
+      - source: ai_memory_credentials
+        target: ai_memory_credentials
+
+secrets:
+  # Placeholders: point each variable at a host file holding one key, or
+  # remove the entries for runners that use an interactive login instead.
+  anthropic_api_key:
+    file: ${ANTHROPIC_API_KEY_FILE:-./secrets/anthropic_api_key.placeholder}
+  openai_api_key:
+    file: ${OPENAI_API_KEY_FILE:-./secrets/openai_api_key.placeholder}
+  xai_api_key:
+    file: ${XAI_API_KEY_FILE:-./secrets/xai_api_key.placeholder}
+  # Credentials of additional services whose clients a downstream image or
+  # the job adds at run time (the base ships none of these clients).
+  hermes_credentials:
+    file: ${HERMES_CREDENTIALS_FILE:-./secrets/hermes_credentials.placeholder}
+  cinzel_credentials:
+    file: ${CINZEL_CREDENTIALS_FILE:-./secrets/cinzel_credentials.placeholder}
+  ai_memory_credentials:
+    file: ${AI_MEMORY_CREDENTIALS_FILE:-./secrets/ai_memory_credentials.placeholder}
+
+volumes:
+  claude-state:
+  codex-state:
+  grok-state:
+  pi-state:
