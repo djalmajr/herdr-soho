@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -442,20 +443,86 @@ func TestSuperviseWakeDisabled(t *testing.T) {
 	}
 }
 
+// requireNoLeakedGoroutines registers a cleanup, run after every other
+// cleanup of the test, that fails the test when the goroutine count has
+// not come back to its level at the call within a bound: a dispatch, a
+// worker or a hook wait left behind by a failure is reported, never
+// masked by the package watchdog.
+func requireNoLeakedGoroutines(t *testing.T) {
+	t.Helper()
+	before := runtime.NumGoroutine()
+	t.Cleanup(func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for runtime.NumGoroutine() > before {
+			if time.Now().After(deadline) {
+				t.Errorf("goroutines = %d after the test, want at most %d (one was left behind)", runtime.NumGoroutine(), before)
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+}
+
+// dispatchWakesWithin runs one dispatch on a goroutine and fails the test
+// when it has not returned after the bound: a dispatch that blocked on a
+// full queue would hold the watch loop. Before failing it releases the
+// blocked dispatch with release (which must free queue slots: drain a
+// test-owned queue or let a held worker go), repeating it until the
+// goroutine returns, so a failure never leaves a goroutine behind; a
+// goroutine that still does not return is reported as its own failure and
+// stuck is set, so the caller never closes the queue under it.
+func dispatchWakesWithin(t *testing.T, sup *Supervisor, release func(), stuck *bool) (int, bool, error) {
+	t.Helper()
+	type result struct {
+		n    int
+		done bool
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		n, done, err := sup.dispatchWakes()
+		ch <- result{n, done, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.n, r.done, r.err
+	case <-time.After(20 * time.Second):
+	}
+	deadline := time.After(20 * time.Second)
+	for {
+		release()
+		select {
+		case <-ch:
+			t.Fatal("dispatchWakes blocked on a full queue (released after the bound)")
+			return 0, false, nil
+		case <-deadline:
+			*stuck = true
+			t.Fatal("dispatchWakes blocked on a full queue and did not return after its release")
+			return 0, false, nil
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
 // TestSuperviseWakeQueueFullDefersTheRest: a full queue (256 slots) leaves
 // the rest of the events for the next tick and never blocks the loop; the
-// deferred events are processed once the worker drains. Only the first and
-// the last event are waking questions, so the drain runs exactly two hook
-// subprocesses while the non-waking notes in between advance the cursor.
+// next tick queues the deferred events in order once slots are free. The
+// queue is the supervisor's own field with the production capacity, but
+// the test is its only receiver, so the counts are exact: no consumer can
+// free a slot while the queue is filled.
 func TestSuperviseWakeQueueFullDefersTheRest(t *testing.T) {
-	store, jobDir, clock, team, fakeDir, env := wakeSupFixture(t,
-		[]fakecli.Rule{{AnyArgs: true}},
-		fakecli.InstallOptions{CaptureEnv: wakeEnvKeys})
+	// Catches the mutations "a full queue blocks the send" (the select
+	// default removed: the bounded dispatch fails), "a full queue drops the
+	// rest" (the high-water mark advanced past an unqueued event: the
+	// deferred tick queues nothing) and "the capacity changed".
+	if wakeQueueCap != 256 {
+		t.Fatalf("wakeQueueCap = %d, want 256", wakeQueueCap)
+	}
+	requireNoLeakedGoroutines(t)
+	store, _, clock, team := supFixture(t)
 	if _, err := store.Note("job-1", EventIn{Tipo: "question", Resumo: "first question"}); err != nil {
 		t.Fatal(err)
 	}
-	// The filler is non-waking, so the drained work is the two hook
-	// subprocesses for the questions at seq 2 and 258, not one per event.
 	for i := 0; i < 255; i++ {
 		if _, err := store.Note("job-1", EventIn{Tipo: "note", Resumo: fmt.Sprintf("n%d", i)}); err != nil {
 			t.Fatal(err)
@@ -466,37 +533,148 @@ func TestSuperviseWakeQueueFullDefersTheRest(t *testing.T) {
 	}
 	var friction []string
 	sup := supSupervisor(store, clock, team, &friction)
-	sup.Wake = &WakeHook{Cmd: "wakehook", JobID: "job-1", Env: env}
-	sup.startWake()
-	// 258 events (accepted + question + 255 notes + question) against a
-	// 256-slot queue: one tick queues up to the capacity and leaves the
-	// rest; it never blocks.
-	n1, done, err := sup.dispatchWakes()
-	if err != nil || done || n1 < 256 || n1 >= 258 {
-		t.Fatalf("first dispatch: n=%d done=%v err=%v, want 256 or 257 (the rest waits for the next tick)", n1, done, err)
+	sup.wakeQueue = make(chan Event, wakeQueueCap)
+	stuck := false
+	drain := func() {
+		for len(sup.wakeQueue) > 0 {
+			<-sup.wakeQueue
+		}
 	}
-	// The next tick queues the rest once the worker frees slots: wait
-	// (bounded) for the queue length to drop to at most cap-2, which frees
-	// at least the two deferred slots. The queue length is safe to read
-	// concurrently; the cursor file is replaced at every drained event and
-	// a concurrent read would race the replacement on Windows.
+	// 258 events (accepted + question + 255 notes + question) against the
+	// 256 slots: one tick queues exactly the capacity and leaves two.
+	if n, done, err := dispatchWakesWithin(t, sup, drain, &stuck); err != nil || done || n != 256 {
+		t.Fatalf("first dispatch: n=%d done=%v err=%v, want 256 (the rest waits for the next tick)", n, done, err)
+	}
+	if n, done, err := dispatchWakesWithin(t, sup, drain, &stuck); err != nil || done || n != 0 {
+		t.Fatalf("dispatch on a full queue: n=%d done=%v err=%v, want 0", n, done, err)
+	}
+	for want := 1; want <= 256; want++ {
+		if ev := <-sup.wakeQueue; ev.Seq != want {
+			t.Fatalf("queued seq = %d, want %d (in order)", ev.Seq, want)
+		}
+	}
+	if n, done, err := dispatchWakesWithin(t, sup, drain, &stuck); err != nil || done || n != 2 {
+		t.Fatalf("deferred dispatch: n=%d done=%v err=%v, want 2", n, done, err)
+	}
+	for want := 257; want <= 258; want++ {
+		if ev := <-sup.wakeQueue; ev.Seq != want {
+			t.Fatalf("deferred seq = %d, want %d (in order)", ev.Seq, want)
+		}
+	}
+	if n, done, err := dispatchWakesWithin(t, sup, drain, &stuck); err != nil || done || n != 0 {
+		t.Fatalf("dispatch with nothing left: n=%d done=%v err=%v, want 0", n, done, err)
+	}
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v, want none", friction)
+	}
+}
+
+// waitHookEntered waits (bounded) until the fake hook process has logged
+// its call for seq: the fake logs the call before it waits on its gate
+// file, so the entry proves the worker is inside that hook. A call log
+// caught mid-append reads as "not yet".
+func waitHookEntered(t *testing.T, fakeDir string, seq int) {
+	t.Helper()
+	want := strconv.Itoa(seq)
 	deadline := time.Now().Add(60 * time.Second)
 	for {
-		if len(sup.wakeQueue) <= wakeQueueCap-2 {
-			break
+		if calls, err := fakecli.ReadCalls(filepath.Join(fakeDir, "wakehook.calls.jsonl")); err == nil {
+			for _, call := range calls {
+				if call.Env["HERDR_SOHO_JOB_SEQ"] == want {
+					return
+				}
+			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the worker freed no slots within 60s; queue length = %d", len(sup.wakeQueue))
+			t.Fatalf("the wake hook for seq %d was never entered", seq)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestSuperviseWakeFullQueueDrainsThroughTheWorker: with the real wake
+// worker held inside the first question's hook, a tick fills the queue to
+// its 256 slots and leaves the last question for a later tick; once the
+// hook is released the worker drains, the next tick queues the deferred
+// question, and the hook runs for exactly the two questions, in order,
+// with the cursor at the last event. The fake hook waits on a gate file
+// and logs its call before waiting, so the test knows the worker is inside
+// the hook (and holds no queue slot) without relying on timing.
+func TestSuperviseWakeFullQueueDrainsThroughTheWorker(t *testing.T) {
+	// Catches the mutations "a full queue blocks the send" (the fill
+	// dispatch blocks while the worker is held: the bounded dispatch
+	// fails), "a full queue drops the rest" (the deferred question is never
+	// queued: the deferred dispatch queues nothing and its hook never runs)
+	// and "the capacity changed".
+	requireNoLeakedGoroutines(t)
+	gate := filepath.Join(t.TempDir(), "release")
+	store, jobDir, clock, team, fakeDir, env := wakeSupFixture(t,
+		[]fakecli.Rule{{AnyArgs: true, WaitFile: gate}},
+		fakecli.InstallOptions{CaptureEnv: wakeEnvKeys})
+	if _, err := store.Note("job-1", EventIn{Tipo: "question", Resumo: "first question"}); err != nil {
+		t.Fatal(err)
+	}
+	var friction []string
+	sup := supSupervisor(store, clock, team, &friction)
+	// One attempt longer than the fake's own gate wait, so the held hook
+	// is never retried by the hook's timeout.
+	sup.Wake = &WakeHook{Cmd: "wakehook", JobID: "job-1", Env: env, Timeout: 2 * time.Minute}
+	sup.startWake()
+	stuck, stopped := false, false
+	open := func() { _ = os.WriteFile(gate, nil, 0o600) }
+	// On any failure, let the held hook go and stop the worker, so the
+	// worker goroutine and its hook process never outlive the test.
+	t.Cleanup(func() {
+		open()
+		if !stopped && !stuck {
+			sup.stopWake(30 * time.Second)
+		}
+	})
+	// The accepted event and the first question.
+	if n, done, err := dispatchWakesWithin(t, sup, open, &stuck); err != nil || done || n != 2 {
+		t.Fatalf("first dispatch: n=%d done=%v err=%v, want 2", n, done, err)
+	}
+	// The worker took both and is inside the first question's hook.
+	waitHookEntered(t, fakeDir, 2)
+	if got := len(sup.wakeQueue); got != 0 {
+		t.Fatalf("queue length = %d with the worker inside the first hook, want 0", got)
+	}
+	// 256 non-waking notes and the last question: 257 events against the
+	// 256 free slots, 259 in all.
+	for i := 0; i < 256; i++ {
+		if _, err := store.Note("job-1", EventIn{Tipo: "note", Resumo: fmt.Sprintf("n%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.Note("job-1", EventIn{Tipo: "question", Resumo: "last question"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, done, err := dispatchWakesWithin(t, sup, open, &stuck); err != nil || done || n != 256 {
+		t.Fatalf("fill dispatch: n=%d done=%v err=%v, want 256 (the last question waits for the next tick)", n, done, err)
+	}
+	// Still held and full: the next tick queues nothing and returns.
+	if n, done, err := dispatchWakesWithin(t, sup, open, &stuck); err != nil || done || n != 0 {
+		t.Fatalf("dispatch on a full queue: n=%d done=%v err=%v, want 0", n, done, err)
+	}
+	if got := hookSeqs(t, fakeDir); !reflect.DeepEqual(got, []int{2}) {
+		t.Fatalf("hook seqs while held = %v, want [2]", got)
+	}
+	open()
+	// The next tick queues the deferred question once the worker frees a
+	// slot. The queue length is safe to read concurrently; the cursor file
+	// is replaced at every drained event and a concurrent read would race
+	// the replacement on Windows.
+	deadline := time.Now().Add(60 * time.Second)
+	for len(sup.wakeQueue) > wakeQueueCap-1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the worker freed no slot within 60s; queue length = %d", len(sup.wakeQueue))
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	n2, done, err := sup.dispatchWakes()
-	if err != nil || done {
-		t.Fatalf("second dispatch: done=%v err=%v", done, err)
+	if n, done, err := dispatchWakesWithin(t, sup, open, &stuck); err != nil || done || n != 1 {
+		t.Fatalf("deferred dispatch: n=%d done=%v err=%v, want 1", n, done, err)
 	}
-	if n1+n2 != 258 {
-		t.Fatalf("dispatches queued %d + %d = %d, want all 258 events", n1, n2, n1+n2)
-	}
+	stopped = true
 	sup.stopWake(30 * time.Second)
 	// stopWake's 30 s budget can expire with the worker still draining;
 	// assert it finished (wakeDone closed) before reading anything it
@@ -506,11 +684,11 @@ func TestSuperviseWakeQueueFullDefersTheRest(t *testing.T) {
 	default:
 		t.Fatalf("the wake worker did not drain within 30s")
 	}
-	if seq, ok := wakeSeqValue(t, jobDir); !ok || seq != "258" {
-		t.Fatalf("wake.seq = %q ok=%v, want 258 (every event, including the deferred ones)", seq, ok)
+	if seq, ok := wakeSeqValue(t, jobDir); !ok || seq != "259" {
+		t.Fatalf("wake.seq = %q ok=%v, want 259 (every event, including the deferred question)", seq, ok)
 	}
-	if got := hookSeqs(t, fakeDir); !reflect.DeepEqual(got, []int{2, 258}) {
-		t.Fatalf("hook seqs = %v, want [2 258] (the in-flight question and the deferred one, in order)", got)
+	if got := hookSeqs(t, fakeDir); !reflect.DeepEqual(got, []int{2, 259}) {
+		t.Fatalf("hook seqs = %v, want [2 259] (each question once, in order)", got)
 	}
 	if len(friction) != 0 {
 		t.Fatalf("friction = %v, want none", friction)
