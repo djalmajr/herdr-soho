@@ -1034,10 +1034,11 @@ func newJobStartEE(t *testing.T) *jobStartEE {
 	}
 	worktree := filepath.Join(checkout, ".worktrees", "job-job-1")
 	// The reachability probe and the create-intent record both read the
-	// workspace list; the list is the contract's real shape.
+	// workspace list; the list is the contract's real shape. The create
+	// hands the root pane the start's user-configuration locator.
 	herdrRules := []fakecli.Rule{
 		{Argv: []string{"workspace", "list"}, Stdout: `{"result":{"workspaces":[]}}`},
-		{Argv: []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--no-focus"},
+		{Argv: []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--env", "XDG_CONFIG_HOME=" + jobStartXDGBase(f.env), "--no-focus"},
 			Stdout: `{"result":{"workspace_id":"w9","root_pane":{"pane_id":"w9:p1"}}}`},
 		{Argv: []string{"pane", "run", "w9:p1"}, ArgvPrefix: true},
 	}
@@ -1073,7 +1074,44 @@ func (ee *jobStartEE) herdrCalls(t *testing.T) []fakecli.Call {
 
 func (ee *jobStartEE) start(t *testing.T, briefFile string) (int, string, string) {
 	t.Helper()
+	stop := ee.confirmLaunches()
+	defer stop()
 	return ee.f.runEnv(t, ee.env, "start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", briefFile)
+}
+
+// jobStartXDGBase is the user-configuration base the start hands to the
+// supervisor: the directory that holds herdr-soho/config.
+func jobStartXDGBase(env platform.Env) string {
+	return filepath.Dir(filepath.Dir(platform.UserConfigPath(platform.Current(), env)))
+}
+
+// confirmLaunches stands in for the supervisor the fake herdr never runs:
+// until stop, it confirms job-1's pending launch from the fake root pane
+// (w9:p1 of w9), as `job supervise` does before it runs. This confirmation
+// is implementation-generated, never evidence of a real Herdr launch.
+func (ee *jobStartEE) confirmLaunches() func() {
+	cfg := core.LoadConfig(ee.env, ee.checkout)
+	store := job.Open(core.StateRootPath(&cfg, ee.env, ee.checkout))
+	pane := platform.Env{"HERDR_WORKSPACE_ID": "w9", "HERDR_PANE_ID": "w9:p1"}
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for {
+			if _, err := os.Stat(filepath.Join(store.Root, "jobs", "job-1", "launch.json")); err == nil {
+				_, _ = job.ConfirmLaunch(store, "job-1", pane)
+			}
+			select {
+			case <-done:
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-finished
+	}
 }
 
 func TestJobStartStartsTheJob(t *testing.T) {
@@ -1114,7 +1152,7 @@ func TestJobStartStartsTheJob(t *testing.T) {
 	if want := []string{"workspace", "list"}; !reflect.DeepEqual(calls[1].Argv, want) {
 		t.Fatalf("call 1 = %v", calls[1].Argv)
 	}
-	if want := []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--no-focus"}; !reflect.DeepEqual(calls[2].Argv, want) {
+	if want := []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--env", "XDG_CONFIG_HOME=" + jobStartXDGBase(ee.f.env), "--no-focus"}; !reflect.DeepEqual(calls[2].Argv, want) {
 		t.Fatalf("call 2 = %v", calls[2].Argv)
 	}
 	if want := []string{"pane", "run", "w9:p1", ee.selfExe, "job", "supervise", "--id", "job-1"}; !reflect.DeepEqual(calls[3].Argv, want) {

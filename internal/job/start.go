@@ -236,8 +236,16 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		return State{}, store, s.failStored(store, req.ID, "", err)
 	}
 
-	// 9. Create the job workspace in the worktree.
-	workspaceID, rootPaneID, err := s.Herdr.Create(prepared.Dir, label, nil)
+	// 9. Create the job workspace in the worktree. The root pane, where
+	// the supervisor runs, gets the user-configuration locators of this
+	// start (locator.go), so the supervisor selects the same user
+	// configuration and finds the job in this store.
+	locators, err := supervisorLocatorEnv(platform.Current(), s.Env, s.Machine.reposRootHome, absLocator)
+	if err != nil {
+		_, _ = store.Fail(req.ID, err.Error(), ExitUsage)
+		return State{}, store, err
+	}
+	workspaceID, rootPaneID, err := s.Herdr.Create(prepared.Dir, label, locators)
 	if err != nil {
 		_, _ = store.Fail(req.ID, err.Error(), herdrExitCode(err))
 		return State{}, store, err
@@ -287,10 +295,25 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		return State{}, store, errUsage("job: cannot write the team session")
 	}
 
-	// 11. Launch the supervisor in the workspace's first pane.
+	// 11. Launch the supervisor in the workspace's first pane, after
+	// issuing the private launch record it must confirm (launch.go). A
+	// failed pane run closes the workspace as before only once the launch
+	// is fenced: a supervisor that confirmed anyway, or a launch that
+	// could not be revoked, leaves the workspace open.
+	clock := store.clock()
+	launch, err := issueLaunch(store, clock, req.ID, workspaceID, rootPaneID)
+	if err != nil {
+		return State{}, store, s.failStored(store, req.ID, workspaceID, err)
+	}
 	if err = s.Panes.Run(rootPaneID, []string{s.SelfExe, "job", "supervise", "--id", req.ID}); err != nil {
 		workspace := "open"
-		if s.closeWorkspace(store, req.ID, workspaceID) {
+		confirmed, revokeErr := revokeLaunch(store, clock, launch)
+		switch {
+		case revokeErr != nil:
+			s.frictionLaunchOpen("the supervisor launch could not be revoked")
+		case confirmed:
+			s.frictionLaunchOpen("the job supervisor confirmed its start")
+		case s.closeWorkspace(store, req.ID, workspaceID):
 			workspace = "closed"
 		}
 		_, _ = store.Fail(req.ID, err.Error(), herdrExitCode(err))
@@ -298,10 +321,34 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		return State{}, store, err
 	}
 
-	// 12. The job is running.
+	// 12. The supervisor confirms that it started for this job, in this
+	// store, from the root pane; the pane-run acknowledgement alone is not
+	// enough. Without the confirmation by the deadline the launch is
+	// revoked, so a late supervisor cannot confirm it, and the job fails
+	// as a start failure. The workspace is left open: whatever runs in
+	// its root pane then (a slow or failed supervisor, a shell) is not
+	// proven to be this start's and inert, so it is not closed under it.
+	accepted, err := awaitLaunch(store, clock, launch, defaultLaunchWait, defaultLaunchPoll)
+	if !accepted {
+		const motivo = "job: the supervisor did not confirm its start"
+		if err != nil {
+			s.frictionLaunchOpen("the supervisor launch could not be revoked")
+		} else {
+			s.frictionLaunchOpen("the supervisor did not confirm its start")
+		}
+		_, _ = store.Fail(req.ID, motivo, ExitHerdr)
+		finishStartFailure(store, req.ID, "open", s.Friction)
+		return State{}, store, herdrExit(motivo)
+	}
+
+	// 13. The job is running. A confirmed supervisor is running in the
+	// root pane: a failed transition fails the job without closing the
+	// workspace under it; the supervisor sees the failed job and closes
+	// the workspace itself.
 	st, err = store.Transition(req.ID, StatusRunning)
 	if err != nil {
-		return State{}, store, s.failStored(store, req.ID, workspaceID, err)
+		s.frictionLaunchOpen("the job supervisor confirmed its start")
+		return State{}, store, s.failStored(store, req.ID, "", err)
 	}
 	return st, store, nil
 }
@@ -350,6 +397,14 @@ func exitCodeOr(err error, def int) int {
 		return exit.Code
 	}
 	return def
+}
+
+// frictionLaunchOpen records why a start failure left the job workspace
+// open around its supervisor launch.
+func (s Starter) frictionLaunchOpen(why string) {
+	if s.Friction != nil {
+		s.Friction("job: the Herdr workspace was left open: " + why)
+	}
 }
 
 // failStored ends a recorded job after a storage error (a state, event or
@@ -522,13 +577,26 @@ func recoverStartLocked(store *Store, id string, herdr herdrWorkspaces, friction
 	if st.Status != StatusAccepted && st.Status != StatusPreparing {
 		return st, false, nil
 	}
+	// The private launch record first (launch.go). Without one the start
+	// never ran the supervisor command and the recovery below is
+	// unchanged. With one, a pending launch is revoked so a late
+	// supervisor cannot confirm it, but the root pane may hold a
+	// supervisor (confirmed, slow, or one this recovery could not fence):
+	// its workspace is not closed under it. A live supervisor sees the
+	// failed job and closes the workspace itself.
+	launched := fenceLaunch(store, id) != launchNone
 	// The job workspace, closed only when its identity is proven.
 	// outcome is the report's limpeza.workspace ("closed" or "open");
 	// empty is a failure with no Herdr workspace to report (none created,
 	// none proven).
 	var workspaceID string
 	var outcome string
-	if st.WorkspaceID != "" {
+	if launched {
+		outcome = "open"
+		if friction != nil {
+			friction("job: the Herdr workspace was left open: the job supervisor may have started")
+		}
+	} else if st.WorkspaceID != "" {
 		// Proven by the record.
 		workspaceID = st.WorkspaceID
 	} else if st.WorkspaceLabel != "" {

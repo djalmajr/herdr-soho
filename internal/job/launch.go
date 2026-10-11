@@ -1,0 +1,395 @@
+package job
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/platform"
+)
+
+// launch.go is the private startup confirmation between `job start` and the
+// `job supervise` process it launches in the job workspace's root pane. A
+// pane-run acknowledgement only proves that Herdr accepted the command; the
+// starter publishes running only after the supervisor process itself has
+// found this job in this store, from this workspace's root pane, built its
+// supervisor and is about to run it, while this starter still waits. The
+// confirmation is evidence of that startup only, not of later health.
+//
+// The evidence is one private file, <job dir>/launch.json (mode 0600,
+// written atomically), never part of state.json, the events, the report or
+// any command output. Every read-modify-write of it runs under its own lock
+// file, <job dir>/launch.lock, taken only with non-blocking tries retried
+// until a monotonic deadline — never the job lock and never start.lock —
+// so no launch step can wait without bound on another process. The
+// supervisor never waits for start.lock or for the running state before
+// confirming, so the confirmation cannot deadlock with the starter's held
+// start.lock or with Supervisor.waitRunning.
+//
+// States: the starter issues a pending record (fresh nonce, store, workspace
+// and root pane) before `pane run`; the supervisor turns it confirmed; the
+// starter turns a still-pending record revoked when its wait ends without
+// a confirmation, and crash recovery does the same for a dead starter.
+// Under the launch lock a confirm and a revoke cannot both win. The
+// supervisor never refuses to run because of the record: a launch it
+// cannot confirm (none, already confirmed, revoked, stale, another pane,
+// unreadable, lock busy) leaves the record as it is and the supervisor
+// continues exactly as before this record existed.
+
+// launchFileName is the private record; launchLockName its lock.
+const (
+	launchFileName = "launch.json"
+	launchLockName = "launch.lock"
+)
+
+const (
+	launchPending   = "pending"
+	launchConfirmed = "confirmed"
+	launchRevoked   = "revoked"
+)
+
+// launchVersion is the record's own version.
+const launchVersion = 1
+
+const (
+	// defaultLaunchWait bounds the starter's wait for the confirmation,
+	// measured on the monotonic clock from the pane-run acknowledgement.
+	defaultLaunchWait = 30 * time.Second
+	// defaultLaunchPoll is the pause between two reads of the record.
+	defaultLaunchPoll = 100 * time.Millisecond
+	// launchLockRetry is the pause between two tries of launch.lock.
+	launchLockRetry = 10 * time.Millisecond
+	// launchRevokeWait bounds the revoke after the wait ended, and the
+	// supervisor's confirmation, when launch.lock is busy.
+	launchRevokeWait = 5 * time.Second
+)
+
+// errLaunchLockBusy is a launch.lock that stayed held until the deadline.
+var errLaunchLockBusy = errors.New("job: the launch lock stayed busy")
+
+// launchRecord is the content of launch.json.
+type launchRecord struct {
+	V         int    `json:"v"`
+	ID        string `json:"id"`
+	Store     string `json:"store"`
+	Workspace string `json:"workspace"`
+	Pane      string `json:"pane"`
+	Nonce     string `json:"nonce"`
+	Issued    string `json:"issued"`
+	State     string `json:"state"`
+	PID       int    `json:"pid,omitempty"`
+	Confirmed string `json:"confirmed,omitempty"`
+}
+
+// sameLaunch reports whether got is the launch want describes: the same
+// version, job, store, workspace, root pane and nonce.
+func sameLaunch(got, want launchRecord) bool {
+	return got.V == launchVersion && got.ID == want.ID && got.Store == want.Store &&
+		got.Workspace == want.Workspace && got.Pane == want.Pane && got.Nonce == want.Nonce
+}
+
+// newLaunchNonce returns 16 random bytes in hex.
+func newLaunchNonce() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+// withLaunchLock runs fn holding <dir>/launch.lock. The lock is only tried
+// without blocking; a held lock is retried every launchLockRetry until the
+// clock's monotonic reading reaches until, and then errLaunchLockBusy is
+// returned without running fn.
+func withLaunchLock(dir string, clock Clock, until int64, fn func() error) error {
+	for {
+		f, err := os.OpenFile(filepath.Join(dir, launchLockName), os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
+			return err
+		}
+		err = tryFlock(f)
+		if err == nil {
+			defer func() {
+				_ = funlock(f)
+				_ = f.Close()
+			}()
+			return fn()
+		}
+		_ = f.Close()
+		if !errors.Is(err, errStartLockHeld) {
+			return err
+		}
+		if clock.Monotonic() >= until {
+			return errLaunchLockBusy
+		}
+		clock.Sleep(launchLockRetry)
+	}
+}
+
+// readLaunch reads the record in dir; ok is false when the file is absent.
+// An unreadable or malformed file is an error.
+func readLaunch(dir string) (launchRecord, bool, error) {
+	data, err := os.ReadFile(filepath.Join(dir, launchFileName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return launchRecord{}, false, nil
+		}
+		return launchRecord{}, false, err
+	}
+	var rec launchRecord
+	if err := json.Unmarshal(data, &rec); err != nil || rec.V != launchVersion {
+		return launchRecord{}, false, errors.New("job: launch record unreadable")
+	}
+	return rec, true, nil
+}
+
+func writeLaunch(dir string, rec launchRecord) error {
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	return writeAtomic0600(filepath.Join(dir, launchFileName), append(data, '\n'))
+}
+
+// issueLaunch writes a fresh pending record for the supervisor about to be
+// launched in rootPane of workspaceID and returns it. It replaces any
+// earlier record, so no earlier confirmation can stand for this launch:
+// only the holder of start.lock issues one.
+func issueLaunch(store *Store, clock Clock, id, workspaceID, rootPane string) (launchRecord, error) {
+	dir, err := Dir(store.Root, id)
+	if err != nil {
+		return launchRecord{}, err
+	}
+	nonce, err := newLaunchNonce()
+	if err != nil {
+		return launchRecord{}, err
+	}
+	rec := launchRecord{
+		V: launchVersion, ID: id, Store: filepath.Clean(store.Root),
+		Workspace: workspaceID, Pane: rootPane, Nonce: nonce,
+		Issued: clock.Now().UTC().Format(time.RFC3339Nano),
+		State:  launchPending,
+	}
+	until := clock.Monotonic() + int64(launchRevokeWait)
+	if err := withLaunchLock(dir, clock, until, func() error { return writeLaunch(dir, rec) }); err != nil {
+		return launchRecord{}, err
+	}
+	return rec, nil
+}
+
+// launchOutcome is what the starter reads back from the record.
+type launchOutcome int
+
+const (
+	// launchWaiting: still this launch's pending record, or the lock was
+	// busy for this read.
+	launchWaiting launchOutcome = iota
+	// launchAccepted: this launch, confirmed.
+	launchAccepted
+	// launchLost: absent, unreadable, revoked, or not this launch.
+	launchLost
+)
+
+// checkLaunch reads the record under launch.lock (tried until until) and
+// classifies it against want.
+func checkLaunch(dir string, clock Clock, until int64, want launchRecord) launchOutcome {
+	outcome := launchWaiting
+	err := withLaunchLock(dir, clock, until, func() error {
+		rec, ok, err := readLaunch(dir)
+		switch {
+		case err != nil || !ok || !sameLaunch(rec, want):
+			outcome = launchLost
+		case rec.State == launchPending:
+			outcome = launchWaiting
+		case rec.State == launchConfirmed:
+			outcome = launchAccepted
+		default:
+			outcome = launchLost
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errLaunchLockBusy) {
+		return launchLost
+	}
+	return outcome
+}
+
+// revokeLaunch ends the starter's wait under launch.lock: want's pending
+// record becomes revoked (accepted=false); want's confirmed record is
+// accepted after all (the confirmation won the race). Anything else is not
+// accepted and is left as it is. An error (the lock stayed busy for
+// launchRevokeWait, or the record could not be read or written) means the
+// launch is not fenced: a late confirmation remains possible.
+func revokeLaunch(store *Store, clock Clock, want launchRecord) (bool, error) {
+	dir, err := Dir(store.Root, want.ID)
+	if err != nil {
+		return false, err
+	}
+	accepted := false
+	until := clock.Monotonic() + int64(launchRevokeWait)
+	err = withLaunchLock(dir, clock, until, func() error {
+		rec, ok, err := readLaunch(dir)
+		if err != nil {
+			return err
+		}
+		if !ok || !sameLaunch(rec, want) {
+			return errors.New("job: launch record replaced")
+		}
+		switch rec.State {
+		case launchConfirmed:
+			accepted = true
+			return nil
+		case launchPending:
+			rec.State = launchRevoked
+			return writeLaunch(dir, rec)
+		}
+		return nil
+	})
+	return accepted, err
+}
+
+// launchFence is crash recovery's view of the launch record.
+type launchFence int
+
+const (
+	// launchNone: no record — the start never issued one, so it never ran
+	// the supervisor command.
+	launchNone launchFence = iota
+	// launchFenced: a pending record was revoked now, or a revoked one was
+	// found: a supervisor command may have been run but cannot confirm.
+	launchFenced
+	// launchUncertain: a confirmed record (a supervisor started and may
+	// still be alive), or a record that could not be read or fenced.
+	launchUncertain
+)
+
+// fenceLaunch is crash recovery's step for a job whose starter is gone
+// (start.lock is free and held by the recovery): a pending record becomes
+// revoked so a late supervisor cannot confirm it.
+func fenceLaunch(store *Store, id string) launchFence {
+	dir, err := Dir(store.Root, id)
+	if err != nil {
+		return launchUncertain
+	}
+	if _, err := os.Lstat(filepath.Join(dir, launchFileName)); os.IsNotExist(err) {
+		return launchNone
+	}
+	clock := store.clock()
+	fence := launchUncertain
+	until := clock.Monotonic() + int64(launchRevokeWait)
+	_ = withLaunchLock(dir, clock, until, func() error {
+		rec, ok, err := readLaunch(dir)
+		if err != nil {
+			return nil
+		}
+		if !ok {
+			fence = launchNone
+			return nil
+		}
+		switch rec.State {
+		case launchPending:
+			rec.State = launchRevoked
+			if writeLaunch(dir, rec) == nil {
+				fence = launchFenced
+			}
+		case launchRevoked:
+			fence = launchFenced
+		}
+		return nil
+	})
+	return fence
+}
+
+// ConfirmLaunch is the supervisor's side, run after the job was located and
+// the supervisor built, right before Supervisor.Run. It confirms a pending
+// record only when its job, its store, its workspace (HERDR_WORKSPACE_ID)
+// and its root pane (HERDR_PANE_ID) are this process's and its starter
+// still holds start.lock (a free lock is a starter that died: the record is
+// stale); the confirmation records this process id. It never refuses: in
+// every other case it changes nothing and confirmed is false, and reason
+// says why for the job's friction log when a launch was waiting on it
+// (empty when there was nothing to confirm).
+func ConfirmLaunch(store *Store, id string, env platform.Env) (confirmed bool, reason string) {
+	dir, err := Dir(store.Root, id)
+	if err != nil {
+		return false, ""
+	}
+	if _, err := os.Lstat(filepath.Join(dir, launchFileName)); os.IsNotExist(err) {
+		return false, ""
+	}
+	clock := store.clock()
+	until := clock.Monotonic() + int64(launchRevokeWait)
+	err = withLaunchLock(dir, clock, until, func() error {
+		rec, ok, readErr := readLaunch(dir)
+		if readErr != nil {
+			reason = "the launch record is unreadable"
+			return nil
+		}
+		if !ok || rec.State != launchPending {
+			return nil
+		}
+		if rec.ID != id || rec.Store != filepath.Clean(store.Root) {
+			reason = "the launch belongs to another job or store"
+			return nil
+		}
+		if rec.Workspace != env.Get("HERDR_WORKSPACE_ID") || rec.Pane != env.Get("HERDR_PANE_ID") {
+			reason = "the launch belongs to another workspace or pane"
+			return nil
+		}
+		lock, lockErr := tryStartLock(dir)
+		if lockErr == nil {
+			closeStartLock(lock)
+			reason = "the launch is stale: its starter is gone"
+			return nil
+		}
+		if !errors.Is(lockErr, errStartLockHeld) {
+			reason = "the start lock is unreadable"
+			return nil
+		}
+		rec.State = launchConfirmed
+		rec.PID = os.Getpid()
+		rec.Confirmed = clock.Now().UTC().Format(time.RFC3339Nano)
+		if writeErr := writeLaunch(dir, rec); writeErr != nil {
+			reason = "the confirmation could not be written"
+			return nil
+		}
+		confirmed = true
+		return nil
+	})
+	if err != nil {
+		return false, "the launch lock stayed busy"
+	}
+	return confirmed, reason
+}
+
+// awaitLaunch waits for the supervisor's confirmation of rec until the
+// monotonic deadline (wait from now, read on clock), polling every poll,
+// then ends the wait with revokeLaunch. Every lock try in the wait is
+// bounded by the same deadline and the revoke by launchRevokeWait, so the
+// step ends within wait plus launchRevokeWait plus one poll, whatever
+// another process does with launch.lock. No goroutine is left behind.
+// accepted is true only for rec's own confirmed record; err is a launch
+// that could not be fenced. The starter calls it with defaultLaunchWait,
+// defaultLaunchPoll and the store clock.
+func awaitLaunch(store *Store, clock Clock, rec launchRecord, wait, poll time.Duration) (bool, error) {
+	dir, err := Dir(store.Root, rec.ID)
+	if err != nil {
+		return false, err
+	}
+	deadline := clock.Monotonic() + int64(wait)
+	for {
+		outcome := checkLaunch(dir, clock, deadline, rec)
+		if outcome == launchAccepted {
+			return true, nil
+		}
+		if outcome == launchLost || clock.Monotonic() >= deadline {
+			break
+		}
+		clock.Sleep(poll)
+	}
+	return revokeLaunch(store, clock, rec)
+}

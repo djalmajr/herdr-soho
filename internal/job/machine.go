@@ -22,6 +22,11 @@ type Machine struct {
 	TimeoutMin        int
 	BlockedTimeoutMin int
 	WakeCmd           string
+
+	// reposRootHome records that ReposRoot was expanded from the home
+	// directory (a leading ~ or %USERPROFILE%): the job start then hands
+	// the home variable to the supervisor so it resolves the same root.
+	reposRootHome bool
 }
 
 // Machine defaults: the user configuration file's values win, and a missing
@@ -85,6 +90,7 @@ func LoadMachine(osName string, env platform.Env) (Machine, error) {
 		TimeoutMin:        timeout,
 		BlockedTimeoutMin: blockedTimeout,
 		WakeCmd:           values["job_wake_cmd"],
+		reposRootHome:     reposRootFromHome(values["job_repos_root"]),
 	}, nil
 }
 
@@ -186,6 +192,16 @@ func expandReposRoot(osName string, env platform.Env, raw string) string {
 		return joinHome(osName, env, rest)
 	}
 	return raw
+}
+
+// reposRootFromHome reports whether expandReposRoot expands raw from the
+// home directory: the same prefixes it handles, empty being the ~ default.
+func reposRootFromHome(raw string) bool {
+	if raw == "" || raw == "~" || strings.HasPrefix(raw, "~/") || strings.HasPrefix(raw, `~\`) {
+		return true
+	}
+	_, ok := cutUserProfile(raw)
+	return ok
 }
 
 func cutUserProfile(raw string) (string, bool) {

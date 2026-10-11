@@ -31,6 +31,11 @@ type fakeHerdr struct {
 	RunErr            error
 	Workspaces        []herdrWorkspace
 	ListErr           error
+	// OnRun, when set, runs after a Run is recorded, before its result is
+	// returned: start tests use it to stand in for the launched supervisor
+	// (an implementation-generated confirmation, never evidence of a real
+	// Herdr pane).
+	OnRun func(paneID string, argv []string)
 
 	// Recorded calls.
 	CreateCalls []fakeHerdrCreateCall
@@ -70,5 +75,8 @@ func (f *fakeHerdr) List() ([]herdrWorkspace, error) {
 
 func (f *fakeHerdr) Run(paneID string, argv []string) error {
 	f.RunCalls = append(f.RunCalls, fakeHerdrRunCall{PaneID: paneID, Argv: append([]string(nil), argv...)})
+	if f.OnRun != nil {
+		f.OnRun(paneID, argv)
+	}
 	return f.RunErr
 }

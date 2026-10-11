@@ -803,6 +803,13 @@ func jobSupervise(args []string, env platform.Env) int {
 	if machine.WakeCmd != "" {
 		sup.Wake = &job.WakeHook{Cmd: machine.WakeCmd, JobID: id, Env: env, Friction: friction}
 	}
+	// The private startup confirmation the job start waits for, right
+	// before the supervisor runs. It never refuses: a launch this process
+	// cannot confirm leaves the supervisor running as before, and the
+	// reason goes to the job friction log.
+	if confirmed, reason := job.ConfirmLaunch(store, id, env); !confirmed && reason != "" {
+		friction("job: the supervisor did not confirm the launch: " + reason)
+	}
 	exit, runErr := sup.Run()
 	if runErr != nil {
 		friction("job: the job supervisor stopped with an error")
