@@ -561,7 +561,7 @@ func TestSuperviseCollabUnreadableRecordsOwnedOnly(t *testing.T) {
 		herdr := collabSup(t, store, sup)
 		ws := collabWorkspace(t, jobDir)
 		root := collabJobDir(t, store)
-		writeCollabRecord(t, ws, ownedID, `{"version":2,"id":"`+ownedID+`","workspace":"w1","root":"`+root+`"}`)
+		writeCollabRecord(t, ws, ownedID, `{"version":2,"id":"`+ownedID+`","workspace":"w1","root":`+quoteJSON(root)+`}`)
 		team.rosterRows = collabRoster("impl-1", "rev-1")
 		report := writeOrchestratorReport(t, "# report\n\n- [done] item\n")
 		team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}

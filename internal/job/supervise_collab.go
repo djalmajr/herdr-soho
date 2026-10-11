@@ -556,10 +556,12 @@ var (
 	evidenceRootOpenedHook      func()
 )
 
-// openEvidenceRoot opens the root as an os.Root bound to a real directory:
-// the trusted base is opened (its own symlinks resolve), then each
-// appended component is opened through the parent's handle, which refuses
-// a component that escapes the parent, and the component is accepted only
+// openEvidenceRoot opens the root as an os.Root bound to a real directory,
+// never blocking on the way (openEvidenceBase, openEvidenceComponent: a
+// FIFO or any other non-directory at the base or at a component is
+// refused at once): the trusted base is opened (its own symlinks resolve),
+// then each appended component is opened through the parent's handle,
+// which refuses a component that escapes the parent, and it is accepted only
 // when the parent's Lstat of its name shows a real directory (not a
 // symlink) that is the same file as the handle just opened. A component
 // swapped before the open is refused by the escape check or the Lstat; a
@@ -569,7 +571,7 @@ func openEvidenceRoot(r collabEvidenceRoot) (*os.Root, error) {
 	if r.base == "" {
 		return nil, errEvidenceOutside
 	}
-	cur, err := os.OpenRoot(r.base)
+	cur, err := openEvidenceBase(r.base)
 	if err != nil {
 		return nil, err
 	}
@@ -577,7 +579,7 @@ func openEvidenceRoot(r collabEvidenceRoot) (*os.Root, error) {
 		return cur, nil
 	}
 	for _, name := range strings.Split(filepath.ToSlash(r.suffix), "/") {
-		next, err := cur.OpenRoot(name)
+		next, err := openEvidenceComponent(cur, name)
 		if err != nil {
 			_ = cur.Close()
 			return nil, err
@@ -604,7 +606,8 @@ func openEvidenceRoot(r collabEvidenceRoot) (*os.Root, error) {
 // the root is opened bound to a real directory (openEvidenceRoot), the
 // file is opened through that handle with the non-blocking read mode (a
 // FIFO can never hold the read) — the handle refuses a symlink that
-// escapes the root, and a symlink resolving inside the root still stands —
+// escapes the root and any absolute symlink, and a relative symlink
+// resolving inside the root still stands —
 // and the opened file must be a regular file of at most maxEvidenceBytes
 // bytes, checked on the opened handle, with the hash computed through a
 // limit reader that refuses a longer read. Every refusal — a missing,

@@ -908,7 +908,7 @@ func TestSuperviseCollabUnreadableUnavailable(t *testing.T) {
 	// The owned unreadable record: the job's workspace and root stand in
 	// the raw claim; one invalid field (the version) keeps it unreadable.
 	ownedID := "c-00000000000001ee"
-	writeCollabRecord(t, ws, ownedID, `{"version":2,"id":"`+ownedID+`","workspace":"w1","root":"`+collabJobDir(t, store)+`"}`)
+	writeCollabRecord(t, ws, ownedID, `{"version":2,"id":"`+ownedID+`","workspace":"w1","root":`+quoteJSON(collabJobDir(t, store))+`}`)
 	report := writeOrchestratorReport(t, "# report\n\n- [done] item\n")
 	team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}
 	exit, err := sup.Run()
@@ -2147,4 +2147,14 @@ func TestSuperviseCollabHostileParticipantReportRejected(t *testing.T) {
 	if len(friction2) != 0 {
 		t.Fatalf("friction = %v, want none", friction2)
 	}
+}
+
+// quoteJSON is s as a JSON string literal: a hand-written record must
+// escape a path (a Windows path holds backslashes).
+func quoteJSON(s string) string {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
 }

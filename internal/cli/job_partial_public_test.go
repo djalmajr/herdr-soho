@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -168,7 +169,18 @@ func partialPublicFix(t *testing.T, withCollab bool) (*jobFix, string, string) {
 		t.Fatal(err)
 	}
 	herdrBin := filepath.Join(f.root, "bin", "herdr")
-	if err := os.Symlink(exe, herdrBin); err != nil {
+	if runtime.GOOS == "windows" {
+		// Windows finds a program on PATH only with its extension, and a
+		// symbolic link needs a privilege the runner may lack: an
+		// independent byte copy named herdr.exe.
+		data, err := os.ReadFile(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(herdrBin+".exe", data, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.Symlink(exe, herdrBin); err != nil {
 		t.Fatal(err)
 	}
 	env := make(platform.Env, len(f.env)+2)

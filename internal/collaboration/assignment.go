@@ -185,12 +185,20 @@ func (s Store) ReadClaim(id string) (workspace, root string, err error) {
 
 // ListActive returns every active assignment in the store directory, with
 // the unreadable records: a per-record read or validation failure comes
-// back in unreadable, not as an error; a directory-level read error is err;
-// an absent directory is (nil, nil, nil). It never locks and never creates
+// back in unreadable, not as an error; a directory-level read error is err
+// (a path in the directory's place that is not a directory included); an
+// absent directory is (nil, nil, nil). It never locks and never creates
 // the directory, and it ignores entries that are not collaboration ids.
 func (s Store) ListActive() (active []Assignment, unreadable []UnreadableAssignment, err error) {
 	entries, err := os.ReadDir(s.directory())
 	if errors.Is(err, os.ErrNotExist) {
+		// Only a path that is really absent is "no collaborations": some
+		// systems (Windows) report a regular file in the directory's place
+		// as not found, and that is a directory-level failure, never an
+		// empty store.
+		if _, lerr := os.Lstat(s.directory()); lerr == nil {
+			return nil, nil, errors.New("collaboration directory is not a directory")
+		}
 		return nil, nil, nil
 	}
 	if err != nil {

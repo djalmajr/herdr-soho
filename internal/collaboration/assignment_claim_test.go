@@ -1,6 +1,7 @@
 package collaboration
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,7 @@ func TestReadClaim(t *testing.T) {
 	t.Run("an invalid field keeps the claim readable", func(t *testing.T) {
 		// The full read refuses the record (version 2) but the raw claim
 		// still proves the ownership.
-		writeClaimRecord(t, s, "c-00000000000001ee", `{"version":2,"id":"c-00000000000001ee","workspace":"w1","root":"`+root+`"}`)
+		writeClaimRecord(t, s, "c-00000000000001ee", `{"version":2,"id":"c-00000000000001ee","workspace":"w1","root":`+quoteJSON(root)+`}`)
 		if _, err := s.Read("c-00000000000001ee"); err == nil {
 			t.Fatal("the full read accepted an invalid record")
 		}
@@ -66,7 +67,7 @@ func TestReadClaim(t *testing.T) {
 	})
 
 	t.Run("a padded record is refused even with a valid claim prefix", func(t *testing.T) {
-		body := `{"version":1,"workspace":"w1","root":"` + root + `"}` + strings.Repeat("a", 1<<20)
+		body := `{"version":1,"workspace":"w1","root":` + quoteJSON(root) + `}` + strings.Repeat("a", 1<<20)
 		writeClaimRecord(t, s, "c-00000000000004ff", body)
 		if _, _, err := s.ReadClaim("c-00000000000004ff"); err == nil {
 			t.Fatal("ReadClaim accepted a padded record")
@@ -84,4 +85,14 @@ func TestReadClaim(t *testing.T) {
 			t.Fatal("ReadClaim accepted a missing record")
 		}
 	})
+}
+
+// quoteJSON is s as a JSON string literal: a hand-written record must
+// escape a path (a Windows path holds backslashes).
+func quoteJSON(s string) string {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
 }
