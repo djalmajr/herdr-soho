@@ -69,7 +69,7 @@ func TestLaunchRecordMustBeAPrivateRegularFile(t *testing.T) {
 		holdStartLock(t, dir)
 		path := filepath.Join(dir, launchFileName)
 		data, _ := os.ReadFile(path)
-		padded := append(bytes.TrimRight(data, "\n"), []byte(strings.Repeat(" ", maxLaunchBytes))...)
+		padded := append(bytes.TrimRight(data, "\n"), []byte(strings.Repeat(" ", maxLaunchRecordBytes))...)
 		if err := os.WriteFile(path, padded, 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +167,7 @@ func TestConfirmLaunchStartLockKinds(t *testing.T) {
 		if err := os.Mkdir(filepath.Join(dir, "start.lock"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if confirmed, reason := ConfirmLaunch(store, "job-1", env); confirmed || reason != "the start lock is unreadable" {
+		if confirmed, reason := ConfirmLaunch(store, "job-1", env); confirmed || reason != "the start lock is not a private regular file" {
 			t.Fatalf("confirmed=%v reason=%q", confirmed, reason)
 		}
 		if rec := recordState(t, dir); rec.State != launchPending {

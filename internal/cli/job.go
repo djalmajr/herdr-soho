@@ -76,7 +76,7 @@ const jobWaitBoundMS = 600000
 // start (without --dry-run) records the job, prepares the checkout, opens
 // the Herdr workspace and launches the supervisor; supervise runs the
 // supervisor inside the job's workspace; ack, close and note change state.
-func cmdJob(args []string, env platform.Env, cwd string) int {
+func cmdJob(args []string, env platform.Env, cwd string, launch job.LaunchLocators) int {
 	if len(args) == 0 {
 		platform.Die("usage: job <status|wait|events|collect|list> --id <id> [--flags]", 2)
 	}
@@ -113,7 +113,7 @@ func cmdJob(args []string, env platform.Env, cwd string) int {
 	case "checkpoint":
 		return jobCheckpoint(rest, env)
 	case "supervise":
-		return jobSupervise(rest, env)
+		return jobSupervise(rest, env, launch)
 	default:
 		// Every subcommand in the flag spec has a case above; the spec
 		// check already refused the unknown ones.
@@ -219,9 +219,12 @@ func jobSinceValue(sub string, vals map[string]string) int {
 }
 
 // allJobStores opens a job store for every checkout <job_repos_root>/*/* on
-// this machine, resolving each checkout's state root read-only.
-func allJobStores(env platform.Env) ([]*job.Store, error) {
-	machine, err := job.LoadMachine(platform.Current(), env)
+// this machine, resolving each checkout's state root read-only. sel is the
+// job supervisor's explicit user configuration selection (zero everywhere
+// else): it chooses only the user file and the home job_repos_root expands
+// from; env stays the environment of every git call the lookup makes.
+func allJobStores(env platform.Env, sel core.UserSelection) ([]*job.Store, error) {
+	machine, err := job.LoadMachineFor(platform.Current(), env, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +249,7 @@ func allJobStores(env platform.Env) ([]*job.Store, error) {
 				continue
 			}
 			checkout := filepath.Join(machine.ReposRoot, org.Name(), repo.Name())
-			cfg := core.LoadConfig(env, checkout)
+			cfg := core.LoadConfigFor(env, checkout, sel)
 			stores = append(stores, job.Open(core.StateRootPath(&cfg, env, checkout)))
 		}
 	}
@@ -256,11 +259,11 @@ func allJobStores(env platform.Env) ([]*job.Store, error) {
 // locateJob resolves the store that holds jobs/<id>/state.json across every
 // checkout. None holds it and the error is nil (the caller prints the
 // not_found line and exits 3); more than one is exit 2.
-func locateJob(env platform.Env, id string) (*job.Store, error) {
+func locateJob(env platform.Env, id string, sel core.UserSelection) (*job.Store, error) {
 	if _, err := job.Dir("", id); err != nil {
 		return nil, err
 	}
-	stores, err := allJobStores(env)
+	stores, err := allJobStores(env, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +350,7 @@ func printJobStatusLine(snap job.Snapshot) {
 // jobSnapshotOrNotFound locates the job and returns its snapshot; an unknown
 // id prints the contract's not_found line and returns 3.
 func jobSnapshotOrNotFound(sub, id string, env platform.Env) (job.Snapshot, int) {
-	store, err := locateJob(env, id)
+	store, err := locateJob(env, id, core.UserSelection{})
 	if err != nil {
 		dieJob(sub, err)
 		return job.Snapshot{}, 0
@@ -371,7 +374,7 @@ func jobSnapshotOrNotFound(sub, id string, env platform.Env) (job.Snapshot, int)
 // jobStoreOrNotFound locates the job store; an unknown id prints the
 // not_found line and returns (nil, 3).
 func jobStoreOrNotFound(sub, id string, env platform.Env) (*job.Store, int) {
-	store, err := locateJob(env, id)
+	store, err := locateJob(env, id, core.UserSelection{})
 	if err != nil {
 		dieJob(sub, err)
 		return nil, 0
@@ -769,7 +772,7 @@ func jobNote(args []string, env platform.Env) int {
 // executable as the team command runner and the job friction file as its
 // friction log, prints the job's status line and exits with the outcome
 // code.
-func jobSupervise(args []string, env platform.Env) int {
+func jobSupervise(args []string, env platform.Env, launch job.LaunchLocators) int {
 	vals, _, pos := parseJobFlags("supervise", args)
 	if len(pos) > 1 {
 		platform.Die("job supervise: unexpected argument '"+pos[1]+"'", 2)
@@ -778,7 +781,16 @@ func jobSupervise(args []string, env platform.Env) int {
 	if env.Get("HERDR_ENV") != "1" {
 		platform.Die("job supervise: run it inside the job's Herdr workspace", 2)
 	}
-	store, err := locateJob(env, id)
+	// The job start's private launch context (locator.go): absent, the
+	// supervisor resolves everything from its own environment as before;
+	// present but unusable, it stops here without locating any store, so
+	// it never runs a job found through another selection; usable, every
+	// user-configuration read below comes from that selection only.
+	if launch.Present && launch.Selection.IsZero() {
+		platform.Die("job supervise: the private launch context is unusable", 2)
+	}
+	sel := launch.Selection
+	store, err := locateJob(env, id, sel)
 	if err != nil {
 		dieJob("supervise", err)
 	}
@@ -791,24 +803,51 @@ func jobSupervise(args []string, env platform.Env) int {
 	friction := func(message string) {
 		core.Warn(message, filepath.Join(store.Root, "jobs", id, "friction.log"))
 	}
-	sup, err := job.NewSupervisor(store, id, env, platform.LauncherPath(env), friction)
+	launcher := platform.LauncherPath(env)
+	sup, err := job.NewSupervisor(store, id, env, launcher, friction)
 	if err != nil {
 		dieJob("supervise", err)
 	}
 	// The machine's wake hook: an empty job_wake_cmd leaves Wake nil.
-	machine, err := job.LoadMachine(platform.Current(), env)
+	machine, err := job.LoadMachineFor(platform.Current(), env, sel)
 	if err != nil {
 		dieJob("supervise", err)
 	}
 	if machine.WakeCmd != "" {
 		sup.Wake = &job.WakeHook{Cmd: machine.WakeCmd, JobID: id, Env: env, Friction: friction}
 	}
-	// The private startup confirmation the job start waits for, right
-	// before the supervisor runs. It never refuses: a launch this process
-	// cannot confirm leaves the supervisor running as before, and the
-	// reason goes to the job friction log.
-	if confirmed, reason := job.ConfirmLaunch(store, id, env); !confirmed && reason != "" {
-		friction("job: the supervisor did not confirm the launch: " + reason)
+	if sel.IsZero() {
+		// Without the private launch context: the private startup
+		// confirmation the job start waits for, right before the
+		// supervisor runs. It never refuses: a launch this process cannot
+		// confirm leaves the supervisor running as before, and the reason
+		// goes to the job friction log.
+		if confirmed, reason := job.ConfirmLaunch(store, id, env); !confirmed && reason != "" {
+			friction("job: the supervisor did not confirm the launch: " + reason)
+		}
+	} else {
+		// With it, the supervisor runs only bound to its launch
+		// (internal/job/managed.go): it confirmed the pending launch, or
+		// took over a confirmed one whose supervisor is proven gone.
+		// Unbound, it does nothing: no lane, worker, git, wake or
+		// workspace step; it prints the job status and exits 4. The team
+		// commands prove their parent is this executable, so a launcher
+		// that is another file (HERDR_SOHO_BIN) is refused before binding:
+		// they would otherwise run with the server's configuration.
+		bound, reason := false, "the team command executable is not this supervisor's"
+		if job.SameExecutable(launcher) {
+			bound, reason = job.BindLaunch(store, id, env, sel)
+		}
+		if !bound {
+			friction("job: the supervisor is not bound to its launch: " + reason)
+			snap, err := store.Snapshot(id)
+			if err != nil {
+				dieJob("supervise", err)
+			}
+			printJobStatusLine(snap)
+			return job.ExitHerdr
+		}
+		sup.UseLaunchSelection(sel)
 	}
 	exit, runErr := sup.Run()
 	if runErr != nil {
@@ -1068,7 +1107,7 @@ func jobStart(args []string, env platform.Env, cwd string) int {
 		rawFriction := func(message string) {
 			core.RecordFrictionError(message, job.ExitHerdr, filepath.Join(stateRootOf(checkout), "jobs", id, "friction.log"))
 		}
-		store, err := locateJob(env, id)
+		store, err := locateJob(env, id, core.UserSelection{})
 		if err != nil {
 			dieJob("start", err)
 		}
@@ -1165,7 +1204,7 @@ func jobList(args []string, env platform.Env) int {
 		}
 		filter = raw
 	}
-	stores, err := allJobStores(env)
+	stores, err := allJobStores(env, core.UserSelection{})
 	if err != nil {
 		dieJob("list", err)
 	}

@@ -22,6 +22,7 @@ func TestMain(m *testing.M) {
 	// this calm default; production measurements are unchanged.
 	platform.DiskFree = func(string) (int64, int64, bool) { return 50, 100, true }
 	platform.SwapUsage = func(platform.Env) (int64, int64, bool) { return 0, 100, true }
+	managedCLIHelperMain()
 	fakecli.RunTests(m)
 }
 

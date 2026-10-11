@@ -1038,7 +1038,7 @@ func newJobStartEE(t *testing.T) *jobStartEE {
 	// hands the root pane the start's user-configuration locator.
 	herdrRules := []fakecli.Rule{
 		{Argv: []string{"workspace", "list"}, Stdout: `{"result":{"workspaces":[]}}`},
-		{Argv: []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--env", "XDG_CONFIG_HOME=" + jobStartXDGBase(f.env), "--no-focus"},
+		{Argv: []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--env", "_SOHO_LAUNCH_CONFIG_BASE=" + jobStartXDGBase(f.env), "--no-focus"},
 			Stdout: `{"result":{"workspace_id":"w9","root_pane":{"pane_id":"w9:p1"}}}`},
 		{Argv: []string{"pane", "run", "w9:p1"}, ArgvPrefix: true},
 	}
@@ -1152,7 +1152,7 @@ func TestJobStartStartsTheJob(t *testing.T) {
 	if want := []string{"workspace", "list"}; !reflect.DeepEqual(calls[1].Argv, want) {
 		t.Fatalf("call 1 = %v", calls[1].Argv)
 	}
-	if want := []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--env", "XDG_CONFIG_HOME=" + jobStartXDGBase(ee.f.env), "--no-focus"}; !reflect.DeepEqual(calls[2].Argv, want) {
+	if want := []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--env", "_SOHO_LAUNCH_CONFIG_BASE=" + jobStartXDGBase(ee.f.env), "--no-focus"}; !reflect.DeepEqual(calls[2].Argv, want) {
 		t.Fatalf("call 2 = %v", calls[2].Argv)
 	}
 	if want := []string{"pane", "run", "w9:p1", ee.selfExe, "job", "supervise", "--id", "job-1"}; !reflect.DeepEqual(calls[3].Argv, want) {

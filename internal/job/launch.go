@@ -5,11 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
@@ -42,11 +42,19 @@ import (
 // continues exactly as before this record existed.
 //
 // Files: launch.json and launch.lock are used only when they are regular
-// files of at most maxLaunchBytes, never through a symlink, and the opened
-// handle must be the file the path names (os.SameFile against an Lstat), so
-// a FIFO, a device, a directory, a symlink or an oversized file at either
-// path cannot block a step or redirect it outside the job directory; such
-// a file is treated like an unreadable record.
+// files of at most maxLaunchRecordBytes and maxLaunchBytes, and the opened
+// handle must be the file the path names (os.SameFile against an Lstat),
+// so a FIFO, a device, a directory, a symlink or an oversized file at
+// either path cannot block a step or redirect it outside the job
+// directory; such a file is treated
+// like an unreadable record. launch.json and start.lock are opened without
+// following links or blocking (openNoFollow: the no-follow and
+// non-blocking flags on unix systems, the reparse-point open on Windows,
+// a refusal elsewhere). launch.lock, which the open may create, gets the
+// no-follow and non-blocking flags on unix systems only; elsewhere the
+// Lstat pre-check and the post-open regular and SameFile checks apply, and
+// an entry swapped after the Lstat may be opened (followed) before the
+// identity check refuses it, not proven on Windows.
 //
 // Threat model: both files are private to the job directory and protected
 // only by their 0600 mode and the directory's owner. Any process of the same
@@ -92,15 +100,66 @@ const (
 	launchRevokeWait = 5 * time.Second
 )
 
-// maxLaunchBytes caps launch.json and launch.lock (the record is a few
-// hundred bytes; the lock file is empty).
+// maxLaunchBytes caps launch.lock and start.lock (both empty).
 const maxLaunchBytes = 4096
+
+// The record's own budget. Every string field of launchRecord has a cap,
+// checked by writeLaunch, and maxLaunchRecordBytes, the bounded read of
+// launch.json, is computed from those caps, so a record with every field
+// at its cap is still readable:
+//
+//   - the two locator fields (ConfigBase, Home) at maxLocatorBytes, as
+//     validated on both sides (locator.go);
+//   - the two system path fields (Store, Exe) at launchSystemPathMax, the
+//     longest path an operating system here hands out (32768 UTF-16 units
+//     on Windows, at most 3 UTF-8 bytes each; unix paths are shorter);
+//   - the eight token fields (ID, Workspace, Pane, Nonce, Issued, State,
+//     Confirmed, Started) at launchTokenMax (an id is at most 64 bytes, a
+//     workspace id 128, a nonce 32, a timestamp or start identity well
+//     under 100);
+//   - json.Marshal writes at most launchJSONEscape bytes per input byte
+//     (\u00XX for a control byte, \u003c for <, \ufffd for an invalid
+//     byte);
+//   - launchRecordOverhead covers the 14 keys, quotes, separators, the two
+//     integers and the newline (measured at 199 bytes).
+const (
+	launchSystemPathMax  = 3 * 32768
+	launchTokenMax       = 256
+	launchJSONEscape     = 6
+	launchRecordOverhead = 256
+	maxLaunchRecordBytes = launchJSONEscape*(2*maxLocatorBytes+2*launchSystemPathMax+8*launchTokenMax) + launchRecordOverhead
+)
+
+// errLaunchRecordTooLarge is a record with a field over its cap: it is
+// never written.
+var errLaunchRecordTooLarge = errors.New("job: launch record field over its cap")
+
+// launchRecordFits reports whether every string field of rec is within its
+// cap (see maxLaunchRecordBytes).
+func launchRecordFits(rec launchRecord) bool {
+	for _, field := range []string{rec.ConfigBase, rec.Home} {
+		if len(field) > maxLocatorBytes {
+			return false
+		}
+	}
+	for _, field := range []string{rec.Store, rec.Exe} {
+		if len(field) > launchSystemPathMax {
+			return false
+		}
+	}
+	for _, field := range []string{rec.ID, rec.Workspace, rec.Pane, rec.Nonce, rec.Issued, rec.State, rec.Confirmed, rec.Started} {
+		if len(field) > launchTokenMax {
+			return false
+		}
+	}
+	return true
+}
 
 // errLaunchLockBusy is a launch.lock that stayed held until the deadline.
 var errLaunchLockBusy = errors.New("job: the launch lock stayed busy")
 
-// errLaunchFile is a launch.json or launch.lock that is not a private
-// regular file of at most maxLaunchBytes at its own path.
+// errLaunchFile is a launch.json, launch.lock or start.lock that is not a
+// private regular file within its size cap at its own path.
 var errLaunchFile = errors.New("job: launch file is not a private regular file")
 
 // openLaunchLock opens <dir>/launch.lock, creating it 0600, only as a
@@ -146,6 +205,16 @@ type launchRecord struct {
 	State     string `json:"state"`
 	PID       int    `json:"pid,omitempty"`
 	Confirmed string `json:"confirmed,omitempty"`
+	// Started and Exe are the bound supervisor's process start identity
+	// (platform.ProcStartIdentity) and kernel executable path
+	// (platform.ProcExec), and ConfigBase and Home the private user
+	// configuration selection it consumed (locator.go): the binding the
+	// team commands it runs check (managed.go). All four stay in this
+	// private file only.
+	Started    string `json:"started,omitempty"`
+	Exe        string `json:"exe,omitempty"`
+	ConfigBase string `json:"config_base,omitempty"`
+	Home       string `json:"home,omitempty"`
 }
 
 // sameLaunch reports whether got is the launch want describes: the same
@@ -196,34 +265,14 @@ func withLaunchLock(dir string, clock Clock, until int64, fn func() error) error
 }
 
 // readLaunch reads the record in dir; ok is false when the file is absent.
-// The record is read only as a regular file of at most maxLaunchBytes that
-// is the file the path names (an Lstat, a non-blocking regular open, and
-// os.SameFile between them), so a symlink, a FIFO or an oversized file is
-// an error like a malformed one.
+// The record is read only through readPrivateFile (a regular file of at
+// most maxLaunchRecordBytes that is the file the path names, opened without
+// following links or blocking), so a symlink, a FIFO or an oversized file
+// is an error like a malformed one.
 func readLaunch(dir string) (launchRecord, bool, error) {
-	path := filepath.Join(dir, launchFileName)
-	pre, err := os.Lstat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return launchRecord{}, false, nil
-		}
+	data, ok, err := readPrivateFile(filepath.Join(dir, launchFileName), maxLaunchRecordBytes)
+	if err != nil || !ok {
 		return launchRecord{}, false, err
-	}
-	if !pre.Mode().IsRegular() || pre.Size() > maxLaunchBytes {
-		return launchRecord{}, false, errLaunchFile
-	}
-	f, err := platform.OpenRegularFile(path)
-	if err != nil {
-		return launchRecord{}, false, errLaunchFile
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil || !os.SameFile(pre, info) {
-		return launchRecord{}, false, errLaunchFile
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxLaunchBytes+1))
-	if err != nil || len(data) > maxLaunchBytes {
-		return launchRecord{}, false, errLaunchFile
 	}
 	var rec launchRecord
 	if err := json.Unmarshal(data, &rec); err != nil || rec.V != launchVersion {
@@ -232,10 +281,18 @@ func readLaunch(dir string) (launchRecord, bool, error) {
 	return rec, true, nil
 }
 
+// writeLaunch writes rec atomically (0600) only when every field is
+// within its cap, so what it writes readLaunch can read back.
 func writeLaunch(dir string, rec launchRecord) error {
+	if !launchRecordFits(rec) {
+		return errLaunchRecordTooLarge
+	}
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return err
+	}
+	if len(data)+1 > maxLaunchRecordBytes {
+		return errLaunchRecordTooLarge
 	}
 	return writeAtomic0600(filepath.Join(dir, launchFileName), append(data, '\n'))
 }
@@ -354,7 +411,10 @@ const (
 
 // fenceLaunch is crash recovery's step for a job whose starter is gone
 // (start.lock is free and held by the recovery): a pending record becomes
-// revoked so a late supervisor cannot confirm it.
+// revoked in the fence's critical section under launch.lock, so no
+// confirmation after that section is accepted; when the fence cannot take
+// the lock, read or write the record, the launch stays uncertain and a
+// late confirmation remains possible.
 func fenceLaunch(store *Store, id string) launchFence {
 	dir, err := Dir(store.Root, id)
 	if err != nil {
@@ -399,6 +459,19 @@ func fenceLaunch(store *Store, id string) launchFence {
 // says why for the job's friction log when a launch was waiting on it
 // (empty when there was nothing to confirm).
 func ConfirmLaunch(store *Store, id string, env platform.Env) (confirmed bool, reason string) {
+	return confirmLaunch(store, id, env, launchBinding{})
+}
+
+// launchBinding is what a confirmation records besides the PID: the
+// supervisor's own process identity and the selection it consumed (empty
+// for a supervisor without the private launch context).
+type launchBinding struct {
+	Started string
+	Exe     string
+	Sel     core.UserSelection
+}
+
+func confirmLaunch(store *Store, id string, env platform.Env, bind launchBinding) (confirmed bool, reason string) {
 	dir, err := Dir(store.Root, id)
 	if err != nil {
 		return false, ""
@@ -428,28 +501,38 @@ func ConfirmLaunch(store *Store, id string, env platform.Env) (confirmed bool, r
 		// The starter holds start.lock for its whole wait. An absent lock
 		// file is a starter that never ran or is gone; a lock file that is
 		// not a regular file is not tried at all.
-		startInfo, statErr := os.Lstat(filepath.Join(dir, "start.lock"))
+		startPath := filepath.Join(dir, "start.lock")
+		startInfo, statErr := os.Lstat(startPath)
 		if os.IsNotExist(statErr) {
 			reason = "the launch is stale: its starter is gone"
 			return nil
 		}
-		if statErr != nil || !startInfo.Mode().IsRegular() {
+		if statErr != nil {
 			reason = "the start lock is unreadable"
 			return nil
 		}
-		lock, lockErr := tryStartLock(dir)
-		if lockErr == nil {
-			closeStartLock(lock)
+		if !startInfo.Mode().IsRegular() || startInfo.Size() > maxLaunchBytes {
+			reason = "the start lock is not a private regular file"
+			return nil
+		}
+		held, lockErr := probeStartLock(startPath, startInfo)
+		if lockErr != nil {
+			if errors.Is(lockErr, errLaunchFile) {
+				reason = "the start lock is not a private regular file"
+			} else {
+				reason = "the start lock is unreadable"
+			}
+			return nil
+		}
+		if !held {
 			reason = "the launch is stale: its starter is gone"
-			return nil
-		}
-		if !errors.Is(lockErr, errStartLockHeld) {
-			reason = "the start lock is unreadable"
 			return nil
 		}
 		rec.State = launchConfirmed
 		rec.PID = os.Getpid()
 		rec.Confirmed = clock.Now().UTC().Format(time.RFC3339Nano)
+		rec.Started, rec.Exe = bind.Started, bind.Exe
+		rec.ConfigBase, rec.Home = bind.Sel.Base, bind.Sel.Home
 		if writeErr := writeLaunch(dir, rec); writeErr != nil {
 			reason = "the confirmation could not be written"
 			return nil
@@ -458,7 +541,14 @@ func ConfirmLaunch(store *Store, id string, env platform.Env) (confirmed bool, r
 		return nil
 	})
 	if err != nil {
-		return false, "the launch lock stayed busy"
+		switch {
+		case errors.Is(err, errLaunchLockBusy):
+			return false, "the launch lock stayed busy"
+		case errors.Is(err, errLaunchFile):
+			return false, "the launch lock is not a private regular file"
+		default:
+			return false, "the launch lock is unreadable"
+		}
 	}
 	return confirmed, reason
 }

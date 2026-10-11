@@ -71,9 +71,14 @@ func TestStartConfirmedLaunchBothModes(t *testing.T) {
 				rec.Workspace != "w9" || rec.Pane != "w9:p1" || rec.PID != os.Getpid() || len(rec.Nonce) != 32 {
 				t.Fatalf("launch record = %+v", rec)
 			}
-			wantEnv := map[string]string{"XDG_CONFIG_HOME": filepath.Clean(f.env.Get("XDG_CONFIG_HOME"))}
+			wantEnv := map[string]string{launchConfigBaseVar: filepath.Clean(f.env.Get("XDG_CONFIG_HOME"))}
 			if !reflect.DeepEqual(fake.CreateCalls[0].Env, wantEnv) {
 				t.Fatalf("create env = %v, want %v", fake.CreateCalls[0].Env, wantEnv)
+			}
+			for _, key := range []string{"XDG_CONFIG_HOME", "HOME", "USERPROFILE"} {
+				if _, ok := fake.CreateCalls[0].Env[key]; ok {
+					t.Fatalf("create env carries the generic selector %q: %v", key, fake.CreateCalls[0].Env)
+				}
 			}
 		})
 	}
@@ -92,11 +97,16 @@ func TestStartForwardsHomeOnlyForAHomeRelativeReposRoot(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	want := map[string]string{
-		"XDG_CONFIG_HOME": filepath.Clean(f.env.Get("XDG_CONFIG_HOME")),
-		"HOME":            filepath.Clean(f.env.Get("HOME")),
+		launchConfigBaseVar: filepath.Clean(f.env.Get("XDG_CONFIG_HOME")),
+		launchHomeVar:       filepath.Clean(f.env.Get("HOME")),
 	}
 	if !reflect.DeepEqual(fake.CreateCalls[0].Env, want) {
 		t.Fatalf("create env = %v, want %v", fake.CreateCalls[0].Env, want)
+	}
+	for _, key := range []string{"XDG_CONFIG_HOME", "HOME", "USERPROFILE"} {
+		if _, ok := fake.CreateCalls[0].Env[key]; ok {
+			t.Fatalf("create env carries the generic selector %q: %v", key, fake.CreateCalls[0].Env)
+		}
 	}
 }
 

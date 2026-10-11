@@ -518,9 +518,14 @@ func TestStartSuccess(t *testing.T) {
 	}
 	// The root pane gets exactly the user-configuration locator of this
 	// start: the base of the selected user configuration, absolute.
-	wantEnv := map[string]string{"XDG_CONFIG_HOME": filepath.Dir(filepath.Dir(platform.UserConfigPath(platform.Current(), f.env)))}
+	wantEnv := map[string]string{launchConfigBaseVar: filepath.Dir(filepath.Dir(platform.UserConfigPath(platform.Current(), f.env)))}
 	if create := fake.CreateCalls[0]; create.Cwd != worktree || create.Label != "job-job-1" || !reflect.DeepEqual(create.Env, wantEnv) {
 		t.Fatalf("Create = %+v, want env %v", create, wantEnv)
+	}
+	for _, key := range []string{"XDG_CONFIG_HOME", "HOME", "USERPROFILE"} {
+		if _, ok := fake.CreateCalls[0].Env[key]; ok {
+			t.Fatalf("create env carries the generic selector %q: %v", key, fake.CreateCalls[0].Env)
+		}
 	}
 	// Events: accepted then preparing.
 	events, err := readEvents(filepath.Join(stateRoot, "jobs", "job-1"))

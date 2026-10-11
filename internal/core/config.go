@@ -39,6 +39,9 @@ type Config struct {
 	Order   []string
 	Sources []string
 	Layers  []ConfigLayer
+	// User is the explicit user configuration selection the config was
+	// loaded with (LoadConfigFor); zero for LoadConfig.
+	User UserSelection
 }
 
 // ConfigLayerPath names one file LoadConfig reads, with its source label.
@@ -60,10 +63,10 @@ func ConfigLayerPaths(ctx *Config, env platform.Env, cwd string) []ConfigLayerPa
 	return paths
 }
 
-func baseConfigLayerPaths(env platform.Env, cwd string) []ConfigLayerPath {
+func baseConfigLayerPaths(env platform.Env, cwd string, sel UserSelection) []ConfigLayerPath {
 	paths := []ConfigLayerPath{
 		{Source: "defaults", File: filepath.Join(platform.SkillDir(env), "config.defaults")},
-		{Source: "user", File: EffectiveConfigFile(platform.UserConfigPath(platform.Current(), env), LegacyUserConfigPath(platform.Current(), env))},
+		{Source: "user", File: EffectiveUserConfigFile(platform.Current(), env, sel)},
 	}
 	if file := ProjectConfigFileUsed(env, cwd); file != "" {
 		paths = append(paths, ConfigLayerPath{Source: "project", File: file})
@@ -121,11 +124,19 @@ func isJSWhitespace(r rune) bool {
 }
 
 func LoadConfig(env platform.Env, cwd string) Config {
+	return LoadConfigFor(env, cwd, UserSelection{})
+}
+
+// LoadConfigFor is LoadConfig with an explicit user configuration
+// selection: only the user layer's file comes from sel (UserConfigFiles);
+// every other layer, and every git or herdr call the load makes, uses env
+// unchanged.
+func LoadConfigFor(env platform.Env, cwd string, sel UserSelection) Config {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0, 4)}
-	for _, layer := range baseConfigLayerPaths(env, cwd) {
+	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0, 4), User: sel}
+	for _, layer := range baseConfigLayerPaths(env, cwd, sel) {
 		loadConfigFile(layer.File, layer.Source, &ctx)
 	}
 	if problem := projectConfigProblem(env, cwd); problem != nil {
@@ -791,8 +802,11 @@ func CmdConfig(ctx *Config, env platform.Env, cwd string) {
 		layers = " " + strings.Join(ctx.Sources, " ")
 	}
 	lines = append(lines, "\nlayers read:"+layers)
-	newUser := platform.UserConfigPath(platform.Current(), env)
-	oldUser := LegacyUserConfigPath(platform.Current(), env)
+	var userSel UserSelection
+	if ctx != nil {
+		userSel = ctx.User
+	}
+	newUser, oldUser := UserConfigFiles(platform.Current(), env, userSel)
 	userFile := EffectiveConfigFile(newUser, oldUser)
 	legacy := ""
 	if userFile == oldUser {

@@ -2,7 +2,9 @@ package job
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -48,8 +50,9 @@ func wantLocatorMap(t *testing.T, got map[string]string, want map[string]string)
 }
 
 // TestSupervisorLocator pins the supervisorLocatorEnv allowlist: exactly
-// XDG_CONFIG_HOME always, set to the base directory of the starter's own
-// selection, plus the home variable only when reposRootHome is true.
+// launchConfigBaseVar always, set to the base directory of the starter's
+// own selection, plus launchHomeVar only when reposRootHome is true, and
+// never a generic selector (XDG_CONFIG_HOME, HOME, USERPROFILE, APPDATA).
 func TestSupervisorLocator(t *testing.T) {
 	t.Run("POSIX default without XDG", func(t *testing.T) {
 		home := t.TempDir()
@@ -58,7 +61,7 @@ func TestSupervisorLocator(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantLocatorMap(t, got, map[string]string{"XDG_CONFIG_HOME": filepath.Join(home, ".config")})
+		wantLocatorMap(t, got, map[string]string{launchConfigBaseVar: filepath.Join(home, ".config")})
 	})
 
 	t.Run("POSIX home forwarded only when reposRootHome", func(t *testing.T) {
@@ -69,8 +72,8 @@ func TestSupervisorLocator(t *testing.T) {
 			t.Fatal(err)
 		}
 		wantLocatorMap(t, got, map[string]string{
-			"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
-			"HOME":            home,
+			launchConfigBaseVar: filepath.Join(home, ".config"),
+			launchHomeVar:       home,
 		})
 	})
 
@@ -81,7 +84,7 @@ func TestSupervisorLocator(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantLocatorMap(t, got, map[string]string{"XDG_CONFIG_HOME": xdg})
+		wantLocatorMap(t, got, map[string]string{launchConfigBaseVar: xdg})
 	})
 
 	t.Run("XDG relative normalized by absLocator", func(t *testing.T) {
@@ -92,7 +95,7 @@ func TestSupervisorLocator(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantLocatorMap(t, got, map[string]string{"XDG_CONFIG_HOME": filepath.Join(cwd, "rel cfg", "home")})
+		wantLocatorMap(t, got, map[string]string{launchConfigBaseVar: filepath.Join(cwd, "rel cfg", "home")})
 	})
 
 	t.Run("spaces preserved except cleaning", func(t *testing.T) {
@@ -101,7 +104,7 @@ func TestSupervisorLocator(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantLocatorMap(t, got, map[string]string{"XDG_CONFIG_HOME": "/cfg base/with spaces/extra"})
+		wantLocatorMap(t, got, map[string]string{launchConfigBaseVar: "/cfg base/with spaces/extra"})
 	})
 
 	t.Run("win32 XDG set", func(t *testing.T) {
@@ -110,16 +113,16 @@ func TestSupervisorLocator(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantLocatorMap(t, got, map[string]string{"XDG_CONFIG_HOME": `C:\xdg home`})
+		wantLocatorMap(t, got, map[string]string{launchConfigBaseVar: `C:\xdg home`})
 	})
 
-	t.Run("win32 APPDATA only pins XDG to the APPDATA value", func(t *testing.T) {
+	t.Run("win32 APPDATA only pins the base to the APPDATA value", func(t *testing.T) {
 		env := platform.Env{"APPDATA": `C:\app data`, "HOME": t.TempDir()}
 		got, err := supervisorLocatorEnv("win32", env, false, winAbs)
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantLocatorMap(t, got, map[string]string{"XDG_CONFIG_HOME": `C:\app data`})
+		wantLocatorMap(t, got, map[string]string{launchConfigBaseVar: `C:\app data`})
 	})
 
 	t.Run("win32 neither XDG nor APPDATA falls back to USERPROFILE AppData Roaming", func(t *testing.T) {
@@ -135,20 +138,20 @@ func TestSupervisorLocator(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantLocatorMap(t, got, map[string]string{"XDG_CONFIG_HOME": want})
+		wantLocatorMap(t, got, map[string]string{launchConfigBaseVar: want})
 		// Joined the way platform.UserConfigPath joins on the test host:
 		// the drive-letter segment keeps its backslash, the rest uses the
 		// host separator.
 		wantExplicit := `C:\users\me` + string(filepath.Separator) + "AppData" + string(filepath.Separator) + "Roaming"
-		if got["XDG_CONFIG_HOME"] != wantExplicit {
-			t.Fatalf("XDG_CONFIG_HOME = %q, want %q", got["XDG_CONFIG_HOME"], wantExplicit)
+		if got[launchConfigBaseVar] != wantExplicit {
+			t.Fatalf("launchConfigBaseVar = %q, want %q", got[launchConfigBaseVar], wantExplicit)
 		}
 	})
 
 	t.Run("win32 USERPROFILE forwarded only when reposRootHome", func(t *testing.T) {
 		env := platform.Env{"USERPROFILE": `C:\users\me`}
 		base := filepath.Dir(filepath.Dir(platform.UserConfigPath("win32", env)))
-		wantXDG, err := winAbs(base)
+		wantBase, err := winAbs(base)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,14 +160,14 @@ func TestSupervisorLocator(t *testing.T) {
 			t.Fatal(err)
 		}
 		wantLocatorMap(t, got, map[string]string{
-			"XDG_CONFIG_HOME": wantXDG,
-			"USERPROFILE":     `C:\users\me`,
+			launchConfigBaseVar: wantBase,
+			launchHomeVar:       `C:\users\me`,
 		})
 		gotOff, err := supervisorLocatorEnv("win32", env, false, winAbs)
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantLocatorMap(t, gotOff, map[string]string{"XDG_CONFIG_HOME": wantXDG})
+		wantLocatorMap(t, gotOff, map[string]string{launchConfigBaseVar: wantBase})
 	})
 
 	t.Run("allowlist holds only the documented keys", func(t *testing.T) {
@@ -184,11 +187,16 @@ func TestSupervisorLocator(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := map[string]string{"XDG_CONFIG_HOME": filepath.Join(home, ".config")}
+			want := map[string]string{launchConfigBaseVar: filepath.Join(home, ".config")}
 			if reposRootHome {
-				want["HOME"] = home
+				want[launchHomeVar] = home
 			}
 			wantLocatorMap(t, got, want)
+			for _, key := range []string{"XDG_CONFIG_HOME", "HOME", "USERPROFILE", "APPDATA"} {
+				if _, ok := got[key]; ok {
+					t.Fatalf("locator map carries the generic selector %q: %v", key, got)
+				}
+			}
 			for _, secret := range []string{
 				env["GH_TOKEN"], env["AWS_SECRET_ACCESS_KEY"], env["HERDR_SOHO_DIR"],
 				env["HERDR_SOHO_STATE_DIR"], env["APPDATA"], env["PATH"], env["SSH_AUTH_SOCK"],
@@ -227,7 +235,7 @@ func TestSupervisorLocator(t *testing.T) {
 					if err != nil {
 						t.Fatalf("accepted value refused: %v", err)
 					}
-					wantLocatorMap(t, got, map[string]string{"XDG_CONFIG_HOME": long4096})
+					wantLocatorMap(t, got, map[string]string{launchConfigBaseVar: long4096})
 					return
 				}
 				if err == nil {
@@ -240,6 +248,371 @@ func TestSupervisorLocator(t *testing.T) {
 					t.Fatalf("refusal returned a partial map: %v", got)
 				}
 			})
+		}
+	})
+}
+
+// parityDirs is one set of real temp dirs for a TestLocatorSelectionParity
+// subtest.
+type parityDirs struct {
+	home       string
+	conf       string
+	serverHome string
+	serverXDG  string
+	spaceConf  string
+}
+
+// TestLocatorSelectionParity pins that the private locators select, on a
+// different server environment, exactly what the starter selected: the
+// selection read back from the locator map is present and non-zero, it
+// reproduces the starter's effective user configuration file, and for the
+// repos-root cases LoadMachineFor with it resolves the same repos root as
+// the starter's LoadMachine; clearing the home from the selection expands
+// a home-relative root from the server's own home.
+func TestLocatorSelectionParity(t *testing.T) {
+	const osName = "linux"
+	starterEffective := func(env platform.Env) string {
+		return core.EffectiveConfigFile(platform.UserConfigPath(osName, env), core.LegacyUserConfigPath(osName, env))
+	}
+	for _, tc := range []struct {
+		name       string
+		starter    func(d parityDirs) platform.Env
+		server     func(d parityDirs) platform.Env
+		files      []string                  // "current" and/or "legacy", planted at the starter's base
+		body       string                    // the planted current file's body; "" plants nothing
+		reposHome  bool                      // reposRootHome the starter passes
+		wantRoot   func(d parityDirs) string // the starter's ReposRoot; nil skips the machine checks
+		wantCtl    func(d parityDirs) string // the root with the home cleared from the selection; nil skips
+		wantNoHome bool                      // loc must not carry launchHomeVar
+	}{
+		{
+			name:    "current file only",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home} },
+			server:  func(d parityDirs) platform.Env { return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.home} },
+			files:   []string{"current"},
+		},
+		{
+			name:    "legacy file only",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home} },
+			server:  func(d parityDirs) platform.Env { return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.home} },
+			files:   []string{"legacy"},
+		},
+		{
+			name:    "both files current wins",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home} },
+			server:  func(d parityDirs) platform.Env { return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.home} },
+			files:   []string{"current", "legacy"},
+		},
+		{
+			name:    "server env with its own XDG_CONFIG_HOME",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home} },
+			server: func(d parityDirs) platform.Env {
+				return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.serverHome}
+			},
+			files: []string{"current"},
+		},
+		{
+			name:    "server env without XDG and a different HOME",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home} },
+			server:  func(d parityDirs) platform.Env { return platform.Env{"HOME": d.serverHome} },
+			files:   []string{"current"},
+		},
+		{
+			name:    "starter XDG_CONFIG_HOME set and server without",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home, "XDG_CONFIG_HOME": d.conf} },
+			server:  func(d parityDirs) platform.Env { return platform.Env{"HOME": d.serverHome} },
+			files:   []string{"current"},
+		},
+		{
+			name:    "starter XDG_CONFIG_HOME set to the empty string",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home, "XDG_CONFIG_HOME": ""} },
+			server: func(d parityDirs) platform.Env {
+				return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.serverHome}
+			},
+			files: []string{"current"},
+		},
+		{
+			name:    "base with spaces",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home, "XDG_CONFIG_HOME": d.spaceConf} },
+			server: func(d parityDirs) platform.Env {
+				return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.serverHome}
+			},
+			files: []string{"current"},
+		},
+		{
+			name:    "default repos root",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home} },
+			server: func(d parityDirs) platform.Env {
+				return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.serverHome}
+			},
+			reposHome: true,
+			wantRoot:  func(d parityDirs) string { return filepath.Join(d.home, "repo.git") },
+			wantCtl:   func(d parityDirs) string { return filepath.Join(d.serverHome, "repo.git") },
+		},
+		{
+			name:    "home relative repos root",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home} },
+			server: func(d parityDirs) platform.Env {
+				return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.serverHome}
+			},
+			files:     []string{"current"},
+			body:      "job_repos_root=~/repos\n",
+			reposHome: true,
+			wantRoot:  func(d parityDirs) string { return filepath.Join(d.home, "repos") },
+			wantCtl:   func(d parityDirs) string { return filepath.Join(d.serverHome, "repos") },
+		},
+		{
+			name:    "absolute repos root",
+			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home} },
+			server: func(d parityDirs) platform.Env {
+				return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.serverHome}
+			},
+			files:      []string{"current"},
+			body:       "job_repos_root=/abs/repos\n",
+			wantRoot:   func(parityDirs) string { return "/abs/repos" },
+			wantNoHome: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			d := parityDirs{
+				home:       filepath.Join(root, "home"),
+				conf:       filepath.Join(root, "conf"),
+				serverHome: filepath.Join(root, "server-home"),
+				serverXDG:  filepath.Join(root, "server-xdg"),
+				spaceConf:  filepath.Join(root, "conf with spaces"),
+			}
+			for _, dir := range []string{d.home, d.conf, d.serverHome, d.serverXDG, d.spaceConf} {
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			starterEnv := tc.starter(d)
+			serverEnv := tc.server(d)
+			base := filepath.Dir(filepath.Dir(platform.UserConfigPath(osName, starterEnv)))
+			for _, which := range tc.files {
+				body := tc.body
+				if body == "" {
+					body = "machine_label=starter\n"
+					if which == "legacy" {
+						body = "machine_label=starter-legacy\n"
+					}
+				}
+				if which == "current" {
+					writeTeamFile(t, filepath.Join(base, "herdr-soho", "config"), body)
+				} else {
+					writeTeamFile(t, filepath.Join(base, "herdr-agents", "config"), body)
+				}
+			}
+			loc, err := supervisorLocatorEnv(osName, starterEnv, tc.reposHome, absLocator)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantNoHome {
+				if _, ok := loc[launchHomeVar]; ok {
+					t.Fatalf("an absolute root forwards the home: %v", loc)
+				}
+			}
+			got := ReadLaunchLocators(platform.Env(loc))
+			if !got.Present || got.Selection.IsZero() {
+				t.Fatalf("ReadLaunchLocators = %+v, want present with a non-zero selection", got)
+			}
+			wantFile := starterEffective(starterEnv)
+			if gotFile := core.EffectiveUserConfigFile(osName, serverEnv, got.Selection); gotFile != wantFile {
+				t.Fatalf("server selection = %q, want the starter's %q", gotFile, wantFile)
+			}
+			if tc.wantRoot != nil {
+				starter, err := LoadMachine(osName, starterEnv)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if starter.ReposRoot != tc.wantRoot(d) {
+					t.Fatalf("starter ReposRoot = %q, want %q", starter.ReposRoot, tc.wantRoot(d))
+				}
+				gotM, err := LoadMachineFor(osName, serverEnv, got.Selection)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if gotM.ReposRoot != starter.ReposRoot {
+					t.Fatalf("LoadMachineFor ReposRoot %q differs from the starter's %q", gotM.ReposRoot, starter.ReposRoot)
+				}
+				if tc.wantCtl != nil {
+					noHome := got.Selection
+					noHome.Home = ""
+					ctl, err := LoadMachineFor(osName, serverEnv, noHome)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if ctl.ReposRoot != tc.wantCtl(d) {
+						t.Fatalf("control ReposRoot = %q, want the server home's %q", ctl.ReposRoot, tc.wantCtl(d))
+					}
+				}
+			}
+		})
+	}
+
+	// Windows precedence: path computations only (no file existence),
+	// comparing the core.UserConfigFiles results against the starter's own
+	// paths.
+	t.Run("win32 precedence", func(t *testing.T) {
+		for _, tc := range []struct {
+			name      string
+			starter   platform.Env
+			server    platform.Env
+			reposHome bool
+		}{
+			{"starter APPDATA only vs server XDG_CONFIG_HOME",
+				platform.Env{"APPDATA": `C:\app data`},
+				platform.Env{"XDG_CONFIG_HOME": `C:\xdg home`},
+				false},
+			{"starter USERPROFILE only (AppData Roaming fallback) vs server APPDATA",
+				platform.Env{"USERPROFILE": `C:\users\me`},
+				platform.Env{"APPDATA": `C:\app data`},
+				false},
+			{"starter XDG_CONFIG_HOME vs server APPDATA",
+				platform.Env{"XDG_CONFIG_HOME": `C:\xdg home`},
+				platform.Env{"APPDATA": `C:\app data`},
+				false},
+			{"launchHomeVar equals the starter USERPROFILE when reposRootHome",
+				platform.Env{"USERPROFILE": `C:\users\me`},
+				platform.Env{"APPDATA": `C:\app data`},
+				true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				loc, err := supervisorLocatorEnv("win32", tc.starter, tc.reposHome, winAbs)
+				if err != nil {
+					t.Fatal(err)
+				}
+				base := filepath.Dir(filepath.Dir(platform.UserConfigPath("win32", tc.starter)))
+				want, err := winAbs(base)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantLoc := map[string]string{launchConfigBaseVar: want}
+				if tc.reposHome {
+					wantLoc[launchHomeVar] = tc.starter.Get("USERPROFILE")
+				}
+				wantLocatorMap(t, loc, wantLoc)
+				got := ReadLaunchLocators(platform.Env(loc))
+				if !got.Present {
+					t.Fatalf("ReadLaunchLocators = %+v, want present", got)
+				}
+				sel := got.Selection
+				if sel.IsZero() {
+					// off-Windows the host's IsAbs cannot validate a
+					// drive-letter base, so the selection is read from the
+					// pinned locator values instead
+					sel = core.UserSelection{Base: loc[launchConfigBaseVar]}
+					if h := loc[launchHomeVar]; h != "" {
+						sel.Home = h
+					}
+				}
+				if sel.IsZero() {
+					t.Fatalf("selection = %+v, want non-zero", sel)
+				}
+				wantCurrent := platform.UserConfigPath("win32", tc.starter)
+				wantLegacy := core.LegacyUserConfigPath("win32", tc.starter)
+				gotCurrent, gotLegacy := core.UserConfigFiles("win32", tc.server, sel)
+				if gotCurrent != wantCurrent || gotLegacy != wantLegacy {
+					t.Fatalf("server selection = (%q, %q), want the starter's (%q, %q)", gotCurrent, gotLegacy, wantCurrent, wantLegacy)
+				}
+			})
+		}
+	})
+}
+
+// TestReadLaunchLocators pins the ReadLaunchLocators usability rule: a
+// usable pair is an absolute, clean, control-free base of at most
+// maxLocatorBytes plus an optional home of the same shape; anything else
+// (a home without a base, an empty, relative, unclean or over-long value,
+// or a usable base with an unusable home) is ignored as a whole.
+func TestReadLaunchLocators(t *testing.T) {
+	long4096 := "/" + strings.Repeat("a", 4095)
+	long4097 := "/" + strings.Repeat("a", 4096)
+	for _, tc := range []struct {
+		name    string
+		env     platform.Env
+		wantP   bool
+		wantSel core.UserSelection
+	}{
+		{"absent", platform.Env{}, false, core.UserSelection{}},
+		{"base only valid", platform.Env{launchConfigBaseVar: "/cfg"}, true, core.UserSelection{Base: "/cfg"}},
+		{"base and home valid", platform.Env{launchConfigBaseVar: "/cfg", launchHomeVar: "/home"}, true, core.UserSelection{Base: "/cfg", Home: "/home"}},
+		{"home without base", platform.Env{launchHomeVar: "/home"}, true, core.UserSelection{}},
+		{"empty base", platform.Env{launchConfigBaseVar: ""}, true, core.UserSelection{}},
+		{"relative base", platform.Env{launchConfigBaseVar: "cfg"}, true, core.UserSelection{}},
+		{"unclean base", platform.Env{launchConfigBaseVar: "/a/../b"}, true, core.UserSelection{}},
+		{"base with a control byte", platform.Env{launchConfigBaseVar: "/bad\x01cfg"}, true, core.UserSelection{}},
+		{"4097-byte base", platform.Env{launchConfigBaseVar: long4097}, true, core.UserSelection{}},
+		{"4096-byte base accepted at the boundary", platform.Env{launchConfigBaseVar: long4096}, true, core.UserSelection{Base: long4096}},
+		{"valid base with an unusable home", platform.Env{launchConfigBaseVar: "/cfg", launchHomeVar: "relative"}, true, core.UserSelection{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ReadLaunchLocators(tc.env)
+			if got.Present != tc.wantP {
+				t.Fatalf("Present = %t, want %t", got.Present, tc.wantP)
+			}
+			if !reflect.DeepEqual(got.Selection, tc.wantSel) {
+				t.Fatalf("Selection = %+v, want %+v", got.Selection, tc.wantSel)
+			}
+		})
+	}
+}
+
+// TestLaunchLocatorEnvCopies pins the env copy helpers: WithoutLaunchLocators
+// strips only the two private names and leaves its input untouched, and
+// withLaunchLocators adds nothing for the zero selection (removing stale
+// names), exactly both names for a selection with base and home.
+func TestLaunchLocatorEnvCopies(t *testing.T) {
+	t.Run("WithoutLaunchLocators strips only the private names", func(t *testing.T) {
+		in := platform.Env{
+			launchConfigBaseVar: "/cfg",
+			launchHomeVar:       "/home",
+			"HOME":              "/home",
+			"XDG_CONFIG_HOME":   "/xdg",
+			"GH_TOKEN":          "secret",
+		}
+		inBefore := in.Clone()
+		got := WithoutLaunchLocators(in)
+		for _, key := range []string{launchConfigBaseVar, launchHomeVar} {
+			if _, ok := got[key]; ok {
+				t.Fatalf("WithoutLaunchLocators kept %q: %v", key, got)
+			}
+		}
+		for key, value := range in {
+			if key == launchConfigBaseVar || key == launchHomeVar {
+				continue
+			}
+			if got[key] != value {
+				t.Fatalf("WithoutLaunchLocators lost or changed %q: %v", key, got)
+			}
+		}
+		if !reflect.DeepEqual(in, inBefore) {
+			t.Fatalf("WithoutLaunchLocators changed its input: %v", in)
+		}
+	})
+	t.Run("withLaunchLocators with a zero selection adds nothing and removes stale names", func(t *testing.T) {
+		in := platform.Env{launchConfigBaseVar: "/stale", launchHomeVar: "/stale", "HOME": "/home"}
+		inBefore := in.Clone()
+		got := withLaunchLocators(in, core.UserSelection{})
+		for _, key := range []string{launchConfigBaseVar, launchHomeVar} {
+			if _, ok := got[key]; ok {
+				t.Fatalf("withLaunchLocators kept the stale %q: %v", key, got)
+			}
+		}
+		if got["HOME"] != "/home" {
+			t.Fatalf("withLaunchLocators lost HOME: %v", got)
+		}
+		if !reflect.DeepEqual(in, inBefore) {
+			t.Fatalf("withLaunchLocators changed its input: %v", in)
+		}
+	})
+	t.Run("withLaunchLocators with base and home adds exactly both", func(t *testing.T) {
+		in := platform.Env{"HOME": "/home", launchHomeVar: "/stale"}
+		got := withLaunchLocators(in, core.UserSelection{Base: "/cfg", Home: "/home2"})
+		want := platform.Env{"HOME": "/home", launchConfigBaseVar: "/cfg", launchHomeVar: "/home2"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("withLaunchLocators = %v, want %v", got, want)
 		}
 	})
 }
@@ -332,125 +705,6 @@ func TestReposRootFromHome(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestLocatorMismatch pins the mismatch case: a starter env without XDG and
-// a server env with its own XDG select different configuration bases, and
-// overlaying the locator map onto the server env restores the starter's
-// file selection and repos root.
-func TestLocatorMismatch(t *testing.T) {
-	overlay := func(server platform.Env, loc map[string]string) platform.Env {
-		out := server.Clone()
-		for key, value := range loc {
-			out[key] = value
-		}
-		return out
-	}
-	selection := func(env platform.Env) string {
-		return core.EffectiveConfigFile(platform.UserConfigPath("linux", env), core.LegacyUserConfigPath("linux", env))
-	}
-	currentFile := func(home string) string { return filepath.Join(home, ".config", "herdr-soho", "config") }
-	legacyFile := func(home string) string { return filepath.Join(home, ".config", "herdr-agents", "config") }
-
-	t.Run("config file selection matches the starter", func(t *testing.T) {
-		for _, tc := range []struct {
-			name        string
-			files       []string
-			wantCurrent bool
-		}{
-			{"current file only", []string{"current"}, true},
-			{"legacy file only", []string{"legacy"}, false},
-			{"both files current wins", []string{"current", "legacy"}, true},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				home, xdg := t.TempDir(), t.TempDir()
-				for _, which := range tc.files {
-					if which == "current" {
-						writeTeamFile(t, currentFile(home), "machine_label=starter\n")
-					} else {
-						writeTeamFile(t, legacyFile(home), "machine_label=starter-legacy\n")
-					}
-				}
-				wantFile := legacyFile(home)
-				if tc.wantCurrent {
-					wantFile = currentFile(home)
-				}
-				starterEnv := platform.Env{"HOME": home}
-				serverEnv := platform.Env{"XDG_CONFIG_HOME": xdg, "HOME": home}
-				loc, err := supervisorLocatorEnv("linux", starterEnv, false, absLocator)
-				if err != nil {
-					t.Fatal(err)
-				}
-				starterWant := selection(starterEnv)
-				if starterWant != wantFile {
-					t.Fatalf("starter selection = %q, want %q", starterWant, wantFile)
-				}
-				if got := selection(overlay(serverEnv, loc)); got != wantFile {
-					t.Fatalf("overlaid selection = %q, want %q (starter %q)", got, wantFile, starterWant)
-				}
-			})
-		}
-	})
-
-	t.Run("LoadMachine repos root matches the starter", func(t *testing.T) {
-		for _, tc := range []struct {
-			name string
-			body string // user configuration body; empty means no file
-		}{
-			{"default root", ""},
-			{"home relative root", "job_repos_root=~/repos\n"},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				home, xdg, serverHome := t.TempDir(), t.TempDir(), t.TempDir()
-				if tc.body != "" {
-					writeTeamFile(t, currentFile(home), tc.body)
-				}
-				starterEnv := platform.Env{"HOME": home}
-				serverEnv := platform.Env{"XDG_CONFIG_HOME": xdg, "HOME": serverHome}
-				loc, err := supervisorLocatorEnv("linux", starterEnv, true, absLocator)
-				if err != nil {
-					t.Fatal(err)
-				}
-				wantLocatorMap(t, loc, map[string]string{
-					"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
-					"HOME":            home,
-				})
-				starter, err := LoadMachine("linux", starterEnv)
-				if err != nil {
-					t.Fatal(err)
-				}
-				overlaid, err := LoadMachine("linux", overlay(serverEnv, loc))
-				if err != nil {
-					t.Fatal(err)
-				}
-				wantRoot := filepath.Join(home, "repo.git")
-				if tc.body != "" {
-					wantRoot = filepath.Join(home, "repos")
-				}
-				if starter.ReposRoot != wantRoot {
-					t.Fatalf("starter ReposRoot = %q, want %q", starter.ReposRoot, wantRoot)
-				}
-				if overlaid.ReposRoot != starter.ReposRoot {
-					t.Fatalf("overlaid ReposRoot %q differs from starter %q", overlaid.ReposRoot, starter.ReposRoot)
-				}
-				// Control: without the forwarded HOME the same config expands
-				// against the server's own home, so the equality above only
-				// holds because reposRootHome forwarded the starter's HOME.
-				control := overlay(serverEnv, map[string]string{"XDG_CONFIG_HOME": loc["XDG_CONFIG_HOME"]})
-				c, err := LoadMachine("linux", control)
-				if err != nil {
-					t.Fatal(err)
-				}
-				wantControl := filepath.Join(serverHome, "repo.git")
-				if tc.body != "" {
-					wantControl = filepath.Join(serverHome, "repos")
-				}
-				if c.ReposRoot != wantControl {
-					t.Fatalf("control ReposRoot = %q, want %q", c.ReposRoot, wantControl)
-				}
-			})
-		}
-	})
 }
 
 // TestLoadMachineReposRootHome pins the unexported reposRootHome flag set by

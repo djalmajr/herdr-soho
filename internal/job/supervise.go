@@ -63,6 +63,12 @@ type Supervisor struct {
 	// (no worker, no cursor).
 	Wake *WakeHook
 
+	// PrivateLaunch: this supervisor was started by job start with the
+	// private launch context (set by the CLI); only then does waitRunning
+	// refuse a running or blocked state written inside a failure
+	// (Store.Fail's walk).
+	PrivateLaunch bool
+
 	// Git sync and release: the git sync of the job branch — nil in
 	// workspace mode, which runs no git at all — and the Herdr adapter
 	// that closes the job workspace last.
@@ -457,7 +463,13 @@ func (s *Supervisor) Run() (int, error) {
 // blocked ceiling while it stays blocked), a terminal state returns its
 // outcome code at once, and a job still not running after the bound fails
 // with exit 19. The bound counts sleep iterations, not wall-clock
-// differences, so a moving clock cannot end the wait early.
+// differences, so a moving clock cannot end the wait early. Only a
+// privately scoped supervisor (PrivateLaunch) refuses a running or
+// blocked snapshot written inside a failure: the store's failure walk
+// appends the failure event and saves running and finishing before
+// failed, so a snapshot read in that window is a failure in flight, not
+// the start's running, and the wait keeps polling; every other
+// supervisor accepts the snapshot at once, exactly as before.
 func (s *Supervisor) waitRunning() (int, bool, error) {
 	poll := s.poll()
 	maxSleeps := int(startWait / poll)
@@ -468,7 +480,29 @@ func (s *Supervisor) waitRunning() (int, bool, error) {
 		snap, err := s.Store.Snapshot(s.ID)
 		if err == nil {
 			if snap.State.Status == StatusRunning || snap.State.Status == StatusBlocked {
-				return 0, false, nil
+				// A failure in flight is not the start's running: the store's
+				// failure walk appends the failure event and saves running and
+				// finishing before failed, so a snapshot read in that window is
+				// refused below and the wait keeps polling. The refusal applies
+				// only to this supervisor's own private scoped execution
+				// (PrivateLaunch): a supervisor without the private context
+				// accepts exactly as before.
+				if !s.PrivateLaunch {
+					return 0, false, nil
+				}
+				dir, dirErr := s.Store.readDir(s.ID)
+				accepted := dirErr == nil
+				if dirErr == nil {
+					// A failed directory or events read, or a log that already
+					// holds a failure event, is refused: keep polling like a
+					// not-yet-running state.
+					events, eventsErr := readEvents(dir)
+					accepted = eventsErr == nil && !hasTipo(events, "failure")
+				}
+				if accepted {
+					return 0, false, nil
+				}
+				// Refused: fall through to the sleep and keep polling.
 			}
 			if isTerminalOutcome(snap.State.Status) {
 				return supervisorExit(snap.State.Status), true, nil
