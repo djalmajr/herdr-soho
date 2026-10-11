@@ -96,16 +96,21 @@ type Supervisor struct {
 
 	// Control delivery and the job budget (supervise_control.go): pushNow is
 	// set here and read and cleared by the git sync slice; stopping is "" or
-	// the kind the stop path ends with (canceled, timeout) and stopDeadline
-	// its Clock.Monotonic deadline; warned guards the single
-	// timeout_warning; budgetBase is the virtual Monotonic base the budget
-	// counts from, captured once on the first budget check.
-	pushNow       bool
-	stopping      string
-	stopDeadline  int64
-	warned        bool
-	budgetBase    int64
-	budgetBaseSet bool
+	// the kind the stop path ends with (canceled, timeout, or the blocked
+	// ceiling — which ends through the existing timeout outcome) and
+	// stopDeadline its Clock.Monotonic deadline; warnedActive and
+	// warnedBlocked guard the single timeout_warning and blocked_warning;
+	// intervalBase is the virtual Monotonic base of the current budget
+	// interval it counts from, captured once on the first budget check of
+	// this process (ensureIntervalBase) and re-anchored at every settled
+	// blocked-boundary crossing (settleAndTransition).
+	pushNow         bool
+	stopping        string
+	stopDeadline    int64
+	warnedActive    bool
+	warnedBlocked   bool
+	intervalBase    int64
+	intervalBaseSet bool
 }
 
 // NewSupervisor wires the production supervisor over a recorded job: the
@@ -158,6 +163,114 @@ func (s *Supervisor) clockSleep(d time.Duration) {
 		return
 	}
 	systemClock{}.Sleep(d)
+}
+
+// monoToMs converts a monotonic nanosecond difference into the whole
+// milliseconds the budget counters persist: the single conversion point
+// between the clock's nanosecond Monotonic readings and the persisted
+// millisecond counts, so nothing compares or stores the raw nanoseconds.
+func monoToMs(nano int64) int64 {
+	return nano / int64(time.Millisecond)
+}
+
+// ensureIntervalBase captures the process's virtual Monotonic base for the
+// current budget interval, once per process: the first reading minus the
+// wall elapsed since the persisted anchor (IntervalStart, or StartedAt on
+// a state without it), clamped at zero so a future anchor starts the
+// interval at zero. The wall clock is compared only here; from then on the
+// in-flight interval is counted on the monotonic clock only, so a backwards
+// Now never shortens or extends it.
+//
+// Legacy rule: a blocked state without an IntervalStart is a job started
+// before the anchor field existed, whose blocked interval's start is
+// unknown — the in-flight interval is counted as zero and the anchor is
+// re-anchored to now (persisted), losing at most the interval's elapsed
+// tail and never double-counting. A blocked state with a recorded anchor
+// always trusts it: every blocked-boundary crossing settles and re-anchors
+// in the same state write (settleAndTransition), so a crash at a crossing
+// leaves the complete pre-crossing state (old status, old counters, old
+// anchor) and never a blocked status with a stale job-start anchor.
+//
+// The anchor is written with RFC3339Nano (sub-second resolution) and read
+// back with the same layout; whole-second anchors written before the
+// nanosecond precision (or by formatTS callers) parse unchanged.
+func (s *Supervisor) ensureIntervalBase(st State) error {
+	if s.intervalBaseSet {
+		return nil
+	}
+	if st.Status == StatusBlocked && st.IntervalStart == "" {
+		// Legacy state: the blocked interval's start is unrecorded: re-anchor
+		// to now and count the in-flight interval as zero.
+		s.intervalBase = s.Clock.Monotonic()
+		s.intervalBaseSet = true
+		return s.recordIntervalAnchor(st)
+	}
+	anchor := st.IntervalStart
+	if anchor == "" {
+		anchor = st.StartedAt
+	}
+	s.intervalBase = s.Clock.Monotonic()
+	if anchor != "" {
+		if start, err := time.Parse(time.RFC3339Nano, anchor); err == nil {
+			if elapsed := s.Clock.Now().Sub(start); elapsed > 0 {
+				s.intervalBase -= int64(elapsed)
+			}
+		}
+	}
+	s.intervalBaseSet = true
+	return nil
+}
+
+// recordIntervalAnchor persists the interval anchor at the current wall
+// time: the re-anchor record the legacy rule leaves behind, so the next
+// process re-derives its virtual base from the same anchor. A no-op when
+// the anchor already carries it. The anchor is written with RFC3339Nano
+// (sub-second resolution): a whole-second anchor would shift a restarted
+// in-flight interval by up to 999 ms.
+func (s *Supervisor) recordIntervalAnchor(st State) error {
+	now := s.Clock.Now().Format(time.RFC3339Nano)
+	if st.IntervalStart == now {
+		return nil
+	}
+	_, err := s.Store.Record(s.ID, func(st *State) { st.IntervalStart = now })
+	return err
+}
+
+// settleAndTransition settles the finished budget interval — the whole
+// milliseconds of the virtual Monotonic elapsed since the process's
+// interval base, clamped at zero, into the counter of the finished
+// interval's kind (blocked when finishedBlocked, active otherwise) and the
+// re-anchor at the crossing — and moves the job along the crossing edge in
+// one locked state write (TransitionSettle): the status change and the
+// settle land together, so a crash at the crossing leaves either the
+// pre-crossing state (the finished interval still in flight, of its old
+// kind) or the post-crossing state (settled and re-anchored) — never the
+// window the separate Transition + settle writes left, which a restart
+// would misread as an in-flight interval of the new status's kind. The
+// process's virtual base moves to the crossing instant.
+func (s *Supervisor) settleAndTransition(st State, to string, finishedBlocked bool) error {
+	if err := s.ensureIntervalBase(st); err != nil {
+		return err
+	}
+	before := s.Clock.Monotonic()
+	elapsed := before - s.intervalBase
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	ms := monoToMs(int64(elapsed))
+	if _, err := s.Store.TransitionSettle(s.ID, to, func(st *State) {
+		if finishedBlocked {
+			st.BudgetBlockedMs += ms
+		} else {
+			st.BudgetActiveMs += ms
+		}
+		st.IntervalStart = s.Clock.Now().Format(time.RFC3339Nano)
+	}); err != nil {
+		return err
+	}
+	s.intervalBase = before
+	s.intervalBaseSet = true
+	return nil
 }
 
 // Run drives the job to a terminal outcome. The exit code follows the
@@ -236,7 +349,10 @@ func (s *Supervisor) Run() (int, error) {
 }
 
 // waitRunning waits for the running transition of job start. It reads the
-// state every poll for at most 60 s of polls: a terminal state returns its
+// state every poll for at most 60 s of polls: a running or a blocked job
+// proceeds at once (a blocked job is alive — the orchestrator is waiting
+// on a question, and the watch loop keeps enforcing the budgets and the
+// blocked ceiling while it stays blocked), a terminal state returns its
 // outcome code at once, and a job still not running after the bound fails
 // with exit 19. The bound counts sleep iterations, not wall-clock
 // differences, so a moving clock cannot end the wait early.
@@ -249,7 +365,7 @@ func (s *Supervisor) waitRunning() (int, bool, error) {
 	for i := 0; ; i++ {
 		snap, err := s.Store.Snapshot(s.ID)
 		if err == nil {
-			if snap.State.Status == StatusRunning {
+			if snap.State.Status == StatusRunning || snap.State.Status == StatusBlocked {
 				return 0, false, nil
 			}
 			if isTerminalOutcome(snap.State.Status) {
@@ -507,9 +623,13 @@ func orchestratorBriefSection(id string) []byte {
 // tick runs one watch iteration: the wake queue first (it only enqueues),
 // then the dispatcher's control requests (amend, send, checkpoint,
 // cancel), then the git sync (a checkpoint request pushes in the same tick;
-// a rejected push blocks the job before the orchestrator is read), then the
-// job budget, which decides the stop path's end while a stop is running,
-// and the job orchestrator when no stop is running.
+// a rejected push blocks the job before the orchestrator is read), then,
+// while a stop is running, the job budget (the stop path's end); otherwise
+// the job orchestrator — read once, the blocked-boundary crossing first (a
+// block entry's settle lands before the tick's budget check, so the active
+// time accrued up to the block is enforced while blocked), then the job
+// budget against the post-crossing state, then the done and gone-family
+// outcomes.
 func (s *Supervisor) tick() (int, bool, error) {
 	if code, done, err := s.dispatchWakes(); err != nil || done {
 		return code, true, err
@@ -521,25 +641,30 @@ func (s *Supervisor) tick() (int, bool, error) {
 		return code, done, err
 	}
 	if s.stopping != "" {
-		return s.checkBudget()
+		// A stop is already running: the stop path owns the job (a fresh
+		// orchestrator read for the done check, no crossing).
+		return s.checkBudget("")
 	}
-	if code, done, err := s.checkBudget(); err != nil || done {
-		return code, done, err
-	}
-	if s.stopping != "" {
-		// checkBudget started the stop at 100 % of the budget this tick;
-		// the stop path decides from here on.
-		return s.checkBudget()
-	}
+	// No stop running: checkOrchestrator reads the orchestrator once,
+	// runs the blocked-boundary crossing first, then the budget check
+	// against the post-crossing state (reusing this read for the stop
+	// path's done check), then the done and gone-family outcomes.
 	return s.checkOrchestrator()
 }
 
 // checkOrchestrator maps one status read of the job orchestrator to the
-// job's transitions, events and outcome. The gone streak counts consecutive
-// gone-family observations and drops on any observation that shows the
-// orchestrator alive; the error streak counts consecutive failed reads and
-// drops on any read that succeeds. A done state without a readable report
-// counts like a gone observation.
+// job's transitions, events and outcome. The blocked-boundary crossing
+// (block or unblock) runs first, when the read shows one: its settle lands
+// before this tick's budget check, so a block entry's accrued active time
+// is counted by that check while the job is blocked. The budget check then
+// runs against the post-crossing state, reusing this tick's read for the
+// stop path's done check (no second read); a stop that starts this tick
+// ends the job on a done read (endStop), so the done and gone-family
+// outcomes below are reached only when no stop is running. The gone streak
+// counts consecutive gone-family observations and drops on any observation
+// that shows the orchestrator alive; the error streak counts consecutive
+// failed reads and drops on any read that succeeds. A done state without a
+// readable report counts like a gone observation.
 func (s *Supervisor) checkOrchestrator() (int, bool, error) {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
@@ -560,17 +685,34 @@ func (s *Supervisor) checkOrchestrator() (int, bool, error) {
 	case "working", "no-report-yet", "idle", "compacting":
 		// Nothing; a block this function set is lifted by the working
 		// state.
-		return s.unblockOrchestrator(st)
+		if code, done, err := s.unblockOrchestrator(st); err != nil || done {
+			return code, done, err
+		}
 	case "blocked", "question":
 		motivo := "dialog"
 		if state == "question" {
 			motivo = "question"
 		}
-		return s.blockOrchestrator(st, st.Orchestrator, motivo)
+		if code, done, err := s.blockOrchestrator(st, st.Orchestrator, motivo); err != nil || done {
+			return code, done, err
+		}
 	case "quota":
-		return s.blockOrchestrator(st, st.Orchestrator, "quota")
+		if code, done, err := s.blockOrchestrator(st, st.Orchestrator, "quota"); err != nil || done {
+			return code, done, err
+		}
 	case "provider-error", "capacity":
-		return s.blockOrchestrator(st, st.Orchestrator, "provider_error")
+		if code, done, err := s.blockOrchestrator(st, st.Orchestrator, "provider_error"); err != nil || done {
+			return code, done, err
+		}
+	}
+	// The budget check against the post-crossing state; a stop that starts
+	// this tick reuses this tick's read (state) for the done check.
+	if code, done, err := s.checkBudget(state); err != nil || done {
+		return code, done, err
+	}
+	// No stop is running: the done and gone-family outcomes. The crossing
+	// states (handled above) are no-ops here: nothing more this tick.
+	switch state {
 	case "done":
 		return s.onOrchestratorDone(st, st.Orchestrator, reportPath)
 	case "gone", "settled-no-report", "not-received", "unavailable":
@@ -579,6 +721,8 @@ func (s *Supervisor) checkOrchestrator() (int, bool, error) {
 			s.fail("job: the job orchestrator ended without a report", ExitFailed)
 			return ExitFailed, true, nil
 		}
+		return 0, false, nil
+	case "working", "no-report-yet", "idle", "compacting", "blocked", "question", "quota", "provider-error", "capacity":
 		return 0, false, nil
 	default:
 		s.frictionUnknown(state)
@@ -599,12 +743,15 @@ func (s *Supervisor) accumulate() (int, bool, error) {
 
 // blockOrchestrator blocks a running job for the orchestrator's motivo and
 // appends the blocked event; a job that is not running is left to the next
-// state.
+// state. The crossing is one locked write: the transition and the settle
+// (the counters and the re-anchor) land together, so the blocked interval
+// starts at the crossing and a crash at the crossing never leaves the
+// transition without the settle.
 func (s *Supervisor) blockOrchestrator(st State, name, motivo string) (int, bool, error) {
 	if st.Status != StatusRunning {
 		return 0, false, nil
 	}
-	if _, err := s.Store.Transition(s.ID, StatusBlocked); err != nil {
+	if err := s.settleAndTransition(st, StatusBlocked, false); err != nil {
 		return 0, true, err
 	}
 	if _, err := s.Store.Record(s.ID, func(st *State) { st.Motivo = &motivo }); err != nil {
@@ -636,7 +783,11 @@ var orchestratorMotivos = map[string]bool{
 }
 
 // unblockOrchestrator lifts a block this function set: the job moves back
-// to running, the stored motivo clears, and the unblocked event lands.
+// to running, the stored motivo clears, and the unblocked event lands. The
+// crossing is one locked write: the transition and the settle (the counters
+// and the re-anchor) land together, so the active interval starts at the
+// unblock and a crash at the crossing never leaves the transition without
+// the settle.
 func (s *Supervisor) unblockOrchestrator(st State) (int, bool, error) {
 	if st.Status != StatusBlocked || st.Motivo == nil {
 		return 0, false, nil
@@ -644,7 +795,7 @@ func (s *Supervisor) unblockOrchestrator(st State) (int, bool, error) {
 	if !orchestratorMotivos[*st.Motivo] {
 		return 0, false, nil
 	}
-	if _, err := s.Store.Transition(s.ID, StatusRunning); err != nil {
+	if err := s.settleAndTransition(st, StatusRunning, true); err != nil {
 		return 0, true, err
 	}
 	if _, err := s.Store.Record(s.ID, func(st *State) { st.Motivo = nil }); err != nil {
@@ -703,8 +854,10 @@ func (s *Supervisor) onOrchestratorDone(st State, name, reportPath string) (int,
 	}
 	if len(snap.Pending) > 0 {
 		// Partial items with an open decision: the job stays alive,
-		// blocked, until the decision lands; the loop keeps running.
-		if _, err := s.Store.Transition(s.ID, StatusBlocked); err != nil {
+		// blocked, until the decision lands; the loop keeps running. The
+		// active interval (finishing counts as active) settles and
+		// re-anchors with the crossing, in one locked write.
+		if err := s.settleAndTransition(st, StatusBlocked, false); err != nil {
 			return 0, true, err
 		}
 		motivo := "decisions pending"

@@ -352,4 +352,6 @@ machine_label=
 job_orgs=
 job_repos_root=~/repo.git
 job_timeout=120
+# job_blocked_timeout is the default blocked budget in minutes (the blocked clock is separate from job_timeout), from 1 to 43200; a blocked job ends through the stop path with the timeout outcome when blocked time passes it.
+job_blocked_timeout=1440
 job_wake_cmd=

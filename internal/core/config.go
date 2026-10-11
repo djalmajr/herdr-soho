@@ -88,7 +88,8 @@ var ConfigScalarKeys = []string{
 // jobMachineKeys are known to ConfigKeyOk. They stay out of ConfigScalarKeys
 // so `herdr-soho config` keeps the row order pinned by the frozen parity oracle.
 var jobMachineKeys = []string{
-	"machine_label", "job_orgs", "job_repos_root", "job_timeout", "job_wake_cmd",
+	"machine_label", "job_orgs", "job_repos_root", "job_timeout",
+	"job_blocked_timeout", "job_wake_cmd",
 }
 
 var KnownKinds = []string{"claude", "codex", "grok", "agy", "gemini", "cursor", "pi", "opencode"}
@@ -341,6 +342,8 @@ func ConfigValueOk(key, value string, env platform.Env, cwd string) bool {
 		return contains(EffortLadder, value)
 	case key == "job_timeout":
 		return jobTimeoutValueOk(value)
+	case key == "job_blocked_timeout":
+		return jobBlockedTimeoutValueOk(value)
 	default:
 		return true
 	}
@@ -353,6 +356,16 @@ func jobTimeoutValueOk(value string) bool {
 	}
 	n, err := strconv.Atoi(value)
 	return err == nil && n >= 1 && n <= 1440
+}
+
+// jobBlockedTimeoutValueOk is the contract range for the default blocked
+// budget: 1..43200 minutes (one minute to 30 days).
+func jobBlockedTimeoutValueOk(value string) bool {
+	if !decimalRE.MatchString(value) {
+		return false
+	}
+	n, err := strconv.Atoi(value)
+	return err == nil && n >= 1 && n <= 43200
 }
 
 func contains(values []string, value string) bool {

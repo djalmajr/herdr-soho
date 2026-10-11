@@ -723,7 +723,10 @@ func TestSuperviseBudgetWarningThenTimeout(t *testing.T) {
 		t.Fatalf("event types = %v, want %v (one warning)", got, want)
 	}
 	warning := events[2]
-	if warning.Resumo != "80% of the job budget used" {
+	// Mandated contract change (active-only budget): the resumo now names
+	// the active budget it counts; the warning type and the first-tick-at-
+	// or-past-80% boundary are unchanged.
+	if warning.Resumo != "80% of the active job budget used" {
 		t.Fatalf("timeout_warning resumo = %q", warning.Resumo)
 	}
 	// The warning fired on the first tick at or past 80 % of the 1 min

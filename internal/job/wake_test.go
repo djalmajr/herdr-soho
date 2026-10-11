@@ -110,6 +110,7 @@ func TestWakeClassification(t *testing.T) {
 		{"decision", "decision", nil, true},
 		{"decision_acked", "decision_acked", nil, false},
 		{"timeout_warning", "timeout_warning", nil, true},
+		{"blocked_warning", "blocked_warning", nil, true},
 		{"failure", "failure", nil, true},
 		{"note", "note", nil, false},
 		{"terminal", "terminal", nil, true},

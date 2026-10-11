@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -186,8 +187,10 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 
 	// 7. Record the run facts; StartedAt comes from the store clock. This
 	// slice computes no deadline: the timeout budget is enforced by the
-	// supervisor slice.
-	startedAt := formatTS(store.clock().Now())
+	// supervisor slice. IntervalStart seeds the budget interval anchor
+	// (the active interval) and BlockedTimeoutMin records the machine's
+	// blocked budget for the job's life, like TimeoutMin.
+	startedAt := store.clock().Now()
 	if _, err = store.Record(req.ID, func(st *State) {
 		st.Checkout = prepared.Checkout
 		st.Dir = prepared.Dir
@@ -196,7 +199,12 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		st.BaseSHA = prepared.BaseSHA
 		st.Modo = runMode(req.Mode)
 		st.TimeoutMin = req.TimeoutMin
-		st.StartedAt = startedAt
+		st.StartedAt = formatTS(startedAt)
+		// The budget anchor keeps the full resolution (RFC3339Nano): a
+		// whole-second anchor would shift a restarted interval by up to
+		// 999 ms.
+		st.IntervalStart = startedAt.Format(time.RFC3339Nano)
+		st.BlockedTimeoutMin = s.Machine.BlockedTimeoutMin
 		st.Equipe = &Equipe{Fonte: req.Team.Source, OverrideBrief: overrideBrief(req.Team.OverrideKeys)}
 	}); err != nil {
 		return State{}, store, s.failStored(store, req.ID, "", err)

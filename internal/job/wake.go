@@ -28,14 +28,14 @@ var defaultWakeDelays = []time.Duration{10 * time.Second, 30 * time.Second, 90 *
 
 // wakes reports whether the event type wakes the dispatcher (contract
 // "Waking (best effort)"): pr_opened, review_verdict, question, blocked,
-// decision, timeout_warning, failure, and terminal always do; push does
-// only on rejection, which is the only push carrying refs.motivo; every
-// other type (accepted, preparing, worker_spawned, worker_done, commit,
-// checkpoint, unblocked, amend_received, decision_acked, note, cleanup, and
-// unknown types) does not.
+// decision, timeout_warning, blocked_warning, failure, and terminal always
+// do; push does only on rejection, which is the only push carrying
+// refs.motivo; every other type (accepted, preparing, worker_spawned,
+// worker_done, commit, checkpoint, unblocked, amend_received,
+// decision_acked, note, cleanup, and unknown types) does not.
 func wakes(ev Event) bool {
 	switch ev.Tipo {
-	case "pr_opened", "review_verdict", "question", "blocked", "decision", "timeout_warning", "failure", "terminal":
+	case "pr_opened", "review_verdict", "question", "blocked", "decision", "timeout_warning", "blocked_warning", "failure", "terminal":
 		return true
 	case "push":
 		return ev.Refs["motivo"] != ""

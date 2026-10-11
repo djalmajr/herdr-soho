@@ -7,10 +7,15 @@ import (
 )
 
 // supervise_control.go is the supervisor's side of the dispatcher's control
-// requests and of the job's time budget: it delivers amend and send to the
+// requests and of the job's time budgets: it delivers amend and send to the
 // job orchestrator, asks for an immediate push on checkpoint, starts the
-// stop path on cancel, warns at 80 % of the budget and starts the stop path
-// at 100 %. Delivery is at-least-once: a request retires only after its
+// stop path on cancel, warns at 80 % of the active budget and starts the
+// stop path at 100 % of it (the timeout outcome), warns at 80 % of the
+// blocked budget (the blocked_warning) and starts the stop path at 100 %
+// of it (the blocked ceiling, which ends the job through the existing
+// timeout outcome with its own motivo). A blocked job pauses the active
+// budget: only the seconds in status blocked count against the blocked
+// budget. Delivery is at-least-once: a request retires only after its
 // delivery and its event, so a crash between the two redelivers the request
 // on the next supervisor run — a redelivered amend is a duplicate
 // amendment the orchestrator applies idempotently, and a redelivered
@@ -104,7 +109,9 @@ func (s *Supervisor) deliverControlBody(item ControlItem, amend bool) error {
 		return err
 	}
 	if amend && snap.State.Status == StatusBlocked {
-		if _, err := s.Store.Transition(s.ID, StatusRunning); err != nil {
+		// The amendment unblocks the job: the crossing settles the blocked
+		// interval into the counters and re-anchors in the same write.
+		if err := s.settleAndTransition(snap.State, StatusRunning, true); err != nil {
 			return err
 		}
 		if _, err := s.Store.Record(s.ID, func(st *State) { st.Motivo = nil }); err != nil {
@@ -157,90 +164,195 @@ func (s *Supervisor) beginStop(kind string, grace time.Duration) {
 	s.stopDeadline = s.Clock.Monotonic() + int64(grace.Nanoseconds())
 }
 
-// checkBudget applies the job's time budget and decides the stop path's end
-// while it runs. The budget is TimeoutMin minutes (120 when 0) measured
-// with Clock.Monotonic from a virtual base captured once: this process's
-// first reading minus the elapsed time already recorded (StartedAt, wall
-// time, read once and clamped at zero, so a started_at in the future starts
-// the budget at zero). The wall clock is never compared after that, so a
-// backwards Now never shortens or extends the budget. A blocked job still
-// counts toward the budget.
-func (s *Supervisor) checkBudget() (int, bool, error) {
+// checkBudget applies the job's time budgets and decides the stop path's
+// end while it runs. Both budgets are measured with Clock.Monotonic from a
+// virtual base captured once per process for the current interval
+// (ensureIntervalBase, from the persisted anchor): the active budget is
+// TimeoutMin minutes (120 when 0) and counts the settled active counter
+// plus the in-flight interval only while the current interval is active —
+// accepted, preparing, running and finishing count as active, so a blocked
+// job pauses the ACCRUAL of active time, never its enforcement: a blocked
+// job whose settled active total is already at or past 80 % (or 100 %) still
+// warns (and stops), deduplicated, while blocked — while the blocked budget
+// is BlockedTimeoutMin minutes (the machine default, 1440, when 0 on a
+// state without it) and counts only the seconds in status blocked. Each
+// interval is settled into its persisted counter at every blocked-boundary
+// crossing (settleAndTransition), so a supervisor restart
+// neither resets nor double-counts; the wall clock is compared only at the
+// base capture, so a backwards Now never shortens or extends a budget. At
+// 80 % of the active budget the timeout_warning lands once (active time
+// only); at 100 % the stop path ends the job timeout (9). At 80 % of the
+// blocked budget the blocked_warning lands once; at 100 % the stop path
+// ends the job through the blocked_ceiling kind, the existing timeout
+// outcome (9) with its own motivo — the active timeout takes precedence
+// when both are reached. orchState is this tick's already-read orchestrator
+// state (a stop that starts this tick reuses it for the done check, no
+// second read); it is "" on a tick where a stop is already running at the
+// tick start (the stop path reads the orchestrator itself).
+func (s *Supervisor) checkBudget(orchState string) (int, bool, error) {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
 		return 0, false, err
 	}
 	st := snap.State
-	if !s.budgetBaseSet {
-		base := s.Clock.Monotonic()
-		if st.StartedAt != "" {
-			if start, perr := time.Parse(time.RFC3339, st.StartedAt); perr == nil {
-				if elapsed := s.Clock.Now().Sub(start); elapsed > 0 {
-					base -= int64(elapsed)
+	if err := s.ensureIntervalBase(st); err != nil {
+		return 0, false, err
+	}
+	if s.stopping != "" {
+		state := orchState
+		if state == "" {
+			if name := st.Orchestrator; name != "" {
+				if read, _, err := s.Ops.Status(name); err == nil {
+					state = read
 				}
 			}
 		}
-		s.budgetBase = base
-		s.budgetBaseSet = true
-	}
-	if s.stopping != "" {
-		if name := st.Orchestrator; name != "" {
-			if state, _, err := s.Ops.Status(name); err == nil && state == "done" {
-				return s.endStop(st)
-			}
+		if state == "done" {
+			return s.endStop(st)
 		}
 		if s.Clock.Monotonic() >= s.stopDeadline {
 			return s.endStop(st)
 		}
 		return 0, false, nil
 	}
-	budget := time.Duration(st.TimeoutMin) * time.Minute
+	// monoToMs converts the monotonic difference to the whole milliseconds
+	// the counters persist: Monotonic reads are nanoseconds, and a raw
+	// difference against a millisecond budget would expire every job on
+	// the first tick.
+	inFlightMs := monoToMs(s.Clock.Monotonic() - s.intervalBase)
+	if inFlightMs < 0 {
+		inFlightMs = 0
+	}
+	// Active = the settled active counter always, plus the in-flight
+	// interval only when the current interval is active (not blocked):
+	// blocking pauses the ACCRUAL of active time, never its enforcement —
+	// a blocked job whose settled active total is already at or past 80 %
+	// (or 100 %) still warns (and stops), deduplicated, while blocked, and
+	// blocked wall time never adds to the active total. The blocked total is
+	// cumulative: the settled counter plus the in-flight interval while the
+	// job is blocked — so a job past the ceiling stays past it (the ceiling
+	// ends it, a stop's grace unblock does not reset the consumed blocked
+	// time), and a restarted supervisor re-derives it from the persisted
+	// counter. Everything is compared in milliseconds, the unit of the
+	// persisted counters.
+	var activeTotalMs, blockedTotalMs int64
+	activeTotalMs = st.BudgetActiveMs
+	if st.Status != StatusBlocked {
+		activeTotalMs += inFlightMs
+	}
+	blockedTotalMs = st.BudgetBlockedMs
+	if st.Status == StatusBlocked {
+		blockedTotalMs += inFlightMs
+	}
+	budgetMs := int64((time.Duration(st.TimeoutMin) * time.Minute).Milliseconds())
 	if st.TimeoutMin <= 0 {
-		budget = 120 * time.Minute
+		budgetMs = int64((120 * time.Minute).Milliseconds())
 	}
-	elapsed := time.Duration(s.Clock.Monotonic() - s.budgetBase)
-	if elapsed < budget*4/5 {
-		return 0, false, nil
-	}
-	if !s.warned {
-		// warned guards against a second warning in this process; the
-		// event log guards against one across a restart.
-		s.warned = true
-		dir, err := s.Store.readDir(s.ID)
-		if err != nil {
-			return 0, false, err
-		}
-		events, err := readEvents(dir)
-		if err != nil {
-			return 0, false, err
-		}
-		if !hasTipo(events, "timeout_warning") {
-			if _, err := s.Store.Append(s.ID, EventIn{
-				Tipo:   "timeout_warning",
-				Resumo: "80% of the job budget used",
-			}); err != nil {
+	if activeTotalMs >= budgetMs*4/5 {
+		if !s.warnedActive {
+			// warnedActive guards against a second warning in this process;
+			// the event log guards against one across a restart.
+			s.warnedActive = true
+			dir, err := s.Store.readDir(s.ID)
+			if err != nil {
 				return 0, false, err
+			}
+			events, err := readEvents(dir)
+			if err != nil {
+				return 0, false, err
+			}
+			if !hasTipo(events, "timeout_warning") {
+				if _, err := s.Store.Append(s.ID, EventIn{
+					Tipo:   "timeout_warning",
+					Resumo: "80% of the active job budget used",
+				}); err != nil {
+					return 0, false, err
+				}
+			}
+		}
+		if activeTotalMs >= budgetMs {
+			s.beginStop("timeout", defaultTimeoutGrace)
+		}
+	}
+	blockedCapMs := int64((time.Duration(st.BlockedTimeoutMin) * time.Minute).Milliseconds())
+	if st.BlockedTimeoutMin <= 0 {
+		blockedCapMs = int64((1440 * time.Minute).Milliseconds())
+	}
+	if blockedTotalMs >= blockedCapMs*4/5 {
+		if !s.warnedBlocked {
+			// warnedBlocked guards against a second warning in this process;
+			// the event log guards against one across a restart.
+			s.warnedBlocked = true
+			dir, err := s.Store.readDir(s.ID)
+			if err != nil {
+				return 0, false, err
+			}
+			events, err := readEvents(dir)
+			if err != nil {
+				return 0, false, err
+			}
+			if !hasTipo(events, "blocked_warning") {
+				if _, err := s.Store.Append(s.ID, EventIn{
+					Tipo:   "blocked_warning",
+					Resumo: "80% of the blocked ceiling used",
+				}); err != nil {
+					return 0, false, err
+				}
+			}
+		}
+		if blockedTotalMs >= blockedCapMs {
+			// The blocked ceiling runs the same stop path as the timeout: the
+			// stop amendment, the bounded grace, the final push and the
+			// release are unchanged; endStop ends the job through the
+			// existing timeout outcome with the ceiling's own motivo. The
+			// active timeout takes precedence: it starts the stop when the
+			// active budget is exhausted too, so the ceiling starts it only
+			// when the active check did not.
+			if s.stopping == "" {
+				s.beginStop("blocked_ceiling", defaultTimeoutGrace)
 			}
 		}
 	}
-	if elapsed >= budget {
-		s.beginStop("timeout", defaultTimeoutGrace)
+	if s.stopping != "" {
+		// The budget check started the stop this tick: the stop path
+		// decides, reusing this tick's read (orchState) for the done check
+		// (no second read).
+		if orchState == "done" {
+			return s.endStop(st)
+		}
+		if s.Clock.Monotonic() >= s.stopDeadline {
+			return s.endStop(st)
+		}
+		return 0, false, nil
 	}
 	return 0, false, nil
 }
 
 // endStop ends the stop path: the job moves to finishing when it is not
-// there yet, and the outcome follows the kind (canceled 21, timeout 9).
-// The terminal path (the git slice) commits leftovers, pushes and releases.
-// A pending cancel retires once the terminal outcome is recorded
-// (finishOutcome and fail retire it on every terminal path), so nothing
-// stays pending on a terminal job; a crash in the window between the
-// terminal record and the retirement is retired by the supervisor that
-// starts on the terminal job.
+// there yet, and the outcome follows the kind (canceled 21, timeout 9, and
+// the blocked ceiling — which ends through the existing timeout outcome 9
+// with its own motivo, because the lifecycle has no terminal blocked and a
+// live blocked state must not be closed). The terminal path (the git slice)
+// commits leftovers, pushes and releases. A pending cancel retires once the
+// terminal outcome is recorded (finishOutcome and fail retire it on every
+// terminal path), so nothing stays pending on a terminal job; a crash in
+// the window between the terminal record and the retirement is retired by
+// the supervisor that starts on the terminal job.
 func (s *Supervisor) endStop(st State) (int, bool, error) {
 	status, motivo, exit := StatusCanceled, "cancelado", ExitCanceled
 	if s.stopping == StatusTimeout {
 		status, motivo, exit = StatusTimeout, "tempo esgotado", ExitTimeout
+	} else if s.stopping == "blocked_ceiling" {
+		// The ceiling's distinct motivo names it in the state and the
+		// terminal refs so a reader tells it from the active-budget
+		// timeout; the outcome stays the existing timeout.
+		status, motivo, exit = StatusTimeout, "tempo de bloqueio esgotado", ExitTimeout
+	}
+	// The stop's motivo replaces whatever the state carries (a block's
+	// question, an earlier stop) for every kind, before the job moves on:
+	// the terminal state never keeps a stale block motivo.
+	if _, err := s.Store.Record(s.ID, func(st *State) { st.Motivo = &motivo }); err != nil {
+		return 0, true, err
 	}
 	if st.Status != StatusFinishing {
 		if _, err := s.Store.Transition(s.ID, StatusFinishing); err != nil {

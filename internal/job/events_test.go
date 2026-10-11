@@ -359,3 +359,26 @@ func (g *gateClock) Sleep(d time.Duration) {
 	<-g.release
 	g.mono += int64(d)
 }
+
+// TestEventsBlockedWarningType: the blocked_warning supervisor type is
+// known to Append (its resumo, no refs), lands in the log with the
+// warning's fixed resumo, and an unknown type is still refused: the
+// event log is the cross-restart dedup source of truth for the budget
+// warnings, so the type must exist before the supervisor writes it.
+func TestEventsBlockedWarningType(t *testing.T) {
+	s, _ := startedJob(t)
+	event, err := s.Append("job-1", EventIn{Tipo: "blocked_warning", Resumo: "80% of the blocked ceiling used"})
+	if err != nil {
+		t.Fatalf("blocked_warning append: %v", err)
+	}
+	if event.Tipo != "blocked_warning" || event.Resumo != "80% of the blocked ceiling used" || event.Seq != 2 {
+		t.Fatalf("event = %+v", event)
+	}
+	page := mustPage(t, s, 0, 0)
+	if len(page.Events) != 2 || page.Events[1].Tipo != "blocked_warning" {
+		t.Fatalf("page events = %+v", page.Events)
+	}
+	if _, err := s.Append("job-1", EventIn{Tipo: "not_a_type", Resumo: "x"}); exitCode(t, err) != ExitUsage {
+		t.Fatalf("unknown type: %v", err)
+	}
+}

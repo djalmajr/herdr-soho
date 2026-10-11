@@ -169,7 +169,10 @@ func (s *Supervisor) syncGitOnce() (int, bool, error) {
 
 // blockPushRejection blocks a running job for a rejected push: the
 // transition, the stored motivo, and the blocked event. A job that is not
-// running is left to the next state.
+// running is left to the next state. The crossing is one locked write:
+// the transition and the settle (the counters and the re-anchor) land
+// together, so the blocked interval starts at the crossing and a crash at
+// the crossing never leaves the transition without the settle.
 func (s *Supervisor) blockPushRejection() error {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
@@ -178,7 +181,7 @@ func (s *Supervisor) blockPushRejection() error {
 	if snap.State.Status != StatusRunning {
 		return nil
 	}
-	if _, err := s.Store.Transition(s.ID, StatusBlocked); err != nil {
+	if err := s.settleAndTransition(snap.State, StatusBlocked, false); err != nil {
 		return err
 	}
 	motivo := "push_rejected"
@@ -195,7 +198,10 @@ func (s *Supervisor) blockPushRejection() error {
 // unblockPushRejection lifts a block this path set: a successful push that
 // leaves the job blocked for push_rejected moves it back to running,
 // clears the stored motivo, and lands the unblocked event. A block with
-// any other motivo is never lifted here.
+// any other motivo is never lifted here. The crossing is one locked
+// write: the transition and the settle (the counters and the re-anchor)
+// land together, so the active interval starts at the unblock and a crash
+// at the crossing never leaves the transition without the settle.
 func (s *Supervisor) unblockPushRejection() {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
@@ -206,7 +212,7 @@ func (s *Supervisor) unblockPushRejection() {
 	if st.Status != StatusBlocked || st.Motivo == nil || *st.Motivo != "push_rejected" {
 		return
 	}
-	if _, err := s.Store.Transition(s.ID, StatusRunning); err != nil {
+	if err := s.settleAndTransition(st, StatusRunning, true); err != nil {
 		s.frictionf("job: git sync: " + err.Error())
 		return
 	}
