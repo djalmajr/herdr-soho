@@ -19,7 +19,7 @@ import (
 // letter plus the modifier flags ps appends, e.g. Ss, S+, R+, SN, S<,
 // Sl) and the rest of the line, the comm. The lstart is stored exactly as
 // the system prints it, so two reads of the same process compare equal.
-var procStartRe = regexp.MustCompile(`^([A-Z][a-z]{2} [A-Z][a-z]{2}  ?\d{1,2} \d{2}:\d{2}:\d{2} \d{4})\s+([A-Za-z][A-Za-z+<]*)\s+(.+)$`)
+var procStartRe = regexp.MustCompile(`^([A-Z][a-z]{2} [A-Z][a-z]{2}  ?\d{1,2} \d{2}:\d{2}:\d{2} \d{4})\s+([A-Za-z?][A-Za-z+<]*)\s+(.+)$`)
 
 // procStateGone reports whether a ps state token is the zombie base state
 // (with or without the modifier flags ps appends, e.g. Z+, Zs): a dead
@@ -31,10 +31,16 @@ func procStateGone(state string) bool {
 
 // procStateRunning reports whether a ps state token's base letter is a
 // live state (R, S, D, T, W, X, I, U, or the tracing-stop t; the modifier
-// letters ps appends, s + n < l, do not change the liveness). Any other
-// base letter — or an empty token — is not a positive running read: the
-// caller confirms the line against the kernel, and an unknown state never
-// reads as running.
+// letters ps appends, s + n < l, do not change the liveness), or whether
+// the token carries the BSD E flag, "the process is trying to exit"
+// (macOS prints it as ?E, or after a base letter, while the exit runs): an
+// exiting process is still in the table with a readable identity, so it
+// reads as present — the stop verifies its start time, signals it and
+// waits for its actual disappearance (a zombie or an absent pid) instead
+// of skipping it or calling it unreadable. Any other base letter — or an
+// empty token — is not a positive running read: the caller confirms the
+// line against the kernel, and an unknown state never reads as running.
+// Linux ps has no E flag.
 func procStateRunning(state string) bool {
 	if state == "" {
 		return false
@@ -43,7 +49,7 @@ func procStateRunning(state string) bool {
 	case 'R', 'S', 'D', 'T', 'W', 'X', 'I', 'U', 't':
 		return true
 	}
-	return false
+	return strings.Contains(state, "E")
 }
 
 // procLocale returns env with LC_ALL=C, so ps prints the date fields in
