@@ -1613,12 +1613,13 @@ func TestSuperviseCollabFinishBeforeFinalizeEnumerates(t *testing.T) {
 		{Name: "impl-1", Path: stopPath, Amend: true},
 		{Name: "rev-1", Path: stopPath, Amend: true},
 	})
-	// The asked ids durably carry the id.
-	if ids := readAskedFile(t, jobDir); !reflect.DeepEqual(ids, []string{id}) {
-		t.Fatalf("asked file = %v, want %v", ids, []string{id})
+	// The asked ids stand persisted in the state (the single source of
+	// truth) before the enumeration.
+	if st := supState(t, store); !reflect.DeepEqual(st.CollabIDs, []string{id}) {
+		t.Fatalf("persisted collab_ids = %v, want %v", st.CollabIDs, []string{id})
 	}
-	// The finished id is read from the asked file and stands finished with
-	// its actual verdict and the last event's evidence.
+	// The finished id is read from the persisted ids and stands finished
+	// with its actual verdict and the last event's evidence.
 	out := findColab(t, readColabs(t, jobDir), id)
 	if out.Outcome != "finished" || out.Verdict != "accept" || out.Phase != collaboration.Finished {
 		t.Fatalf("outcome = %+v, want finished/accept", out)
@@ -1640,10 +1641,10 @@ func TestSuperviseCollabFinishBeforeFinalizeEnumerates(t *testing.T) {
 }
 
 // The same finish-before-enumeration across a mid-grace restart: process
-// one asks (the ids are persisted) and dies inside the grace after the
-// collaboration finished; the restart re-asks (nothing stands active: the
-// file stands, no participant amendment) and the finished id is read from
-// the asked file.
+// one asks (the ids are persisted in the state) and dies inside the grace
+// after the collaboration finished; the restart re-asks (nothing stands
+// active: the file stands, no participant amendment) and the finished id
+// is read from the persisted state ids.
 func TestSuperviseCollabRestartMidGraceFinishBeforeEnumerate(t *testing.T) {
 	var friction1 []string
 	store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction1)
@@ -1687,15 +1688,15 @@ func TestSuperviseCollabRestartMidGraceFinishBeforeEnumerate(t *testing.T) {
 		t.Fatal("the grace did not crash where scripted")
 	}
 	// After the crash: the job is still running, the collaboration is
-	// finished/accept, and the asked file carries the id.
+	// finished/accept, and the persisted state ids carry the id.
 	if st := supState(t, store); st.Status != StatusRunning || st.WorkspaceClosed {
 		t.Fatalf("state after the crash = %s/closed=%v, want running/open", st.Status, st.WorkspaceClosed)
 	}
 	if a := collabDisk(t, cstore, id); a.Phase != collaboration.Finished || a.Verdict != "accept" {
 		t.Fatalf("collaboration after the crash = %s/%s, want finished/accept", a.Phase, a.Verdict)
 	}
-	if ids := readAskedFile(t, jobDir); !reflect.DeepEqual(ids, []string{id}) {
-		t.Fatalf("asked file after the crash = %v, want %v", ids, []string{id})
+	if st := supState(t, store); !reflect.DeepEqual(st.CollabIDs, []string{id}) {
+		t.Fatalf("persisted collab_ids after the crash = %v, want %v", st.CollabIDs, []string{id})
 	}
 	if len(herdr.CloseIDs) != 0 {
 		t.Fatalf("close calls before the terminal = %v, want none", herdr.CloseIDs)
@@ -1706,14 +1707,14 @@ func TestSuperviseCollabRestartMidGraceFinishBeforeEnumerate(t *testing.T) {
 
 	// Process two: the restart asks (nothing stands active anymore: no
 	// participant amendment, the file stands), the orchestrator reports
-	// done, and the finished id is read from the asked file.
+	// done, and the finished id is read from the persisted state ids.
 	var friction2 []string
 	clock2 := &nsClock{now: clock.now}
 	herdr2 := &fakeHerdr{}
 	team2 := &fakeTeam{spawnName: "orch-1", rosterRows: team.rosterRows}
 	report := writeOrchestratorReport(t, "# report\n\n- [done] item\n")
 	team2.statusScript = []fakeStatus{{State: "done", Report: report}}
-	sup2 := &Supervisor{Store: store, ID: "job-1", Ops: team2, Clock: clock2, Poll: 10 * time.Second, Herdr: herdr2}
+	sup2 := &Supervisor{Store: store, ID: "job-1", Ops: team2, Clock: clock2, Poll: 10 * time.Second, Herdr: herdr2, ProjectRoot: collabJobDir(t, store)}
 	sup2.Friction = func(message string) { friction2 = append(friction2, message) }
 	exit, err := sup2.Run()
 	if err != nil {
@@ -1797,6 +1798,11 @@ func TestSuperviseCollabEnumerationFailureKeepsSnapshot(t *testing.T) {
 	if !crashed {
 		t.Fatal("the settlement did not crash where scripted")
 	}
+	// The crash was scripted once for process one: the later processes
+	// settle without it (the first outcome's settle already happened on
+	// disk before the crash, and process three confirms it without a
+	// supervisor claim).
+	settleCollaborationHook = nil
 	// The snapshot persisted before the termination carries both ids
 	// (partial, not finalized); on disk the first is settled, the second
 	// stands active.
@@ -1844,7 +1850,7 @@ func TestSuperviseCollabEnumerationFailureKeepsSnapshot(t *testing.T) {
 	clock2 := &nsClock{now: clock.now}
 	herdr2 := &fakeHerdr{}
 	team2 := &fakeTeam{spawnName: "orch-1", rosterRows: team.rosterRows}
-	sup2 := &Supervisor{Store: store, ID: "job-1", Ops: team2, Clock: clock2, Poll: 10 * time.Second, Herdr: herdr2}
+	sup2 := &Supervisor{Store: store, ID: "job-1", Ops: team2, Clock: clock2, Poll: 10 * time.Second, Herdr: herdr2, ProjectRoot: collabJobDir(t, store)}
 	sup2.Friction = func(message string) { friction2 = append(friction2, message) }
 	exit, err := sup2.Run()
 	if err != nil {
@@ -1891,7 +1897,7 @@ func TestSuperviseCollabEnumerationFailureKeepsSnapshot(t *testing.T) {
 	clock3 := &nsClock{now: clock2.now}
 	herdr3 := &fakeHerdr{}
 	team3 := &fakeTeam{spawnName: "orch-1", rosterRows: team.rosterRows}
-	sup3 := &Supervisor{Store: store, ID: "job-1", Ops: team3, Clock: clock3, Poll: 10 * time.Second, Herdr: herdr3}
+	sup3 := &Supervisor{Store: store, ID: "job-1", Ops: team3, Clock: clock3, Poll: 10 * time.Second, Herdr: herdr3, ProjectRoot: collabJobDir(t, store)}
 	sup3.Friction = func(message string) { friction3 = append(friction3, message) }
 	exit, err = sup3.Run()
 	if err != nil {

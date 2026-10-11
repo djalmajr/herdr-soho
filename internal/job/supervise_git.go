@@ -266,13 +266,15 @@ func (s *Supervisor) finalSync(status string) {
 }
 
 // finalize finishes every terminal outcome the same way, after the
-// outcome is recorded and finalSync has pushed: the complete report facts, the
-// release of the job orchestrator, the team, and the registered copies and
-// processes, the cleanup event (checked against the log first so a retry
-// converges), and the Herdr workspace close last. It never removes a
-// worktree, a directory, a branch, or a pull request; its failures go to
-// friction and the path continues, because everything durable is written
-// before the process may end with the workspace.
+// outcome is recorded and finalSync has pushed: the collaboration
+// settlement of the persisted outcomes (a fresh process over a terminal
+// job captures them first), the release of the job orchestrator, the
+// team, and the registered copies and processes, the cleanup event
+// (checked against the log first so a retry converges), and the Herdr
+// workspace close last. It never removes a worktree, a directory, a
+// branch, or a pull request; its failures go to friction and the path
+// continues, because everything durable is written before the process may
+// end with the workspace.
 func (s *Supervisor) finalize(status string) {
 	jobDir, err := s.Store.readDir(s.ID)
 	if err != nil {
@@ -290,28 +292,44 @@ func (s *Supervisor) finalize(status string) {
 		return
 	}
 	facts := s.reportFacts(snap.State, events, jobDir)
-	// The collaboration terminal step (supervise_collab.go), between the
-	// report facts and the report write: the job's active collaborations
-	// are asked to finish (the stop path already asked in beginStop) and
-	// waited on the shared deadline — the stop deadline for cancel and
-	// timeout, one defaultTimeoutGrace from now for done and failed —
-	// until they are finished, and their outcomes, with the last event's
-	// evidence and the fresh hash, are persisted through this report write
-	// BEFORE any Store.Stop or Store.Finalize, so a crash between the
-	// persistence and the settlement loses no outcome. The unsettled ones
-	// are ended (Stop + Finalize reject) and the confirmed facts rewritten
-	// only after the write, and then the release runs with every readable
-	// collaboration finished.
-	collabDeadline := s.Clock.Monotonic() + int64(defaultTimeoutGrace.Nanoseconds())
-	if s.stopping != "" {
-		// Cancel and timeout share the stop deadline: the ask ran in
-		// beginStop, and the stop's end is the collaboration's grace end;
-		// an orchestrator that reports done early keeps the rest of the
-		// deadline for the participants.
-		collabDeadline = s.stopDeadline
+	// The collaboration terminal step (supervise_collab.go): the outcomes
+	// of this process's terminal path were persisted into the state
+	// before the terminal transition, so they are settled here only; a
+	// fresh process over a terminal job (a restart) has not captured and
+	// runs the capture first — the state-first enumeration, the ask of the
+	// still-active ones (once in its own process) and the wait on the
+	// shared deadline. Either way the confirmed facts (the final phase,
+	// finalized_by_supervisor and the cause) are recorded back into the
+	// state, which is the single source of the report's colaboracoes and
+	// partial fields. When the enumeration could not be restored by the
+	// deadline the persisted ids stand and the release, the cleanup and
+	// the workspace close are refused: the close is what guarantees no
+	// orphan pane, and it runs only when the enumeration succeeded.
+	var settleSrc []CollaborationOutcome
+	if s.collabEnded {
+		settleSrc = snap.State.Colaboracoes
+	} else {
+		outcomes, capErr := s.endCollaborations(s.collabDeadline())
+		if capErr != nil {
+			s.frictionf("job: the supervisor cannot enumerate the collaborations: " + capErr.Error())
+			if err := s.persistCollabOutcomes(outcomes); err != nil {
+				s.frictionf("job: finalize: " + err.Error())
+			}
+			return
+		}
+		s.collabEnded = true
+		if err := s.persistCollabOutcomes(outcomes); err != nil {
+			s.frictionf("job: finalize: " + err.Error())
+			return
+		}
+		settleSrc = outcomes
 	}
-	if outcomes := s.endCollaborations(collabDeadline); len(outcomes) > 0 {
-		facts.Colaboracoes = outcomes
+	settled := s.settleCollaborations(settleSrc)
+	if len(settled) > 0 {
+		if err := s.persistCollabOutcomes(settled); err != nil {
+			s.frictionf("job: finalize: " + err.Error())
+			return
+		}
 	}
 	if snap.State.WorkspaceID != "" {
 		// The release, the cleanup, and the workspace close apply to jobs
@@ -323,16 +341,6 @@ func (s *Supervisor) finalize(status string) {
 	if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
 		s.frictionf("job: finalize: " + err.Error())
 		return
-	}
-	// End the unsettled collaborations and record the confirmed facts;
-	// the snapshot is already durable, so a failure here is friction and
-	// the retry rewrites it before the release.
-	if len(facts.Colaboracoes) > 0 {
-		facts.Colaboracoes = s.settleCollaborations(facts.Colaboracoes)
-		if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
-			s.frictionf("job: finalize: " + err.Error())
-			return
-		}
 	}
 
 	// Release: the job orchestrator, then the remaining workers, then

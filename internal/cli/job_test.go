@@ -228,13 +228,37 @@ func TestJobStatusPrintsTheSnapshotLine(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
+	// The legacy state (no colaboracoes, collab ids or terminal intent on
+	// disk) prints the empty partial values, and the read stays
+	// write-free: the state file's bytes and mtime stand through the
+	// status line.
+	statePath := filepath.Join(co, ".herdr-soho", "jobs", "job-1", "state.json")
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeInfo, err := os.Stat(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	code, out, errOut := f.run(t, "status", "--id", "job-1")
 	if code != 0 || errOut != "" {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 	}
-	want := `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[]}`
+	want := `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[]}`
 	if out != want+"\n" {
 		t.Fatalf("out=%q", out)
+	}
+	after, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterInfo, err := os.Stat(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) || beforeInfo.ModTime() != afterInfo.ModTime() {
+		t.Fatalf("the status read rewrote state.json (bytes or mtime moved)")
 	}
 }
 
@@ -581,13 +605,14 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 }
 
 // jobControlStatusLine is the fresh status line of the fixture job after a
-// control request.
-const jobControlStatusLine = `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[]}` + "\n"
+// control request. The partial fields are the additive contract change of
+// the collaboration partial facts: always present, empty here.
+const jobControlStatusLine = `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[]}` + "\n"
 
 // jobRunningStatusLine is the fixture job's status line once it is
 // running: the live path of job cancel, which queues the request for the
 // supervisor.
-const jobRunningStatusLine = `{"id":"job-1","status":"running","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[]}` + "\n"
+const jobRunningStatusLine = `{"id":"job-1","status":"running","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[]}` + "\n"
 
 // TestJobControlAmendSendWriteRequests: amend and send queue the request
 // file with the exact body, print the fresh status line and exit 0; the

@@ -1,30 +1,33 @@
 // supervise_collab.go is the job supervisor's end of the job's own worker
 // collaborations, run on every terminal path (done, failed, timeout,
-// cancel, including restarts) inside finalize: the supervisor asks every
-// active collaboration of the job's own workspace to finish — the stop
+// cancel, including restarts): the supervisor asks every active
+// collaboration of the job's own workspace to finish — the stop
 // amendment, dispatched as an amendment to the participants that are names
 // in the job's team — waits on the injected clock on the shared deadline
 // (the stop deadline for cancel and timeout, one defaultTimeoutGrace from
-// now for done and failed) until every job collaboration is finished, then
+// now for done and failed) until every job collaboration is finished, and
 // persists one outcome per collaboration with its evidence into
-// report.json through the normal atomic report write BEFORE any
-// termination, ends the ones still active (Store.Stop, unless escalated,
-// and Store.Finalize reject — one retry on a generation conflict each, and
-// never accept), records the confirmed facts, and lets the release run
-// with every readable collaboration finished, so no release is refused and
-// no pane or process is left behind. The supervisor is the owner of the
-// job-owned assignments of the job's own workspace and can only interrupt
-// or reject them: it never finalizes accept, never edits or deletes an
-// assignment file, and never rewrites a phase by hand. A readable record
-// the job does not own — another workspace or another project root than
-// the trusted one — is never dispatched to, stopped, finalized, waited
-// on, or recorded, and every evidence read is bounded and root-bound, so
-// a hostile report target is refused without publishing its path. A
-// partial or unavailable outcome is never an accepted success: the job
-// status, the partial count and the publico block are decided elsewhere
-// and are never changed by this step. A restarted supervisor loads the persisted
-// snapshot first, never drops an id it carries, and re-asks once in its
-// own process — the same accepted bound as the stop amendment.
+// state.json BEFORE the terminal transition, so the partial facts exist
+// before the outcome is visible; the report's colaboracoes and the
+// partial fields are derived from that persisted list by every rewrite.
+// The still-active ones are ended after the transition (Store.Stop, unless
+// escalated, and Store.Finalize reject — one retry on a generation
+// conflict each, and never accept) and the confirmed facts are recorded
+// back into the state, and the release runs with every readable
+// collaboration finished, so no release is refused and no pane or process
+// is left behind. The supervisor is the owner of the job-owned assignments
+// of the job's own workspace and can only interrupt or reject them: it
+// never finalizes accept, never edits or deletes an assignment file, and
+// never rewrites a phase by hand. A readable record the job does not own —
+// another workspace or another project root than the trusted one — is
+// never dispatched to, stopped, finalized, waited on, or recorded, and
+// every evidence read is bounded and root-bound, so a hostile report
+// target is refused without publishing its path. A partial or unavailable
+// outcome is never an accepted success: the job status, the partial count
+// and the publico block are decided elsewhere and are never changed by
+// this step. A restarted supervisor loads the persisted snapshot first,
+// never drops an id it carries, and re-asks once in its own process — the
+// same accepted bound as the stop amendment.
 package job
 
 import (
@@ -117,6 +120,95 @@ type CollaborationOutcome struct {
 // settlement and the rewrite.
 var settleCollaborationHook func(id string)
 
+// collabListActive is the test seam of the enumeration: the job
+// workspace store's ListActive read behind the retry loop of
+// endCollaborations, so a directory-level failure can be scripted and
+// observed across the shared deadline.
+var collabListActive = func(s collaboration.Store) ([]collaboration.Assignment, []collaboration.UnreadableAssignment, error) {
+	return s.ListActive()
+}
+
+// PartialCollaborations derives the partial facts from the persisted
+// outcomes: the sorted unique ids of the outcomes whose outcome is
+// partial or unavailable; an outcome finished by the orchestrator's own
+// finalize (with any verdict) is never partial. It returns an empty
+// non-nil list when none stands, so the report and the status line carry
+// the keys with empty values, never null.
+func PartialCollaborations(st State) []string {
+	ids := map[string]bool{}
+	for _, o := range st.Colaboracoes {
+		if o.Outcome == collabOutcomePartial || o.Outcome == collabOutcomeUnavailable {
+			ids[o.ID] = true
+		}
+	}
+	out := make([]string, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// unionSorted merges the new ids into the existing list, sorted and
+// without duplicates: the persisted list is the union of what the ask
+// observed and what an earlier process observed.
+func unionSorted(existing, add []string) []string {
+	set := map[string]bool{}
+	for _, id := range existing {
+		set[id] = true
+	}
+	for _, id := range add {
+		set[id] = true
+	}
+	out := make([]string, 0, len(set))
+	for id := range set {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mergeCollabOutcomes merges the newly captured outcomes into the
+// persisted list (the no-late-erasure rule): an id already persisted
+// keeps its persisted outcome and verdict forever — only settle's
+// confirmed facts (the phase, the supervisor flag and the cause) may
+// touch it later — and a new id is added. The list stays sorted by id
+// with no duplicates.
+func mergeCollabOutcomes(persisted, fresh []CollaborationOutcome) []CollaborationOutcome {
+	byID := map[string]CollaborationOutcome{}
+	for _, o := range fresh {
+		byID[o.ID] = o
+	}
+	for _, o := range persisted {
+		if f, ok := byID[o.ID]; ok {
+			// A persisted id keeps its persisted outcome and verdict
+			// forever; only the settle fields — the final phase, the
+			// supervisor's confirmed end and the cause — stand from the
+			// fresh facts.
+			o.Phase = f.Phase
+			o.FinalizedBySupervisor = f.FinalizedBySupervisor
+			o.Cause = f.Cause
+			byID[o.ID] = o
+		} else {
+			byID[o.ID] = o
+		}
+	}
+	out := make([]CollaborationOutcome, 0, len(byID))
+	for _, id := range sortedKeys(byID) {
+		out = append(out, byID[id])
+	}
+	return out
+}
+
+func sortedKeys(m map[string]CollaborationOutcome) []string {
+	ids := make([]string, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // collabSettlePreWriteHook is the test seam of the settlement window:
 // called with the collaboration id after the fresh read and right before
 // the Stop write; it is where a concurrent generation bump interleaves.
@@ -153,10 +245,14 @@ func (s *Supervisor) ownsCollaboration(st State, a collaboration.Assignment) boo
 // every participant of every active assignment that is a name in the job's
 // team (the roster), writing stop-amend.md with the exact contract body
 // first when the stop path has not written it yet (the done/failed paths).
-// It never Store.Stops: the recorded interruption happens after the grace,
-// when settleCollaborations finalizes, so the participants can still
-// publish their final events. A dispatch failure is a friction line and
-// never blocks the terminal path. The ask runs at most once per supervisor
+// The owned active ids it is about to ask are persisted into the state
+// (collab_ids, unioned, sorted, unique) with one Record BEFORE it
+// dispatches any stop amendment, so an id that finishes before the
+// terminal enumeration still stands in the enumeration. It never
+// Store.Stops: the recorded interruption happens after the grace, when
+// settleCollaborations finalizes, so the participants can still publish
+// their final events. A dispatch failure is a friction line and never
+// blocks the terminal path. The ask runs at most once per supervisor
 // process (collabAsked), the same accepted bound as the orchestrator's
 // stop amendment: a restart re-asks once in its own process.
 func (s *Supervisor) askCollaborations() {
@@ -174,7 +270,7 @@ func (s *Supervisor) askCollaborations() {
 	if store == nil {
 		return
 	}
-	active, _, err := store.ListActive()
+	active, _, err := collabListActive(*store)
 	if err != nil {
 		s.frictionf("job: the supervisor cannot list the job's collaborations to ask them to finish: " + err.Error())
 		return
@@ -187,6 +283,18 @@ func (s *Supervisor) askCollaborations() {
 	}
 	if len(mine) == 0 {
 		return
+	}
+	// The owned active ids, durably observed before any dispatch: a crash
+	// or a later enumeration (state-first) reads them from the state and
+	// never drops an id the ask ran for.
+	asked := make([]string, 0, len(mine))
+	for _, a := range mine {
+		asked = append(asked, a.ID)
+	}
+	if _, err := s.Store.Record(s.ID, func(st *State) {
+		st.CollabIDs = unionSorted(st.CollabIDs, asked)
+	}); err != nil {
+		s.frictionf("job: the supervisor cannot record the collaborations asked to finish: " + err.Error())
 	}
 	rows, err := s.Ops.Roster()
 	if err != nil {
@@ -223,34 +331,65 @@ func (s *Supervisor) askCollaborations() {
 }
 
 // endCollaborations is the common terminal-path collaboration step, called
-// from finalize between the report facts and the report write: it asks the
-// job's active collaborations to finish (the stop path already asked in
-// beginStop; the flag makes it a no-op there), waits on the injected clock
-// on the shared deadline — the stop deadline for cancel and timeout, one
-// defaultTimeoutGrace from now for done and failed, computed once and never
-// restarted per tick — until every job collaboration is finished or the
-// deadline passes, and returns one outcome per job collaboration with its
-// evidence, sorted by id. It waits only when at least one active job
-// collaboration exists; nothing else changes. The outcomes are persisted
-// by the caller through the normal report write before any Store.Stop or
-// Store.Finalize: this function loads the persisted snapshot first and
-// never drops an id it already carries, so a crash between the persistence
-// and the settlement loses no outcome.
-func (s *Supervisor) endCollaborations(deadline int64) []CollaborationOutcome {
+// from finishOutcome and fail before the terminal transition (the capture)
+// and from finalize by a fresh process over a terminal job (the restart
+// pass): it reads the persisted state FIRST, enumerates the job's own
+// workspace store (a directory-level failure retries each poll on the
+// same deadline and, if it still fails, returns every known id with the
+// error), asks the still-active ones to finish (the stop path already
+// asked in beginStop; the flag makes it a no-op there), waits on the
+// injected clock on the shared deadline — the stop deadline for cancel
+// and timeout, one defaultTimeoutGrace from now for done and failed,
+// computed once by the caller and never restarted per tick — until every
+// job collaboration is finished or the deadline passes, and returns one
+// outcome per known collaboration with its evidence, sorted by id:
+// CollabIDs union the persisted outcomes' ids, the owned active records
+// and the unreadable records. It waits only when at least one active job
+// collaboration exists; nothing else changes. The caller persists the
+// merged outcomes into the state (the single source of the report's
+// colaboracoes) before the terminal transition or, on a fresh process,
+// before the settlement, so a crash between the persistence and the
+// settlement loses no outcome and a finished id observed by the ask
+// stands finished with its verdict, never partial.
+func (s *Supervisor) endCollaborations(deadline int64) ([]CollaborationOutcome, error) {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
 		s.frictionf("job: the supervisor cannot read the state to end the collaborations")
-		return nil
+		return nil, nil
 	}
 	st := snap.State
 	store := s.collabStore(st)
 	if store == nil {
-		return nil
+		return nil, nil
 	}
-	active, unreadable, err := store.ListActive()
+	// The enumeration, through the seam: a directory-level failure retries
+	// each poll on the same deadline; if it still fails at the deadline
+	// every known id stands (the persisted ones unchanged, the rest
+	// unavailable) and the error is returned for the caller to friction
+	// and still persist. A persisted id is never dropped.
+	active, unreadable, err := collabListActive(*store)
+	for err != nil && s.Clock.Monotonic() < deadline {
+		s.clockSleep(s.poll())
+		active, unreadable, err = collabListActive(*store)
+	}
 	if err != nil {
-		s.frictionf("job: the supervisor cannot list the job's collaborations: " + err.Error())
-		return nil
+		known := map[string]CollaborationOutcome{}
+		for _, o := range st.Colaboracoes {
+			known[o.ID] = o
+		}
+		out := make([]CollaborationOutcome, 0, len(unionSorted(st.CollabIDs, outcomeIDs(st.Colaboracoes))))
+		for _, id := range unionSorted(st.CollabIDs, outcomeIDs(st.Colaboracoes)) {
+			if o, ok := known[id]; ok {
+				out = append(out, o)
+				continue
+			}
+			out = append(out, CollaborationOutcome{
+				ID:      id,
+				Outcome: collabOutcomeUnavailable,
+				Cause:   "collaborations could not be enumerated",
+			})
+		}
+		return out, err
 	}
 	// Only this job's collaborations: the store dir is the job's own
 	// workspace state dir, and every readable record is owned on the
@@ -259,6 +398,9 @@ func (s *Supervisor) endCollaborations(deadline int64) []CollaborationOutcome {
 	// waited on, stopped, finalized, or recorded.
 	activeCount := 0
 	ids := map[string]bool{}
+	for _, id := range st.CollabIDs {
+		ids[id] = true
+	}
 	for _, a := range active {
 		if !s.ownsCollaboration(st, a) {
 			continue
@@ -269,14 +411,12 @@ func (s *Supervisor) endCollaborations(deadline int64) []CollaborationOutcome {
 	for _, u := range unreadable {
 		ids[u.ID] = true
 	}
-	// The persisted snapshot (a crashed earlier finalize) keeps its ids
-	// even when ListActive no longer returns them.
+	// The persisted outcomes keep their ids even when the enumeration no
+	// longer returns them.
 	persisted := map[string]CollaborationOutcome{}
-	if snap.Report != nil {
-		for _, o := range snap.Report.Colaboracoes {
-			ids[o.ID] = true
-			persisted[o.ID] = o
-		}
+	for _, o := range st.Colaboracoes {
+		ids[o.ID] = true
+		persisted[o.ID] = o
 	}
 	if activeCount > 0 {
 		// The done/failed ask (a no-op on the stop path, which already
@@ -328,7 +468,9 @@ func (s *Supervisor) endCollaborations(deadline int64) []CollaborationOutcome {
 		}
 		if a.Phase == collaboration.Finished {
 			// Finished by the orchestrator's own finalize before the
-			// snapshot: finished, with the record's verdict.
+			// snapshot (an id the ask persisted that has since finished,
+			// included): finished, with the record's verdict and the
+			// last event's evidence; never partial.
 			outcomes = append(outcomes, s.collaborationEvidence(a, st, store.StateDir, collabOutcomeFinished, a.Verdict))
 			continue
 		}
@@ -337,7 +479,16 @@ func (s *Supervisor) endCollaborations(deadline int64) []CollaborationOutcome {
 		// persisted; the outcome is partial with the planned verdict.
 		outcomes = append(outcomes, s.collaborationEvidence(a, st, store.StateDir, collabOutcomePartial, collabVerdictReject))
 	}
-	return outcomes
+	return outcomes, nil
+}
+
+// outcomeIDs is the ids of the persisted outcomes, in their order.
+func outcomeIDs(outcomes []CollaborationOutcome) []string {
+	ids := make([]string, 0, len(outcomes))
+	for _, o := range outcomes {
+		ids = append(ids, o.ID)
+	}
+	return ids
 }
 
 // collabEvidenceRoots is the allowed directories of one evidence read,

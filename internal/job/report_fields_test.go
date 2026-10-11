@@ -20,13 +20,15 @@ import (
 )
 
 // reportFieldOrder is the top-level key order of the contract report
-// example: the schema through the publico block.
+// example: the schema through the publico block. The partial fields are
+// the additive contract change of the collaboration partial facts: always
+// present, right after parciais.
 var reportFieldOrder = []string{
 	"schema", "id", "status", "motivo", "resumo", "maquina", "repo", "base",
 	"branch", "head", "head_remoto", "sincronizado", "commits", "pr",
-	"itens", "parciais", "testes", "revisao", "artefatos", "blockers",
-	"perguntas", "memoria", "equipe", "eventos", "custo", "logs",
-	"limpeza", "publico",
+	"itens", "parciais", "partial", "partial_collaborations", "testes",
+	"revisao", "artefatos", "blockers", "perguntas", "memoria", "equipe",
+	"eventos", "custo", "logs", "limpeza", "publico",
 }
 
 // topKeys returns the top-level key order of one JSON object, as written.

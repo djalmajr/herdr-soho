@@ -80,6 +80,26 @@ type State struct {
 	OrchestratorSpawnAt string `json:"orchestrator_spawn_at,omitempty"`
 	Orchestrator        string `json:"orchestrator,omitempty"`
 	DispatchedAt        string `json:"dispatched_at,omitempty"`
+	// The collaboration terminal facts (supervise_collab.go), persisted
+	// before the terminal status becomes visible and never erased: the
+	// outcomes one persisted outcome per job collaboration, the owned ids
+	// observed when the ask ran (sorted, unique), and the terminal intent
+	// the outcome converges to on a restart. All omitempty, so a state
+	// without them serializes byte for byte as before.
+	Colaboracoes   []CollaborationOutcome `json:"colaboracoes,omitempty"`
+	CollabIDs      []string               `json:"collab_ids,omitempty"`
+	TerminalIntent *TerminalIntent        `json:"terminal_intent,omitempty"`
+}
+
+// TerminalIntent is the terminal outcome a supervisor process committed to
+// before it could record it: the status, the stored motivo and the exit
+// code. A restarted supervisor converges on it instead of re-deriving the
+// outcome, so a crash between the intent and the terminal transition loses
+// neither the outcome nor its partial facts.
+type TerminalIntent struct {
+	Status string `json:"status"`
+	Motivo string `json:"motivo,omitempty"`
+	Exit   int    `json:"exit"`
 }
 
 // Store is the job state root (core.StateRootPath, not a workspace directory).

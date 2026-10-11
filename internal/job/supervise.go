@@ -123,6 +123,14 @@ type Supervisor struct {
 	// re-asks once in its own process, the same accepted bound as the stop
 	// amendment.
 	collabAsked bool
+
+	// collabEnded guards the single collaboration capture of this
+	// process's terminal path: finishOutcome and fail capture and
+	// persist the outcomes before the terminal transition, and finalize
+	// then settles the persisted outcomes only; a fresh process over a
+	// terminal job (a restart) has not captured and runs the capture in
+	// finalize instead.
+	collabEnded bool
 }
 
 // NewSupervisor wires the production supervisor over a recorded job: the
@@ -286,6 +294,32 @@ func (s *Supervisor) settleAndTransition(st State, to string, finishedBlocked bo
 	return nil
 }
 
+// collabDeadline is the shared deadline of the collaboration wait on a
+// terminal path: the stop deadline when a stop is running in this process
+// (cancel and timeout keep the stop's original grace, never restarted or
+// extended), one defaultTimeoutGrace from now for done and failed and for
+// a fresh process over a terminal job.
+func (s *Supervisor) collabDeadline() int64 {
+	if s.stopping != "" {
+		return s.stopDeadline
+	}
+	return s.Clock.Monotonic() + int64(defaultTimeoutGrace.Nanoseconds())
+}
+
+// persistCollabOutcomes merges the captured outcomes into the persisted
+// ones (the no-late-erasure rule) and records the merge into the state,
+// the single source of the report's colaboracoes. An empty merge is a
+// no-op that rewrites nothing.
+func (s *Supervisor) persistCollabOutcomes(outcomes []CollaborationOutcome) error {
+	if len(outcomes) == 0 {
+		return nil
+	}
+	_, err := s.Store.Record(s.ID, func(st *State) {
+		st.Colaboracoes = mergeCollabOutcomes(st.Colaboracoes, outcomes)
+	})
+	return err
+}
+
 // Run drives the job to a terminal outcome. The exit code follows the
 // outcome (done 0, failed 19, canceled 21, timeout 9, blocked 7); err is
 // non-nil only for unexpected store failures, which exit with the
@@ -303,6 +337,32 @@ func (s *Supervisor) Run() (int, error) {
 		}
 		s.finishWakes()
 	}()
+	// The terminal intent (persisted before the terminal transition on
+	// every terminal path): a crash left the outcome behind without the
+	// transition, and this process converges on it instead of re-deriving
+	// the outcome. A job already terminal keeps today's path (finalize
+	// again; settle the persisted outcomes; never re-ask or rewrite a
+	// persisted outcome).
+	if snap, err := s.Store.Snapshot(s.ID); err == nil {
+		intent := snap.State.TerminalIntent
+		if intent != nil && !isTerminalOutcome(snap.State.Status) &&
+			snap.State.Status != StatusCollected && snap.State.Status != StatusClosed {
+			if intent.Status == StatusFailed {
+				s.fail(intent.Motivo, intent.Exit)
+				return intent.Exit, nil
+			}
+			if snap.State.Status == StatusRunning || snap.State.Status == StatusBlocked {
+				if _, err := s.Store.Transition(s.ID, StatusFinishing); err != nil {
+					return ExitFailed, err
+				}
+			}
+			code, _, err := s.finishOutcome(intent.Status, intent.Motivo, intent.Exit)
+			if err != nil {
+				return ExitFailed, err
+			}
+			return code, nil
+		}
+	}
 	code, done, err := s.waitRunning()
 	if err != nil {
 		return ExitFailed, err
@@ -892,20 +952,58 @@ func (s *Supervisor) onOrchestratorDone(st State, name, reportPath string) (int,
 	return s.finishOutcome(StatusFailed, motivo, ExitFailed)
 }
 
-// finishOutcome appends the terminal event (refs.motivo when set,
-// refs.exit), moves the job to the outcome — which publishes report.json —
-// and finalizes: the final push and draft pull request, the complete
-// report facts, the release, the cleanup event, and the workspace close.
+// finishOutcome commits the terminal outcome in the contract order: the
+// terminal intent is persisted first (a crash leaves it for a restart to
+// converge on), the final push and draft pull request run while the job is
+// still finishing, the collaboration outcomes are captured and persisted
+// before the terminal transition (so the partial facts exist before the
+// outcome is visible), the terminal event lands at most once, and the
+// transition publishes report.json — built from the state's persisted
+// outcomes — before the retire, the wake drain and the finalize (the
+// settlement, the release, the cleanup event, the workspace close).
 func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, error) {
+	// The terminal intent is durable before anything else: a crash between
+	// the intent and the terminal transition leaves the outcome for the
+	// restart instead of re-deriving it.
+	intent := &TerminalIntent{Status: status, Motivo: motivo, Exit: exit}
+	if _, err := s.Store.Record(s.ID, func(st *State) { st.TerminalIntent = intent }); err != nil {
+		return 0, true, err
+	}
 	// The final push happens while the job is still finishing, so its events
 	// precede the terminal event.
 	s.finalSync(status)
-	refs := map[string]string{"exit": strconv.Itoa(exit)}
-	if motivo != "" {
-		refs["motivo"] = motivo
+	// The collaboration capture: the outcomes are merged into the state
+	// (the persisted ones stand forever) and persisted before the
+	// terminal transition; an enumeration that could not be restored by
+	// the deadline still persists every known id, and the friction names
+	// it.
+	outcomes, capErr := s.endCollaborations(s.collabDeadline())
+	if capErr != nil {
+		s.frictionf("job: the supervisor cannot enumerate the collaborations: " + capErr.Error())
 	}
-	if _, err := s.Store.Append(s.ID, EventIn{Tipo: "terminal", Refs: refs}); err != nil {
+	s.collabEnded = true
+	if err := s.persistCollabOutcomes(outcomes); err != nil {
 		return 0, true, err
+	}
+	// The terminal event lands at most once: a crashed earlier pass may
+	// have appended it already, and the restart converges without a
+	// duplicate.
+	jobDir, err := s.Store.readDir(s.ID)
+	if err != nil {
+		return 0, true, err
+	}
+	events, err := readEvents(jobDir)
+	if err != nil {
+		return 0, true, err
+	}
+	if !hasTipo(events, "terminal") {
+		refs := map[string]string{"exit": strconv.Itoa(exit)}
+		if motivo != "" {
+			refs["motivo"] = motivo
+		}
+		if _, err := s.Store.Append(s.ID, EventIn{Tipo: "terminal", Refs: refs}); err != nil {
+			return 0, true, err
+		}
 	}
 	if _, err := s.Store.Transition(s.ID, status); err != nil {
 		return 0, true, err
@@ -935,10 +1033,30 @@ func (s *Supervisor) frictionUnknown(state string) {
 
 // fail records the failure (event, stored motivo, walk to failed, terminal
 // event, report) and never returns its error: the state is the truth, and
-// a failure to record it goes to friction only. The failure finalizes like
-// every terminal outcome: final push, report, release, cleanup, close.
+// a failure to record it goes to friction only. The terminal intent and
+// the collaboration outcomes are persisted before the failure walk, so a
+// crash loses neither the outcome nor the partial facts. The failure
+// finalizes like every terminal outcome: final push, report, release,
+// cleanup, close.
 func (s *Supervisor) fail(motivo string, exit int) {
+	// The terminal intent, best effort: on error, friction and continue —
+	// the failure still has to be recorded.
+	intent := &TerminalIntent{Status: StatusFailed, Motivo: motivo, Exit: exit}
+	if _, err := s.Store.Record(s.ID, func(st *State) { st.TerminalIntent = intent }); err != nil {
+		s.frictionf("job: the supervisor could not record the terminal intent")
+	}
 	s.finalSync(StatusFailed)
+	// The collaboration capture, persisted before the failure walk; an
+	// enumeration that could not be restored by the deadline still
+	// persists every known id, and the friction names it.
+	outcomes, capErr := s.endCollaborations(s.collabDeadline())
+	if capErr != nil {
+		s.frictionf("job: the supervisor cannot enumerate the collaborations: " + capErr.Error())
+	}
+	s.collabEnded = true
+	if err := s.persistCollabOutcomes(outcomes); err != nil {
+		s.frictionf("job: the supervisor could not persist the collaboration outcomes")
+	}
 	if _, err := s.Store.Fail(s.ID, motivo, exit); err != nil {
 		if s.Friction != nil {
 			s.Friction("job: the supervisor could not record the failure")

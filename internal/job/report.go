@@ -17,7 +17,9 @@ import (
 // ReportFacts is the worktree and job snapshot the supervisor passes in to
 // fill the report: the clean and head facts behind limpeza.removivel, the
 // commits, the draft pull request, the acceptance checks, the review, the
-// blockers, the team, the cost, the logs and the workspace release.
+// blockers, the team, the cost, the logs and the workspace release. The
+// colaboracoes (and their partial fields) are not facts: they are derived
+// from the state's persisted outcomes by every rewrite.
 type ReportFacts struct {
 	Clean         bool
 	Head          string
@@ -33,10 +35,6 @@ type ReportFacts struct {
 	Logs          *Logs
 	Workspace     string
 	PanesFechados int
-	// Colaboracoes are the outcomes of the job's own worker collaborations
-	// ended on the terminal path (supervise_collab.go); nil when the job
-	// had none.
-	Colaboracoes []CollaborationOutcome
 }
 
 // PullRequest is the draft pull request recorded by a later slice.
@@ -65,16 +63,25 @@ type Report struct {
 	PR           *PullRequest `json:"pr"`
 	Itens        []Item       `json:"itens"`
 	Parciais     int          `json:"parciais"`
-	Testes       []Teste      `json:"testes"`
-	Revisao      *Revisao     `json:"revisao"`
-	Artefatos    []Artefato   `json:"artefatos"`
-	Blockers     []string     `json:"blockers"`
-	Perguntas    []string     `json:"perguntas"`
-	Memoria      Memoria      `json:"memoria"`
+	// Partial is true when one of the job's own collaborations ended
+	// partial or unavailable on the terminal path; it and
+	// PartialCollaborations (the sorted deduplicated ids) are always
+	// present — false and [] when none — and are derived from the
+	// state's persisted outcomes, never from the facts, so every rewrite
+	// agrees with the job status.
+	Partial               bool       `json:"partial"`
+	PartialCollaborations []string   `json:"partial_collaborations"`
+	Testes                []Teste    `json:"testes"`
+	Revisao               *Revisao   `json:"revisao"`
+	Artefatos             []Artefato `json:"artefatos"`
+	Blockers              []string   `json:"blockers"`
+	Perguntas             []string   `json:"perguntas"`
+	Memoria               Memoria    `json:"memoria"`
 	// Colaboracoes is the array of the job's own worker collaborations
 	// ended on the terminal path, one outcome each (supervise_collab.go);
-	// omitted when the job had none. It is kept as stored by every later
-	// rewrite (refreshReport and the collected/closed transitions).
+	// omitted when the job had none. It is derived from the state's
+	// persisted outcomes by every rewrite (buildReport, refreshReport, the
+	// collected and closed transitions), never from the facts.
 	Colaboracoes []CollaborationOutcome `json:"colaboracoes,omitempty"`
 	Equipe       *Equipe                `json:"equipe"`
 	Eventos      Eventos                `json:"eventos"`
@@ -274,28 +281,31 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 	if blockers == nil {
 		blockers = []string{}
 	}
+	partial := PartialCollaborations(st)
 	return Report{
-		Schema:       1,
-		ID:           st.ID,
-		Status:       st.Status,
-		Motivo:       motivo,
-		Resumo:       resumo,
-		Maquina:      jsonString(fields, "maquina"),
-		Repo:         jsonString(fields, "repo"),
-		Base:         base,
-		Branch:       branch,
-		Head:         facts.Head,
-		HeadRemoto:   facts.HeadRemoto,
-		Sincronizado: inSync,
-		Commits:      commits,
-		PR:           facts.PR,
-		Itens:        items,
-		Parciais:     parciais,
-		Testes:       testes,
-		Revisao:      facts.Revisao,
-		Artefatos:    artefatos,
-		Blockers:     blockers,
-		Perguntas:    openQuestions(events),
+		Schema:                1,
+		ID:                    st.ID,
+		Status:                st.Status,
+		Motivo:                motivo,
+		Resumo:                resumo,
+		Maquina:               jsonString(fields, "maquina"),
+		Repo:                  jsonString(fields, "repo"),
+		Base:                  base,
+		Branch:                branch,
+		Head:                  facts.Head,
+		HeadRemoto:            facts.HeadRemoto,
+		Sincronizado:          inSync,
+		Commits:               commits,
+		PR:                    facts.PR,
+		Itens:                 items,
+		Parciais:              parciais,
+		Partial:               len(partial) > 0,
+		PartialCollaborations: partial,
+		Testes:                testes,
+		Revisao:               facts.Revisao,
+		Artefatos:             artefatos,
+		Blockers:              blockers,
+		Perguntas:             openQuestions(events),
 		Memoria: Memoria{
 			Lida:              []MemRead{},
 			Global:            global,
@@ -303,7 +313,7 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 			DecisionsTotal:    decisions,
 			DecisionsAckedSeq: st.DecisionsAckedSeq,
 		},
-		Colaboracoes: facts.Colaboracoes,
+		Colaboracoes: st.Colaboracoes,
 		Equipe:       equipe,
 		Eventos: Eventos{
 			Total:     len(events),
@@ -502,9 +512,11 @@ func cutRunes(value string, limit int) string {
 // only for a terminal outcome (collected and closed never replace the stored
 // outcome, so a closed job still reports done), the motivo when the state
 // has one, the event metadata, the decision aggregates, the effective ack
-// watermark and limpeza.worktree. Every other field (head, pr, resumo,
-// removivel, ...) is kept as stored; a missing report is built from the
-// known facts.
+// watermark and limpeza.worktree, and — always, terminal or not — the
+// colaboracoes and the partial fields, derived from the state's persisted
+// outcomes so every rewrite agrees with the job status. Every other field
+// (head, pr, resumo, removivel, ...) is kept as stored; a missing report is
+// built from the known facts.
 func refreshReport(dir string, st State) error {
 	events, err := readEvents(dir)
 	if err != nil {
@@ -527,6 +539,12 @@ func refreshReport(dir string, st State) error {
 	if st.Motivo != nil {
 		rep.Motivo = st.Motivo
 	}
+	// The collaboration facts stand as the state has them: never re-derived
+	// from anything else, never erased.
+	rep.Colaboracoes = st.Colaboracoes
+	partial := PartialCollaborations(st)
+	rep.Partial = len(partial) > 0
+	rep.PartialCollaborations = partial
 	rep.Eventos = Eventos{
 		Total:     len(events),
 		UltimoSeq: lastSeq(events),

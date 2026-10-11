@@ -1,7 +1,8 @@
 package job
 
 // The colaboracoes field of report.json: omitted when empty, the exact
-// shape and key order when present, and kept as stored by every later
+// shape and key order when present, derived from the state's persisted
+// outcomes (never from the facts) and kept as stored by every later
 // rewrite (the collected and closed transitions).
 
 import (
@@ -56,7 +57,9 @@ func TestReportCollabOmittedWhenEmpty(t *testing.T) {
 }
 
 // The shape of one outcome: the key order, the empty-field omissions and
-// the placement between memoria and equipe, byte for byte.
+// the placement between memoria and equipe, byte for byte. The outcomes
+// are persisted into the state (the single source) before the report is
+// written: the report derives them from the state, never from the facts.
 func TestReportCollabShapeAndKeyOrder(t *testing.T) {
 	root := t.TempDir()
 	s := Open(root)
@@ -64,8 +67,7 @@ func TestReportCollabShapeAndKeyOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeReportMD(t, root, "# report\n\n- [done] item\n")
-	facts := fullReportFacts()
-	facts.Colaboracoes = []CollaborationOutcome{
+	outcomes := []CollaborationOutcome{
 		{
 			ID: "c-0000000000000001", Phase: "finished", Round: 1, Revision: "rev",
 			LastEvent: "reviewed by rev-1, delivery submitted",
@@ -83,7 +85,10 @@ func TestReportCollabShapeAndKeyOrder(t *testing.T) {
 			Outcome: "unavailable", Cause: "unreadable record",
 		},
 	}
-	if _, err := s.WriteReport("job-1", facts); err != nil {
+	if _, err := s.Record("job-1", func(st *State) { st.Colaboracoes = outcomes }); err != nil {
+		t.Fatalf("Record the outcomes: %v", err)
+	}
+	if _, err := s.WriteReport("job-1", fullReportFacts()); err != nil {
 		t.Fatalf("WriteReport: %v", err)
 	}
 	raw := storedReport(t, root)
@@ -94,9 +99,9 @@ func TestReportCollabShapeAndKeyOrder(t *testing.T) {
 	if idxMemoria < 0 || idxColab < 0 || idxEquipe < 0 || !(idxMemoria < idxColab && idxColab < idxEquipe) {
 		t.Fatalf("colaboracoes placement = memoria@%d colaboracoes@%d equipe@%d, want in between", idxMemoria, idxColab, idxEquipe)
 	}
-	// The stored array is exactly the compact marshal of the outcomes:
-	// the key order of the outcome and of the participant report, and the
-	// omission of every empty optional field.
+	// The stored array is exactly the compact marshal of the persisted
+	// outcomes: the key order of the outcome and of the participant
+	// report, and the omission of every empty optional field.
 	var shape struct {
 		Colaboracoes json.RawMessage `json:"colaboracoes"`
 	}
@@ -106,12 +111,24 @@ func TestReportCollabShapeAndKeyOrder(t *testing.T) {
 	if shape.Colaboracoes == nil {
 		t.Fatalf("report has no colaboracoes:\n%s", raw)
 	}
-	marshaled, err := json.Marshal(facts.Colaboracoes)
+	marshaled, err := json.Marshal(outcomes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(shape.Colaboracoes, marshaled) {
 		t.Fatalf("stored colaboracoes = %s, want the compact marshal\n%s", shape.Colaboracoes, marshaled)
+	}
+	// The partial fields are derived from the persisted outcomes: the
+	// partial one and the unavailable one stand, never the finished.
+	var partialShape struct {
+		Partial               bool     `json:"partial"`
+		PartialCollaborations []string `json:"partial_collaborations"`
+	}
+	if err := json.Unmarshal(raw, &partialShape); err != nil {
+		t.Fatalf("unmarshal the partial fields: %v", err)
+	}
+	if !partialShape.Partial || !reflect.DeepEqual(partialShape.PartialCollaborations, []string{"c-0000000000000001", "c-0000000000000002"}) {
+		t.Fatalf("partial fields = %+v, want true with the two ids", partialShape)
 	}
 	// The order spelled out: the byte equality above pins it, and this
 	// per-key walk fails loudly if a key ever moves or drops.

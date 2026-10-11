@@ -309,19 +309,28 @@ type jobStatusLine struct {
 		Total     int `json:"total"`
 		UltimoSeq int `json:"ultimo_seq"`
 	} `json:"eventos"`
-	DecisionsAckedSeq  int    `json:"decisions_acked_seq"`
-	DecisionsPendentes []int  `json:"decisions_pendentes"`
-	DuplicateOf        string `json:"duplicate_of,omitempty"`
+	DecisionsAckedSeq  int   `json:"decisions_acked_seq"`
+	DecisionsPendentes []int `json:"decisions_pendentes"`
+	// Partial and PartialCollaborations carry the persisted partial facts
+	// of the job's own collaborations (derived from the state's outcomes):
+	// always present, false and [] when none; a legacy state without the
+	// fields prints the empty values.
+	Partial               bool     `json:"partial"`
+	PartialCollaborations []string `json:"partial_collaborations"`
+	DuplicateOf           string   `json:"duplicate_of,omitempty"`
 }
 
 func printJobStatusLine(snap job.Snapshot) {
+	partial := job.PartialCollaborations(snap.State)
 	line := jobStatusLine{
-		ID:                 snap.State.ID,
-		Status:             snap.State.Status,
-		Motivo:             snap.State.Motivo,
-		DecisionsAckedSeq:  snap.State.DecisionsAckedSeq,
-		DecisionsPendentes: snap.Pending,
-		DuplicateOf:        snap.State.DuplicateOf,
+		ID:                    snap.State.ID,
+		Status:                snap.State.Status,
+		Motivo:                snap.State.Motivo,
+		DecisionsAckedSeq:     snap.State.DecisionsAckedSeq,
+		DecisionsPendentes:    snap.Pending,
+		Partial:               len(partial) > 0,
+		PartialCollaborations: partial,
+		DuplicateOf:           snap.State.DuplicateOf,
 	}
 	line.Eventos.Total = snap.EventTotal
 	line.Eventos.UltimoSeq = snap.LastSeq
