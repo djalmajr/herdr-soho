@@ -119,3 +119,60 @@ func TestSuperviseCollabHashEvidenceHostilePaths(t *testing.T) {
 		}
 	})
 }
+
+// The allowed-root refusal of a symlinked appended component: the job
+// workspace's reports directory that is a symlink to an outside directory
+// never becomes an allowed root (only the trusted base may resolve
+// through symlinks), while the same file through a real reports directory
+// and through a symlinked trusted base (the job worktree) stands with its
+// fresh sha256.
+func TestSuperviseCollabHashEvidenceSymlinkedRoot(t *testing.T) {
+	// Catches the mutation "a symlinked allowed root is trusted" (the
+	// decision-1 revert in collabEvidenceRoots): the symlinked reports
+	// directory would then become the allowed root and the outside file
+	// would be read and hashed.
+	outside := t.TempDir()
+	body := "the outside report\n"
+	writeEvidenceTarget(t, filepath.Join(outside, "report.md"), body)
+
+	// The refused root: the job workspace's reports directory is a
+	// symlink to the outside directory holding the file.
+	ws := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(ws, "reports")); err != nil {
+		t.Skipf("cannot create symlinks on %s: %v", runtime.GOOS, err)
+	}
+	path := filepath.Join(ws, "reports", "report.md")
+	roots := collabEvidenceRoots(State{WorkspaceID: "w1"}, ws)
+	if _, sum, err := hashEvidence(roots, path); !errors.Is(err, errEvidenceOutside) || sum != "" {
+		t.Fatalf("symlinked root %q accepted: sum=%s err=%v, want the outside-roots refusal and no hash", path, sum, err)
+	}
+
+	// Control (a): the same file through a real reports directory stands
+	// with its fresh sha256.
+	ws2 := t.TempDir()
+	real := writeEvidenceTarget(t, filepath.Join(ws2, "reports", "report.md"), body)
+	accepted, sum, err := hashEvidence(collabEvidenceRoots(State{WorkspaceID: "w1"}, ws2), real)
+	if err != nil || accepted != real {
+		t.Fatalf("real reports dir refused: %v (accepted %q)", err, accepted)
+	}
+	want := sha256.Sum256([]byte(body))
+	if sum != hex.EncodeToString(want[:]) {
+		t.Fatalf("sha256 = %s, want %s", sum, hex.EncodeToString(want[:]))
+	}
+
+	// Control (b): the trusted base reached through a symlink (the job
+	// worktree) still stands: the base may resolve through symlinks.
+	base := t.TempDir()
+	worktree := filepath.Join(base, "wt-link")
+	if err := os.Symlink(base, worktree); err != nil {
+		t.Skipf("cannot create symlinks on %s: %v", runtime.GOOS, err)
+	}
+	file := writeEvidenceTarget(t, filepath.Join(worktree, "report.md"), body)
+	accepted, sum, err = hashEvidence(collabEvidenceRoots(State{WorkspaceID: "w1", Dir: worktree}, ws2), file)
+	if err != nil || accepted != file {
+		t.Fatalf("symlinked trusted base refused: %v (accepted %q)", err, accepted)
+	}
+	if sum != hex.EncodeToString(want[:]) {
+		t.Fatalf("sha256 = %s, want %s", sum, hex.EncodeToString(want[:]))
+	}
+}

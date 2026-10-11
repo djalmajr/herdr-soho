@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -141,6 +142,42 @@ func validate(a Assignment) error {
 type UnreadableAssignment struct {
 	ID    string
 	Cause string
+}
+
+// claimReadLimit bounds the raw claim read of one record: the ownership
+// proof never reads more than 1 MiB of the record.
+const claimReadLimit = 1 << 20
+
+// ReadClaim is the bounded raw ownership claim of one collaboration
+// record: it reads at most claimReadLimit bytes of the record's
+// assignment.json and unmarshals only the workspace and root fields, so a
+// record the full read refuses (a hostile shape, an invalid field, a torn
+// write) still proves its ownership when its claim stands. It never locks
+// and never writes, and it never validates the rest of the record: an
+// invalid id, a missing record, an overlong record or a non-JSON record
+// is an error with the fields left empty.
+func (s Store) ReadClaim(id string) (workspace, root string, err error) {
+	file, err := s.Path(id)
+	if err != nil {
+		return "", "", err
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(f, claimReadLimit))
+	if err != nil {
+		return "", "", err
+	}
+	var claim struct {
+		Workspace string `json:"workspace"`
+		Root      string `json:"root"`
+	}
+	if err := json.Unmarshal(raw, &claim); err != nil {
+		return "", "", fmt.Errorf("unreadable collaboration %s claim: %w", id, err)
+	}
+	return claim.Workspace, claim.Root, nil
 }
 
 // ListActive returns every active assignment in the store directory, with

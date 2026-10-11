@@ -344,8 +344,11 @@ func (s *Supervisor) askCollaborations() {
 // job collaboration is finished or the deadline passes, and returns one
 // outcome per known collaboration with its evidence, sorted by id:
 // CollabIDs union the persisted outcomes' ids, the owned active records
-// and the unreadable records. It waits only when at least one active job
-// collaboration exists; nothing else changes. The caller persists the
+// and the unreadable records with provable ownership (an id the job
+// already knows, or a bounded raw claim still showing the job's own
+// workspace and trusted root; any other unreadable record is friction
+// only). It waits only when at least one active job collaboration
+// exists; nothing else changes. The caller persists the
 // merged outcomes into the state (the single source of the report's
 // colaboracoes) before the terminal transition or, on a fresh process,
 // before the settlement, so a crash between the persistence and the
@@ -408,15 +411,29 @@ func (s *Supervisor) endCollaborations(deadline int64) ([]CollaborationOutcome, 
 		activeCount++
 		ids[a.ID] = true
 	}
-	for _, u := range unreadable {
-		ids[u.ID] = true
-	}
 	// The persisted outcomes keep their ids even when the enumeration no
 	// longer returns them.
 	persisted := map[string]CollaborationOutcome{}
 	for _, o := range st.Colaboracoes {
 		ids[o.ID] = true
 		persisted[o.ID] = o
+	}
+	// An unreadable record joins the outcomes only with proof of
+	// ownership: an id the job already knows (asked or persisted) or a
+	// bounded raw claim of the record still showing the job's own
+	// workspace and trusted root. An unknown or foreign claim is friction
+	// only — never an outcome, never stopped, finalized or waited on, and
+	// never partial.
+	for _, u := range unreadable {
+		if ids[u.ID] {
+			continue
+		}
+		ws, root, err := store.ReadClaim(u.ID)
+		if err != nil || s.ProjectRoot == "" || ws != st.WorkspaceID || root != s.ProjectRoot {
+			s.frictionf("job: the collaboration " + u.ID + " is unreadable and not provably the job's own: " + u.Cause)
+			continue
+		}
+		ids[u.ID] = true
 	}
 	if activeCount > 0 {
 		// The done/failed ask (a no-op on the stop path, which already
@@ -491,35 +508,83 @@ func outcomeIDs(outcomes []CollaborationOutcome) []string {
 	return ids
 }
 
-// collabEvidenceRoots is the allowed directories of one evidence read,
+// collabEvidenceRoot is one allowed directory as a trusted base plus the
+// components the code appends to it: only the base may resolve through
+// symlinks (the job workspace state dir, os.TempDir() — itself a
+// symlinked path on macOS — or the job worktree); a symlink among the
+// appended components makes the root refuse, so a reports directory that
+// is a symlink to an outside directory never becomes an allowed root.
+type collabEvidenceRoot struct {
+	base   string
+	suffix string
+}
+
+// collabEvidenceRoots are the allowed directories of one evidence read,
 // derived only from trusted job data (never from the marker or event
 // being validated): the collaboration store's reports directory, the
 // routing reports directory of the job workspace (the location the
 // workers outside the job worktree publish their reports to), and the job
-// worktree itself when it is an absolute path. A missing root is skipped
-// by the read.
+// worktree itself when it is an absolute path. A root is refused —
+// skipped, exactly like a missing root — when its trusted base does not
+// resolve or any appended component is a symlink; nothing about the
+// refused root's target is published.
 func collabEvidenceRoots(st State, stateDir string) []string {
-	roots := []string{
-		filepath.Join(stateDir, "reports"),
-		filepath.Join(os.TempDir(), "herdr-soho", st.WorkspaceID, "reports"),
+	pairs := []collabEvidenceRoot{
+		{base: stateDir, suffix: "reports"},
+		{base: os.TempDir(), suffix: filepath.Join("herdr-soho", st.WorkspaceID, "reports")},
 	}
 	if filepath.IsAbs(st.Dir) {
-		roots = append(roots, st.Dir)
+		// The job worktree is itself a trusted base: the whole root may
+		// resolve through symlinks.
+		pairs = append(pairs, collabEvidenceRoot{base: st.Dir})
+	}
+	roots := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		if !collabEvidenceRootStands(pair) {
+			continue
+		}
+		roots = append(roots, filepath.Join(pair.base, pair.suffix))
 	}
 	return roots
+}
+
+// collabEvidenceRootStands reports whether the root's appended components
+// stand without a symlink: the trusted base resolves (through its own,
+// trusted symlinks) and the full root resolves to exactly the base
+// resolution with the same suffix appended; a symlink among the appended
+// components resolves to a different place and refuses the root.
+func collabEvidenceRootStands(pair collabEvidenceRoot) bool {
+	if pair.base == "" {
+		return false
+	}
+	realBase, err := filepath.EvalSymlinks(pair.base)
+	if err != nil {
+		return false
+	}
+	realRoot, err := filepath.EvalSymlinks(filepath.Join(pair.base, pair.suffix))
+	if err != nil {
+		return false
+	}
+	return realRoot == filepath.Join(realBase, pair.suffix)
 }
 
 // hashEvidence returns the accepted absolute path and the fresh sha256 of
 // one evidence report read under the allowed roots, or an error. The path
 // must be non-empty and absolute; for the first allowed root where the
 // path is local (checked lexically: filepath.Rel and filepath.IsLocal),
-// it is opened through os.OpenRoot, which refuses a symlink that escapes
-// the root; the opened file must be a regular file of at most
-// maxEvidenceBytes bytes, and the hash is computed through a limit reader
-// that refuses a longer read. Every refusal — a missing or unreadable
-// root, a missing file, a symlink escape, a non-regular file, or an
-// overlong file — is the same error: the evidence is outside the allowed
-// directories, and nothing about the target is published.
+// the pre-open stat through the root must show a regular file — a FIFO or
+// other non-regular path is refused without being opened, because an open
+// of a FIFO would block the read, and an escaping symlink is refused by
+// the root — and the file is opened through os.OpenRoot with the per-OS
+// non-blocking flags, which refuses a symlink that escapes the root and
+// keeps a FIFO swapped in after the check from blocking the open; the
+// opened file must be a regular file of at most maxEvidenceBytes bytes,
+// and the hash is computed through a limit reader that refuses a longer
+// read. The root stat follows symlinks inside the root, so a symlink
+// resolving inside the root still stands. Every refusal — a missing or
+// unreadable root, a missing file, a symlink escape, a non-regular file,
+// or an overlong file — is the same error: the evidence is outside the
+// allowed directories, and nothing about the target is published.
 func hashEvidence(allowedRoots []string, path string) (string, string, error) {
 	if path == "" || !filepath.IsAbs(path) {
 		return "", "", errors.New("evidence path is not an absolute path")
@@ -538,13 +603,21 @@ func hashEvidence(allowedRoots []string, path string) (string, string, error) {
 			// The root is missing or unreadable: skip it.
 			continue
 		}
-		f, err := r.Open(rel)
+		// The pre-open regular check through the root: a FIFO or other
+		// non-regular path is refused before the open, and an escaping
+		// symlink is refused by the root here.
+		info, err := r.Stat(rel)
+		if err != nil || !info.Mode().IsRegular() {
+			_ = r.Close()
+			continue
+		}
+		f, err := r.OpenFile(rel, evidenceOpenFlags, 0)
 		if err != nil {
 			_ = r.Close()
 			continue
 		}
 		_ = r.Close()
-		info, err := f.Stat()
+		info, err = f.Stat()
 		if err != nil || !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > maxEvidenceBytes {
 			_ = f.Close()
 			continue

@@ -1552,3 +1552,97 @@ func TestJobStartUnknownEnvelopeGoesOnlyToFriction(t *testing.T) {
 		t.Fatalf("friction.log is missing the raw envelope: %s", friction)
 	}
 }
+
+// The legacy collect view: a report.json whose state predates the partial
+// fields collects with "partial":false and "partial_collaborations":[],
+// and the read changes nothing on disk (the bytes and the mtime stand,
+// and --verify keeps hashing the original bytes); a report that already
+// carries the fields prints them unchanged.
+//
+// Catches the mutation "the legacy view dropped from jobCollect" (the
+// decision-5 revert): the collect line of a pre-fields report would then
+// lack the partial keys.
+func TestJobCollectLegacyPartialView(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	reportFile := filepath.Join(jobDir, "report.json")
+
+	// The legacy report: no partial fields at all.
+	legacy := `{"schema":1,"id":"job-1","status":"done","motivo":null,"resumo":"ok"}`
+	if err := os.WriteFile(reportFile, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(reportFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mtimeBefore, err := os.Stat(reportFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := f.run(t, "collect", "--id", "job-1")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d err=%q", code, errOut)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(out, "\n")), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["partial"] != false {
+		t.Fatalf("partial = %#v, want false", got["partial"])
+	}
+	if ids, ok := got["partial_collaborations"].([]any); !ok || len(ids) != 0 {
+		t.Fatalf("partial_collaborations = %#v, want the empty array", got["partial_collaborations"])
+	}
+	// The read changes nothing: the on-disk bytes and the mtime stand.
+	after, err := os.ReadFile(reportFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("report.json bytes changed by the read: %s", after)
+	}
+	mtimeAfter, err := os.Stat(reportFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mtimeBefore.ModTime().Equal(mtimeAfter.ModTime()) {
+		t.Fatalf("report.json mtime changed by the read: %s -> %s", mtimeBefore.ModTime(), mtimeAfter.ModTime())
+	}
+
+	// --verify keeps hashing the original on-disk bytes (the legacy
+	// report has no artefatos, so it passes over the untouched file).
+	if code, _, errOut := f.run(t, "collect", "--id", "job-1", "--verify"); code != 0 || errOut != "" {
+		t.Fatalf("verify code=%d err=%q, want the original bytes to verify", code, errOut)
+	}
+
+	// The control: a report that already carries the fields prints them
+	// unchanged, and the file is left untouched.
+	owned := `{"schema":1,"id":"job-1","status":"done","partial":true,"partial_collaborations":["c-0123456789abcdef"],"resumo":"ok"}`
+	if err := os.WriteFile(reportFile, []byte(owned), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = f.run(t, "collect", "--id", "job-1")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d err=%q", code, errOut)
+	}
+	var kept map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(out, "\n")), &kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept["partial"] != true {
+		t.Fatalf("partial = %#v, want the stored true to stand", kept["partial"])
+	}
+	if ids, ok := kept["partial_collaborations"].([]any); !ok || len(ids) != 1 || ids[0] != "c-0123456789abcdef" {
+		t.Fatalf("partial_collaborations = %#v, want the stored ids to stand", kept["partial_collaborations"])
+	}
+	after, err = os.ReadFile(reportFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal([]byte(owned), after) {
+		t.Fatalf("report.json changed by the read: %s", after)
+	}
+}

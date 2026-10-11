@@ -491,3 +491,121 @@ func jsonArray(ids []string) string {
 	}
 	return strings.Join(out, ",")
 }
+
+// Mutation guard: an unreadable record joining the outcomes without
+// ownership proof (the decision-3 revert in endCollaborations) — foreign
+// or unknown unreadable records would then stand unavailable outcomes and
+// partial ids, and their friction line would carry the old wording.
+func TestSuperviseCollabUnreadableRecordsOwnedOnly(t *testing.T) {
+	const foreign1 = "c-00000000000000ff" // unknown ownership: a torn record
+	const foreign2 = "c-00000000000000aa" // a foreign claim: another workspace
+	const ownedID = "c-00000000000001ee"  // the job's own claim, one invalid field
+
+	t.Run("foreign unreadable records are friction only", func(t *testing.T) {
+		var friction []string
+		store, jobDir, _, team, sup := nsSup(t, 10*time.Second, &friction)
+		_ = store
+		herdr := collabSup(t, store, sup)
+		ws := collabWorkspace(t, jobDir)
+		writeCollabRecord(t, ws, foreign1, "{")
+		writeCollabRecord(t, ws, foreign2, `{"version":2,"id":"`+foreign2+`","workspace":"w2","root":"/elsewhere"}`)
+		team.rosterRows = collabRoster("impl-1", "rev-1")
+		report := writeOrchestratorReport(t, "# report\n\n- [done] item\n")
+		team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}
+		exit, err := sup.Run()
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if exit != 0 {
+			t.Fatalf("exit = %d, want 0", exit)
+		}
+		// state.json: no outcome, no asked ids, and the partial fact is
+		// false with the empty list — the foreign records leave it there.
+		st := supState(t, store)
+		if len(st.Colaboracoes) != 0 {
+			t.Fatalf("state colaboracoes = %+v, want none", st.Colaboracoes)
+		}
+		if got := PartialCollaborations(st); len(got) != 0 {
+			t.Fatalf("PartialCollaborations = %v, want none", got)
+		}
+		// report.json: the same empty fact, byte for byte.
+		raw, err := os.ReadFile(filepath.Join(jobDir, "report.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(raw, []byte(`"partial":false,"partial_collaborations":[]`)) {
+			t.Fatalf("report.json lacks the empty partial fields:\n%s", raw)
+		}
+		// Exactly one friction line per foreign record, each with the
+		// provably-owned wording and the record's id — nothing else.
+		if len(friction) != 2 {
+			t.Fatalf("friction = %v, want one line per foreign record", friction)
+		}
+		byID := map[string]int{}
+		for _, line := range friction {
+			for _, id := range []string{foreign1, foreign2} {
+				if strings.HasPrefix(line, "job: the collaboration "+id+" is unreadable and not provably the job's own: ") {
+					byID[id]++
+				}
+			}
+		}
+		if byID[foreign1] != 1 || byID[foreign2] != 1 {
+			t.Fatalf("friction = %v, want exactly one provably-owned line per foreign record", friction)
+		}
+		requireWorkspaceClosed(t, herdr, team)
+	})
+
+	t.Run("the owned unreadable record stands unavailable", func(t *testing.T) {
+		var friction []string
+		store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+		herdr := collabSup(t, store, sup)
+		ws := collabWorkspace(t, jobDir)
+		root := collabJobDir(t, store)
+		writeCollabRecord(t, ws, ownedID, `{"version":2,"id":"`+ownedID+`","workspace":"w1","root":"`+root+`"}`)
+		team.rosterRows = collabRoster("impl-1", "rev-1")
+		report := writeOrchestratorReport(t, "# report\n\n- [done] item\n")
+		team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}
+		exit, err := sup.Run()
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if exit != 0 {
+			t.Fatalf("exit = %d, want 0", exit)
+		}
+		// The owned unreadable record stands unavailable with its cause,
+		// and no verdict.
+		outcomes := readColabs(t, jobDir)
+		if len(outcomes) != 1 {
+			t.Fatalf("colaboracoes = %+v, want the single owned outcome", outcomes)
+		}
+		out := findColab(t, outcomes, ownedID)
+		if out.Outcome != collabOutcomeUnavailable || out.Cause == "" || out.Verdict != "" {
+			t.Fatalf("owned outcome = %+v, want unavailable with a cause and no verdict", out)
+		}
+		// state.json: the partial fact carries the owned id only.
+		st := supState(t, store)
+		if got := PartialCollaborations(st); !reflect.DeepEqual(got, []string{ownedID}) {
+			t.Fatalf("PartialCollaborations = %v, want %v", got, []string{ownedID})
+		}
+		// report.json: the same fact, byte for byte.
+		raw, err := os.ReadFile(filepath.Join(jobDir, "report.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(raw, []byte(`"partial":true,"partial_collaborations":["`+ownedID+`"]`)) {
+			t.Fatalf("report.json lacks the exact partial fields:\n%s", raw)
+		}
+		// The owned record is named twice (the snapshot and the settle)
+		// with the unreadable wording and nothing else.
+		if len(friction) != 2 {
+			t.Fatalf("friction = %v, want the two lines naming the owned record", friction)
+		}
+		for _, line := range friction {
+			if !strings.HasPrefix(line, "job: the collaboration "+ownedID+" is unreadable: ") {
+				t.Fatalf("friction line %q, want the unreadable wording naming %s", line, ownedID)
+			}
+		}
+		_ = clock
+		requireWorkspaceClosed(t, herdr, team)
+	})
+}

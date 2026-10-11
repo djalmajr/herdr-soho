@@ -522,6 +522,16 @@ func jobCollect(args []string, env platform.Env) int {
 	if report == nil {
 		platform.Die("job collect: report.json unreadable: expected an object", 2)
 	}
+	// The legacy view (the job contract): a report whose state predates the
+	// partial fields reads partial: false and partial_collaborations: []
+	// — never null; a present key stands untouched, and the read writes
+	// nothing (the verify below keeps hashing the original on-disk bytes).
+	if v, ok := report["partial"]; !ok || v == nil {
+		report["partial"] = false
+	}
+	if v, ok := report["partial_collaborations"]; !ok || v == nil {
+		report["partial_collaborations"] = []any{}
+	}
 	report["decisions_pendentes"] = snap.Pending
 	line, err := json.Marshal(report)
 	if err != nil {

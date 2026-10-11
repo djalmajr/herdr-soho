@@ -170,6 +170,20 @@ func collabRoster(names ...string) []rosterRow {
 	return rows
 }
 
+// writeCollabRecord lays one raw assignment.json under the workspace store
+// directory without the store's write path: the record is exactly the
+// given bytes (a torn or hostile shape the store refuses to read).
+func writeCollabRecord(t *testing.T, ws, id, body string) {
+	t.Helper()
+	dir := filepath.Join(ws, "collaboration", id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assignment.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // writeCollabReport writes a collaboration report file and returns its path
 // and hash.
 func writeCollabReport(t *testing.T, name, body string) (string, string) {
@@ -871,9 +885,16 @@ func TestSuperviseCollabCrashSnapshotSurvives(t *testing.T) {
 	requireNoActiveCollabs(t, ws)
 }
 
-// An unreadable collaboration record is an unavailable outcome with its
-// cause, friction only: the readable one is still ended and the release
-// runs.
+// An unreadable collaboration record the job can prove is its own (the
+// job's workspace and root still standing in its raw claim) is an
+// unavailable outcome with its cause; an unreadable record of unknown or
+// foreign ownership is friction only — never an outcome — while the
+// readable one is still ended and the release runs.
+//
+// Catches the mutation "an unreadable record joins the outcomes without
+// ownership proof" (the decision-3 revert in endCollaborations): the
+// foreign record would then stand an unavailable outcome and its friction
+// line would carry the old wording.
 func TestSuperviseCollabUnreadableUnavailable(t *testing.T) {
 	var friction []string
 	store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
@@ -881,13 +902,13 @@ func TestSuperviseCollabUnreadableUnavailable(t *testing.T) {
 	ws := collabWorkspace(t, jobDir)
 	cstore, id := makeCollab(t, ws, collabJobDir(t, store), "w1", "impl-1", "rev-1", "w1:p2", "w1:p3")
 	team.rosterRows = collabRoster("impl-1", "rev-1")
-	corruptID := "c-00000000000000ff"
-	if err := os.MkdirAll(filepath.Join(ws, "collaboration", corruptID), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(ws, "collaboration", corruptID, "assignment.json"), []byte("{"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// The foreign record: unknown ownership (a torn byte).
+	foreignID := "c-00000000000000ff"
+	writeCollabRecord(t, ws, foreignID, "{")
+	// The owned unreadable record: the job's workspace and root stand in
+	// the raw claim; one invalid field (the version) keeps it unreadable.
+	ownedID := "c-00000000000001ee"
+	writeCollabRecord(t, ws, ownedID, `{"version":2,"id":"`+ownedID+`","workspace":"w1","root":"`+collabJobDir(t, store)+`"}`)
 	report := writeOrchestratorReport(t, "# report\n\n- [done] item\n")
 	team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}
 	exit, err := sup.Run()
@@ -898,17 +919,22 @@ func TestSuperviseCollabUnreadableUnavailable(t *testing.T) {
 		t.Fatalf("exit = %d, want 0", exit)
 	}
 	// The wait ran the full grace for the readable collaboration (the
-	// unreadable one is not waited on: it has nothing to finish).
+	// unreadable ones are not waited on: they have nothing to finish).
 	if clock.sleeps != 13 {
 		t.Fatalf("sleeps = %d, want 13", clock.sleeps)
 	}
 	outcomes := readColabs(t, jobDir)
 	if len(outcomes) != 2 {
-		t.Fatalf("colaboracoes = %+v, want two outcomes", outcomes)
+		t.Fatalf("colaboracoes = %+v, want two outcomes (the owned unreadable and the readable)", outcomes)
 	}
-	bad := findColab(t, outcomes, corruptID)
-	if bad.Outcome != collabOutcomeUnavailable || bad.Cause == "" || bad.Verdict != "" {
-		t.Fatalf("unreadable outcome = %+v, want unavailable with a cause and no verdict", bad)
+	for _, o := range outcomes {
+		if o.ID == foreignID {
+			t.Fatalf("the foreign unreadable record stands an outcome: %+v", o)
+		}
+	}
+	owned := findColab(t, outcomes, ownedID)
+	if owned.Outcome != collabOutcomeUnavailable || owned.Cause == "" || owned.Verdict != "" {
+		t.Fatalf("owned unreadable outcome = %+v, want unavailable with a cause and no verdict", owned)
 	}
 	good := findColab(t, outcomes, id)
 	if good.Outcome != collabOutcomePartial || good.Verdict != "reject" || !good.FinalizedBySupervisor {
@@ -917,15 +943,13 @@ func TestSuperviseCollabUnreadableUnavailable(t *testing.T) {
 	if a := collabDisk(t, cstore, id); a.Phase != collaboration.Finished || a.Verdict != "reject" {
 		t.Fatalf("collaboration on disk = %s/%s, want finished/reject", a.Phase, a.Verdict)
 	}
-	// The unreadable record is named twice (the snapshot and the settle)
-	// and nothing else.
-	if len(friction) != 2 {
-		t.Fatalf("friction = %v, want the two lines naming the unreadable record", friction)
-	}
-	for _, line := range friction {
-		if !bytes.Contains([]byte(line), []byte(corruptID)) {
-			t.Fatalf("friction line %q does not name the unreadable record", line)
-		}
+	// The friction lines, exact: the foreign record is named once with
+	// the provably-owned wording, and the owned record is named twice
+	// (the snapshot and the settle) with the unreadable wording.
+	ownedLine := "job: the collaboration " + ownedID + " is unreadable: invalid collaboration record"
+	foreignLine := "job: the collaboration " + foreignID + " is unreadable and not provably the job's own: unreadable collaboration " + foreignID + ": unexpected end of JSON input"
+	if len(friction) != 3 || friction[0] != foreignLine || friction[1] != ownedLine || friction[2] != ownedLine {
+		t.Fatalf("friction = %v, want the three exact lines", friction)
 	}
 	// The release still ran (the readable one is finished).
 	if team.releaseCalls != 1 || team.releaseTeamCalls != 1 || team.gcCalls != 1 {
