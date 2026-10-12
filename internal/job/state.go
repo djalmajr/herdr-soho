@@ -398,7 +398,7 @@ func (s *Store) Snapshot(id string) (Snapshot, error) {
 }
 
 func readState(dir string) (State, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	raw, err := readReplacedFile(filepath.Join(dir, "state.json"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return State{}, &ExitError{Code: ExitNotFound, Msg: "job: not found"}

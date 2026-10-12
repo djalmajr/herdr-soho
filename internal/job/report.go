@@ -598,7 +598,7 @@ func readBriefFields(dir string) (map[string]any, error) {
 }
 
 func readReport(dir string) (Report, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "report.json"))
+	raw, err := readReplacedFile(filepath.Join(dir, "report.json"))
 	if err != nil {
 		return Report{}, err
 	}
