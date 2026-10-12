@@ -70,6 +70,12 @@ type State struct {
 	// state that predates it, which checks the machine default at check
 	// time.
 	BlockedTimeoutMin int `json:"blocked_timeout_min,omitempty"`
+	// FinishingTimeoutMin is the budget in minutes of the job's terminal
+	// procedure (the finishing phase), recorded at start in the same write
+	// as BlockedTimeoutMin and immutable for the job's life; 0 on a state
+	// that predates it, which uses the built-in 10 minutes at read time and
+	// is never rewritten.
+	FinishingTimeoutMin int `json:"finishing_timeout_min,omitempty"`
 	// Equipe is the team resolution the job ran with (the report's
 	// equipe field), recorded with the run facts: the source file and the
 	// brief override keys, an empty non-nil list when there are none.

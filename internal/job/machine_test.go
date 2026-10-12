@@ -1,6 +1,7 @@
 package job
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ func TestMachineConfig(t *testing.T) {
 			"job_repos_root=~/repo.git",
 			"job_timeout=120",
 			"job_blocked_timeout=1440",
+			"job_finishing_timeout=10",
 			"job_wake_cmd=",
 		} {
 			if !strings.Contains(text, line) {
@@ -69,6 +71,12 @@ func TestMachineConfig(t *testing.T) {
 			{"job_blocked_timeout", "43201", false},
 			{"job_blocked_timeout", "90m", false},
 			{"job_blocked_timeout", "1.5", false},
+			{"job_finishing_timeout", "1", true},
+			{"job_finishing_timeout", "10", true},
+			{"job_finishing_timeout", "1440", true},
+			{"job_finishing_timeout", "0", false},
+			{"job_finishing_timeout", "1441", false},
+			{"job_finishing_timeout", "10m", false},
 			{"machine_label", "machine-a", true},
 			{"machine_label", "a#b", false},
 			{"job_orgs", "example-org, other-org", true},
@@ -170,6 +178,49 @@ func TestMachineConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("finishing timeout default, value and invalid values", func(t *testing.T) {
+		f := newMachineFix(t)
+		if got := f.must(t, "linux"); got.FinishingTimeoutMin != 10 {
+			t.Fatalf("default FinishingTimeoutMin = %d, want 10", got.FinishingTimeoutMin)
+		}
+		for _, tc := range []struct {
+			raw  string
+			want int
+		}{{"1", 1}, {"25", 25}, {"1440", 1440}} {
+			writeTeamFile(t, platform.UserConfigPath("linux", f.env), "job_finishing_timeout="+tc.raw+"\n")
+			if got := f.must(t, "linux"); got.FinishingTimeoutMin != tc.want {
+				t.Errorf("job_finishing_timeout=%s: FinishingTimeoutMin = %d, want %d", tc.raw, got.FinishingTimeoutMin, tc.want)
+			}
+		}
+		// Project, session and environment layers never change it.
+		writeTeamFile(t, platform.UserConfigPath("linux", f.env), "job_finishing_timeout=25\n")
+		writeTeamFile(t, filepath.Join(f.cwd, ".agents", "herdr-soho.conf"), "job_finishing_timeout=26\n")
+		env := platform.Env{}
+		for k, v := range f.env {
+			env[k] = v
+		}
+		env["HERDR_SOHO_JOB_FINISHING_TIMEOUT"] = "27"
+		got, err := LoadMachine("linux", env)
+		if err != nil || got.FinishingTimeoutMin != 25 {
+			t.Fatalf("layers: FinishingTimeoutMin = %d err %v, want the user file's 25", got.FinishingTimeoutMin, err)
+		}
+		// The user file's parser trims a value's edges and drops a trailing
+		// comment before the value reaches the key's validation, so the
+		// leading-space and comment-marker cases are the core test's.
+		for _, raw := range []string{"0", "-1", "1441", "10m", "1.5", "+5", "010x"} {
+			writeTeamFile(t, platform.UserConfigPath("linux", f.env), "job_finishing_timeout="+raw+"\n")
+			_, err := LoadMachine("linux", f.env)
+			var exit *platform.ExitError
+			if !errors.As(err, &exit) {
+				t.Errorf("job_finishing_timeout=%q: err = %v, want an exit error", raw, err)
+				continue
+			}
+			if want := "job: invalid job_finishing_timeout '" + raw + "'"; exit.Code != 2 || exit.Msg != want {
+				t.Errorf("job_finishing_timeout=%q: exit %d %q, want exit 2 %q", raw, exit.Code, exit.Msg, want)
+			}
+		}
+	})
+
 	t.Run("windows checkout root uses USERPROFILE", func(t *testing.T) {
 		f := newMachineFix(t)
 		got := f.must(t, "win32")
@@ -253,12 +304,13 @@ func TestMachineConfig(t *testing.T) {
 			got[pair.Key] = pair.Value
 		}
 		for key, want := range map[string]string{
-			"machine_label":       defaultMachineLabel,
-			"job_orgs":            defaultJobOrgs,
-			"job_repos_root":      defaultJobReposRoot,
-			"job_timeout":         defaultJobTimeout,
-			"job_blocked_timeout": defaultJobBlockedTimeout,
-			"job_wake_cmd":        defaultJobWakeCmd,
+			"machine_label":         defaultMachineLabel,
+			"job_orgs":              defaultJobOrgs,
+			"job_repos_root":        defaultJobReposRoot,
+			"job_timeout":           defaultJobTimeout,
+			"job_blocked_timeout":   defaultJobBlockedTimeout,
+			"job_finishing_timeout": defaultJobFinishingTimeout,
+			"job_wake_cmd":          defaultJobWakeCmd,
 		} {
 			if value := got[key]; value != want {
 				t.Errorf("config.defaults %s = %q, want %q", key, value, want)

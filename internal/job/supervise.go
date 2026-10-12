@@ -69,7 +69,6 @@ type finishingLimits struct {
 	Collab time.Duration
 }
 
-func (l finishingLimits) budget() time.Duration { return limitOr(l.Budget, defaultFinishingBudget) }
 func (l finishingLimits) git() time.Duration    { return limitOr(l.Git, defaultFinishingGitStep) }
 func (l finishingLimits) gh() time.Duration     { return limitOr(l.GH, defaultFinishingGHStep) }
 func (l finishingLimits) collab() time.Duration { return limitOr(l.Collab, defaultFinishingCollabStep) }
@@ -199,8 +198,12 @@ type Supervisor struct {
 	// pull request step now running (0 when none), which the GitSync
 	// timeouts are clamped to; askDeadline bounds the collaboration stop
 	// request while the terminal path's capture runs (0 outside it).
+	// finBudget is the budget recorded with the job at start
+	// (finishing_timeout_min), read with the anchor by
+	// ensureFinishingBase; 0 when the state predates the field.
 	finBase      int64
 	finBaseSet   bool
+	finBudget    time.Duration
 	stepDeadline int64
 	stepName     string
 	askDeadline  int64
@@ -1297,6 +1300,9 @@ func (s *Supervisor) ensureFinishingBase() {
 		s.frictionf("job: the supervisor could not read the finishing anchor: " + err.Error())
 		return
 	}
+	if min := snap.State.FinishingTimeoutMin; min > 0 {
+		s.finBudget = time.Duration(min) * time.Minute
+	}
 	anchor := snap.State.FinishingStartedAt
 	if anchor == "" {
 		if _, err := s.Store.Record(s.ID, s.anchorFinishing); err != nil {
@@ -1311,9 +1317,26 @@ func (s *Supervisor) ensureFinishingBase() {
 	}
 }
 
+// finishingBudget is the length of the terminal procedure's budget: the
+// test seam FinishingLimits.Budget when set, else the value recorded with
+// the job at start (read once per process by ensureFinishingBase, never
+// from the machine configuration), else the built-in 10 minutes for a state
+// that predates the field. Every use of the budget (the deadline, the
+// terminal write retries, the step caps) goes through it, after
+// ensureFinishingBase.
+func (s *Supervisor) finishingBudget() time.Duration {
+	if s.FinishingLimits.Budget > 0 {
+		return s.FinishingLimits.Budget
+	}
+	if s.finBudget > 0 {
+		return s.finBudget
+	}
+	return defaultFinishingBudget
+}
+
 // finDeadline is the Monotonic deadline of the terminal procedure's budget.
 func (s *Supervisor) finDeadline() int64 {
-	return s.finBase + int64(s.FinishingLimits.budget())
+	return s.finBase + int64(s.finishingBudget())
 }
 
 // finRemaining is what is left of the terminal procedure's budget.
@@ -1404,7 +1427,7 @@ func (s *Supervisor) endCollaborationsFinishing() ([]CollaborationOutcome, error
 // last error is returned unchanged when the budget is spent.
 func (s *Supervisor) transitionTerminal(status string) error {
 	s.ensureFinishingBase()
-	maxRetries := int(s.FinishingLimits.budget() / s.poll())
+	maxRetries := int(s.finishingBudget() / s.poll())
 	lastText := ""
 	for retries := 0; ; retries++ {
 		_, err := s.Store.Transition(s.ID, status)

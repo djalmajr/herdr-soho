@@ -354,4 +354,6 @@ job_repos_root=~/repo.git
 job_timeout=120
 # job_blocked_timeout is the default blocked budget in minutes (the blocked clock is separate from job_timeout), from 1 to 43200; a blocked job ends through the stop path with the timeout outcome when blocked time passes it.
 job_blocked_timeout=1440
+# job_finishing_timeout is the budget in minutes of the terminal procedure (the final push, the draft pull request and the collaboration wait), from 1 to 1440; the value in effect at job start is recorded with the job and a restart keeps it.
+job_finishing_timeout=10
 job_wake_cmd=

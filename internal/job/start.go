@@ -188,8 +188,9 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 	// 7. Record the run facts; StartedAt comes from the store clock. This
 	// slice computes no deadline: the timeout budget is enforced by the
 	// supervisor slice. IntervalStart seeds the budget interval anchor
-	// (the active interval) and BlockedTimeoutMin records the machine's
-	// blocked budget for the job's life, like TimeoutMin.
+	// (the active interval); BlockedTimeoutMin and FinishingTimeoutMin
+	// record the machine's blocked and finishing budgets for the job's
+	// life, like TimeoutMin, in this same atomic write.
 	startedAt := store.clock().Now()
 	if _, err = store.Record(req.ID, func(st *State) {
 		st.Checkout = prepared.Checkout
@@ -205,6 +206,7 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		// 999 ms.
 		st.IntervalStart = startedAt.Format(time.RFC3339Nano)
 		st.BlockedTimeoutMin = s.Machine.BlockedTimeoutMin
+		st.FinishingTimeoutMin = s.Machine.FinishingTimeoutMin
 		st.Equipe = &Equipe{Fonte: req.Team.Source, OverrideBrief: overrideBrief(req.Team.OverrideKeys)}
 	}); err != nil {
 		return State{}, store, s.failStored(store, req.ID, "", err)
