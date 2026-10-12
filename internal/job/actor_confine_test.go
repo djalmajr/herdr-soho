@@ -615,3 +615,35 @@ func TestActorConfineRunPinsBeforeTheOrchestrator(t *testing.T) {
 		}
 	})
 }
+
+// TestActorConfineRefusesATrackedPinDirectory: the agents' relative
+// state_dir puts the workspace pin in a directory the checkout tracks a
+// file in; an exclude line would not hide it and the pin would sit among
+// tracked files, so the pin is refused and nothing is written there.
+func TestActorConfineRefusesATrackedPinDirectory(t *testing.T) {
+	f := newAcf(t)
+	tracked := filepath.Join(f.co, "agent state", acfWorkspace)
+	mustMkdir(t, tracked)
+	if err := os.WriteFile(filepath.Join(tracked, "kept.txt"), []byte("kept\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.git(t, f.co, "add", "--", filepath.Join("agent state", acfWorkspace, "kept.txt"))
+	f.git(t, f.co, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "tracked")
+	storeRoot := filepath.Join(f.root, "starter abs")
+	base := f.userBase(t, "starter-xdg", "state_dir="+storeRoot+"\n")
+	agentXDG := f.userBase(t, "agent-xdg", "state_dir=agent state\n")
+	store := f.job(t, storeRoot, f.wt, "lane.build.roles=implementer\n")
+	actorEnv := f.env.Clone()
+	actorEnv["XDG_CONFIG_HOME"] = agentXDG
+	var friction []string
+	err := acfSupervisor(store, f.id, actorEnv, core.UserSelection{Base: base}, &friction).pinActorSession()
+	if err != errActorSession || len(friction) != 1 || friction[0] != "job: the job workspace session path is tracked by git or cannot be checked" {
+		t.Fatalf("pin = %v, friction %v", err, friction)
+	}
+	if _, err := os.Lstat(filepath.Join(tracked, "session.conf")); !os.IsNotExist(err) {
+		t.Fatalf("a session file was written among tracked files: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(f.co, ".git", "info", "exclude")); err == nil && excludeHas(data, "/agent state/"+acfWorkspace+"/") {
+		t.Fatal("the exclude line was written for a tracked directory")
+	}
+}
