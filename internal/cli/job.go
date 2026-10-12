@@ -284,7 +284,7 @@ func locateJob(env platform.Env, id string, sel core.UserSelection) (*job.Store,
 // locateJob scans them, plus at most one own-checkout anchor
 // (job.OwnCheckoutStore: the job whose recorded directory cwd lies in).
 // The anchor is gathered on every lookup, not only on a miss, and the
-// candidates are merged by the real path of their store root: none is
+// candidates are merged by the identity of their store root: none is
 // nil (not_found), one is that store, and more than one distinct store is
 // exit 2 before the subcommand changes anything (the lookup itself only
 // reads: the checkouts' configuration, git and the anchor's state.json).
@@ -305,32 +305,35 @@ func locateOwnJob(env platform.Env, cwd, id string) (*job.Store, error) {
 	if anchor := job.OwnCheckoutStore(env, cwd, id); anchor != nil {
 		hits = append(hits, anchor)
 	}
-	var hit *job.Store
-	seen := map[string]bool{}
+	// The same store reached twice (an alias, or a case variant on a
+	// case-insensitive file system) is one store: identity, not strings.
+	var distinct []*job.Store
+	var infos []os.FileInfo
 	for _, store := range hits {
-		key := storeIdentity(store.Root)
-		if seen[key] {
-			continue
+		info, err := os.Stat(store.Root)
+		if err != nil {
+			return nil, err
 		}
-		seen[key] = true
-		if hit != nil {
-			return nil, &platform.ExitError{Code: 2, Msg: "job: id " + id + " exists in more than one checkout"}
+		same := false
+		for _, seen := range infos {
+			if os.SameFile(seen, info) {
+				same = true
+				break
+			}
 		}
-		hit = store
+		if !same {
+			distinct = append(distinct, store)
+			infos = append(infos, info)
+		}
 	}
-	return hit, nil
-}
-
-// storeIdentity is the real path of a store root, or its clean absolute
-// path when it cannot be resolved.
-func storeIdentity(root string) string {
-	if real, err := filepath.EvalSymlinks(root); err == nil {
-		return filepath.Clean(real)
+	switch len(distinct) {
+	case 0:
+		return nil, nil
+	case 1:
+		return distinct[0], nil
+	default:
+		return nil, &platform.ExitError{Code: 2, Msg: "job: id " + id + " exists in more than one checkout"}
 	}
-	if abs, err := filepath.Abs(root); err == nil {
-		return abs
-	}
-	return filepath.Clean(root)
 }
 
 // dieJob maps a *job.ExitError or *platform.ExitError to platform.Die; any

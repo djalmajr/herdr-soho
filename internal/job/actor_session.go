@@ -1,11 +1,14 @@
 package job
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -24,11 +27,13 @@ import (
 //
 //  1. snapshots into the start's session file the team settings the
 //     starter's selection resolves for every role of the team's lanes
-//     (kind, model, effort and approvals, on the lane or role keys that
-//     already exist) and max_workers, where the session does not already
-//     decide them: resolved values, so the layer rules (a lower layer's
-//     model is discarded under a higher layer's kind) apply before the
-//     snapshot, not after;
+//     (kind, model and effort, on the lane or role keys that already
+//     exist) and max_workers, where the session does not already decide
+//     them: resolved values, so the layer rules (a lower layer's model is
+//     discarded under a higher layer's kind) apply before the snapshot,
+//     not after. Approvals are permission policy, not team selection:
+//     only the team file's own (already in the session) reach the agents;
+//     an agent's other approvals stay its own configuration's;
 //  2. when the workspace environment's session file is another file (a
 //     custom state_dir on either side), writes it as that session plus
 //     state_dir="<job store root>": the existing key moves the agents'
@@ -37,8 +42,15 @@ import (
 //     environment's, and requires the same team and state root.
 //
 // Any failure is errActorSession, before an agent is spawned. No other key
-// (no args, credentials, machine policy or unrelated setting), file kind or
-// environment value is involved.
+// (no approvals, auto-approval, args, credentials, machine policy or
+// unrelated setting), file kind or environment value is involved.
+//
+// Writes are confined (confinedDir): the nearest existing ancestor of a
+// state root is trusted as the configuration names it (resolved, so an
+// alias such as a linked home or temp directory stays usable); the levels
+// the pin creates, the state root, the workspace directory and the session
+// file are opened through an os.Root at that ancestor, are never links or
+// other kinds of files, and cannot leave it.
 
 // maxSessionBytes caps the session files the pin reads.
 const maxSessionBytes = 64 << 10
@@ -55,7 +67,7 @@ var errActorSession = errUsage("job: cannot pin the job workspace session")
 var teamLaneRolesRE = regexp.MustCompile(`^lane\.([a-z][a-z0-9_-]*)\.roles$`)
 
 // teamView is what an agent's spawn resolves for the team: per role its
-// lane, kind, model, effort and approvals, and max_workers.
+// lane, kind, model and effort, and max_workers.
 type teamView struct {
 	roles      map[string]core.RoleSettings
 	maxWorkers string
@@ -91,8 +103,6 @@ func (v teamView) diff(o teamView) string {
 			return "role " + role + " model"
 		case a.Effort != b.Effort:
 			return "role " + role + " effort"
-		case a.Approvals != b.Approvals:
-			return "role " + role + " approvals"
 		}
 	}
 	return ""
@@ -132,14 +142,14 @@ func (s *Supervisor) pinActorSession() error {
 
 	// 1. The starter's team, resolved, into the start's session file.
 	starter := core.LoadConfigFor(agentEnv, dir, s.launchSel)
-	if storeIdentityPath(core.StateRootPath(&starter, agentEnv, dir)) != storeIdentityPath(s.Store.Root) {
+	if !sameEntryPath(core.StateRootPath(&starter, agentEnv, dir), s.Store.Root) {
 		s.frictionf("job: the starter's selection does not resolve the job state root")
 		return errActorSession
 	}
 	want := resolveTeamView(roles, &starter, agentEnv, dir)
 	body := appendSessionLines(string(data), teamPins(pairs, want))
 	if body != string(data) {
-		if !s.writeSessionFile(s.Store.Root, workspace, body, excludeLine{}, false) {
+		if !s.writeSessionFile(s.Store.Root, workspace, body, false) {
 			return errActorSession
 		}
 		again := core.LoadConfigFor(agentEnv, dir, s.launchSel)
@@ -151,7 +161,7 @@ func (s *Supervisor) pinActorSession() error {
 
 	// 2. The workspace environment's own session file.
 	actorRoot := core.SessionStateRootPath(s.actorEnv, dir)
-	if storeIdentityPath(actorRoot) != storeIdentityPath(s.Store.Root) {
+	if !sameEntryPath(actorRoot, s.Store.Root) {
 		if !sessionStateDirValue(s.Store.Root) {
 			s.frictionf("job: the job state root cannot be written in a session file (an absolute path without '#' or line breaks)")
 			return errActorSession
@@ -160,18 +170,17 @@ func (s *Supervisor) pinActorSession() error {
 			s.frictionf("job: the job workspace session would be inside the skill")
 			return errActorSession
 		}
-		exclude, ok := s.pinExclude(actorRoot, workspace, dir)
-		if !ok {
+		if !s.pinExclude(actorRoot, workspace, dir) {
 			return errActorSession
 		}
-		if !s.writeSessionFile(actorRoot, workspace, pinnedSessionBody(body, s.Store.Root), exclude, true) {
+		if !s.writeSessionFile(actorRoot, workspace, pinnedSessionBody(body, s.Store.Root), true) {
 			return errActorSession
 		}
 	}
 
 	// 3. What the agents will resolve.
 	actor := core.LoadConfig(agentEnv, dir)
-	if storeIdentityPath(core.StateRootPath(&actor, agentEnv, dir)) != storeIdentityPath(s.Store.Root) {
+	if !sameEntryPath(core.StateRootPath(&actor, agentEnv, dir), s.Store.Root) {
 		s.frictionf("job: the job's agents would not resolve the job state root")
 		return errActorSession
 	}
@@ -233,7 +242,6 @@ func teamPins(pairs []core.ConfigPair, view teamView) []string {
 			{"kind", rs.Kind, rs.KindFrom},
 			{"model", rs.ModelSpec, rs.ModelFrom},
 			{"effort", rs.Effort, rs.EffortFrom},
-			{"approvals", rs.Approvals, rs.ApprovalsFrom},
 		} {
 			if strings.HasSuffix(attr.from, "(session)") || attr.from == "flag" {
 				continue
@@ -285,131 +293,244 @@ func sessionStateDirValue(root string) bool {
 	return filepath.IsAbs(root) && !strings.ContainsAny(root, "#\n\r")
 }
 
-// pinExclude decides the git-local exclude line the workspace session at
-// <actorRoot>/<ws> needs. Outside the checkout, or under the checkout's
-// .herdr-soho (the job prepare excludes it), none; under the checkout's
-// .worktrees it is refused (a worktree has its own root, which a checkout
-// exclude line does not reach); elsewhere in the checkout the line is
-// /<path from the checkout>/<ws>/, refused when git already tracks a file
-// there or the path holds a gitignore pattern character.
-func (s *Supervisor) pinExclude(actorRoot, workspace, dir string) (excludeLine, bool) {
-	checkout := storeIdentityPath(platform.StateProjectRoot(s.actorEnv, dir))
-	pinned := filepath.Join(storeIdentityPath(actorRoot), workspace)
-	if !withinOrSame(checkout, pinned) || withinOrSame(filepath.Join(checkout, ".herdr-soho"), pinned) {
-		return excludeLine{}, true
+// confinedDir is <state root>/<workspace> as the pin reaches it: trusted
+// is the real path of the state root's nearest existing proper ancestor,
+// and rel the levels below it, the state root's own last and the
+// workspace's after it.
+type confinedDir struct {
+	trusted string
+	rel     []string
+}
+
+// confine resolves root/workspace into a confinedDir.
+func confine(root, workspace string) (confinedDir, bool) {
+	if !filepath.IsAbs(root) || !validWorkspaceID(workspace) {
+		return confinedDir{}, false
 	}
-	if withinOrSame(filepath.Join(checkout, ".worktrees"), pinned) {
+	root = filepath.Clean(root)
+	base := filepath.Dir(root)
+	var rest []string
+	for {
+		if _, err := os.Lstat(base); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			return confinedDir{}, false
+		}
+		rest = append([]string{filepath.Base(base)}, rest...)
+		next := filepath.Dir(base)
+		if next == base {
+			return confinedDir{}, false
+		}
+		base = next
+	}
+	trusted, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		return confinedDir{}, false
+	}
+	if info, err := os.Stat(trusted); err != nil || !info.IsDir() {
+		return confinedDir{}, false
+	}
+	return confinedDir{trusted: trusted, rel: append(rest, filepath.Base(root), workspace)}, true
+}
+
+// path is the directory's path below its trusted ancestor.
+func (c confinedDir) path() string {
+	return filepath.Join(append([]string{c.trusted}, c.rel...)...)
+}
+
+// open opens the directory, creating its missing levels when create is
+// set: every refusal comes first, before anything is created (an existing
+// level must be a plain directory at its own path, and with check an
+// existing name in the directory a regular file at its own path); missing
+// levels are then created with Mkdir through the os.Root, one at a time,
+// and checked again. The returned os.Root is the directory's.
+func (c confinedDir) open(create bool, check string) (*os.Root, bool) {
+	top, err := os.OpenRoot(c.trusted)
+	if err != nil {
+		return nil, false
+	}
+	defer top.Close()
+	missing := len(c.rel)
+	for i := range c.rel {
+		info, err := top.Lstat(filepath.Join(c.rel[:i+1]...))
+		if os.IsNotExist(err) {
+			missing = i
+			break
+		}
+		if err != nil || info.Mode().Type() != os.ModeDir {
+			return nil, false
+		}
+	}
+	if missing == len(c.rel) && check != "" {
+		info, err := top.Lstat(filepath.Join(append(append([]string{}, c.rel...), check)...))
+		if err != nil && !os.IsNotExist(err) || err == nil && !info.Mode().IsRegular() {
+			return nil, false
+		}
+	}
+	if missing < len(c.rel) && !create {
+		return nil, false
+	}
+	for i := missing; i < len(c.rel); i++ {
+		level := filepath.Join(c.rel[:i+1]...)
+		if err := top.Mkdir(level, 0o700); err != nil && !os.IsExist(err) {
+			return nil, false
+		}
+		info, err := top.Lstat(level)
+		if err != nil || info.Mode().Type() != os.ModeDir {
+			return nil, false
+		}
+	}
+	dir, err := top.OpenRoot(filepath.Join(c.rel...))
+	if err != nil {
+		return nil, false
+	}
+	return dir, true
+}
+
+// pinExclude adds the git-local exclude line the workspace session at
+// <actorRoot>/<ws> needs, before it is written. Outside the checkout, or
+// under the checkout's .herdr-soho (the job prepare excludes it), none;
+// under the checkout's .worktrees it is refused (a worktree has its own
+// root, which a checkout exclude line does not reach); elsewhere in the
+// checkout the line /<path from the checkout>/<ws>/ goes to the checkout's
+// .git/info/exclude, refused when git already tracks a file there or the
+// path holds a gitignore pattern character. Inside or outside is decided
+// on the real location (confine) and by file identity.
+func (s *Supervisor) pinExclude(actorRoot, workspace, dir string) bool {
+	c, ok := confine(actorRoot, workspace)
+	if !ok {
+		s.frictionf("job: the job workspace session path cannot be resolved")
+		return false
+	}
+	checkout, err := filepath.EvalSymlinks(platform.StateProjectRoot(s.actorEnv, dir))
+	if err != nil {
+		s.frictionf("job: the job checkout cannot be resolved")
+		return false
+	}
+	// The trusted ancestor's levels below the checkout, by identity.
+	var above []string
+	inside := false
+	for p := c.trusted; ; {
+		if sameEntryPath(p, checkout) {
+			inside = true
+			break
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			break
+		}
+		above = append([]string{filepath.Base(p)}, above...)
+		p = parent
+	}
+	if !inside {
+		return true
+	}
+	rel := append(above, c.rel...)
+	first := filepath.Join(checkout, rel[0])
+	if rel[0] == ".herdr-soho" || sameEntryPath(first, filepath.Join(checkout, ".herdr-soho")) {
+		return true
+	}
+	if rel[0] == ".worktrees" || sameEntryPath(first, filepath.Join(checkout, ".worktrees")) {
 		s.frictionf("job: the job workspace session would be inside a job worktree")
-		return excludeLine{}, false
+		return false
 	}
-	rel, err := filepath.Rel(checkout, pinned)
-	if err != nil || rel == "." || strings.ContainsAny(filepath.ToSlash(rel), "*?[]\\#!\n\r") || strings.TrimSpace(rel) != rel {
+	line := "/" + filepath.ToSlash(filepath.Join(rel...)) + "/"
+	if strings.ContainsAny(line, "*?[]\\#!\n\r") || strings.TrimSpace(line) != line {
 		s.frictionf("job: the job workspace session path cannot be excluded from git")
-		return excludeLine{}, false
+		return false
 	}
-	out, ok := boundedGit(s.actorEnv, checkout, "ls-files", "-z", "--", filepath.ToSlash(rel))
+	out, ok := boundedGit(s.actorEnv, checkout, "ls-files", "-z", "--", strings.Trim(line, "/"))
 	if !ok || out != "" {
 		s.frictionf("job: the job workspace session path is tracked by git or cannot be checked")
-		return excludeLine{}, false
-	}
-	return excludeLine{checkout: checkout, line: "/" + filepath.ToSlash(rel) + "/"}, true
-}
-
-// excludeLine is one line for a checkout's local info/exclude; the zero
-// value adds none.
-type excludeLine struct {
-	checkout string
-	line     string
-}
-
-// writeSessionFile writes body to <root>/<workspace>/session.conf. Every
-// refusal comes before anything is created: an existing root or workspace
-// directory must be a plain directory at its own path and an existing
-// session file a regular file at its own path (never a link, a FIFO or a
-// directory). Then the exclude line, when one is given, is added to the
-// checkout's local info/exclude; missing directories are created one
-// level at a time and checked; the file is written atomically (0600) and
-// read back at its own path, bounded and without following a link, as the
-// same bytes (for the workspace pin, pinsRoot, bytes whose state_dir the
-// config parser reads as the job store root); the directories are checked
-// again.
-func (s *Supervisor) writeSessionFile(root, workspace, body string, exclude excludeLine, pinsRoot bool) bool {
-	dir := filepath.Join(root, workspace)
-	file := filepath.Join(dir, "session.conf")
-	if !plainOrMissing(root, true) || !plainOrMissing(dir, true) || !plainOrMissing(file, false) {
-		s.frictionf("job: the job workspace session path holds a link or another kind of file")
 		return false
 	}
-	if exclude.line != "" && !s.appendExclude(exclude.checkout, exclude.line) {
-		return false
-	}
-	rootInfo, ok := ensurePlainDirectory(root)
-	if !ok {
-		s.frictionf("job: the job workspace session directory cannot be created")
-		return false
-	}
-	dirInfo, ok := ensurePlainDirectory(dir)
-	if !ok {
-		s.frictionf("job: the job workspace session directory cannot be created")
-		return false
-	}
-	if err := writeAtomic0600(file, []byte(body)); err != nil {
-		s.frictionf("job: the job workspace session cannot be written")
-		return false
-	}
-	back, ok, err := readPrivateFile(file, maxSessionBytes)
-	if err != nil || !ok || string(back) != body || !sameEntry(root, rootInfo) || !sameEntry(dir, dirInfo) {
-		s.frictionf("job: the job workspace session does not read back")
-		return false
-	}
-	if value, set := sessionStateDir(back); pinsRoot && (!set || value != s.Store.Root) {
-		s.frictionf("job: the job workspace session does not read back")
+	if !appendExclude(checkout, line) {
+		s.frictionf("job: the checkout's local git exclude file cannot be updated")
 		return false
 	}
 	return true
 }
 
-// appendExclude adds line to the checkout's <checkout>/.git/info/exclude
-// unless it is there: .git and info are plain directories at their own
-// paths and exclude a regular file at its own path (read bounded, without
-// following a link); the line is appended and read back.
-func (s *Supervisor) appendExclude(checkout, line string) bool {
-	info := filepath.Join(checkout, ".git", "info")
-	file := filepath.Join(info, "exclude")
-	fail := func() bool {
-		s.frictionf("job: the checkout's local git exclude file cannot be updated")
+// appendExclude adds line to <checkout>/.git/info/exclude unless it is
+// there, through an os.Root at the checkout: .git and info are plain
+// directories at their own paths (info created when missing); a missing
+// exclude file is created exclusively; an existing one is opened
+// read-write without blocking, and only a regular file that is the entry
+// the path named before the open and at most maxExcludeBytes is read,
+// appended to and read back through that one handle.
+func appendExclude(checkout, line string) bool {
+	top, err := os.OpenRoot(checkout)
+	if err != nil {
 		return false
 	}
-	if !exactDirectory(filepath.Join(checkout, ".git")) || !plainOrMissing(info, true) || !plainOrMissing(file, false) {
-		return fail()
+	defer top.Close()
+	info := filepath.Join(".git", "info")
+	file := filepath.Join(info, "exclude")
+	gitInfo, err := top.Lstat(".git")
+	if err != nil || gitInfo.Mode().Type() != os.ModeDir {
+		return false
 	}
-	existing, _, err := readPrivateFile(file, maxExcludeBytes)
+	infoInfo, err := top.Lstat(info)
+	if err != nil && !os.IsNotExist(err) || err == nil && infoInfo.Mode().Type() != os.ModeDir {
+		return false
+	}
+	pre, err := top.Lstat(file)
+	if err != nil && !os.IsNotExist(err) || err == nil && (!pre.Mode().IsRegular() || pre.Size() > maxExcludeBytes) {
+		return false
+	}
+	if infoInfo == nil {
+		if err := top.Mkdir(info, 0o755); err != nil && !os.IsExist(err) {
+			return false
+		}
+		if again, err := top.Lstat(info); err != nil || again.Mode().Type() != os.ModeDir {
+			return false
+		}
+	}
+	if pre == nil {
+		f, err := top.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			return false
+		}
+		_, werr := f.WriteString(line + "\n")
+		if cerr := f.Close(); werr != nil || cerr != nil {
+			return false
+		}
+		pre, err = top.Lstat(file)
+		if err != nil || !pre.Mode().IsRegular() {
+			return false
+		}
+	}
+	f, err := top.OpenFile(file, platform.ReadWriteNonBlocking, 0)
 	if err != nil {
-		return fail()
+		return false
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(pre, opened) || opened.Size() > maxExcludeBytes {
+		return false
+	}
+	existing, err := io.ReadAll(io.LimitReader(f, maxExcludeBytes+1))
+	if err != nil || len(existing) > maxExcludeBytes {
+		return false
 	}
 	if excludeHas(existing, line) {
 		return true
-	}
-	if _, ok := ensurePlainDirectory(info); !ok || !plainOrMissing(file, false) {
-		return fail()
 	}
 	add := line + "\n"
 	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
 		add = "\n" + add
 	}
-	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fail()
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		return false
 	}
-	_, werr := f.WriteString(add)
-	if cerr := f.Close(); werr != nil || cerr != nil {
-		return fail()
+	if _, err := f.WriteString(add); err != nil {
+		return false
 	}
-	back, ok, err := readPrivateFile(file, maxExcludeBytes)
-	if err != nil || !ok || !excludeHas(back, line) {
-		return fail()
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false
 	}
-	return true
+	back, err := io.ReadAll(io.LimitReader(f, maxExcludeBytes+int64(len(add))+1))
+	return err == nil && excludeHas(back, line)
 }
 
 // excludeHas reports whether data holds line as one of its lines.
@@ -420,6 +541,77 @@ func excludeHas(data []byte, line string) bool {
 		}
 	}
 	return false
+}
+
+// writeSessionFile writes body to <root>/<workspace>/session.conf through
+// the directory's os.Root (confinedDir.open: refusals first, then the
+// missing levels): a fresh temporary file created exclusively, written,
+// synced and renamed over session.conf inside the directory; then read
+// back through one handle, opened without blocking, that is the regular
+// file the name holds, at most maxSessionBytes, as the same bytes (for the
+// workspace pin, pinsRoot, bytes whose state_dir the config parser reads
+// as the job store root).
+func (s *Supervisor) writeSessionFile(root, workspace, body string, pinsRoot bool) bool {
+	fail := func(reason string) bool {
+		s.frictionf("job: " + reason)
+		return false
+	}
+	c, ok := confine(root, workspace)
+	if !ok {
+		return fail("the job workspace session path cannot be resolved")
+	}
+	dir, ok := c.open(true, "session.conf")
+	if !ok {
+		return fail("the job workspace session path holds a link or another kind of file")
+	}
+	defer dir.Close()
+	tmp := fmt.Sprintf(".session.conf-%d-%d.tmp", os.Getpid(), time.Now().UnixNano())
+	f, err := dir.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fail("the job workspace session cannot be written")
+	}
+	_, werr := f.WriteString(body)
+	serr := f.Sync()
+	if cerr := f.Close(); werr != nil || serr != nil || cerr != nil {
+		_ = dir.Remove(tmp)
+		return fail("the job workspace session cannot be written")
+	}
+	if err := dir.Rename(tmp, "session.conf"); err != nil {
+		_ = dir.Remove(tmp)
+		return fail("the job workspace session cannot be written")
+	}
+	back, ok := readConfined(dir, "session.conf", maxSessionBytes)
+	if !ok || string(back) != body {
+		return fail("the job workspace session does not read back")
+	}
+	if value, set := sessionStateDir(back); pinsRoot && (!set || value != s.Store.Root) {
+		return fail("the job workspace session does not read back")
+	}
+	return true
+}
+
+// readConfined reads name in dir through one handle opened without
+// blocking: only a regular file that is the entry name held before the
+// open, of at most max bytes.
+func readConfined(dir *os.Root, name string, max int64) ([]byte, bool) {
+	pre, err := dir.Lstat(name)
+	if err != nil || !pre.Mode().IsRegular() || pre.Size() > max {
+		return nil, false
+	}
+	f, err := dir.OpenFile(name, platform.ReadOnlyNonBlocking, 0)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(pre, opened) {
+		return nil, false
+	}
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil || int64(len(data)) > max {
+		return nil, false
+	}
+	return data, true
 }
 
 // sessionStateDir is the state_dir the config parser reads from session
@@ -433,87 +625,4 @@ func sessionStateDir(data []byte) (string, bool) {
 		}
 	}
 	return value, found
-}
-
-// plainOrMissing reports whether path is absent, or present at its own
-// path as a plain directory (dir) or a regular file (!dir).
-func plainOrMissing(path string, dir bool) bool {
-	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		return true
-	}
-	if err != nil {
-		return false
-	}
-	if dir {
-		return info.Mode().Type() == os.ModeDir
-	}
-	return info.Mode().IsRegular()
-}
-
-// ensurePlainDirectory returns the Lstat of path as a plain directory: an
-// existing one must be a directory at its own path (no link, no reparse
-// point); a missing one is created with Mkdir, one level at a time from
-// its nearest existing ancestor (an existing ancestor is resolved as the
-// path names it), and each created level is checked at its own path.
-// Mkdir never follows a link at the path it creates.
-func ensurePlainDirectory(path string) (os.FileInfo, bool) {
-	info, err := os.Lstat(path)
-	if err == nil {
-		return info, info.Mode().Type() == os.ModeDir
-	}
-	if !os.IsNotExist(err) {
-		return nil, false
-	}
-	parent := filepath.Dir(path)
-	if parent == path {
-		return nil, false
-	}
-	if parentInfo, err := os.Stat(parent); err != nil {
-		if !os.IsNotExist(err) {
-			return nil, false
-		}
-		if _, ok := ensurePlainDirectory(parent); !ok {
-			return nil, false
-		}
-	} else if !parentInfo.IsDir() {
-		return nil, false
-	}
-	if err := os.Mkdir(path, 0o700); err != nil && !os.IsExist(err) {
-		return nil, false
-	}
-	info, err = os.Lstat(path)
-	if err != nil || info.Mode().Type() != os.ModeDir {
-		return nil, false
-	}
-	return info, true
-}
-
-// sameEntry reports whether path still names, at its own path, the entry
-// before describes.
-func sameEntry(path string, before os.FileInfo) bool {
-	now, err := os.Lstat(path)
-	return err == nil && os.SameFile(before, now) && now.Mode().Type() == before.Mode().Type()
-}
-
-// storeIdentityPath is the real path of a state root; a root that does
-// not exist yet is its nearest existing ancestor's real path joined with
-// the rest.
-func storeIdentityPath(root string) string {
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return filepath.Clean(root)
-	}
-	rest := ""
-	for dir := abs; ; {
-		if real, err := filepath.EvalSymlinks(dir); err == nil {
-			return filepath.Join(real, rest)
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return abs
-		}
-		rest = filepath.Join(filepath.Base(dir), rest)
-		dir = parent
-	}
 }

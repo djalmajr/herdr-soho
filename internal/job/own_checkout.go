@@ -152,7 +152,7 @@ func OwnCheckoutStore(env platform.Env, cwd, id string) *Store {
 	}
 	top, gitDir, common := realAbs(rawTop), realAbs(rawGitDir), realAbs(rawCommon)
 	realCwd := realAbs(cwd)
-	if top == "" || gitDir == "" || common == "" || realCwd == "" || !withinOrSame(top, realCwd) {
+	if top == "" || gitDir == "" || common == "" || realCwd == "" || !insideOrSame(top, realCwd) {
 		return nil
 	}
 	if filepath.Base(common) != ".git" || !exactDirectory(common) {
@@ -160,18 +160,18 @@ func OwnCheckoutStore(env platform.Env, cwd, id string) *Store {
 	}
 	checkout := filepath.Dir(common)
 	mode := "workspace"
-	if gitDir != common {
+	if !sameEntryPath(gitDir, common) {
 		mode = "worktree"
-		if filepath.Dir(gitDir) != filepath.Join(common, "worktrees") {
+		if !sameEntryPath(filepath.Dir(gitDir), filepath.Join(common, "worktrees")) {
 			return nil
 		}
-		if top != filepath.Join(checkout, ".worktrees", "job-"+id) {
+		if !sameEntryPath(top, filepath.Join(checkout, ".worktrees", "job-"+id)) {
 			return nil
 		}
 		if !worktreeRegistered(top, gitDir) {
 			return nil
 		}
-	} else if top != checkout || filepath.Join(top, ".git") != common {
+	} else if !sameEntryPath(top, checkout) || !sameEntryPath(filepath.Join(top, ".git"), common) {
 		return nil
 	}
 	cfg := core.LoadConfig(env, checkout)
@@ -191,7 +191,7 @@ func OwnCheckoutStore(env platform.Env, cwd, id string) *Store {
 	if st.Schema != 1 || st.ID != id || st.Modo != mode || !filepath.IsAbs(st.Checkout) || !filepath.IsAbs(st.Dir) {
 		return nil
 	}
-	if realAbs(st.Checkout) != checkout || realAbs(st.Dir) != top {
+	if !sameEntryPath(st.Checkout, checkout) || !sameEntryPath(st.Dir, top) {
 		return nil
 	}
 	return Open(root)
@@ -214,14 +214,14 @@ func worktreeRegistered(top, gitDir string) bool {
 	if !filepath.IsAbs(filepath.FromSlash(named)) {
 		named = filepath.Join(top, named)
 	}
-	if realAbs(named) != gitDir {
+	if !sameEntryPath(named, gitDir) {
 		return false
 	}
 	back, ok, err := readPrivateFile(filepath.Join(gitDir, "gitdir"), ownCheckoutLinkMax)
 	if err != nil || !ok {
 		return false
 	}
-	return realAbs(strings.TrimSpace(string(back))) == realAbs(dotGit)
+	return sameEntryPath(filepath.FromSlash(strings.TrimSpace(string(back))), dotGit)
 }
 
 // realAbs is the real absolute path of an existing path, "" otherwise.
@@ -237,13 +237,49 @@ func realAbs(path string) string {
 	return filepath.Clean(real)
 }
 
-// withinOrSame reports whether path is dir or lies inside it (both real).
+// withinOrSame reports whether path is dir or lies inside it, by their
+// clean path strings (both already real).
 func withinOrSame(dir, path string) bool {
 	if path == dir {
 		return true
 	}
 	rel, err := filepath.Rel(dir, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+// sameEntryPath reports whether a and b name the same existing entry
+// (os.SameFile of their Stat): an alias, or a case variant on a
+// case-insensitive file system, is the same entry, which a comparison of
+// path strings would not see.
+func sameEntryPath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	ia, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	ib, err := os.Stat(b)
+	return err == nil && os.SameFile(ia, ib)
+}
+
+// insideOrSame reports whether path is dir or lies below it by identity:
+// path or one of its ancestors is the same entry as dir.
+func insideOrSame(dir, path string) bool {
+	di, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	for p := filepath.Clean(path); ; {
+		if pi, err := os.Stat(p); err == nil && os.SameFile(di, pi) {
+			return true
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return false
+		}
+		p = parent
+	}
 }
 
 // exactDirectory reports whether path is a directory at its own path: not
