@@ -31,7 +31,13 @@ import (
 //     exist) and max_workers, where the session does not already decide
 //     them: resolved values, so the layer rules (a lower layer's model is
 //     discarded under a higher layer's kind) apply before the snapshot,
-//     not after. Approvals are permission policy, not team selection:
+//     not after. When the agents' own non-session configuration layers
+//     set a team lane's kind and every role of that lane resolves the
+//     same kind for the starter, the lane's kind is pinned too: a
+//     session-layer lane kind lifts the agents' kind layer, so their
+//     own lower-layer lane model and effort no longer outrank the
+//     session's role pins. Approvals are permission policy, not team
+//     selection:
 //     only the team file's own (already in the session) reach the agents;
 //     an agent's other approvals stay its own configuration's;
 //  2. when the workspace environment's session file is another file (a
@@ -147,7 +153,11 @@ func (s *Supervisor) pinActorSession() error {
 		return errActorSession
 	}
 	want := resolveTeamView(roles, &starter, agentEnv, dir)
-	body := appendSessionLines(string(data), teamPins(pairs, want))
+	// The agents' own configuration, read-only (step 3 loads it again
+	// after the snapshot write): which team lanes' kind their own
+	// non-session layers set.
+	agentCfg := core.LoadConfig(agentEnv, dir)
+	body := appendSessionLines(string(data), teamPins(pairs, want, agentLaneKinds(&agentCfg, want)))
 	if body != string(data) {
 		if !s.writeSessionFile(s.Store.Root, workspace, body, false) {
 			return errActorSession
@@ -212,13 +222,45 @@ func teamRoles(pairs []core.ConfigPair) []string {
 	return roles
 }
 
+// agentLaneKinds reports the lanes of view's roles whose kind the
+// agents' own non-session configuration layers set: a layer that is not
+// the session and read without an error, with a non-empty entry under
+// the lane's kind key. Those are the lanes step 1 can anchor on their
+// lane kind (teamPins), so the agents' lower-layer lane kind cannot
+// outrank the session's role pins.
+func agentLaneKinds(ctx *core.Config, view teamView) map[string]bool {
+	set := map[string]bool{}
+	for _, rs := range view.roles {
+		if rs.Lane == "" || set[rs.Lane] {
+			continue
+		}
+		key := core.LaneKey(rs.Lane, "kind")
+		for _, layer := range ctx.Layers {
+			if layer.Source == "session" || layer.ReadError != nil {
+				continue
+			}
+			if e, ok := layer.Entries[key]; ok && e.Value != "" {
+				set[rs.Lane] = true
+				break
+			}
+		}
+	}
+	return set
+}
+
 // teamPins are the key=value lines that make the session decide each
 // resolved team setting it does not decide yet: a value the session
 // already gives (from its lane or role key) is left alone; a lane value
 // from a lower layer is pinned on that lane key, any other source on the
-// role key; an empty value (nothing resolved it) is not pinned. max_workers
-// is pinned when the session does not set it.
-func teamPins(pairs []core.ConfigPair, view teamView) []string {
+// role key; an empty value (nothing resolved it) is not pinned. When
+// agentKinds names a lane and every role of that lane resolves the same
+// non-empty kind, the lane's kind is pinned on its lane key after the
+// per-role lines: a session-layer lane kind lifts the agents' kind
+// layer, so their lower-layer lane model and effort are discarded under
+// it and the session's role pins resolve (a lane whose roles resolve
+// different kinds is not anchored, and step 3's refusal fails the job
+// closed). max_workers is pinned when the session does not set it.
+func teamPins(pairs []core.ConfigPair, view teamView, agentKinds map[string]bool) []string {
 	inSession := map[string]bool{}
 	for _, pair := range pairs {
 		inSession[pair.Original] = true
@@ -251,6 +293,33 @@ func teamPins(pairs []core.ConfigPair, view teamView) []string {
 				continue
 			}
 			add("role."+role+"."+attr.name, attr.value)
+		}
+	}
+	// The lanes the agents' own non-session configuration layers set the
+	// kind of, in sorted lane order: pinned only when the lane's roles
+	// all resolve the same non-empty kind (a lane whose roles resolve
+	// different kinds is left to step 3's refusal).
+	lanes := make([]string, 0, len(agentKinds))
+	for lane := range agentKinds {
+		lanes = append(lanes, lane)
+	}
+	sort.Strings(lanes)
+	for _, lane := range lanes {
+		kind := ""
+		conflict := false
+		for _, role := range roles {
+			rs := view.roles[role]
+			if rs.Lane != lane {
+				continue
+			}
+			if rs.Kind == "" || (kind != "" && rs.Kind != kind) {
+				conflict = true
+				break
+			}
+			kind = rs.Kind
+		}
+		if !conflict {
+			add("lane."+lane+".kind", kind)
 		}
 	}
 	add("max_workers", view.maxWorkers)
