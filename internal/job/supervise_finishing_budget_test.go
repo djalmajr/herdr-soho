@@ -1,0 +1,792 @@
+package job
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+)
+
+// supervise_finishing_budget_test.go pins the terminal procedure's own
+// budget: a finite budget persisted with the job (so a restart keeps the
+// deadline), one bound per step inside it (the final git sync, the draft
+// pull request, the collaboration wait), the truthful failed outcome of a
+// done job whose final push or pull request was cut, and the retry of the
+// terminal write while the budget remains. Real subprocess hangs run on the
+// real clock with small limits; every other case runs on the fake clocks.
+
+const budgetMotivoText = "tempo de finalização esgotado"
+
+// failStateWritesRecord is what failEveryStateWrite saw: the failures it
+// injected and the monotonic reading of the first and the last.
+type failStateWritesRecord struct {
+	n           int
+	first, last int64
+}
+
+// failEveryStateWrite fails every state.json write whose pending content
+// satisfies match (a persistent write failure) and records when each
+// failure happened on mono.
+func failEveryStateWrite(t *testing.T, err error, mono func() int64, match func(pending State) bool) *failStateWritesRecord {
+	t.Helper()
+	rec := &failStateWritesRecord{}
+	previous := renameAtomic
+	renameAtomic = func(from, to string) error {
+		if filepath.Base(to) == "state.json" {
+			var pending State
+			if raw, readErr := os.ReadFile(from); readErr == nil && json.Unmarshal(raw, &pending) == nil && match(pending) {
+				now := mono()
+				if rec.n == 0 {
+					rec.first = now
+				}
+				rec.last = now
+				rec.n++
+				return err
+			}
+		}
+		return previous(from, to)
+	}
+	t.Cleanup(func() { renameAtomic = previous })
+	return rec
+}
+
+// holdRemotePush makes the bare remote's pre-receive hook (a fakecli
+// re-execution) wait for a release file, so a real `git push` hangs; the
+// hook is released after hold (or at cleanup), so no process outlives the
+// test.
+func holdRemotePush(t *testing.T, f *supGitFixture, hold time.Duration) {
+	t.Helper()
+	release := filepath.Join(t.TempDir(), "release")
+	target, err := fakecli.Install(t, f.job.base.fakeDir, "pre-receive", []fakecli.Rule{{AnyArgs: true, WaitFile: release}})
+	if err != nil {
+		t.Fatalf("install the pre-receive fake: %v", err)
+	}
+	hooks := filepath.Join(f.job.base.bare, "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(hooks, "pre-receive")); err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	free := func() {
+		once.Do(func() {
+			if err := os.WriteFile(release, nil, 0o600); err != nil {
+				t.Errorf("release the held push: %v", err)
+			}
+		})
+	}
+	timer := time.AfterFunc(hold, free)
+	t.Cleanup(func() { timer.Stop(); free() })
+}
+
+// finishingRealClock puts the supervisor of the git fixture on the real
+// clock with a short poll and the given limits.
+func finishingRealClock(f *supGitFixture, limits finishingLimits) {
+	f.sup.Clock = systemClock{}
+	f.sup.Poll = 20 * time.Millisecond
+	f.sup.FinishingLimits = limits
+}
+
+// finishDone runs the done outcome of the git fixture from finishing and
+// returns the exit code, the error and the wall time it took.
+func finishDone(t *testing.T, f *supGitFixture) (int, error, time.Duration) {
+	t.Helper()
+	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	exit, done, err := f.sup.finishOutcome(StatusDone, "", 0)
+	elapsed := time.Since(start)
+	if !done {
+		t.Errorf("finishOutcome done = false, want the terminal path")
+	}
+	return exit, err, elapsed
+}
+
+// requireBudgetFailed asserts the truthful result of a done job whose
+// final push or pull request was cut: failed, exit 19, the motivo in the
+// state and in report.json, and a friction line naming the cut step.
+func requireBudgetFailed(t *testing.T, f *supGitFixture, exit int, err error, friction string) {
+	t.Helper()
+	if err != nil {
+		t.Errorf("finishOutcome error = %v, want nil", err)
+	}
+	if exit != ExitFailed {
+		t.Errorf("exit = %d, want %d", exit, ExitFailed)
+	}
+	st := f.state(t)
+	if st.Status != StatusFailed || st.Motivo == nil || *st.Motivo != budgetMotivoText {
+		t.Errorf("state = %s motivo=%v, want failed with %q", st.Status, st.Motivo, budgetMotivoText)
+	}
+	if st.TerminalIntent == nil || st.TerminalIntent.Status != StatusFailed || st.TerminalIntent.Exit != ExitFailed || st.TerminalIntent.Motivo != budgetMotivoText {
+		t.Errorf("terminal intent = %+v, want the rewritten failed intent", st.TerminalIntent)
+	}
+	rep := f.report(t)
+	if rep["status"] != "failed" || rep["motivo"] != budgetMotivoText {
+		t.Errorf("report.json status=%v motivo=%v, want failed with %q", rep["status"], rep["motivo"], budgetMotivoText)
+	}
+	found := false
+	for _, line := range *f.friction {
+		if strings.Contains(line, friction) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("friction = %q, want a line naming %q", *f.friction, friction)
+	}
+}
+
+// A push that hangs far beyond the budget: the terminal path still ends
+// within the budget (plus a fixed slack) as failed with the budget motivo.
+func TestSuperviseFinishingStalledPushIsBoundedAndFailsTruthfully(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	holdRemotePush(t, f, 8*time.Second)
+	finishingRealClock(f, finishingLimits{Budget: 2 * time.Second, Git: time.Second})
+	exit, err, elapsed := finishDone(t, f)
+	t.Logf("stalled push: terminal in %v", elapsed)
+	if elapsed > 2*time.Second+3*time.Second {
+		t.Errorf("terminal path took %v, want at most the 2s budget + 3s", elapsed)
+	}
+	requireBudgetFailed(t, f, exit, err, "the final push")
+	if st := f.state(t); st.FinishingSynced {
+		t.Errorf("finishing_synced = true after a cut push, want false")
+	}
+}
+
+// The git step's own bound ends a hung push long before the budget does.
+func TestSuperviseFinishingStalledPushIsCutByTheGitStepBeforeTheBudget(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	holdRemotePush(t, f, 8*time.Second)
+	finishingRealClock(f, finishingLimits{Budget: 30 * time.Second, Git: time.Second})
+	exit, err, elapsed := finishDone(t, f)
+	t.Logf("stalled push, long budget: terminal in %v", elapsed)
+	if elapsed > time.Second+3*time.Second {
+		t.Errorf("terminal path took %v, want at most the 1s git step + 3s", elapsed)
+	}
+	requireBudgetFailed(t, f, exit, err, "the final push")
+}
+
+// The push succeeds and the gh step hangs: the gh step bound cuts it and
+// the result is the same truthful failed.
+func TestSuperviseFinishingStalledGhIsBoundedAndFailsTruthfully(t *testing.T) {
+	rules := []fakecli.Rule{
+		{Argv: ghListArgv(), Stdout: "[]\n", Delay: 8000},
+		{Argv: ghCreateArgv("feat: first", supGitPRBody), Stdout: "Creating pull request\n" + gitSyncPRURL + "\n"},
+	}
+	f := newSupGitFixture(t, rules)
+	f.job.commitIn(t, "feat: first")
+	// The budget and the git step are far longer than the gh step, so only
+	// the gh step's own bound can end the hang.
+	finishingRealClock(f, finishingLimits{Budget: 30 * time.Second, Git: 20 * time.Second, GH: time.Second})
+	exit, err, elapsed := finishDone(t, f)
+	t.Logf("stalled gh: terminal in %v", elapsed)
+	if elapsed > time.Second+3*time.Second {
+		t.Errorf("terminal path took %v, want at most the 1s gh step + 3s", elapsed)
+	}
+	requireBudgetFailed(t, f, exit, err, "the draft pull request")
+	if n := countTipes(f.events(t), "push"); n != 1 {
+		t.Errorf("push events = %d, want the one push that completed before the gh step", n)
+	}
+	if st := f.state(t); st.FinishingSynced {
+		t.Errorf("finishing_synced = true after a cut gh step, want false")
+	}
+}
+
+// A canceled job whose final push is cut keeps its outcome: only a done
+// intent becomes failed.
+func TestSuperviseFinishingBudgetKeepsTheStopOutcome(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	holdRemotePush(t, f, 8*time.Second)
+	finishingRealClock(f, finishingLimits{Budget: 2 * time.Second, Git: time.Second})
+	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	exit, done, err := f.sup.finishOutcome(StatusCanceled, "cancelado", ExitCanceled)
+	if err != nil || !done || exit != ExitCanceled {
+		t.Fatalf("finishOutcome = %d %v %v, want canceled with exit %d", exit, done, err, ExitCanceled)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("terminal path took %v, want it bounded by the budget", elapsed)
+	}
+	st := f.state(t)
+	if st.Status != StatusCanceled || st.Motivo != nil && *st.Motivo == budgetMotivoText {
+		t.Errorf("state = %s motivo=%v, want canceled and not the budget motivo", st.Status, st.Motivo)
+	}
+}
+
+// The collaboration wait of the terminal path ends at the collaboration
+// step bound, not at the old fixed grace: the outcome stays done with the
+// partial collaboration persisted.
+func TestSuperviseFinishingCollaborationWaitIsBoundedByItsStep(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+	herdr := collabSup(t, store, sup)
+	ws := collabWorkspace(t, jobDir)
+	_, id := makeCollab(t, ws, collabJobDir(t, store), "w1", "impl-1", "rev-1", "w1:p2", "w1:p3")
+	team.rosterRows = collabRoster("impl-1", "rev-1")
+	sup.FinishingLimits = finishingLimits{Collab: 30 * time.Second}
+	if _, err := store.Transition("job-1", StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	before := clock.mono
+	exit, done, err := sup.finishOutcome(StatusDone, "", 0)
+	if err != nil || !done || exit != 0 {
+		t.Fatalf("finishOutcome = %d %v %v, want done with exit 0", exit, done, err)
+	}
+	waited := time.Duration(clock.mono - before)
+	if waited > 30*time.Second+10*time.Second {
+		t.Errorf("collaboration wait = %v, want at most the 30s step + one poll", waited)
+	}
+	st := supState(t, store)
+	if st.Status != StatusDone || !reflect.DeepEqual(PartialCollaborations(st), []string{id}) {
+		t.Errorf("state = %s partial=%v, want done with [%s] partial", st.Status, PartialCollaborations(st), id)
+	}
+	requireWorkspaceClosed(t, herdr, team)
+}
+
+// A restart keeps the deadline: the budget counted from the persisted
+// anchor is already spent, so the final sync is skipped (no push), the
+// result follows the outcome rule, and the anchor is the original one.
+func TestSuperviseFinishingRestartKeepsTheDeadline(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	anchor := f.clock.Now().Add(-11 * time.Minute).Format(time.RFC3339Nano)
+	if _, err := f.store.Record(supGitID, func(st *State) {
+		st.TerminalIntent = &TerminalIntent{Status: StatusDone}
+		st.FinishingStartedAt = anchor
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	sup := f.supRestarted(t)
+	exit, err := sup.Run()
+	requireBudgetFailed(t, f, exit, err, "the final push")
+	if _, err := f.job.base.git(f.job.base.bare, "rev-parse", "--verify", "-q", "refs/heads/"+supGitBranch); err == nil {
+		t.Errorf("the job branch reached the remote, want no git sync after the spent budget")
+	}
+	if n := countTipes(f.events(t), "push"); n != 0 {
+		t.Errorf("push events = %d, want none", n)
+	}
+	if st := f.state(t); st.FinishingStartedAt != anchor {
+		t.Errorf("finishing_started_at = %q, want the original anchor %q", st.FinishingStartedAt, anchor)
+	}
+}
+
+// A restart that finds the final sync recorded as done does not run it
+// again, whatever is left of the budget: the done intent ends done.
+func TestSuperviseFinishingSyncedRestartDoesNotPushAgain(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	anchor := f.clock.Now().Add(-11 * time.Minute).Format(time.RFC3339Nano)
+	if _, err := f.store.Record(supGitID, func(st *State) {
+		st.TerminalIntent = &TerminalIntent{Status: StatusDone}
+		st.FinishingStartedAt = anchor
+		st.FinishingSynced = true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	exit, err := f.supRestarted(t).Run()
+	if err != nil || exit != 0 {
+		t.Fatalf("restart Run = %d %v, want done with exit 0", exit, err)
+	}
+	if st := f.state(t); st.Status != StatusDone {
+		t.Errorf("state = %s, want done", st.Status)
+	}
+	if _, err := f.job.base.git(f.job.base.bare, "rev-parse", "--verify", "-q", "refs/heads/"+supGitBranch); err == nil {
+		t.Errorf("the job branch reached the remote, want no second sync")
+	}
+	if n := countTipes(f.events(t), "push"); n != 0 {
+		t.Errorf("push events = %d, want none", n)
+	}
+}
+
+// A completed final sync is recorded: finishing_synced and the anchor, in
+// the state of a done job.
+func TestSuperviseFinishingRecordsTheCompletedSync(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	exit, err, _ := finishDone(t, f)
+	if err != nil || exit != 0 {
+		t.Fatalf("finishOutcome = %d %v, want done with exit 0", exit, err)
+	}
+	st := f.state(t)
+	if st.Status != StatusDone || !st.FinishingSynced || st.FinishingStartedAt == "" {
+		t.Errorf("state = %s synced=%v anchor=%q, want done, synced and anchored", st.Status, st.FinishingSynced, st.FinishingStartedAt)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, st.FinishingStartedAt); err != nil {
+		t.Errorf("finishing_started_at %q is not RFC 3339 nano: %v", st.FinishingStartedAt, err)
+	}
+}
+
+// A state finishing with an intent and no anchor (written before the
+// field existed) is anchored at the restart and the anchor is persisted;
+// the budget then counts from it, so the sync still runs.
+func TestSuperviseFinishingLegacyStateIsAnchoredAtTheRestart(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	if _, err := f.store.Record(supGitID, func(st *State) { st.TerminalIntent = &TerminalIntent{Status: StatusDone} }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	if st := f.state(t); st.FinishingStartedAt != "" {
+		t.Fatalf("fixture anchor = %q, want none (a legacy state)", st.FinishingStartedAt)
+	}
+	want := f.clock.Now().Format(time.RFC3339Nano)
+	exit, err := f.supRestarted(t).Run()
+	if err != nil || exit != 0 {
+		t.Fatalf("restart Run = %d %v, want done with exit 0", exit, err)
+	}
+	st := f.state(t)
+	if st.FinishingStartedAt != want {
+		t.Errorf("finishing_started_at = %q, want the restart instant %q", st.FinishingStartedAt, want)
+	}
+	if st.Status != StatusDone || !st.FinishingSynced {
+		t.Errorf("state = %s synced=%v, want done with the sync run from the new anchor", st.Status, st.FinishingSynced)
+	}
+}
+
+// A restart over a spent budget does not wait a fresh grace for the
+// collaborations: nothing is asked or waited on, and the partial facts are
+// persisted with the outcome unchanged.
+func TestSuperviseFinishingRestartDoesNotWaitAFreshCollaborationGrace(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+	collabSup(t, store, sup)
+	ws := collabWorkspace(t, jobDir)
+	_, id := makeCollab(t, ws, collabJobDir(t, store), "w1", "impl-1", "rev-1", "w1:p2", "w1:p3")
+	team.rosterRows = collabRoster("impl-1", "rev-1")
+	anchor := clock.now.Add(-11 * time.Minute).Format(time.RFC3339Nano)
+	if _, err := store.Record("job-1", func(st *State) {
+		st.TerminalIntent = &TerminalIntent{Status: StatusDone}
+		st.FinishingStartedAt = anchor
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition("job-1", StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	before := clock.mono
+	exit, err := sup.Run()
+	if err != nil || exit != 0 {
+		t.Fatalf("restart Run = %d %v, want done with exit 0", exit, err)
+	}
+	if waited := time.Duration(clock.mono - before); waited >= 10*time.Second {
+		t.Errorf("restart waited %v for the collaborations, want no wait over a spent budget", waited)
+	}
+	if len(team.dispatches) != 0 {
+		t.Errorf("dispatches = %+v, want none after the budget", team.dispatches)
+	}
+	st := supState(t, store)
+	if st.Status != StatusDone || !reflect.DeepEqual(PartialCollaborations(st), []string{id}) {
+		t.Errorf("state = %s partial=%v, want done with [%s] partial", st.Status, PartialCollaborations(st), id)
+	}
+}
+
+// The terminal write that fails once is retried within the budget: the job
+// ends terminal and the injected text is in friction once.
+func TestSuperviseFinishingTerminalWriteRetrySucceeds(t *testing.T) {
+	var friction []string
+	store, jobDir, _, team, herdr, sup := failBlockedSetup(t, &friction)
+	report := writeOrchestratorReport(t, "# Report — job\n\n- [done] item\n")
+	team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}
+	injected := errors.New("injected terminal write error")
+	fired := failStateWrite(t, injected, func(p State) bool { return p.Status == StatusDone })
+	exit, err := sup.Run()
+	if err != nil || exit != 0 {
+		t.Errorf("Run = %d %v, want done with exit 0 after the retry", exit, err)
+	}
+	if !*fired {
+		t.Fatal("the terminal write error was never injected")
+	}
+	if st := supState(t, store); st.Status != StatusDone || !st.WorkspaceClosed {
+		t.Errorf("state = %s closed=%v, want done and the workspace closed", st.Status, st.WorkspaceClosed)
+	}
+	want := []string{"job: the supervisor could not record the terminal state done: injected terminal write error"}
+	if !reflect.DeepEqual(friction, want) {
+		t.Errorf("friction = %q, want the injected text once: %q", friction, want)
+	}
+	if n := countTipe(mustEvents(t, jobDir), "cleanup"); n != 1 {
+		t.Errorf("cleanup events = %d, want 1", n)
+	}
+	requireWorkspaceClosed(t, herdr, team)
+}
+
+// A persistent terminal write failure is retried at the poll cadence until
+// the budget is spent and then returned: the job stays finishing with its
+// intent and finalize never runs.
+func TestSuperviseFinishingTerminalWritePersistentFailureEndsAtTheBudget(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, herdr, sup := failBlockedSetup(t, &friction)
+	sup.FinishingLimits = finishingLimits{Budget: 60 * time.Second}
+	report := writeOrchestratorReport(t, "# Report — job\n\n- [done] item\n")
+	team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}
+	injected := errors.New("injected persistent terminal write error")
+	rec := failEveryStateWrite(t, injected, func() int64 { return clock.mono }, func(p State) bool { return p.Status == StatusDone })
+	exit, err := sup.Run()
+	if err == nil || !errors.Is(err, injected) {
+		t.Errorf("Run error = %v, want the injected error after the budget", err)
+	}
+	if exit != ExitFailed {
+		t.Errorf("exit = %d, want %d", exit, ExitFailed)
+	}
+	span := time.Duration(rec.last - rec.first)
+	if span < 60*time.Second-10*time.Second || span > 60*time.Second+10*time.Second {
+		t.Errorf("retried over %v (%d attempts), want the 60s budget +- one poll", span, rec.n)
+	}
+	st := supState(t, store)
+	if st.Status != StatusFinishing || st.TerminalIntent == nil || st.TerminalIntent.Status != StatusDone {
+		t.Errorf("state = %s intent=%+v, want finishing with the done intent", st.Status, st.TerminalIntent)
+	}
+	want := []string{"job: the supervisor could not record the terminal state done: injected persistent terminal write error"}
+	if !reflect.DeepEqual(friction, want) {
+		t.Errorf("friction = %q, want the one distinct error line %q", friction, want)
+	}
+	requireNoTerminalFinalize(t, store, jobDir, team, herdr)
+}
+
+// A clock that never advances cannot hold the terminal write retry: the
+// attempts are also bounded by the budget counted in polls.
+func TestSuperviseFinishingTerminalWriteRetryIsFiniteOnAStuckClock(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	rec := failEveryStateWrite(t, errors.New("injected stuck write error"), func() int64 { return 0 }, func(p State) bool { return p.Status == StatusDone })
+	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	_, done, err := f.sup.finishOutcome(StatusDone, "", 0)
+	if err == nil || !done {
+		t.Fatalf("finishOutcome = done %v err %v, want the write error", done, err)
+	}
+	// 10 minutes of 5 s polls: the first attempt and 120 retries.
+	if rec.n != 121 {
+		t.Errorf("terminal write attempts = %d, want 121 (budget / poll + 1)", rec.n)
+	}
+}
+
+// Hostile clock: an anchor in the future counts as zero elapsed, so the
+// budget runs from the process's own monotonic start and is never
+// extended by the anchor's distance.
+func TestSuperviseFinishingFutureAnchorClampsToZeroElapsed(t *testing.T) {
+	var friction []string
+	store, _, clock, _, _, sup := failBlockedSetup(t, &friction)
+	sup.FinishingLimits = finishingLimits{Budget: 60 * time.Second}
+	if _, err := store.Record("job-1", func(st *State) {
+		st.TerminalIntent = &TerminalIntent{Status: StatusDone}
+		st.FinishingStartedAt = clock.now.Add(time.Hour).Format(time.RFC3339Nano)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition("job-1", StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	rec := failEveryStateWrite(t, errors.New("injected"), func() int64 { return clock.mono }, func(p State) bool { return p.Status == StatusDone })
+	if _, err := sup.Run(); err == nil {
+		t.Fatal("Run succeeded under a persistent terminal write failure")
+	}
+	span := time.Duration(rec.last - rec.first)
+	if span < 60*time.Second-10*time.Second || span > 60*time.Second+10*time.Second {
+		t.Errorf("retried over %v (%d attempts), want the 60s budget from a zero elapsed (+- one poll)", span, rec.n)
+	}
+}
+
+// Hostile clock: a wall clock that moves backwards on every sleep never
+// extends the budget past the monotonic elapsed: the 5 s already spent at
+// the process start plus the sleeps add up to the budget.
+func TestSuperviseFinishingBackwardsWallClockNeverExtendsTheBudget(t *testing.T) {
+	var friction []string
+	store, _, clock, _, _, sup := failBlockedSetup(t, &friction)
+	sup.FinishingLimits = finishingLimits{Budget: 60 * time.Second}
+	clock.rewind = true
+	if _, err := store.Record("job-1", func(st *State) {
+		st.TerminalIntent = &TerminalIntent{Status: StatusDone}
+		st.FinishingStartedAt = clock.now.Add(-5 * time.Second).Format(time.RFC3339Nano)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition("job-1", StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	rec := failEveryStateWrite(t, errors.New("injected"), func() int64 { return clock.mono }, func(p State) bool { return p.Status == StatusDone })
+	if _, err := sup.Run(); err == nil {
+		t.Fatal("Run succeeded under a persistent terminal write failure")
+	}
+	span := time.Duration(rec.last - rec.first)
+	if span < 55*time.Second-10*time.Second || span > 55*time.Second+10*time.Second {
+		t.Errorf("retried over %v (%d attempts), want 55s (60s budget minus the 5s already spent) +- one poll", span, rec.n)
+	}
+}
+
+// Hostile clock, measured on a step that is shorter than the budget's
+// default: with a 20 s budget the collaboration wait ends at the budget, not
+// at its own 120 s step, whatever the wall clock says about the anchor — an
+// anchor in the future counts as zero elapsed, and a wall clock that moves
+// backwards on every sleep never extends what the anchor had already spent.
+func TestSuperviseFinishingHostileWallClockNeverExtendsTheCollaborationWait(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		anchor time.Duration // offset of the anchor from the supervisor's now
+		rewind bool
+		want   time.Duration // the budget left when the process starts
+	}{
+		{"future anchor", time.Hour, false, 20 * time.Second},
+		{"backwards wall clock", -5 * time.Second, true, 15 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var friction []string
+			store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+			collabSup(t, store, sup)
+			ws := collabWorkspace(t, jobDir)
+			_, id := makeCollab(t, ws, collabJobDir(t, store), "w1", "impl-1", "rev-1", "w1:p2", "w1:p3")
+			team.rosterRows = collabRoster("impl-1", "rev-1")
+			sup.FinishingLimits = finishingLimits{Budget: 20 * time.Second}
+			clock.rewind = tc.rewind
+			if _, err := store.Record("job-1", func(st *State) {
+				st.TerminalIntent = &TerminalIntent{Status: StatusDone}
+				st.FinishingStartedAt = clock.now.Add(tc.anchor).Format(time.RFC3339Nano)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Transition("job-1", StatusFinishing); err != nil {
+				t.Fatal(err)
+			}
+			before := clock.mono
+			exit, err := sup.Run()
+			if err != nil || exit != 0 {
+				t.Fatalf("restart Run = %d %v, want done with exit 0", exit, err)
+			}
+			waited := time.Duration(clock.mono - before)
+			if waited > tc.want+10*time.Second {
+				t.Errorf("collaboration wait = %v, want at most the %v of budget left + one poll", waited, tc.want)
+			}
+			if st := supState(t, store); st.Status != StatusDone || !reflect.DeepEqual(PartialCollaborations(st), []string{id}) {
+				t.Errorf("state = %s partial=%v, want done with [%s] partial", st.Status, PartialCollaborations(st), id)
+			}
+		})
+	}
+}
+
+// rejectFirstRemotePush makes the bare remote's pre-receive hook (a fakecli
+// re-execution) refuse the first push at once and accept every later one, so
+// a push fails fast, is not cut by any bound, and a later pass succeeds.
+func rejectFirstRemotePush(t *testing.T, f *supGitFixture) {
+	t.Helper()
+	target, err := fakecli.Install(t, f.job.base.fakeDir, "pre-receive", []fakecli.Rule{
+		{AnyArgs: true, Call: 1, Code: 1, Stderr: "rejected by the fixture\n"},
+		{AnyArgs: true},
+	})
+	if err != nil {
+		t.Fatalf("install the pre-receive fake: %v", err)
+	}
+	hooks := filepath.Join(f.job.base.bare, "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(hooks, "pre-receive")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// remoteHasBranch reports whether the job branch reached the bare remote.
+func remoteHasBranch(f *supGitFixture) bool {
+	_, err := f.job.base.git(f.job.base.bare, "rev-parse", "--verify", "-q", "refs/heads/"+supGitBranch)
+	return err == nil
+}
+
+// pushedEvents counts the push events that carry a completed push.
+func pushedEvents(events []Event) int {
+	n := 0
+	for _, event := range events {
+		if event.Tipo == "push" && event.Resumo == "pushed" {
+			n++
+		}
+	}
+	return n
+}
+
+// A push that the remote refuses at once is not cut by any bound: the job
+// keeps today's done, and the final sync is not recorded as complete.
+func TestSuperviseFinishingRejectedPushKeepsDoneAndIsNotSynced(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	rejectFirstRemotePush(t, f)
+	exit, err, _ := finishDone(t, f)
+	if err != nil || exit != 0 {
+		t.Fatalf("finishOutcome = %d %v, want done with exit 0", exit, err)
+	}
+	st := f.state(t)
+	if st.Status != StatusDone || st.Motivo != nil {
+		t.Errorf("state = %s motivo=%v, want done without a motivo (a rejected push is not a cut)", st.Status, st.Motivo)
+	}
+	if st.FinishingSynced {
+		t.Errorf("finishing_synced = true after a rejected push, want false")
+	}
+	if remoteHasBranch(f) {
+		t.Errorf("the job branch reached the remote, want the push refused")
+	}
+}
+
+// A restart over a done intent whose final sync did not complete cleanly (a
+// refused push) runs the final sync again, as the baseline did: the push
+// lands, the sync is then recorded, and the job ends done.
+func TestSuperviseFinishingRestartRunsTheSyncAgainAfterARejectedPush(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	rejectFirstRemotePush(t, f)
+	// Process one: the push is refused and the terminal write fails with no
+	// budget to retry it, so the job stays finishing with its done intent.
+	f.sup.FinishingLimits = finishingLimits{Budget: time.Second}
+	fired := failStateWrite(t, errors.New("injected terminal write error"), func(p State) bool { return p.Status == StatusDone })
+	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	if _, done, err := f.sup.finishOutcome(StatusDone, "", 0); err == nil || !done {
+		t.Fatalf("process one finishOutcome = done %v err %v, want the terminal write error", done, err)
+	}
+	if !*fired {
+		t.Fatal("the terminal write error was never injected")
+	}
+	st := f.state(t)
+	if st.Status != StatusFinishing || st.TerminalIntent == nil || st.TerminalIntent.Status != StatusDone {
+		t.Fatalf("state after process one = %s intent=%+v, want finishing with the done intent", st.Status, st.TerminalIntent)
+	}
+	if st.FinishingSynced {
+		t.Errorf("finishing_synced = true after a refused push, want false")
+	}
+	if remoteHasBranch(f) {
+		t.Fatalf("the job branch reached the remote in process one, want the push refused")
+	}
+	// Process two: the remote accepts now; the restart pushes again.
+	exit, err := f.supRestarted(t).Run()
+	if err != nil || exit != 0 {
+		t.Fatalf("restart Run = %d %v, want done with exit 0", exit, err)
+	}
+	if st := f.state(t); st.Status != StatusDone || !st.FinishingSynced {
+		t.Errorf("state after the restart = %s synced=%v, want done and synced", st.Status, st.FinishingSynced)
+	}
+	if !remoteHasBranch(f) {
+		t.Errorf("the job branch is not on the remote after the restart, want the final sync run again")
+	}
+	if n := pushedEvents(f.events(t)); n != 1 {
+		t.Errorf("pushed events = %d, want the one push of the restart", n)
+	}
+}
+
+// A draft pull request step that fails at once (not cut) leaves the sync
+// unrecorded and the job done.
+func TestSuperviseFinishingGhErrorKeepsDoneAndIsNotSynced(t *testing.T) {
+	rules := []fakecli.Rule{{Argv: ghListArgv(), Code: 1, Stderr: "gh failed\n"}}
+	f := newSupGitFixture(t, rules)
+	f.job.commitIn(t, "feat: first")
+	exit, err, _ := finishDone(t, f)
+	if err != nil || exit != 0 {
+		t.Fatalf("finishOutcome = %d %v, want done with exit 0", exit, err)
+	}
+	st := f.state(t)
+	if st.Status != StatusDone || st.FinishingSynced {
+		t.Errorf("state = %s synced=%v, want done and not synced", st.Status, st.FinishingSynced)
+	}
+	if !remoteHasBranch(f) {
+		t.Errorf("the push did not land, want the gh failure to be the only failed step")
+	}
+}
+
+// A push that fails on its own command timeout (not the step's clamp) is a
+// plain step error: the job keeps done and the sync is not recorded.
+func TestSuperviseFinishingPushErrorBelowTheStepBoundIsNotSynced(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	holdRemotePush(t, f, 3*time.Second)
+	f.sup.Git.NetTimeout = 300 * time.Millisecond
+	finishingRealClock(f, finishingLimits{Budget: 30 * time.Second, Git: 20 * time.Second})
+	exit, err, _ := finishDone(t, f)
+	if err != nil || exit != 0 {
+		t.Fatalf("finishOutcome = %d %v, want done with exit 0 (the command timeout is not a cut)", exit, err)
+	}
+	st := f.state(t)
+	if st.Status != StatusDone || st.FinishingSynced {
+		t.Errorf("state = %s synced=%v, want done and not synced", st.Status, st.FinishingSynced)
+	}
+}
+
+// A git read that fails at once (the head, the commit listing) is a plain
+// step error too: the job keeps done and the sync is not recorded.
+func TestSuperviseFinishingGitReadErrorsAreNotSynced(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		break_ func(g *GitSync, t *testing.T)
+	}{
+		{"head", func(g *GitSync, t *testing.T) { g.Dir = filepath.Join(t.TempDir(), "missing") }},
+		{"commits", func(g *GitSync, t *testing.T) { g.Base = "no-such-base" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSupGitFixture(t, supGitGhRules)
+			f.job.commitIn(t, "feat: first")
+			tc.break_(f.sup.Git, t)
+			exit, err, _ := finishDone(t, f)
+			if err != nil || exit != 0 {
+				t.Fatalf("finishOutcome = %d %v, want done with exit 0", exit, err)
+			}
+			if st := f.state(t); st.Status != StatusDone || st.FinishingSynced {
+				t.Errorf("state = %s synced=%v, want done and not synced", st.Status, st.FinishingSynced)
+			}
+		})
+	}
+}
+
+// A store error returned by the sync pass (the commit event cannot be
+// appended) is not a clean sync either.
+func TestSuperviseFinishingStoreErrorInTheSyncIsNotSynced(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	previous := appendEventFn
+	appendEventFn = func(dir string, now time.Time, in EventIn) (Event, error) {
+		if in.Tipo == "commit" {
+			return Event{}, errors.New("injected commit append error")
+		}
+		return previous(dir, now, in)
+	}
+	t.Cleanup(func() { appendEventFn = previous })
+	exit, err, _ := finishDone(t, f)
+	if err != nil || exit != 0 {
+		t.Fatalf("finishOutcome = %d %v, want done with exit 0", exit, err)
+	}
+	if st := f.state(t); st.Status != StatusDone || st.FinishingSynced {
+		t.Errorf("state = %s synced=%v, want done and not synced", st.Status, st.FinishingSynced)
+	}
+}
+
+// The production team adapter lowers its command timeout to the step's
+// remaining time and never raises it above its own bound.
+func TestSelfCLIBoundedLowersTheCommandTimeout(t *testing.T) {
+	base := selfCLI{Exe: "x", Dir: "d", Timeout: 120 * time.Second}
+	lowered, ok := base.bounded(5 * time.Second).(selfCLI)
+	if !ok || lowered.Timeout != 5*time.Second {
+		t.Fatalf("bounded(5s) = %+v, want a 5s timeout", lowered)
+	}
+	kept, ok := base.bounded(10 * time.Minute).(selfCLI)
+	if !ok || kept.Timeout != 120*time.Second {
+		t.Fatalf("bounded(10m) = %+v, want the adapter's own 120s", kept)
+	}
+	zero, ok := selfCLI{Exe: "x", Dir: "d"}.bounded(7 * time.Second).(selfCLI)
+	if !ok || zero.Timeout != 7*time.Second {
+		t.Fatalf("zero-timeout bounded(7s) = %+v, want 7s", zero)
+	}
+}

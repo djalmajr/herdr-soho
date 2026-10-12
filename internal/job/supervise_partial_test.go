@@ -225,6 +225,8 @@ func TestSupervisePartialOutcomesPersistBeforeTheTerminalTransition(t *testing.T
 	team.rosterRows = collabRoster("impl-1", "rev-1")
 	report := writeOrchestratorReport(t, "# report\n\n- [done] item\n")
 	team.statusScript = []fakeStatus{{State: "working"}, {State: "working"}, {State: "done", Report: report}}
+	// The first process has no budget left to retry the crashed write.
+	sup.FinishingLimits = finishingLimits{Budget: 10 * time.Second}
 	// Crash the terminal transition's state write: the first state.json
 	// whose top-level outcome is the done one is the transition itself —
 	// the intent record (which carries the done status inside the intent,

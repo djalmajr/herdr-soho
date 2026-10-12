@@ -63,6 +63,17 @@ func (c selfCLI) timeout() time.Duration {
 	return defaultTeamOpsTimeout
 }
 
+// bounded is the same adapter with every command timeout lowered to at most
+// d (never raised above its own bound): the terminal procedure's collaboration
+// step runs its dispatches and roster reads through it, so one command
+// cannot outlast the step's remaining time.
+func (c selfCLI) bounded(d time.Duration) teamOps {
+	if d > 0 && d < c.timeout() {
+		c.Timeout = d
+	}
+	return c
+}
+
 // step runs one self subprocess and maps any failure to the fixed error of
 // the operation.
 func (c selfCLI) step(op string, args ...string) (string, error) {

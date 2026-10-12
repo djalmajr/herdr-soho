@@ -37,6 +37,19 @@ type GitSync struct {
 	LocalTimeout time.Duration
 	NetTimeout   time.Duration
 	GhTimeout    time.Duration
+	// Limit, when set, is consulted by every timeout below with the
+	// original default or configured value and returns the timeout to use:
+	// the supervisor's terminal procedure clamps each subprocess to the
+	// remaining time of its step (never to zero, which would mean none).
+	Limit func(time.Duration) time.Duration
+}
+
+// limited applies Limit to a timeout.
+func (g *GitSync) limited(d time.Duration) time.Duration {
+	if g.Limit != nil {
+		return g.Limit(d)
+	}
+	return d
 }
 
 // Commit is one commit of the job branch ahead of the base, oldest first.
@@ -65,23 +78,23 @@ func gitSyncError(step string) error {
 
 func (g *GitSync) localTimeout() time.Duration {
 	if g.LocalTimeout <= 0 {
-		return defaultLocalSyncTimeout
+		return g.limited(defaultLocalSyncTimeout)
 	}
-	return g.LocalTimeout
+	return g.limited(g.LocalTimeout)
 }
 
 func (g *GitSync) netTimeout() time.Duration {
 	if g.NetTimeout <= 0 {
-		return defaultNetSyncTimeout
+		return g.limited(defaultNetSyncTimeout)
 	}
-	return g.NetTimeout
+	return g.limited(g.NetTimeout)
 }
 
 func (g *GitSync) ghTimeout() time.Duration {
 	if g.GhTimeout <= 0 {
-		return defaultGhSyncTimeout
+		return g.limited(defaultGhSyncTimeout)
 	}
-	return g.GhTimeout
+	return g.limited(g.GhTimeout)
 }
 
 // gitEnv is the subprocess environment for git steps: GIT_TERMINAL_PROMPT=0
