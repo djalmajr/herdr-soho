@@ -223,8 +223,10 @@ func (g *GitSync) Push() (PushResult, error) {
 // caller pushes after it.
 func (g *GitSync) Checkpoint() (bool, error) {
 	env := g.gitEnv()
-	local := g.localTimeout()
-	if _, err := runStep("git", []string{"-C", g.Dir, "add", "-A"}, local, env); err != nil {
+	// The timeout is read immediately before each subprocess: under a Limit
+	// that means "what is left of the step", a later command must not get the
+	// remainder the first one saw.
+	if _, err := runStep("git", []string{"-C", g.Dir, "add", "-A"}, g.localTimeout(), env); err != nil {
 		return false, gitSyncError("checkpoint")
 	}
 	// diff --cached --quiet exits 0 when nothing is staged and 1 when the
@@ -232,10 +234,10 @@ func (g *GitSync) Checkpoint() (bool, error) {
 	// same error, so a genuine diff failure falls through to the commit,
 	// which fails on its own when nothing was staged and surfaces as the
 	// checkpoint error instead of committing an empty commit.
-	if _, err := runStep("git", []string{"-C", g.Dir, "diff", "--cached", "--quiet"}, local, env); err == nil {
+	if _, err := runStep("git", []string{"-C", g.Dir, "diff", "--cached", "--quiet"}, g.localTimeout(), env); err == nil {
 		return false, nil
 	}
-	if _, err := runStep("git", []string{"-C", g.Dir, "commit", "--no-verify", "-m", "wip(job): checkpoint"}, local, env); err != nil {
+	if _, err := runStep("git", []string{"-C", g.Dir, "commit", "--no-verify", "-m", "wip(job): checkpoint"}, g.localTimeout(), env); err != nil {
 		return false, gitSyncError("checkpoint")
 	}
 	return true, nil
@@ -248,8 +250,7 @@ func (g *GitSync) Checkpoint() (bool, error) {
 // deletes a branch.
 func (g *GitSync) EnsureDraftPR(title, body string) (PullRequest, bool, error) {
 	ghEnv := g.ghEnv()
-	gh := g.ghTimeout()
-	list, err := runStep("gh", []string{"pr", "list", "--repo", g.Repo, "--head", g.Branch, "--state", "all", "--json", "number,url,isDraft", "--limit", "1"}, gh, ghEnv)
+	list, err := runStep("gh", []string{"pr", "list", "--repo", g.Repo, "--head", g.Branch, "--state", "all", "--json", "number,url,isDraft", "--limit", "1"}, g.ghTimeout(), ghEnv)
 	if err != nil {
 		return PullRequest{}, false, gitSyncError("pr")
 	}
@@ -278,7 +279,7 @@ func (g *GitSync) EnsureDraftPR(title, body string) (PullRequest, bool, error) {
 	if len(items) != 0 {
 		return PullRequest{}, false, gitSyncError("pr")
 	}
-	create, err := runStep("gh", []string{"pr", "create", "--repo", g.Repo, "--draft", "--base", g.Base, "--head", g.Branch, "--title", title, "--body", body}, gh, ghEnv)
+	create, err := runStep("gh", []string{"pr", "create", "--repo", g.Repo, "--draft", "--base", g.Base, "--head", g.Branch, "--title", title, "--body", body}, g.ghTimeout(), ghEnv)
 	if err != nil {
 		return PullRequest{}, false, gitSyncError("pr")
 	}
