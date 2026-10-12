@@ -351,12 +351,27 @@ func runStep(exe string, args []string, timeout time.Duration, env platform.Env)
 	return runStepIn("", exe, args, timeout, env)
 }
 
+// timeoutMs is the platform deadline of a subprocess timeout: a positive
+// duration is rounded up to whole milliseconds and never below one, because
+// platform.RunCli and RunExecutable read 0 as "no deadline"; an explicit zero
+// (or a negative value) stays 0 and keeps that meaning.
+func timeoutMs(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	ms := d / time.Millisecond
+	if d%time.Millisecond != 0 {
+		ms++
+	}
+	return int(ms)
+}
+
 // runStepIn is runStep with the subprocess working directory set to dir
 // (RunOptions.Cwd); "" keeps the current directory. The same rules apply.
 // An absolute exe is run as is (platform.RunExecutable); a name is
 // resolved through PATH (platform.RunCli).
 func runStepIn(dir, exe string, args []string, timeout time.Duration, env platform.Env) (string, error) {
-	opts := platform.RunOptions{Env: env, Cwd: dir, TimeoutMs: int(timeout / time.Millisecond)}
+	opts := platform.RunOptions{Env: env, Cwd: dir, TimeoutMs: timeoutMs(timeout)}
 	var result platform.RunResult
 	if filepath.IsAbs(exe) {
 		result = platform.RunExecutable(exe, args, opts)
