@@ -264,8 +264,8 @@ func TestSupervisePartialOutcomesPersistBeforeTheTerminalTransition(t *testing.T
 	if countTipe(events, "terminal") != 1 {
 		t.Fatalf("terminal events at the crash = %d, want one (it lands before the transition)", countTipe(events, "terminal"))
 	}
-	if len(friction1) != 0 {
-		t.Fatalf("friction at the crash = %v, want none", friction1)
+	if want := []string{"job: the supervisor could not record the terminal state done: crash"}; !reflect.DeepEqual(friction1, want) {
+		t.Fatalf("friction at the crash = %q, want %q", friction1, want)
 	}
 	// The crash was scripted once: the restart transitions without it.
 	renameAtomic = previous

@@ -909,7 +909,7 @@ func jobSupervise(args []string, env platform.Env, launch job.LaunchLocators) in
 	}
 	exit, runErr := sup.Run()
 	if runErr != nil {
-		friction("job: the job supervisor stopped with an error")
+		friction("job: the job supervisor stopped with an error: " + runErr.Error())
 	}
 	snap, err := store.Snapshot(id)
 	if err != nil {

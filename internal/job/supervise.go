@@ -385,6 +385,7 @@ func (s *Supervisor) Run() (int, error) {
 			}
 			if snap.State.Status == StatusRunning || snap.State.Status == StatusBlocked {
 				if _, err := s.Store.Transition(s.ID, StatusFinishing); err != nil {
+					s.frictionf("job: the supervisor could not enter finishing: " + err.Error())
 					return ExitFailed, err
 				}
 			}
@@ -1060,6 +1061,17 @@ const decisionsPendingMotivo = "decisions pending"
 // write, so time spent blocked is never charged to the active budget (from
 // running, both sides are active and nothing settles, as before).
 func (s *Supervisor) enterFinishing(intent *TerminalIntent, motivo *string) error {
+	err := s.enterFinishingWrite(intent, motivo)
+	if err != nil {
+		// The returned error is the store's own (callers match its code);
+		// the text and the step go to friction.
+		s.frictionf("job: the supervisor could not enter finishing: " + err.Error())
+	}
+	return err
+}
+
+// enterFinishingWrite is the state write of enterFinishing.
+func (s *Supervisor) enterFinishingWrite(intent *TerminalIntent, motivo *string) error {
 	update := func(st *State) {
 		if intent != nil {
 			st.TerminalIntent = intent
@@ -1116,6 +1128,7 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 	// restart instead of re-deriving it.
 	intent := &TerminalIntent{Status: status, Motivo: motivo, Exit: exit}
 	if _, err := s.Store.Record(s.ID, func(st *State) { st.TerminalIntent = intent }); err != nil {
+		s.frictionf("job: the supervisor could not record the terminal intent: " + err.Error())
 		return 0, true, err
 	}
 	// The final push happens while the job is still finishing, so its events
@@ -1133,6 +1146,7 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 	}
 	s.collabEnded = true
 	if err := s.persistCollabOutcomes(outcomes); err != nil {
+		s.frictionf("job: the supervisor could not persist the collaboration outcomes: " + err.Error())
 		return 0, true, err
 	}
 	// The terminal event lands at most once: a crashed earlier pass may
@@ -1140,10 +1154,12 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 	// duplicate.
 	jobDir, err := s.Store.readDir(s.ID)
 	if err != nil {
+		s.frictionf("job: the supervisor could not read the job directory for the terminal event: " + err.Error())
 		return 0, true, err
 	}
 	events, err := readEvents(jobDir)
 	if err != nil {
+		s.frictionf("job: the supervisor could not read the events for the terminal event: " + err.Error())
 		return 0, true, err
 	}
 	if !hasTipo(events, "terminal") {
@@ -1152,10 +1168,14 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 			refs["motivo"] = motivo
 		}
 		if _, err := s.Store.Append(s.ID, EventIn{Tipo: "terminal", Refs: refs}); err != nil {
+			s.frictionf("job: the supervisor could not append the terminal event: " + err.Error())
 			return 0, true, err
 		}
 	}
 	if _, err := s.Store.Transition(s.ID, status); err != nil {
+		// The terminal state was not saved: the job stays finishing with
+		// its terminal intent, and finalize never runs for it.
+		s.frictionf("job: the supervisor could not record the terminal state " + status + ": " + err.Error())
 		return 0, true, err
 	}
 	// The job is terminal: a cancel still pending (it stays pending through
@@ -1200,7 +1220,7 @@ func (s *Supervisor) fail(motivo string, exit int) error {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
 		// The status is unknown, so the unsettled walk must not run.
-		s.frictionf("job: the supervisor could not record the failure")
+		s.frictionf("job: the supervisor could not record the failure: " + err.Error())
 		return err
 	}
 	if snap.State.Status == StatusBlocked {
@@ -1211,14 +1231,14 @@ func (s *Supervisor) fail(motivo string, exit int) error {
 			// The job stays blocked and unsettled: the failure walk refused
 			// to run from a state it could not cross, and the restart
 			// converges on the still-blocked job.
-			s.frictionf("job: the supervisor could not record the failure")
+			s.frictionf("job: the supervisor could not record the failure: " + err.Error())
 			return err
 		}
 	} else {
 		// The terminal intent, best effort: on error, friction and continue
 		// — the failure still has to be recorded.
 		if _, err := s.Store.Record(s.ID, func(st *State) { st.TerminalIntent = intent }); err != nil {
-			s.frictionf("job: the supervisor could not record the terminal intent")
+			s.frictionf("job: the supervisor could not record the terminal intent: " + err.Error())
 		}
 	}
 	s.finalSync(StatusFailed)
@@ -1232,16 +1252,18 @@ func (s *Supervisor) fail(motivo string, exit int) error {
 	}
 	s.collabEnded = true
 	if err := s.persistCollabOutcomes(outcomes); err != nil {
-		s.frictionf("job: the supervisor could not persist the collaboration outcomes")
+		s.frictionf("job: the supervisor could not persist the collaboration outcomes: " + err.Error())
 	}
 	if _, err := s.Store.Fail(s.ID, motivo, exit); err != nil {
-		if s.Friction != nil {
-			s.Friction("job: the supervisor could not record the failure")
-		}
-	} else {
-		// The job is terminal: a pending cancel has nothing left to deliver.
-		s.retirePendingCancel()
+		// The failed state was not saved: the job stays finishing with its
+		// terminal intent, so the pending cancel is not retired, finalize
+		// (the cleanup event, the release, the workspace close) never runs
+		// for it, and the store's own error is returned unwrapped.
+		s.frictionf("job: the supervisor could not record the failure: " + err.Error())
+		return err
 	}
+	// The job is terminal: a pending cancel has nothing left to deliver.
+	s.retirePendingCancel()
 	// The terminal events wake the dispatcher too; the worker drains
 	// before the release and the workspace close.
 	s.finishWakes()
