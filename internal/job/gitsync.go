@@ -206,7 +206,7 @@ func (g *GitSync) Push() (PushResult, error) {
 	// RunCli directly (deadline and WaitDelay, argv only) so a timeout, a
 	// missing executable or a killed process stays apart from a refused push:
 	// only a non-zero exit is reported as Rejected for the blocked event.
-	result := platform.RunCli("git", []string{"-C", g.Dir, "push", "--porcelain", "origin", "HEAD:refs/heads/" + g.Branch}, platform.RunOptions{Env: gitEnv, TimeoutMs: int(g.netTimeout() / time.Millisecond)})
+	result := platform.RunCli("git", []string{"-C", g.Dir, "push", "--porcelain", "origin", "HEAD:refs/heads/" + g.Branch}, platform.RunOptions{Env: gitEnv, TimeoutMs: timeoutMs(g.netTimeout())})
 	switch {
 	case result.NotFound || result.TimedOut || result.Status == nil:
 		return PushResult{Head: head}, gitSyncError("push")

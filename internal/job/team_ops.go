@@ -190,7 +190,7 @@ func (c selfCLI) Send(name, path string) error {
 // provider states print a JSON object instead of a tab line, so a line that
 // carries the agent in its agent field is read the same way.
 func (c selfCLI) Status(name string) (string, string, error) {
-	opts := platform.RunOptions{Env: c.Env, Cwd: c.Dir, TimeoutMs: int(c.timeout() / time.Millisecond)}
+	opts := platform.RunOptions{Env: c.Env, Cwd: c.Dir, TimeoutMs: timeoutMs(c.timeout())}
 	var result platform.RunResult
 	if filepath.IsAbs(c.Exe) {
 		result = platform.RunExecutable(c.Exe, []string{"status", name}, opts)
