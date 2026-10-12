@@ -195,6 +195,14 @@ func loadConfigFile(file, label string, ctx *Config) {
 		return
 	}
 	ctx.Sources = append(ctx.Sources, label)
+	applyConfigText(raw, &record, ctx)
+	ctx.Layers = append(ctx.Layers, record)
+}
+
+// applyConfigText parses one file's decoded text into ctx and the file's
+// layer record, as loadConfigFile reads every layer.
+func applyConfigText(raw string, record *ConfigLayer, ctx *Config) {
+	layer := record.Entries
 	for _, rawLine := range splitLines(raw) {
 		if hash := strings.IndexByte(rawLine, '#'); hash >= 0 {
 			rawLine = rawLine[:hash]
@@ -220,10 +228,9 @@ func loadConfigFile(file, label string, ctx *Config) {
 		if _, exists := ctx.Entries[key]; !exists {
 			ctx.Order = append(ctx.Order, key)
 		}
-		ctx.Entries[key] = ConfigEntry{Value: value, Source: label, Original: rawKey}
+		ctx.Entries[key] = ConfigEntry{Value: value, Source: record.Source, Original: rawKey}
 		layer[key] = ctx.Entries[key]
 	}
-	ctx.Layers = append(ctx.Layers, record)
 }
 
 // ConfigPair is one key/value read from a config file: the normalized key,
@@ -233,6 +240,21 @@ type ConfigPair struct {
 	Key      string
 	Original string
 	Value    string
+}
+
+// ConfigTextPairs parses bytes already read from one config file with the
+// shared parser (DecodeText, then applyConfigText): one pair per key in
+// first-occurrence order, the last occurrence of a key winning.
+func ConfigTextPairs(data []byte) []ConfigPair {
+	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0)}
+	record := ConfigLayer{Source: "file", Entries: make(map[string]ConfigEntry)}
+	applyConfigText(platform.DecodeText(data), &record, &ctx)
+	pairs := make([]ConfigPair, 0, len(ctx.Order))
+	for _, key := range ctx.Order {
+		entry := ctx.Entries[key]
+		pairs = append(pairs, ConfigPair{Key: key, Original: entry.Original, Value: entry.Value})
+	}
+	return pairs
 }
 
 // ReadConfigFilePairs reads one file with the shared single-file config

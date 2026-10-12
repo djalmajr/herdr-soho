@@ -73,24 +73,101 @@ func (s *Supervisor) pinActorSession() error {
 	}
 	body := pinnedSessionBody(string(data), s.Store.Root)
 	dir := filepath.Join(actorRoot, workspace)
-	if err := os.MkdirAll(dir, 0o700); err != nil || !exactDirectory(actorRoot) || !exactDirectory(dir) {
-		s.frictionf("job: the job workspace session directory is not a plain directory")
+	file := filepath.Join(dir, "session.conf")
+	// Every refusal comes before anything is created: an existing root or
+	// workspace directory must be a plain directory at its own path, and
+	// an existing session file a regular file at its own path (never a
+	// link, a FIFO or a directory, which the rename would replace or the
+	// read could block on).
+	if !plainOrMissing(actorRoot, true) || !plainOrMissing(dir, true) || !plainOrMissing(file, false) {
+		s.frictionf("job: the job workspace session path holds a link or another kind of file")
 		return errActorSession
 	}
-	file := filepath.Join(dir, "session.conf")
+	rootInfo, ok := ensurePlainDirectory(actorRoot)
+	if !ok {
+		s.frictionf("job: the job workspace session directory cannot be created")
+		return errActorSession
+	}
+	dirInfo, ok := ensurePlainDirectory(dir)
+	if !ok {
+		s.frictionf("job: the job workspace session directory cannot be created")
+		return errActorSession
+	}
 	if err := writeAtomic0600(file, []byte(body)); err != nil {
 		s.frictionf("job: the job workspace session cannot be written")
 		return errActorSession
 	}
-	// Read back what the agents will read: the same bytes, at its own
-	// path, and the existing config parser resolving state_dir to the
-	// store root.
+	// Read back what the agents will read: the directories are the ones
+	// checked, the file is the same bytes at its own path (bounded,
+	// no-follow, one handle), and the existing config parser resolves
+	// those bytes' state_dir to the store root.
 	back, ok, err := readPrivateFile(file, maxSessionBytes)
-	if err != nil || !ok || string(back) != body || !sessionNamesRoot(file, s.Store.Root) {
+	if err != nil || !ok || string(back) != body || !sessionNamesRoot(back, s.Store.Root) || !sameEntry(actorRoot, rootInfo) || !sameEntry(dir, dirInfo) {
 		s.frictionf("job: the job workspace session does not read back")
 		return errActorSession
 	}
 	return nil
+}
+
+// plainOrMissing reports whether path is absent, or present at its own
+// path as a plain directory (dir) or a regular file (!dir).
+func plainOrMissing(path string, dir bool) bool {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	if dir {
+		return info.Mode().Type() == os.ModeDir
+	}
+	return info.Mode().IsRegular()
+}
+
+// ensurePlainDirectory returns the Lstat of path as a plain directory: an
+// existing one must be a directory at its own path (no link, no reparse
+// point); a missing one is created with Mkdir, one level at a time from
+// its nearest existing ancestor (an existing ancestor is resolved as the
+// path names it), and each created level is checked at its own path.
+// Mkdir never follows a link at the path it creates.
+func ensurePlainDirectory(path string) (os.FileInfo, bool) {
+	info, err := os.Lstat(path)
+	if err == nil {
+		return info, info.Mode().Type() == os.ModeDir
+	}
+	if !os.IsNotExist(err) {
+		return nil, false
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		return nil, false
+	}
+	if parentInfo, err := os.Stat(parent); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, false
+		}
+		if _, ok := ensurePlainDirectory(parent); !ok {
+			return nil, false
+		}
+	} else if !parentInfo.IsDir() {
+		return nil, false
+	}
+	if err := os.Mkdir(path, 0o700); err != nil && !os.IsExist(err) {
+		return nil, false
+	}
+	info, err = os.Lstat(path)
+	if err != nil || info.Mode().Type() != os.ModeDir {
+		return nil, false
+	}
+	return info, true
+}
+
+// sameEntry reports whether path still names, at its own path, the entry
+// before describes.
+func sameEntry(path string, before os.FileInfo) bool {
+	now, err := os.Lstat(path)
+	return err == nil && os.SameFile(before, now) && now.Mode().Type() == before.Mode().Type()
 }
 
 // pinnedSessionBody is the start's session text without any state_dir
@@ -119,15 +196,12 @@ func sessionStateDirValue(root string) bool {
 	return filepath.IsAbs(root) && !strings.ContainsAny(root, "#\n\r")
 }
 
-// sessionNamesRoot reports whether the config parser reads file's
-// state_dir as exactly root.
-func sessionNamesRoot(file, root string) bool {
-	pairs, err := core.ReadConfigFilePairs(file)
-	if err != nil {
-		return false
-	}
+// sessionNamesRoot reports whether the config parser reads the session
+// bytes' state_dir as exactly root (core.ConfigTextPairs: the parser every
+// layer is read with, over the bytes already read; no second open).
+func sessionNamesRoot(data []byte, root string) bool {
 	value, found := "", false
-	for _, pair := range pairs {
+	for _, pair := range core.ConfigTextPairs(data) {
 		if pair.Key == "state_dir" {
 			value, found = pair.Value, true
 		}

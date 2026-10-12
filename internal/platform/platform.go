@@ -161,8 +161,13 @@ func ReadTextFile(file string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	text := decodeWHATWGUTF8(data)
-	return strings.ReplaceAll(text, "\r\n", "\n"), nil
+	return DecodeText(data), nil
+}
+
+// DecodeText decodes bytes read from a text file the way ReadTextFile
+// does: WHATWG UTF-8 decoding and CRLF line endings as LF.
+func DecodeText(data []byte) string {
+	return strings.ReplaceAll(decodeWHATWGUTF8(data), "\r\n", "\n")
 }
 
 func decodeWHATWGUTF8(data []byte) string {
