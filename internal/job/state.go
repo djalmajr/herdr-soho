@@ -89,6 +89,15 @@ type State struct {
 	Colaboracoes   []CollaborationOutcome `json:"colaboracoes,omitempty"`
 	CollabIDs      []string               `json:"collab_ids,omitempty"`
 	TerminalIntent *TerminalIntent        `json:"terminal_intent,omitempty"`
+	// FinishingStartedAt is the wall ts (RFC3339Nano) the terminal
+	// procedure's own budget counts from: set once, in the same locked
+	// write that records the terminal intent or enters finishing, and
+	// never overwritten, so a restarted supervisor keeps the same
+	// deadline. FinishingSynced records that the final git and pull
+	// request steps completed without being cut by that budget, so a
+	// restart does not run them again. Both are internal and omitempty.
+	FinishingStartedAt string `json:"finishing_started_at,omitempty"`
+	FinishingSynced    bool   `json:"finishing_synced,omitempty"`
 }
 
 // TerminalIntent is the terminal outcome a supervisor process committed to

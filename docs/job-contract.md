@@ -156,6 +156,9 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 - `timeout_warning` fires once per job at 80% of the active budget; blocked time never brings a job closer to it. At 100% the stop path ends the job `timeout` with `motivo` `tempo esgotado`.
 - `blocked_warning` fires once per job at 80% of the blocked ceiling. At 100% the stop path ends the job `timeout` (exit 9) with `motivo` `tempo de bloqueio esgotado`. When both budgets are exhausted in the same check, the active timeout wins.
 - Both clocks and the warnings already emitted are persisted with the job, so a restarted supervisor continues them: it neither resets nor double-counts an interval, and it emits a missing warning once. The clocks are measured on the monotonic clock; a wall clock that moves backwards between supervisor runs never shortens or extends a budget.
+- The terminal procedure in `finishing` has its own 10-minute budget, persisted with the job and kept across a supervisor restart, so a restart neither resets nor extends it.
+- Inside that budget the final push, the draft pull request step and the collaboration wait each have their own bound (5 minutes, 2 minutes and 2 minutes), and every command of those steps is also limited to what remains of its step.
+- When the final push or the draft pull request step is cut by that budget, a job that would end `done` ends `failed` (exit 19) with `motivo` `tempo de finalização esgotado`; a `canceled` or `timeout` job keeps its own outcome, and a collaboration wait cut by the budget keeps the partial collaboration facts.
 
 ### Collaborations at the end of a job
 

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // supervise_terminal_error_test.go pins the two guarantees of a store error
@@ -65,6 +66,8 @@ func TestSuperviseTerminalWriteErrorKeepsTextAndSkipsFinalize(t *testing.T) {
 	store, jobDir, _, team, herdr, sup := failBlockedSetup(t, &friction)
 	report := writeOrchestratorReport(t, "# Report — job\n\n- [done] item\n")
 	team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}
+	// No budget left to retry the failed write.
+	sup.FinishingLimits = finishingLimits{Budget: time.Second}
 	injected := errors.New("injected terminal write error")
 	fired := failStateWrite(t, injected, func(p State) bool { return p.Status == StatusDone })
 	exit, err := sup.Run()
