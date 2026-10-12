@@ -467,3 +467,81 @@ func assertEmptyDir(t *testing.T, dir string) {
 		t.Fatalf("%s changed: %v %v", dir, entries, err)
 	}
 }
+
+// TestActorConfineRunPinsBeforeTheOrchestrator: in Run, a privately
+// launched supervisor whose required pin fails records the job failed with
+// exit 2 before the orchestrator is spawned (removing the check, or
+// continuing after it, spawns); a pin that succeeds writes the workspace
+// environment's session file and then spawns.
+func TestActorConfineRunPinsBeforeTheOrchestrator(t *testing.T) {
+	skill, err := filepath.Abs("../../skills/herdr-soho")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setup := func(t *testing.T, withSession bool) (*Supervisor, *Store, *fakeTeam, string, *[]string) {
+		store, _, clock, team := supFixture(t)
+		root, err := filepath.EvalSymlinks(store.Root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store.Root = root
+		if withSession {
+			mustMkdir(t, filepath.Join(root, "w1"))
+			if err := os.WriteFile(filepath.Join(root, "w1", "session.conf"), []byte("lane.build.roles=implementer\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		base := filepath.Join(t.TempDir(), "starter")
+		mustMkdir(t, filepath.Join(base, "herdr-soho"))
+		if err := os.WriteFile(filepath.Join(base, "herdr-soho", "config"), []byte("state_dir="+root+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		home := t.TempDir()
+		var friction []string
+		sup := supSupervisor(store, clock, team, &friction)
+		sup.PrivateLaunch = true
+		sup.actorEnv = platform.Env{"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": filepath.Join(home, "xdg"), "HERDR_SOHO_SKILL_DIR": skill}
+		sup.launchSel = core.UserSelection{Base: base}
+		return sup, store, team, root, &friction
+	}
+	t.Run("a failed pin fails the job before the spawn", func(t *testing.T) {
+		sup, store, team, _, friction := setup(t, false)
+		exit, err := sup.Run()
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if exit != ExitUsage {
+			t.Fatalf("exit = %d, want %d", exit, ExitUsage)
+		}
+		st := supState(t, store)
+		if st.Status != StatusFailed || st.Motivo == nil || *st.Motivo != "job: cannot pin the job workspace session" {
+			t.Fatalf("state = %+v", st)
+		}
+		if team.spawnCalls != 0 {
+			t.Fatalf("spawn calls = %d, want 0", team.spawnCalls)
+		}
+		if !strings.Contains(strings.Join(*friction, "\n"), "job: the job session file is unreadable") {
+			t.Fatalf("friction = %v", *friction)
+		}
+	})
+	t.Run("a pin that holds is written before the spawn", func(t *testing.T) {
+		sup, store, team, root, friction := setup(t, true)
+		team.statusScript = []fakeStatus{{State: "done", Report: writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")}}
+		exit, err := sup.Run()
+		if err != nil || exit != 0 {
+			t.Fatalf("Run = %d, %v (friction %v)", exit, err, *friction)
+		}
+		if team.spawnCalls != 1 {
+			t.Fatalf("spawn calls = %d, want 1", team.spawnCalls)
+		}
+		dir := supState(t, store).Dir
+		real, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin, err := os.ReadFile(filepath.Join(real, ".herdr-soho", "w1", "session.conf"))
+		if err != nil || !strings.Contains(string(pin), "state_dir=\""+root+"\"") {
+			t.Fatalf("workspace pin = %q, %v", pin, err)
+		}
+	})
+}
