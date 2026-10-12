@@ -308,6 +308,48 @@ func TestActorConfineRefusesWithoutWriting(t *testing.T) {
 			t.Fatalf("the link was replaced: %v %v", info, err)
 		}
 	})
+	// The links above have absolute targets, which os.Root itself refuses
+	// as an escape. A relative link that stays inside the trusted ancestor
+	// is one os.Root would follow: only the pin's own check of every level
+	// (a plain directory, a regular or missing file) refuses these.
+	t.Run("relative links inside the trusted ancestor", func(t *testing.T) {
+		for _, level := range []string{"state root", "workspace directory", "session file"} {
+			t.Run(level, func(t *testing.T) {
+				sup, root, _ := newSup(t)
+				mustMkdir(t, filepath.Join(root, "target"))
+				link, target := filepath.Join(root, "state"), "target"
+				switch level {
+				case "workspace directory":
+					mustMkdir(t, link)
+					link, target = filepath.Join(link, acfWorkspace), filepath.Join("..", "target")
+				case "session file":
+					mustMkdir(t, filepath.Join(link, acfWorkspace))
+					if err := os.WriteFile(filepath.Join(root, "target", "kept.conf"), []byte("keep=1\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					link, target = filepath.Join(link, acfWorkspace, "session.conf"), filepath.Join("..", "..", "target", "kept.conf")
+				}
+				mustSymlink(t, target, link)
+				if sup.writeSessionFile(filepath.Join(root, "state"), acfWorkspace, "a=1\n", false) {
+					t.Fatal("written through a relative link")
+				}
+				entries, err := os.ReadDir(filepath.Join(root, "target"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if level == "session file" {
+					if got, _ := os.ReadFile(filepath.Join(root, "target", "kept.conf")); len(entries) != 1 || string(got) != "keep=1\n" {
+						t.Fatalf("target changed: %v %q", entries, got)
+					}
+					if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+						t.Fatalf("the link was replaced: %v %v", info, err)
+					}
+				} else if len(entries) != 0 {
+					t.Fatalf("target changed: %v", entries)
+				}
+			})
+		}
+	})
 	t.Run("missing levels under an alias ancestor", func(t *testing.T) {
 		sup, root, _ := newSup(t)
 		real := filepath.Join(root, "real")
@@ -398,6 +440,34 @@ func TestActorConfineExclude(t *testing.T) {
 		if got, _ := os.ReadFile(target); string(got) != "keep\n" {
 			t.Fatalf("target = %q", got)
 		}
+	})
+	t.Run("exclude is a relative link inside the checkout", func(t *testing.T) {
+		// os.Root follows this link (it stays inside the checkout): only
+		// the checks that the path holds a regular file and that the
+		// opened handle is that same file refuse it.
+		co := newCheckout(t)
+		mustMkdir(t, filepath.Join(co, ".git", "info"))
+		target := filepath.Join(co, "outside")
+		if err := os.WriteFile(target, []byte("keep\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mustSymlink(t, filepath.Join("..", "..", "outside"), filepath.Join(co, ".git", "info", "exclude"))
+		if appendExclude(co, "/x/w7/") {
+			t.Fatal("appended through a relative link")
+		}
+		if got, _ := os.ReadFile(target); string(got) != "keep\n" {
+			t.Fatalf("target = %q", got)
+		}
+	})
+	t.Run("info is a relative link inside the checkout", func(t *testing.T) {
+		co := newCheckout(t)
+		target := filepath.Join(co, "outside")
+		mustMkdir(t, target)
+		mustSymlink(t, filepath.Join("..", "outside"), filepath.Join(co, ".git", "info"))
+		if appendExclude(co, "/x/w7/") {
+			t.Fatal("appended through a linked info")
+		}
+		assertEmptyDir(t, target)
 	})
 	t.Run("info is a link", func(t *testing.T) {
 		co := newCheckout(t)
