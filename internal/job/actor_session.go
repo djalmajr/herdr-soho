@@ -25,28 +25,34 @@ import (
 // maxSessionBytes caps the start's session file the pin copies.
 const maxSessionBytes = 64 << 10
 
+// errActorSession is the fixed failure of a pin the job needs but cannot
+// make; the reason goes to friction.
+var errActorSession = errUsage("job: cannot pin the job workspace session")
+
 // pinActorSession writes the workspace environment's session file when it
 // is not the start's one; a privately launched supervisor only, after the
-// job lane and before the orchestrator spawn. A failure goes to friction
-// and leaves the job running: the agent then misses the job truthfully,
-// never into another store.
-func (s *Supervisor) pinActorSession() {
+// job lane and before the orchestrator spawn. Nothing to pin is nil. A pin
+// the job needs that cannot be encoded, read, written or read back is
+// errActorSession (the reason in friction): the caller fails the job
+// before any agent runs with a session that would miss its team and
+// state.
+func (s *Supervisor) pinActorSession() error {
 	if !s.PrivateLaunch || s.actorEnv == nil {
-		return
+		return nil
 	}
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil || snap.State.Dir == "" || !validWorkspaceID(snap.State.WorkspaceID) {
-		s.frictionf("job: the job workspace session cannot be pinned")
-		return
+		s.frictionf("job: the job workspace session cannot be located")
+		return errActorSession
 	}
 	workspace := snap.State.WorkspaceID
 	actorRoot := core.SessionStateRootPath(s.actorEnv, snap.State.Dir)
 	if storeIdentityPath(actorRoot) == storeIdentityPath(s.Store.Root) {
-		return
+		return nil
 	}
 	if !sessionStateDirValue(s.Store.Root) {
-		s.frictionf("job: the job state root cannot be named in a session file")
-		return
+		s.frictionf("job: the job state root cannot be written in a session file (an absolute path without '#' or line breaks)")
+		return errActorSession
 	}
 	// Inside the checkout the pin may only live in the default state
 	// directory the job prepare excludes from git (/.herdr-soho/): anywhere
@@ -54,30 +60,43 @@ func (s *Supervisor) pinActorSession() {
 	checkout := storeIdentityPath(platform.StateProjectRoot(s.actorEnv, snap.State.Dir))
 	if pinned := storeIdentityPath(actorRoot); withinOrSame(checkout, pinned) && pinned != filepath.Join(checkout, ".herdr-soho") {
 		s.frictionf("job: the job workspace session would be inside the checkout")
-		return
+		return errActorSession
 	}
 	if core.StatePathInSkill(s.actorEnv, actorRoot) != "" {
 		s.frictionf("job: the job workspace session would be inside the skill")
-		return
+		return errActorSession
 	}
 	data, ok, err := readPrivateFile(filepath.Join(s.Store.Root, workspace, "session.conf"), maxSessionBytes)
 	if err != nil || !ok {
 		s.frictionf("job: the job session file is unreadable")
-		return
+		return errActorSession
 	}
 	body := pinnedSessionBody(string(data), s.Store.Root)
 	dir := filepath.Join(actorRoot, workspace)
-	if err := os.MkdirAll(dir, 0o700); err != nil || !exactDirectory(dir) {
-		s.frictionf("job: the job workspace session cannot be pinned")
-		return
+	if err := os.MkdirAll(dir, 0o700); err != nil || !exactDirectory(actorRoot) || !exactDirectory(dir) {
+		s.frictionf("job: the job workspace session directory is not a plain directory")
+		return errActorSession
 	}
-	if err := writeAtomic0600(filepath.Join(dir, "session.conf"), []byte(body)); err != nil {
-		s.frictionf("job: the job workspace session cannot be pinned")
+	file := filepath.Join(dir, "session.conf")
+	if err := writeAtomic0600(file, []byte(body)); err != nil {
+		s.frictionf("job: the job workspace session cannot be written")
+		return errActorSession
 	}
+	// Read back what the agents will read: the same bytes, at its own
+	// path, and the existing config parser resolving state_dir to the
+	// store root.
+	back, ok, err := readPrivateFile(file, maxSessionBytes)
+	if err != nil || !ok || string(back) != body || !sessionNamesRoot(file, s.Store.Root) {
+		s.frictionf("job: the job workspace session does not read back")
+		return errActorSession
+	}
+	return nil
 }
 
 // pinnedSessionBody is the start's session text without any state_dir
-// line, plus state_dir=root as its last line.
+// line, plus state_dir="<root>" as its last line: the config parser strips
+// one pair of quotes, so spaces at either end and quotes inside the path
+// survive.
 func pinnedSessionBody(text, root string) string {
 	var lines []string
 	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
@@ -89,24 +108,31 @@ func pinnedSessionBody(text, root string) string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "state_dir="+root)
+	lines = append(lines, `state_dir="`+root+`"`)
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// sessionStateDirValue reports whether root survives a session file line
-// as the same absolute state_dir: the config parser cuts at '#', splits at
-// newlines, trims whitespace and strips one pair of quotes, and session
-// set refuses tabs.
+// sessionStateDirValue reports whether root can be one session file line:
+// absolute, without '#' (the parser cuts a comment there, quoted or not)
+// and without line breaks.
 func sessionStateDirValue(root string) bool {
-	if !filepath.IsAbs(root) || root != strings.TrimSpace(root) || strings.HasPrefix(root, `"`) || strings.HasSuffix(root, `"`) {
+	return filepath.IsAbs(root) && !strings.ContainsAny(root, "#\n\r")
+}
+
+// sessionNamesRoot reports whether the config parser reads file's
+// state_dir as exactly root.
+func sessionNamesRoot(file, root string) bool {
+	pairs, err := core.ReadConfigFilePairs(file)
+	if err != nil {
 		return false
 	}
-	for i := 0; i < len(root); i++ {
-		if root[i] < 0x20 || root[i] == 0x7f || root[i] == '#' {
-			return false
+	value, found := "", false
+	for _, pair := range pairs {
+		if pair.Key == "state_dir" {
+			value, found = pair.Value, true
 		}
 	}
-	return core.ConfigValueOk("state_dir", root, platform.Env{}, "")
+	return found && value == root
 }
 
 // storeIdentityPath is the real path of a state root; a root that does

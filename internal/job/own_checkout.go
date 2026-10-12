@@ -1,10 +1,15 @@
 package job
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
@@ -21,9 +26,10 @@ import (
 // widens a lookup and never fails the command by itself.
 
 const (
-	// ownCheckoutGitTimeoutMs bounds the one git query of the anchor.
-	ownCheckoutGitTimeoutMs = 10_000
-	// ownCheckoutGitOutputMax bounds that query's output: three paths.
+	// ownCheckoutGitTimeout bounds the one git query of the anchor.
+	ownCheckoutGitTimeout = 10 * time.Second
+	// ownCheckoutGitOutputMax bounds what that query's stdout may hold
+	// (three paths); more is never stored and refuses the anchor.
 	ownCheckoutGitOutputMax = 3 * 4097
 	// ownCheckoutLinkMax bounds a worktree's .git and gitdir files.
 	ownCheckoutLinkMax = 4096 + 16
@@ -31,13 +37,66 @@ const (
 	ownCheckoutStateMax = 1 << 20
 )
 
-// ownCheckoutGit runs the anchor's git query; tests swap it.
-var ownCheckoutGit = func(env platform.Env, cwd string) (string, bool) {
-	result := platform.RunCli("git", []string{"rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"}, platform.RunOptions{Env: env, Cwd: cwd, TimeoutMs: ownCheckoutGitTimeoutMs})
-	if result.NotFound || result.TimedOut || result.Status == nil || *result.Status != 0 {
+// ownCheckoutGitQuery runs the anchor's git query from cwd under env: the
+// git on env's PATH, a 10 s deadline, stderr discarded and stdout kept up
+// to ownCheckoutGitOutputMax bytes (the rest is drained, not stored, and
+// refuses the answer).
+func ownCheckoutGitQuery(env platform.Env, cwd string) (string, bool) {
+	git, ok := platform.FindExecutable("git", env, platform.Current())
+	if !ok {
 		return "", false
 	}
-	return result.Stdout, true
+	ctx, cancel := context.WithTimeout(context.Background(), ownCheckoutGitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, git, "rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir")
+	cmd.Dir = cwd
+	cmd.Env = env.List()
+	out := &cappedOutput{max: ownCheckoutGitOutputMax}
+	cmd.Stdout = out
+	cmd.Stderr = io.Discard
+	cmd.WaitDelay = time.Second
+	if err := cmd.Run(); err != nil || out.over {
+		return "", false
+	}
+	return out.buf.String(), true
+}
+
+// cappedOutput keeps at most max bytes and records that more arrived.
+type cappedOutput struct {
+	buf  bytes.Buffer
+	max  int
+	over bool
+}
+
+func (c *cappedOutput) Write(p []byte) (int, error) {
+	if room := c.max - c.buf.Len(); len(p) > room {
+		c.over = true
+		if room > 0 {
+			c.buf.Write(p[:room])
+		}
+		return len(p), nil
+	}
+	c.buf.Write(p)
+	return len(p), nil
+}
+
+// parseOwnCheckoutGit reads the query's answer: exactly three absolute
+// paths, one per line (the top level, the git dir and the common dir).
+func parseOwnCheckoutGit(out string) (top, gitDir, common string, ok bool) {
+	if len(out) > ownCheckoutGitOutputMax {
+		return "", "", "", false
+	}
+	lines := strings.Split(strings.TrimSuffix(strings.ReplaceAll(out, "\r\n", "\n"), "\n"), "\n")
+	if len(lines) != 3 {
+		return "", "", "", false
+	}
+	for i, line := range lines {
+		lines[i] = filepath.FromSlash(line)
+		if line == "" || !filepath.IsAbs(lines[i]) {
+			return "", "", "", false
+		}
+	}
+	return lines[0], lines[1], lines[2], true
 }
 
 // ownCheckoutState is the part of state.json the anchor checks.
@@ -52,8 +111,9 @@ type ownCheckoutState struct {
 // OwnCheckoutStore returns the store of job id when cwd lies in that job's
 // own directory, else nil:
 //
-//  1. one bounded git query from cwd (its top level, git dir and common
-//     dir; git's own discovery, nothing above the nearest repository);
+//  1. one bounded git query from cwd (ownCheckoutGitQuery: its top level,
+//     git dir and common dir; git's own discovery, nothing above the
+//     nearest repository), three absolute paths (parseOwnCheckoutGit);
 //  2. cwd, by real path, is the top level or inside it;
 //  3. the registration, read from the files themselves: workspace mode,
 //     the git dir is the common dir <top>/.git, a real directory; worktree
@@ -75,15 +135,15 @@ func OwnCheckoutStore(env platform.Env, cwd, id string) *Store {
 	if _, err := Dir("", id); err != nil {
 		return nil
 	}
-	out, ok := ownCheckoutGit(env, cwd)
-	if !ok || len(out) > ownCheckoutGitOutputMax {
+	out, ok := ownCheckoutGitQuery(env, cwd)
+	if !ok {
 		return nil
 	}
-	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(out, "\r\n", "\n"), "\n"), "\n")
-	if len(lines) != 3 {
+	rawTop, rawGitDir, rawCommon, ok := parseOwnCheckoutGit(out)
+	if !ok {
 		return nil
 	}
-	top, gitDir, common := realAbs(lines[0]), realAbs(lines[1]), realAbs(lines[2])
+	top, gitDir, common := realAbs(rawTop), realAbs(rawGitDir), realAbs(rawCommon)
 	realCwd := realAbs(cwd)
 	if top == "" || gitDir == "" || common == "" || realCwd == "" || !withinOrSame(top, realCwd) {
 		return nil

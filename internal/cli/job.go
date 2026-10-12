@@ -286,7 +286,8 @@ func locateJob(env platform.Env, id string, sel core.UserSelection) (*job.Store,
 // The anchor is gathered on every lookup, not only on a miss, and the
 // candidates are merged by the real path of their store root: none is
 // nil (not_found), one is that store, and more than one distinct store is
-// exit 2 before anything reads the job or writes.
+// exit 2 before the subcommand changes anything (the lookup itself only
+// reads: the checkouts' configuration, git and the anchor's state.json).
 func locateOwnJob(env platform.Env, cwd, id string) (*job.Store, error) {
 	if _, err := job.Dir("", id); err != nil {
 		return nil, err

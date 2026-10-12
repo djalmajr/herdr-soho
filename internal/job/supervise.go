@@ -436,8 +436,14 @@ func (s *Supervisor) Run() (int, error) {
 	}
 	// The workspace's own session file carries the job team and state
 	// root for the agents (actor_session.go): after the job lane, before
-	// the orchestrator, again on every restart.
-	s.pinActorSession()
+	// the orchestrator, again on every restart. A pin the job needs and
+	// cannot make fails the job before any agent runs without it.
+	if err := s.pinActorSession(); err != nil {
+		if err := s.fail("job: cannot pin the job workspace session", ExitUsage); err != nil {
+			return ExitFailed, err
+		}
+		return ExitUsage, nil
+	}
 	name, done, err := s.ensureOrchestrator()
 	if err != nil {
 		return ExitFailed, err
