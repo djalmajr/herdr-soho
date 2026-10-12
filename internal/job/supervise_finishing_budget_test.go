@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -57,24 +58,99 @@ func failEveryStateWrite(t *testing.T, err error, mono func() int64, match func(
 	return rec
 }
 
-// holdRemotePush makes the bare remote's pre-receive hook (a fakecli
-// re-execution) wait for a release file, so a real `git push` hangs; the
-// hook is released after hold (or at cleanup), so no process outlives the
-// test.
-func holdRemotePush(t *testing.T, f *supGitFixture, hold time.Duration) {
+// remoteHookName is the hook the fixtures install in the bare remote and
+// the name of its fakecli config and call log in the fake directory.
+const remoteHookName = "pre-receive"
+
+// installRemoteHook installs a fakecli re-execution as the bare remote's
+// pre-receive hook. The fake and its config live in the fake directory (the
+// fake finds its config there through the environment, by the base name of
+// its argv[0] without a .exe suffix); the hook entry in the remote's hooks
+// directory carries the name fakecli.Install gave the binary: `pre-receive`
+// on Unix (a symlink to the test binary) and `pre-receive.exe` on Windows (a
+// hard link, or a copy when the volumes differ): a hook entry that is a
+// real executable under the name Git for Windows resolves (as far as the
+// Git source is known to: the bare name, then the name plus .exe) is the
+// shape that needs no symlink privilege and no extension-less spawn. Both
+// hook fixtures share this installer; requireRemoteHookCalls proves the hook
+// ran, on every platform, so a hook that does not run fails as a fixture
+// error instead of as a product result.
+func installRemoteHook(t *testing.T, f *supGitFixture, rules []fakecli.Rule) {
 	t.Helper()
-	release := filepath.Join(t.TempDir(), "release")
-	target, err := fakecli.Install(t, f.job.base.fakeDir, "pre-receive", []fakecli.Rule{{AnyArgs: true, WaitFile: release}})
+	target, err := fakecli.Install(t, f.job.base.fakeDir, remoteHookName, rules)
 	if err != nil {
-		t.Fatalf("install the pre-receive fake: %v", err)
+		t.Fatalf("install the %s fake: %v", remoteHookName, err)
 	}
 	hooks := filepath.Join(f.job.base.bare, "hooks")
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(target, filepath.Join(hooks, "pre-receive")); err != nil {
+	hook := filepath.Join(hooks, filepath.Base(target))
+	if runtime.GOOS == "windows" {
+		if err := os.Link(target, hook); err != nil {
+			data, readErr := os.ReadFile(target)
+			if readErr != nil {
+				t.Fatalf("link the hook: %v; read the fake: %v", err, readErr)
+			}
+			if writeErr := os.WriteFile(hook, data, 0o755); writeErr != nil {
+				t.Fatalf("link the hook: %v; copy the fake: %v", err, writeErr)
+			}
+		}
+	} else if err := os.Symlink(target, hook); err != nil {
 		t.Fatal(err)
 	}
+	if info, err := os.Stat(hook); err != nil || info.IsDir() || info.Size() == 0 {
+		t.Fatalf("fixture error: the hook %s is not a usable file: %v", hook, err)
+	}
+}
+
+// remoteHookCalls returns the calls the installed hook logged; none when it
+// never ran (no log).
+func remoteHookCalls(t *testing.T, f *supGitFixture) []fakecli.Call {
+	t.Helper()
+	calls, err := fakecli.ReadCalls(filepath.Join(f.job.base.fakeDir, remoteHookName+".calls.jsonl"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read the %s calls: %v", remoteHookName, err)
+	}
+	return calls
+}
+
+// requireRemoteHookCalls is the fixtures' self-check: it fails the test as a
+// fixture error unless the pre-receive fake logged exactly want calls, so a hook that never ran, or never read its
+// config, is not mistaken for a product result. The fake logs a call before
+// it applies any rule, and a push cut early may leave the hook starting, so
+// the log is polled for a short while before it is judged.
+func requireRemoteHookCalls(t *testing.T, f *supGitFixture, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	calls := remoteHookCalls(t, f)
+	for len(calls) < want && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		calls = remoteHookCalls(t, f)
+	}
+	if len(calls) == want {
+		return
+	}
+	var listed []string
+	if entries, err := os.ReadDir(filepath.Join(f.job.base.bare, "hooks")); err == nil {
+		for _, entry := range entries {
+			if strings.Contains(entry.Name(), remoteHookName) {
+				listed = append(listed, entry.Name())
+			}
+		}
+	}
+	t.Fatalf("fixture error: the bare remote's %s hook logged %d call(s), want %d: the hook did not run or could not read its fake config, so this test does not exercise the push it claims; hook entries in %s: %v",
+		remoteHookName, len(calls), want, filepath.Join(f.job.base.bare, "hooks"), listed)
+}
+
+// holdRemotePush makes the bare remote's pre-receive hook (a fakecli
+// re-execution) wait for a release file, so a real `git push` hangs; the
+// hook is released after hold (or at cleanup), so no process outlives the
+// test. Callers prove the hook ran with requireRemoteHookCalls.
+func holdRemotePush(t *testing.T, f *supGitFixture, hold time.Duration) {
+	t.Helper()
+	release := filepath.Join(t.TempDir(), "release")
+	installRemoteHook(t, f, []fakecli.Rule{{AnyArgs: true, WaitFile: release}})
 	var once sync.Once
 	free := func() {
 		once.Do(func() {
@@ -153,6 +229,7 @@ func TestSuperviseFinishingStalledPushIsBoundedAndFailsTruthfully(t *testing.T) 
 	finishingRealClock(f, finishingLimits{Budget: 2 * time.Second, Git: time.Second})
 	exit, err, elapsed := finishDone(t, f)
 	t.Logf("stalled push: terminal in %v", elapsed)
+	requireRemoteHookCalls(t, f, 1)
 	if elapsed > 2*time.Second+3*time.Second {
 		t.Errorf("terminal path took %v, want at most the 2s budget + 3s", elapsed)
 	}
@@ -170,6 +247,7 @@ func TestSuperviseFinishingStalledPushIsCutByTheGitStepBeforeTheBudget(t *testin
 	finishingRealClock(f, finishingLimits{Budget: 30 * time.Second, Git: time.Second})
 	exit, err, elapsed := finishDone(t, f)
 	t.Logf("stalled push, long budget: terminal in %v", elapsed)
+	requireRemoteHookCalls(t, f, 1)
 	if elapsed > time.Second+3*time.Second {
 		t.Errorf("terminal path took %v, want at most the 1s git step + 3s", elapsed)
 	}
@@ -217,6 +295,7 @@ func TestSuperviseFinishingBudgetKeepsTheStopOutcome(t *testing.T) {
 	if err != nil || !done || exit != ExitCanceled {
 		t.Fatalf("finishOutcome = %d %v %v, want canceled with exit %d", exit, done, err, ExitCanceled)
 	}
+	requireRemoteHookCalls(t, f, 1)
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("terminal path took %v, want it bounded by the budget", elapsed)
 	}
@@ -586,22 +665,13 @@ func TestSuperviseFinishingHostileWallClockNeverExtendsTheCollaborationWait(t *t
 // rejectFirstRemotePush makes the bare remote's pre-receive hook (a fakecli
 // re-execution) refuse the first push at once and accept every later one, so
 // a push fails fast, is not cut by any bound, and a later pass succeeds.
+// Callers prove each push reached the hook with requireRemoteHookCalls.
 func rejectFirstRemotePush(t *testing.T, f *supGitFixture) {
 	t.Helper()
-	target, err := fakecli.Install(t, f.job.base.fakeDir, "pre-receive", []fakecli.Rule{
+	installRemoteHook(t, f, []fakecli.Rule{
 		{AnyArgs: true, Call: 1, Code: 1, Stderr: "rejected by the fixture\n"},
 		{AnyArgs: true},
 	})
-	if err != nil {
-		t.Fatalf("install the pre-receive fake: %v", err)
-	}
-	hooks := filepath.Join(f.job.base.bare, "hooks")
-	if err := os.MkdirAll(hooks, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, filepath.Join(hooks, "pre-receive")); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // remoteHasBranch reports whether the job branch reached the bare remote.
@@ -631,6 +701,7 @@ func TestSuperviseFinishingRejectedPushKeepsDoneAndIsNotSynced(t *testing.T) {
 	if err != nil || exit != 0 {
 		t.Fatalf("finishOutcome = %d %v, want done with exit 0", exit, err)
 	}
+	requireRemoteHookCalls(t, f, 1)
 	st := f.state(t)
 	if st.Status != StatusDone || st.Motivo != nil {
 		t.Errorf("state = %s motivo=%v, want done without a motivo (a rejected push is not a cut)", st.Status, st.Motivo)
@@ -663,6 +734,7 @@ func TestSuperviseFinishingRestartRunsTheSyncAgainAfterARejectedPush(t *testing.
 	if !*fired {
 		t.Fatal("the terminal write error was never injected")
 	}
+	requireRemoteHookCalls(t, f, 1)
 	st := f.state(t)
 	if st.Status != StatusFinishing || st.TerminalIntent == nil || st.TerminalIntent.Status != StatusDone {
 		t.Fatalf("state after process one = %s intent=%+v, want finishing with the done intent", st.Status, st.TerminalIntent)
@@ -678,6 +750,7 @@ func TestSuperviseFinishingRestartRunsTheSyncAgainAfterARejectedPush(t *testing.
 	if err != nil || exit != 0 {
 		t.Fatalf("restart Run = %d %v, want done with exit 0", exit, err)
 	}
+	requireRemoteHookCalls(t, f, 2)
 	if st := f.state(t); st.Status != StatusDone || !st.FinishingSynced {
 		t.Errorf("state after the restart = %s synced=%v, want done and synced", st.Status, st.FinishingSynced)
 	}
@@ -720,6 +793,7 @@ func TestSuperviseFinishingPushErrorBelowTheStepBoundIsNotSynced(t *testing.T) {
 	if err != nil || exit != 0 {
 		t.Fatalf("finishOutcome = %d %v, want done with exit 0 (the command timeout is not a cut)", exit, err)
 	}
+	requireRemoteHookCalls(t, f, 1)
 	st := f.state(t)
 	if st.Status != StatusDone || st.FinishingSynced {
 		t.Errorf("state = %s synced=%v, want done and not synced", st.Status, st.FinishingSynced)
