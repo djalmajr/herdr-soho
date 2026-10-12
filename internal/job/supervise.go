@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/reportscan"
 )
@@ -72,6 +73,9 @@ type Supervisor struct {
 	// names: the environment of every agent pane of the job workspace
 	// (actor_session.go). Set with PrivateLaunch.
 	actorEnv platform.Env
+	// launchSel is the starter's user configuration selection of the
+	// private launch (set with PrivateLaunch).
+	launchSel core.UserSelection
 
 	// Git sync and release: the git sync of the job branch — nil in
 	// workspace mode, which runs no git at all — and the Herdr adapter

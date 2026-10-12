@@ -37,19 +37,26 @@ const (
 	ownCheckoutStateMax = 1 << 20
 )
 
-// ownCheckoutGitQuery runs the anchor's git query from cwd under env: the
-// git on env's PATH, a 10 s deadline, stderr discarded and stdout kept up
-// to ownCheckoutGitOutputMax bytes (the rest is drained, not stored, and
-// refuses the answer).
+// ownCheckoutGitQuery runs the anchor's git query from cwd under env
+// (boundedGit).
 func ownCheckoutGitQuery(env platform.Env, cwd string) (string, bool) {
+	return boundedGit(env, cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir")
+}
+
+// boundedGit runs one read-only git command from dir under env: the git on
+// env's PATH, a 10 s deadline, stderr discarded and stdout kept up to
+// ownCheckoutGitOutputMax bytes (the rest is drained, not stored, and
+// refuses the answer); a descendant holding stdout is waited for at most
+// one second after the deadline or the exit.
+func boundedGit(env platform.Env, dir string, args ...string) (string, bool) {
 	git, ok := platform.FindExecutable("git", env, platform.Current())
 	if !ok {
 		return "", false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), ownCheckoutGitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, git, "rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir")
-	cmd.Dir = cwd
+	cmd := exec.CommandContext(ctx, git, args...)
+	cmd.Dir = dir
 	cmd.Env = env.List()
 	out := &cappedOutput{max: ownCheckoutGitOutputMax}
 	cmd.Stdout = out

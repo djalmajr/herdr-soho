@@ -210,6 +210,7 @@ func (s *Supervisor) UseLaunchSelection(sel core.UserSelection) {
 	s.PrivateLaunch = true
 	if ops, ok := s.Ops.(selfCLI); ok {
 		s.actorEnv = ops.Env.Clone()
+		s.launchSel = sel
 		ops.Env = withLaunchLocators(ops.Env, sel)
 		s.Ops = ops
 	}
