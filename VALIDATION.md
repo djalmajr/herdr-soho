@@ -80,20 +80,25 @@ The task is deliberately harmless and deterministic: create one text file `smoke
   "repo": "<org>/<sandbox-repo>",
   "base": "<base-branch>",
   "modo": "worktree",
-  "objetivo": "Create the file smoke/<id>.txt whose only line is: ok <id>",
+  "objetivo": "Create and commit the file smoke/<id>.txt whose only line is: ok <id>",
   "aceite": [
     {
-      "criterio": "smoke/<id>.txt exists and its content is the single line: ok <id>",
-      "prova": "git grep --no-index -c -Fx \"ok <id>\" -- smoke/<id>.txt"
+      "criterio": "smoke/<id>.txt has a line that is exactly: ok <id>",
+      "prova": "git grep --no-index -c -E -e \"^ok <id>$\" -- smoke/<id>.txt"
+    },
+    {
+      "criterio": "smoke/<id>.txt has exactly one line",
+      "prova": "git grep --no-index -c -e \"\" -- smoke/<id>.txt"
     }
   ],
+  "decisoes": ["commit smoke/<id>.txt in exactly one commit titled: test: add smoke marker <id>"],
   "restricoes": ["change no file other than smoke/<id>.txt"],
   "nao_objetivos": ["any change to code, configuration or documentation"],
   "idioma": "en"
 }
 ```
 
-The `id` in the brief must equal `--id`, and `repo` must equal `--repo`. `job start` takes the active budget from `--timeout` (minutes, 1 to 1440), not from the brief; use a small fixed value (30 in the examples) and never widen it after the job has started. The `aceite[].prova` command is read-only. The `job start --dry-run` below also validates and lints the brief, so adapt the example if it exits 2.
+The `id` in the brief must equal `--id`, and `repo` must equal `--repo`. `job start` takes the active budget from `--timeout` (minutes, 1 to 1440), not from the brief; use a small fixed value (30 in the examples) and never widen it after the job has started. Each `aceite[].prova` command is read-only, and each one prints `smoke/<id>.txt:1` when the file is correct; together they prove a single line equal to `ok <id>`. Run every `prova` on a scratch copy of the expected file with the git the job will use before `job start`: the job orchestrator runs it as written, and a command its tools reject (an unsupported option, for example) leaves the criterion partial and ends the job `failed`. The `job start --dry-run` below also validates and lints the brief, but it does not run the `prova` commands, so adapt the example if either check fails.
 
 Use a fresh `<id>` for every attempt: the id is the idempotency key, and starting the same id again returns the recorded job (or exits 20 for a different brief) instead of running a new one.
 
