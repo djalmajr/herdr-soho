@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -363,8 +364,19 @@ func TestActorConfineRefusesWithoutWriting(t *testing.T) {
 			t.Fatalf("session at the alias's real location = %q %v", got, err)
 		}
 		for _, level := range []string{filepath.Join(real, "new"), filepath.Join(real, "new", "state"), filepath.Join(real, "new", "state", acfWorkspace)} {
-			if info, err := os.Lstat(level); err != nil || info.Mode().Type() != os.ModeDir || info.Mode().Perm() != 0o700 {
+			info, err := os.Lstat(level)
+			if err != nil || info.Mode().Type() != os.ModeDir {
 				t.Fatalf("created level %s: %v %v", level, info, err)
+			}
+			// The level is created with mode 0700 on the POSIX platforms.
+			// Windows cannot express it: Mkdir ignores the mode and the
+			// standard library reports every non-readonly directory as 0777
+			// (os/types_windows.go), so the mode bits are not observable
+			// there; the existence and type checks above still run on every
+			// OS. Same precedent as actor_session_test.go (the pin file's
+			// 0600 is asserted on the POSIX platforms only).
+			if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+				t.Fatalf("created level %s mode %o, want 0700", level, info.Mode().Perm())
 			}
 		}
 	})

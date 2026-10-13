@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -584,55 +585,67 @@ func TestOwnCheckout(t *testing.T) {
 	})
 
 	t.Run("parseOwnCheckoutGit", func(t *testing.T) {
-		long := "/" + strings.Repeat("a", 4096)
+		// git prints absolute paths with forward slashes on every OS; on
+		// Windows they carry a drive letter, and a rooted path without one
+		// is not absolute there. vol is the drive of the fixture paths: git's
+		// spelling is in(...) and the parsed value is want(...), which
+		// filepath.FromSlash turns into the OS spelling.
+		vol := ""
+		if runtime.GOOS == "windows" {
+			vol = "C:"
+		}
+		in := func(p string) string { return vol + p }
+		want := func(p string) string { return filepath.FromSlash(vol + p) }
+		long := in("/" + strings.Repeat("a", 4096))
 		over := long + "\n" + long + "\n" + long + "\n"
-		cases := []struct {
+		type parseCase struct {
 			name   string
 			out    string
 			top    string
 			gitDir string
 			common string
 			ok     bool
-		}{
+		}
+		cases := []parseCase{
 			{
 				name:   "three absolute lines with trailing newline",
-				out:    "/repo/top\n/repo/top/.git\n/repo/top/.git\n",
-				top:    "/repo/top",
-				gitDir: "/repo/top/.git",
-				common: "/repo/top/.git",
+				out:    in("/repo/top") + "\n" + in("/repo/top/.git") + "\n" + in("/repo/top/.git") + "\n",
+				top:    want("/repo/top"),
+				gitDir: want("/repo/top/.git"),
+				common: want("/repo/top/.git"),
 				ok:     true,
 			},
 			{
 				name:   "three absolute lines without trailing newline",
-				out:    "/repo/top\n/repo/top/.git\n/repo/top/.git",
-				top:    "/repo/top",
-				gitDir: "/repo/top/.git",
-				common: "/repo/top/.git",
+				out:    in("/repo/top") + "\n" + in("/repo/top/.git") + "\n" + in("/repo/top/.git"),
+				top:    want("/repo/top"),
+				gitDir: want("/repo/top/.git"),
+				common: want("/repo/top/.git"),
 				ok:     true,
 			},
 			{
 				name:   "CRLF endings",
-				out:    "/repo/top\r\n/repo/top/.git\r\n/repo/top/.git\r\n",
-				top:    "/repo/top",
-				gitDir: "/repo/top/.git",
-				common: "/repo/top/.git",
+				out:    in("/repo/top") + "\r\n" + in("/repo/top/.git") + "\r\n" + in("/repo/top/.git") + "\r\n",
+				top:    want("/repo/top"),
+				gitDir: want("/repo/top/.git"),
+				common: want("/repo/top/.git"),
 				ok:     true,
 			},
 			{
 				name: "two lines",
-				out:  "/repo/top\n/repo/top/.git\n",
+				out:  in("/repo/top") + "\n" + in("/repo/top/.git") + "\n",
 			},
 			{
 				name: "four lines",
-				out:  "/repo/a\n/repo/b\n/repo/c\n/repo/d\n",
+				out:  in("/repo/a") + "\n" + in("/repo/b") + "\n" + in("/repo/c") + "\n" + in("/repo/d") + "\n",
 			},
 			{
 				name: "relative line",
-				out:  "/repo/top\nrel/.git\n/repo/top/.git\n",
+				out:  in("/repo/top") + "\nrel/.git\n" + in("/repo/top/.git") + "\n",
 			},
 			{
 				name: "empty line",
-				out:  "/repo/top\n\n/repo/top/.git\n",
+				out:  in("/repo/top") + "\n\n" + in("/repo/top/.git") + "\n",
 			},
 			{
 				name: "empty output",
@@ -643,15 +656,25 @@ func TestOwnCheckout(t *testing.T) {
 				out:  over,
 			},
 		}
+		if runtime.GOOS == "windows" {
+			// A rooted path without a drive letter is not absolute on
+			// Windows: the POSIX spelling of the first row is refused there.
+			cases = append(cases, parseCase{
+				name: "rooted lines without a drive are refused on Windows",
+				out:  "/repo/top\n/repo/top/.git\n/repo/top/.git\n",
+			})
+		}
 		// Each row discriminates one production check of
-		// parseOwnCheckoutGit: the ok rows fail if the CRLF normalization or
-		// the trailing-newline handling regresses; "output longer than the
-		// cap" fails if the len(out) > ownCheckoutGitOutputMax guard is
-		// removed (its three fake absolute lines pass every remaining
+		// parseOwnCheckoutGit: the ok rows fail if the CRLF normalization, the
+		// trailing-newline handling or (on Windows) the forward-slash
+		// conversion regresses; "output longer than the cap" fails if the
+		// len(out) > ownCheckoutGitOutputMax guard is removed (its three fake
+		// absolute lines, drive-qualified on Windows, pass every remaining
 		// check); "two lines" and "four lines" fail if the len(lines) != 3
 		// guard is removed (the third line access panics); "relative line",
 		// "empty line" and "empty output" fail if the per-line empty and
-		// absolute checks are removed.
+		// absolute checks are removed; the Windows-only row fails if a path
+		// without a drive is accepted as absolute.
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {
 				gotTop, gotGitDir, gotCommon, gotOk := parseOwnCheckoutGit(c.out)
