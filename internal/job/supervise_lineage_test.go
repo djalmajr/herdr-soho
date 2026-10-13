@@ -96,10 +96,13 @@ func TestWakeHookEnvironmentIsTheServers(t *testing.T) {
 	}
 	editState(t, dir, func(s *State) { s.Status, s.Dir, s.Modo = StatusRunning, t.TempDir(), "workspace" })
 	dump := filepath.Join(t.TempDir(), "wake-env.txt")
+	starterRoot, starterSep := nativeRoot(t), string(filepath.Separator)
+	starterConfig := starterRoot + "starter" + starterSep + "config"
+	starterHome := starterRoot + "starter" + starterSep + "home"
 	server := platform.Env{
 		"XDG_CONFIG_HOME": "/server/xdg", "HOME": "/server/home", "USERPROFILE": "/server/home", "APPDATA": "/server/appdata",
 		"PATH": os.Getenv("PATH"), managedHelperVar: "envdump", "JOB_ENV_DUMP": dump,
-		launchConfigBaseVar: "/starter/config", launchHomeVar: "/starter/home",
+		launchConfigBaseVar: starterConfig, launchHomeVar: starterHome,
 	}
 	sel := ReadLaunchLocators(server).Selection
 	env := WithoutLaunchLocators(server)
@@ -135,7 +138,7 @@ func TestWakeHookEnvironmentIsTheServers(t *testing.T) {
 	if got["HERDR_SOHO_JOB_ID"] != "job-1" {
 		t.Fatalf("the wake command is not the hook's: %v", got["HERDR_SOHO_JOB_ID"])
 	}
-	if ops := sup.Ops.(selfCLI); ops.Env[launchConfigBaseVar] != "/starter/config" {
+	if ops := sup.Ops.(selfCLI); ops.Env[launchConfigBaseVar] != starterConfig {
 		t.Fatal("the team commands did not receive the selection")
 	}
 }

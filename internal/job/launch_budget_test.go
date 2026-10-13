@@ -111,7 +111,8 @@ func TestConfirmLaunchLongLocators(t *testing.T) {
 		t.Fatal(err)
 	}
 	holdStartLock(t, dir)
-	sel := core.UserSelection{Base: "/" + strings.Repeat("<", maxLocatorBytes-1), Home: "/" + strings.Repeat("&", maxLocatorBytes-1)}
+	root := nativeRoot(t)
+	sel := core.UserSelection{Base: root + strings.Repeat("<", maxLocatorBytes-len(root)), Home: root + strings.Repeat("&", maxLocatorBytes-len(root))}
 	if !usableLocator(sel.Base) || !usableLocator(sel.Home) {
 		t.Fatal("the fixture locators are not usable")
 	}

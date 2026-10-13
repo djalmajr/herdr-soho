@@ -26,6 +26,19 @@ func winAbs(value string) (string, error) {
 	return "", errors.New("winAbs: not an absolute path: " + value)
 }
 
+// nativeRoot is the root of the test's volume as this OS writes it: "/" off
+// Windows, `D:\` (the working directory's drive) on Windows, so the literals
+// built from it are absolute and clean under filepath.IsAbs and filepath.Abs
+// on every platform.
+func nativeRoot(t *testing.T) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.VolumeName(cwd) + string(filepath.Separator)
+}
+
 // locatorCode returns the job exit code of an error, or -1 for any other
 // shape: locator refusals must be the job *ExitError of code 2.
 func locatorCode(err error) int {
@@ -99,12 +112,15 @@ func TestSupervisorLocator(t *testing.T) {
 	})
 
 	t.Run("spaces preserved except cleaning", func(t *testing.T) {
-		env := platform.Env{"HOME": t.TempDir(), "XDG_CONFIG_HOME": "/cfg base/with spaces/./extra"}
+		root, sep := nativeRoot(t), string(filepath.Separator)
+		xdg := root + "cfg base" + sep + "with spaces" + sep + "." + sep + "extra"
+		want := root + "cfg base" + sep + "with spaces" + sep + "extra"
+		env := platform.Env{"HOME": t.TempDir(), "XDG_CONFIG_HOME": xdg}
 		got, err := supervisorLocatorEnv("linux", env, false, absLocator)
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantLocatorMap(t, got, map[string]string{launchConfigBaseVar: "/cfg base/with spaces/extra"})
+		wantLocatorMap(t, got, map[string]string{launchConfigBaseVar: want})
 	})
 
 	t.Run("win32 XDG set", func(t *testing.T) {
@@ -213,8 +229,9 @@ func TestSupervisorLocator(t *testing.T) {
 	t.Run("refusals exit with code 2", func(t *testing.T) {
 		home := t.TempDir()
 		absFail := func(string) (string, error) { return "", errors.New("abs failure") }
-		long4096 := "/" + strings.Repeat("a", 4095)
-		long4097 := "/" + strings.Repeat("a", 4096)
+		root := nativeRoot(t)
+		long4096 := root + strings.Repeat("a", maxLocatorBytes-len(root))
+		long4097 := long4096 + "a"
 		for _, tc := range []struct {
 			name   string
 			env    platform.Env
@@ -527,8 +544,11 @@ func TestLocatorSelectionParity(t *testing.T) {
 // (a home without a base, an empty, relative, unclean or over-long value,
 // or a usable base with an unusable home) is ignored as a whole.
 func TestReadLaunchLocators(t *testing.T) {
-	long4096 := "/" + strings.Repeat("a", 4095)
-	long4097 := "/" + strings.Repeat("a", 4096)
+	root, sep := nativeRoot(t), string(filepath.Separator)
+	cfg, home := root+"cfg", root+"home"
+	unclean := root + "a" + sep + ".." + sep + "b"
+	long4096 := root + strings.Repeat("a", maxLocatorBytes-len(root))
+	long4097 := long4096 + "a"
 	for _, tc := range []struct {
 		name    string
 		env     platform.Env
@@ -536,16 +556,16 @@ func TestReadLaunchLocators(t *testing.T) {
 		wantSel core.UserSelection
 	}{
 		{"absent", platform.Env{}, false, core.UserSelection{}},
-		{"base only valid", platform.Env{launchConfigBaseVar: "/cfg"}, true, core.UserSelection{Base: "/cfg"}},
-		{"base and home valid", platform.Env{launchConfigBaseVar: "/cfg", launchHomeVar: "/home"}, true, core.UserSelection{Base: "/cfg", Home: "/home"}},
-		{"home without base", platform.Env{launchHomeVar: "/home"}, true, core.UserSelection{}},
+		{"base only valid", platform.Env{launchConfigBaseVar: cfg}, true, core.UserSelection{Base: cfg}},
+		{"base and home valid", platform.Env{launchConfigBaseVar: cfg, launchHomeVar: home}, true, core.UserSelection{Base: cfg, Home: home}},
+		{"home without base", platform.Env{launchHomeVar: home}, true, core.UserSelection{}},
 		{"empty base", platform.Env{launchConfigBaseVar: ""}, true, core.UserSelection{}},
 		{"relative base", platform.Env{launchConfigBaseVar: "cfg"}, true, core.UserSelection{}},
-		{"unclean base", platform.Env{launchConfigBaseVar: "/a/../b"}, true, core.UserSelection{}},
-		{"base with a control byte", platform.Env{launchConfigBaseVar: "/bad\x01cfg"}, true, core.UserSelection{}},
+		{"unclean base", platform.Env{launchConfigBaseVar: unclean}, true, core.UserSelection{}},
+		{"base with a control byte", platform.Env{launchConfigBaseVar: root + "bad\x01cfg"}, true, core.UserSelection{}},
 		{"4097-byte base", platform.Env{launchConfigBaseVar: long4097}, true, core.UserSelection{}},
 		{"4096-byte base accepted at the boundary", platform.Env{launchConfigBaseVar: long4096}, true, core.UserSelection{Base: long4096}},
-		{"valid base with an unusable home", platform.Env{launchConfigBaseVar: "/cfg", launchHomeVar: "relative"}, true, core.UserSelection{}},
+		{"valid base with an unusable home", platform.Env{launchConfigBaseVar: cfg, launchHomeVar: "relative"}, true, core.UserSelection{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := ReadLaunchLocators(tc.env)
@@ -668,9 +688,10 @@ func TestLocatorValue(t *testing.T) {
 		if err != nil || got != filepath.Join(cwd, "b") {
 			t.Fatalf("absLocator cleaning = %q, %v; want %q", got, err, filepath.Join(cwd, "b"))
 		}
-		got, err = absLocator("/abs/../x")
-		if err != nil || got != "/x" {
-			t.Fatalf("absLocator absolute = %q, %v; want %q", got, err, "/x")
+		root, sep := nativeRoot(t), string(filepath.Separator)
+		got, err = absLocator(root + "abs" + sep + ".." + sep + "x")
+		if err != nil || got != root+"x" {
+			t.Fatalf("absLocator absolute = %q, %v; want %q", got, err, root+"x")
 		}
 	})
 }

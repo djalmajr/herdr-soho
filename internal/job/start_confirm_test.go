@@ -88,6 +88,18 @@ func TestStartConfirmedLaunchBothModes(t *testing.T) {
 // travels only when job_repos_root was expanded from the home.
 func TestStartForwardsHomeOnlyForAHomeRelativeReposRoot(t *testing.T) {
 	f := newPrepareFixture(t, []fakecli.Rule{{Argv: []string{"auth", "status"}}})
+	// On win32 the home is USERPROFILE, not HOME (platform.HomeDir): give the
+	// fixture a profile distinct from HOME so the test still tells the two
+	// selectors apart, and expect the one the platform uses.
+	profile := filepath.Join(filepath.Dir(f.env.Get("HOME")), "profile")
+	if err := os.MkdirAll(profile, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f.env["USERPROFILE"] = profile
+	wantHome := f.env.Get("HOME")
+	if platform.Current() == "win32" {
+		wantHome = profile
+	}
 	stateRoot := t.TempDir()
 	fake := startFake()
 	var friction []string
@@ -98,7 +110,7 @@ func TestStartForwardsHomeOnlyForAHomeRelativeReposRoot(t *testing.T) {
 	}
 	want := map[string]string{
 		launchConfigBaseVar: filepath.Clean(f.env.Get("XDG_CONFIG_HOME")),
-		launchHomeVar:       filepath.Clean(f.env.Get("HOME")),
+		launchHomeVar:       filepath.Clean(wantHome),
 	}
 	if !reflect.DeepEqual(fake.CreateCalls[0].Env, want) {
 		t.Fatalf("create env = %v, want %v", fake.CreateCalls[0].Env, want)
