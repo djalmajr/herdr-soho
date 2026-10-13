@@ -424,9 +424,10 @@ func saveState(dir string, st State) error {
 	return writeAtomic0600(filepath.Join(dir, "state.json"), raw)
 }
 
-// renameAtomic is the last step of an atomic replace. Tests point it at a
-// failing function to simulate a crash after the temp file is written.
-var renameAtomic = os.Rename
+// renameAtomic is the last step of an atomic replace; on Windows it admits
+// lock-free readers that hold the file with FILE_SHARE_DELETE. Tests point it
+// at a failing function to simulate a crash after the temp file is written.
+var renameAtomic = replaceFile
 
 func writeAtomic0600(dest string, data []byte) error {
 	file, err := os.CreateTemp(filepath.Dir(dest), "."+filepath.Base(dest)+"-*.tmp")
