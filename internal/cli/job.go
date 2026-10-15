@@ -384,10 +384,20 @@ type jobStatusLine struct {
 	// complete. It is out of the line in every other case, and the read
 	// writes nothing.
 	ReportMissing bool `json:"report_missing,omitempty"`
+	// HeldControls is the status-side view of the requests the supervisor
+	// is holding while the job orchestrator is blocked or in a question:
+	// always present, [] when there are none, in the requests' seq order.
+	// The count is job.HeldControls's read of control/ and the event log;
+	// the CLI repeats none of that rule, and the read writes nothing.
+	HeldControls []job.HeldControl `json:"held_controls"`
 }
 
 func printJobStatusLine(snap job.Snapshot) {
 	partial := job.PartialCollaborations(snap.State)
+	held, err := job.HeldControls(snap)
+	if err != nil {
+		platform.Die("job: cannot read held controls: "+err.Error(), 2)
+	}
 	line := jobStatusLine{
 		ID:                    snap.State.ID,
 		Status:                snap.State.Status,
@@ -398,6 +408,7 @@ func printJobStatusLine(snap job.Snapshot) {
 		PartialCollaborations: partial,
 		DuplicateOf:           snap.State.DuplicateOf,
 		ReportMissing:         snap.Report == nil && job.ReportExpected(snap.State.Status),
+		HeldControls:          held,
 	}
 	line.Eventos.Total = snap.EventTotal
 	line.Eventos.UltimoSeq = snap.LastSeq

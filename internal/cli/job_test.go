@@ -245,7 +245,7 @@ func TestJobStatusPrintsTheSnapshotLine(t *testing.T) {
 	if code != 0 || errOut != "" {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 	}
-	want := `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[]}`
+	want := `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"held_controls":[]}`
 	if out != want+"\n" {
 		t.Fatalf("out=%q", out)
 	}
@@ -259,6 +259,54 @@ func TestJobStatusPrintsTheSnapshotLine(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) || beforeInfo.ModTime() != afterInfo.ModTime() {
 		t.Fatalf("the status read rewrote state.json (bytes or mtime moved)")
+	}
+}
+
+// TestJobStatusLineHeldControls: the status line's held_controls is always
+// present, at the end of the line, [] when no request is held; in a
+// blocked job with the amend pending in control/ and its control_held mark
+// it is the held request, and the other fields and their order stand.
+func TestJobStatusLineHeldControls(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+
+	// No held request: the field is present and empty, last in the line.
+	code, out, errOut := f.run(t, "status", "--id", "job-1")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	want := `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"held_controls":[]}`
+	if out != want+"\n" {
+		t.Fatalf("out=%q", out)
+	}
+
+	// A blocked job with the amend pending in control/ and its
+	// control_held mark: the held request is last in the line, and the
+	// other fields and their order stand.
+	f.setStatus(t, co, "job-1", "blocked")
+	ctl := filepath.Join(jobDir, "control")
+	if err := os.MkdirAll(ctl, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ctl, "amend-000007.md"), []byte("held amend\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store(t, co).Append("job-1", job.EventIn{
+		Tipo:   "control_held",
+		Resumo: "held: the job orchestrator is blocked",
+		Refs:   map[string]string{"seq_ref": "7"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = f.run(t, "status", "--id", "job-1")
+	if code != 0 || errOut != "" {
+		t.Fatalf("blocked code=%d out=%q err=%q", code, out, errOut)
+	}
+	want = `{"id":"job-1","status":"blocked","motivo":null,"eventos":{"total":2,"ultimo_seq":2},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"held_controls":[{"kind":"amend","seq":7}]}`
+	if out != want+"\n" {
+		t.Fatalf("out=%q", out)
 	}
 }
 
@@ -607,12 +655,12 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 // jobControlStatusLine is the fresh status line of the fixture job after a
 // control request. The partial fields are the additive contract change of
 // the collaboration partial facts: always present, empty here.
-const jobControlStatusLine = `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[]}` + "\n"
+const jobControlStatusLine = `{"id":"job-1","status":"accepted","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"held_controls":[]}` + "\n"
 
 // jobRunningStatusLine is the fixture job's status line once it is
 // running: the live path of job cancel, which queues the request for the
 // supervisor.
-const jobRunningStatusLine = `{"id":"job-1","status":"running","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[]}` + "\n"
+const jobRunningStatusLine = `{"id":"job-1","status":"running","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"held_controls":[]}` + "\n"
 
 // TestJobControlAmendSendWriteRequests: amend and send queue the request
 // file with the exact body, print the fresh status line and exit 0; the
@@ -1722,7 +1770,7 @@ func TestJobReportMissingLegacyTerminal(t *testing.T) {
 	// partial facts stay false and [], and both reads exit 0.
 	for _, status := range []string{"done", "collected", "closed"} {
 		f.setStatus(t, co, "job-1", status)
-		wantWait := `{"id":"job-1","status":"` + status + `","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"report_missing":true}`
+		wantWait := `{"id":"job-1","status":"` + status + `","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"report_missing":true,"held_controls":[]}`
 		code, out, errOut := f.run(t, "wait", "--id", "job-1")
 		if code != 0 || errOut != "" || out != wantWait+"\n" {
 			t.Fatalf("%s wait code=%d out=%q err=%q", status, code, out, errOut)
@@ -1747,7 +1795,7 @@ func TestJobReportMissingLegacyTerminal(t *testing.T) {
 	}
 	f.setStatus(t, co, "job-1", "done")
 	code, out, errOut := f.run(t, "wait", "--id", "job-1")
-	want := `{"id":"job-1","status":"done","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[]}`
+	want := `{"id":"job-1","status":"done","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"held_controls":[]}`
 	if code != 0 || errOut != "" || out != want+"\n" {
 		t.Fatalf("wait with report code=%d out=%q err=%q", code, out, errOut)
 	}
