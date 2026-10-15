@@ -424,3 +424,85 @@ func (s *Store) RetireControl(id string, item ControlItem) error {
 		return renameAtomic(srcAbs, filepath.Join(done, name))
 	})
 }
+
+// HeldControl is one control request the supervisor is holding for the
+// blocked job orchestrator: the kind (amend or send) and the counter value
+// of the request that is still pending in control/ and carries its
+// control_held mark in the event log.
+type HeldControl struct {
+	Kind string `json:"kind"` // amend or send
+	Seq  int    `json:"seq"`  // the request's counter value
+}
+
+// HeldControls lists the control requests the supervisor is holding, in
+// ascending seq: every pending amend or send under control/ whose
+// control_held mark (a control_held event whose refs.seq_ref equals the
+// request's counter) is in the event log. A pending request without the
+// mark is out, and a retired request with an old mark is out too: only a
+// request still pending in control/ counts. An absent control directory
+// and a snapshot without a state directory read as an empty non-nil list.
+// The read is lock-free like the other reads and writes nothing.
+func HeldControls(snap Snapshot) ([]HeldControl, error) {
+	dir := snap.dir
+	if dir == "" {
+		return []HeldControl{}, nil
+	}
+	events, err := readEvents(dir)
+	if err != nil {
+		return nil, err
+	}
+	mark := map[string]bool{}
+	for _, e := range events {
+		if e.Tipo == "control_held" {
+			mark[e.Refs["seq_ref"]] = true
+		}
+	}
+	ctl := filepath.Join(dir, "control")
+	entries, err := os.ReadDir(ctl)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []HeldControl{}, nil
+		}
+		return nil, fmt.Errorf("job: control unreadable: %w", err)
+	}
+	out := []HeldControl{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		match := controlFilePattern.FindStringSubmatch(entry.Name())
+		if match == nil {
+			continue
+		}
+		path := filepath.Join(ctl, entry.Name())
+		info, err := os.Lstat(path)
+		if err != nil {
+			// A retire moving the file mid-read is a normal interleave;
+			// every other stat failure is a real I/O error.
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("job: control unreadable: %w", err)
+		}
+		// A symlinked request points outside the job and is skipped, not
+		// read; only a regular file inside control/ counts, like the other
+		// reads.
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		seq, err := strconv.Atoi(match[2])
+		if err != nil {
+			continue
+		}
+		if mark[strconv.Itoa(seq)] {
+			out = append(out, HeldControl{Kind: match[1], Seq: seq})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Seq != out[j].Seq {
+			return out[i].Seq < out[j].Seq
+		}
+		return out[i].Kind < out[j].Kind
+	})
+	return out, nil
+}

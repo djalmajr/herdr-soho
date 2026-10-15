@@ -110,9 +110,9 @@ func TestJobOwnLookupAnchorOnly(t *testing.T) {
 
 	// The starter job's status line before the note appends the first
 	// event.
-	const wantStatus = `{"id":"job-9","status":"running","motivo":null,"eventos":{"total":0,"ultimo_seq":0},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[]}`
+	const wantStatus = `{"id":"job-9","status":"running","motivo":null,"eventos":{"total":0,"ultimo_seq":0},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"held_controls":[]}`
 	// The status line once the note event is stored.
-	const wantStatusAfterNote = `{"id":"job-9","status":"running","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[]}`
+	const wantStatusAfterNote = `{"id":"job-9","status":"running","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"held_controls":[]}`
 
 	t.Run("status from the worktree cwd", func(t *testing.T) {
 		t.Chdir(o.worktree)

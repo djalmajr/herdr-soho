@@ -393,6 +393,11 @@ type Snapshot struct {
 	LastSeq    int
 	Pending    []int
 	Report     *Report
+	// dir is the job's state directory the snapshot was read from: it is
+	// not a state fact and serializes nowhere; it is only the address of
+	// the lock-free reads that take a snapshot as their input
+	// (HeldControls).
+	dir string
 }
 
 func (s *Store) Snapshot(id string) (Snapshot, error) {
@@ -410,6 +415,7 @@ func (s *Store) Snapshot(id string) (Snapshot, error) {
 		return snap, err
 	}
 	snap.State = st
+	snap.dir = dir
 	snap.EventTotal = len(events)
 	snap.LastSeq = lastSeq(events)
 	snap.Pending = pendingDecisions(events, effectiveWatermark(st.DecisionsAckedSeq, events))

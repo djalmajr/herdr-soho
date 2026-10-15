@@ -1,8 +1,11 @@
 package job
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -950,5 +953,172 @@ func TestControlCrashBeforeBodyRename(t *testing.T) {
 	items, err := s.PendingControl("job-1")
 	if err != nil || len(items) != 1 || items[0].Seq != 1 || string(items[0].Body) != "retry body" {
 		t.Fatalf("pending after retry = %+v err=%v", items, err)
+	}
+}
+
+// heldMark appends the control_held event of the request with the given
+// counter, the same event the supervisor records for a held request.
+func heldMark(t *testing.T, s *Store, seq int) {
+	t.Helper()
+	if _, err := s.Append("job-1", EventIn{
+		Tipo:   "control_held",
+		Resumo: "held: the job orchestrator is blocked",
+		Refs:   map[string]string{"seq_ref": strconv.Itoa(seq)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestHeldControlsListsOnlyTheHeldPending: a pending request with the
+// control_held mark is listed; a pending request without the mark is out;
+// a retired request with an old mark is out; the list is in seq order (the
+// send before the higher-seq amend, not by file name); and a mark with no
+// matching pending request adds nothing. An absent control directory and a
+// snapshot without a state directory read as an empty non-nil list.
+func TestHeldControlsListsOnlyTheHeldPending(t *testing.T) {
+	s, root := startedJob(t)
+	ctl := controlDir(root)
+
+	sd1, err := s.RequestSend("job-1", []byte("send one"))
+	if err != nil || sd1.Seq != 1 {
+		t.Fatalf("send 1: %+v err=%v", sd1, err)
+	}
+	if _, err := s.RequestAmend("job-1", []byte("amend two")); err != nil {
+		t.Fatal(err) // seq 2, no mark
+	}
+	sd3, err := s.RequestSend("job-1", []byte("send three"))
+	if err != nil || sd3.Seq != 3 {
+		t.Fatalf("send 3: %+v err=%v", sd3, err)
+	}
+	am4, err := s.RequestAmend("job-1", []byte("amend four"))
+	if err != nil || am4.Seq != 4 {
+		t.Fatalf("amend 4: %+v err=%v", am4, err)
+	}
+
+	heldMark(t, s, 1)  // the pending send one is held
+	heldMark(t, s, 3)  // the send three is held, then retired
+	heldMark(t, s, 4)  // the pending amend four is held
+	heldMark(t, s, 99) // a mark with no matching request
+
+	// The retired request keeps its old mark in the log but is out.
+	if err := s.RetireControl("job-1", sd3); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ctl, "stray.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := s.Snapshot("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := HeldControls(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []HeldControl{{Kind: "send", Seq: 1}, {Kind: "amend", Seq: 4}}
+	if !reflect.DeepEqual(held, want) {
+		t.Fatalf("held = %+v want %+v", held, want)
+	}
+
+	// An absent control directory reads as an empty non-nil list.
+	dir := filepath.Join(root, "jobs", "job-2")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"schema":1,"id":"job-2","status":"running","brief_sha256":"x","decisions_acked_seq":0,"motivo":null}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snap2, err := s.Snapshot("job-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	held2, err := HeldControls(snap2)
+	if err != nil || !reflect.DeepEqual(held2, []HeldControl{}) {
+		t.Fatalf("held job-2 = %+v err=%v", held2, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "control")); !os.IsNotExist(err) {
+		t.Fatalf("HeldControls created the control directory: %v", err)
+	}
+
+	// A snapshot without a state directory reads as an empty non-nil list
+	// without touching anything.
+	held3, err := HeldControls(Snapshot{})
+	if err != nil || !reflect.DeepEqual(held3, []HeldControl{}) {
+		t.Fatalf("held zero snapshot = %+v err=%v", held3, err)
+	}
+}
+
+// heldTreeFingerprint is the fingerprint the write-free read is checked
+// against: the sha256 of the job's state.json and events.jsonl plus the
+// sorted relative names of every entry below the job directory (control/
+// and its done/ included).
+func heldTreeFingerprint(t *testing.T, jobDir string) string {
+	t.Helper()
+	var names []string
+	err := filepath.WalkDir(jobDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(jobDir, path)
+		if err != nil {
+			return err
+		}
+		names = append(names, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(names)
+	stateRaw, err := os.ReadFile(filepath.Join(jobDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventsRaw, err := os.ReadFile(filepath.Join(jobDir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateSum := sha256.Sum256(stateRaw)
+	eventsSum := sha256.Sum256(eventsRaw)
+	return hex.EncodeToString(stateSum[:]) + " " + hex.EncodeToString(eventsSum[:]) + "\n" + strings.Join(names, "\n")
+}
+
+// TestHeldControlsReadWritesNothing: the read leaves state.json and
+// events.jsonl with their bytes and the job directory's listing exactly as
+// it found them, on the first read and on a second read over the same
+// snapshot.
+func TestHeldControlsReadWritesNothing(t *testing.T) {
+	s, root := startedJob(t)
+	jobDir := filepath.Join(root, "jobs", "job-1")
+
+	am, err := s.RequestAmend("job-1", []byte("held amend"))
+	if err != nil || am.Seq != 1 {
+		t.Fatalf("amend: %+v err=%v", am, err)
+	}
+	heldMark(t, s, 1)
+	if _, err := s.RequestSend("job-1", []byte("not held")); err != nil {
+		t.Fatal(err)
+	}
+
+	before := heldTreeFingerprint(t, jobDir)
+	snap, err := s.Snapshot("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := HeldControls(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(held, []HeldControl{{Kind: "amend", Seq: 1}}) {
+		t.Fatalf("held = %+v", held)
+	}
+	// A second read over the same snapshot stands as well.
+	if _, err := HeldControls(snap); err != nil {
+		t.Fatal(err)
+	}
+	after := heldTreeFingerprint(t, jobDir)
+	if before != after {
+		t.Fatalf("the held-controls read changed the job tree:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }

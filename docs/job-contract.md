@@ -153,7 +153,8 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 - The supervisor's deliveries are interrupted by the arrival of the cancel, and every delivery of the stop (the stop amendment and the deliveries of the pending queue) is limited to the grace remaining at its start, with no extra time and no retry; a delivery cut by the cancel records a `delivery_uncertain` event (`refs.seq_ref` the request's counter), is never re-sent automatically, and the request stays in `control/` for the dispatcher.
 - From the acceptance of the `job cancel` to the durable terminal record (`state.json` in `canceled`, written by the terminal transition of the stop), the time is at most `--grace` plus one supervisor poll interval (5 s) plus the finishing budget (`job_finishing_timeout`): the stop ends on the first supervisor tick at or past the persisted deadline, at most one poll after it, and the final `wip(job): checkpoint` commit and the final push run inside the finishing budget after the grace. Measured in real use with a 20 s grace, the terminal event came 22.6 s after the acceptance on Windows and 28.8 s after it on macOS: a margin of about 3 to 9 s over the grace, the wait for the next supervisor tick plus the final commit and push.
 - Blocked jobs: a `blocked` job stays alive, with its job orchestrator in its pane, waiting for `job amend`. It does not consume the active budget while it waits, but it consumes the blocked ceiling; when the ceiling is reached the job ends through the same stop path as a timeout. The owner may still cancel it at any time.
-- Unblocking: `job amend` on a `blocked` job sends a formal amendment and moves it back to `running` with the same workspace, worktree and pull request.
+- Held requests: while the job orchestrator is in a dialog or a question, the supervisor does not attempt to deliver a pending `amend` or `send`: it holds the request, records one `control_held` per request, and lists the request in the status line's `held_controls`. The dispatcher answers by hand in the job orchestrator's pane, and the held request is delivered on the first tick on which the orchestrator is out of the block. An automatic answer to a blocked agent's question is not available yet, because it depends on a Herdr capability that does not exist today; the human action in the pane is not attested by herdr-soho.
+- Unblocking: `job amend` on a `blocked` job sends a formal amendment and moves it back to `running` with the same workspace, worktree and pull request, when the job orchestrator accepts the prompt; while the orchestrator is in a dialog or a question the amendment is held (see Held requests) until the manual answer, and it is delivered on the first tick after the block ends.
 
 ### Budgets: active time and the blocked ceiling
 
@@ -191,13 +192,14 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 `job status` and `job wait` print one line:
 
 ```json
-{"id":"TASK-123-7f3a","status":"done","motivo":null,"eventos":{"total":42,"ultimo_seq":42},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":true,"partial_collaborations":["c-0123456789abcdef"]}
+{"id":"TASK-123-7f3a","status":"done","motivo":null,"eventos":{"total":42,"ultimo_seq":42},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":true,"partial_collaborations":["c-0123456789abcdef"],"held_controls":[]}
 ```
 
 - `partial` is always present: `true` when at least one of the job's collaborations ended `partial` or `unavailable`, otherwise `false`.
 - `partial_collaborations` is always present: the IDs of those collaborations, sorted and without duplicates; `[]` when there are none. A job whose state predates these fields reads as `false` and `[]`, and the read changes nothing.
 - The two fields are published before the terminal status, so a reader that sees `done` (or any terminal status) already sees the final partial facts, and they are never removed later. `report.json` carries the same two values and is written before the terminal status is saved in `state.json`; a crash between the two writes leaves the job `finishing` with its recorded outcome, and the restarted supervisor writes both again.
 - `report_missing` is `true` only when the status is one that carries a stored report (`done`, `failed`, `timeout`, `canceled`, `collected` or `closed`) and no report is stored; in every other case the field is absent from the line. A legacy terminal job without a report reads as missing, never as complete; the exit code is unchanged, and the read writes nothing.
+- `held_controls` is always present, at the end of the line: every `amend` or `send` request still pending in `control/` that carries its `control_held` mark in the event log — the request the supervisor is holding while the job orchestrator is in a dialog or a question — as `{"kind","seq"}` pairs in `seq` order; `[]` when there are none. A request without the mark, and one already retired, are out; the read writes nothing.
 
 ## Report
 
@@ -278,6 +280,7 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 | `unblocked` | supervisor | no | back to `running` after an amendment |
 | `amend_received` | supervisor | no | an `amend` or `send` was delivered (`refs.seq_ref`) |
 | `delivery_uncertain` | supervisor | no | a delivery of the pending queue was interrupted by the cancel's stop (`refs.seq_ref` the request's counter; the request stays in `control/`) |
+| `control_held` | supervisor | no | a pending `amend` or `send` is held while the job orchestrator is in a dialog or a question (`refs.seq_ref` the request's counter; at most one per request; it does not wake the dispatcher, because the `blocked` or `question` of the same block already does) |
 | `decision` | orchestrator | yes | a relevant decision (`job note --tipo decision`) |
 | `decision_acked` | supervisor | no | `job ack` received |
 | `timeout_warning` | supervisor | yes | 80% of the active budget used (blocked time excluded) |
