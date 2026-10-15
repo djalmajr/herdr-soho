@@ -68,14 +68,18 @@ const remoteHookName = "pre-receive"
 // its argv[0] without a .exe suffix); the hook entry in the remote's hooks
 // directory carries the name fakecli.Install gave the binary: `pre-receive`
 // on Unix (a symlink to the test binary) and `pre-receive.exe` on Windows (a
-// hard link, or a copy when the volumes differ): a hook entry that is a
-// real executable under the name Git for Windows resolves (as far as the
-// Git source is known to: the bare name, then the name plus .exe) is the
-// shape that needs no symlink privilege and no extension-less spawn. Both
+// copy): a hook entry that is a real executable under the name Git for
+// Windows resolves (as far as the Git source is known to: the bare name,
+// then the name plus .exe) is the shape that needs no symlink privilege and
+// no extension-less spawn. The Windows hook is a copy, never a hard link of
+// the fake: every fakecli binary of the test process is a hard link of one
+// prepared image, and Windows refuses to delete any link of an image a
+// process still runs, so a held hook that shared it would fail the
+// temporary-directory cleanup of every test that ends while it runs. Both
 // hook fixtures share this installer; requireRemoteHookCalls proves the hook
 // ran, on every platform, so a hook that does not run fails as a fixture
-// error instead of as a product result.
-func installRemoteHook(t *testing.T, f *supGitFixture, rules []fakecli.Rule) {
+// error instead of as a product result. It returns the hook entry's path.
+func installRemoteHook(t *testing.T, f *supGitFixture, rules []fakecli.Rule) string {
 	t.Helper()
 	target, err := fakecli.Install(t, f.job.base.fakeDir, remoteHookName, rules)
 	if err != nil {
@@ -87,14 +91,12 @@ func installRemoteHook(t *testing.T, f *supGitFixture, rules []fakecli.Rule) {
 	}
 	hook := filepath.Join(hooks, filepath.Base(target))
 	if runtime.GOOS == "windows" {
-		if err := os.Link(target, hook); err != nil {
-			data, readErr := os.ReadFile(target)
-			if readErr != nil {
-				t.Fatalf("link the hook: %v; read the fake: %v", err, readErr)
-			}
-			if writeErr := os.WriteFile(hook, data, 0o755); writeErr != nil {
-				t.Fatalf("link the hook: %v; copy the fake: %v", err, writeErr)
-			}
+		data, err := os.ReadFile(target)
+		if err != nil {
+			t.Fatalf("read the fake for the hook: %v", err)
+		}
+		if err := os.WriteFile(hook, data, 0o755); err != nil {
+			t.Fatalf("copy the fake to the hook: %v", err)
 		}
 	} else if err := os.Symlink(target, hook); err != nil {
 		t.Fatal(err)
@@ -102,6 +104,7 @@ func installRemoteHook(t *testing.T, f *supGitFixture, rules []fakecli.Rule) {
 	if info, err := os.Stat(hook); err != nil || info.IsDir() || info.Size() == 0 {
 		t.Fatalf("fixture error: the hook %s is not a usable file: %v", hook, err)
 	}
+	return hook
 }
 
 // remoteHookCalls returns the calls the installed hook logged; none when it
@@ -122,7 +125,7 @@ func remoteHookCalls(t *testing.T, f *supGitFixture) []fakecli.Call {
 // the log is polled for a short while before it is judged.
 func requireRemoteHookCalls(t *testing.T, f *supGitFixture, want int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(scaledDuration(5 * time.Second))
 	calls := remoteHookCalls(t, f)
 	for len(calls) < want && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
@@ -145,12 +148,17 @@ func requireRemoteHookCalls(t *testing.T, f *supGitFixture, want int) {
 
 // holdRemotePush makes the bare remote's pre-receive hook (a fakecli
 // re-execution) wait for a release file, so a real `git push` hangs; the
-// hook is released after hold (or at cleanup), so no process outlives the
-// test. Callers prove the hook ran with requireRemoteHookCalls.
+// hook is released after hold (or at cleanup). On Windows the cleanup then
+// waits until the hook entry can be removed (the released hook has exited,
+// or a push the cut left behind can no longer start it) and until the
+// fixture tree can be removed: the step cut kills only the git process
+// there, and the git processes it started finish on their own, holding
+// files of the checkout and the remote for a while. Callers prove the hook
+// ran with requireRemoteHookCalls.
 func holdRemotePush(t *testing.T, f *supGitFixture, hold time.Duration) {
 	t.Helper()
 	release := filepath.Join(t.TempDir(), "release")
-	installRemoteHook(t, f, []fakecli.Rule{{AnyArgs: true, WaitFile: release}})
+	hook := installRemoteHook(t, f, []fakecli.Rule{{AnyArgs: true, WaitFile: release}})
 	var once sync.Once
 	free := func() {
 		once.Do(func() {
@@ -160,7 +168,59 @@ func holdRemotePush(t *testing.T, f *supGitFixture, hold time.Duration) {
 		})
 	}
 	timer := time.AfterFunc(hold, free)
-	t.Cleanup(func() { timer.Stop(); free() })
+	t.Cleanup(func() {
+		timer.Stop()
+		free()
+		if runtime.GOOS == "windows" {
+			removeReleasedHook(t, hook)
+			removeHeldFixtureTree(t, f.job.base.root)
+		}
+	})
+}
+
+// removeHeldFixtureTree removes the fixture tree of a held push on Windows,
+// retrying while the git processes the cut left behind still hold its
+// files, and fails the test as a fixture error when the tree is still held
+// after releasedHookExitWait. The testing package's own removal retries for
+// only a short while.
+func removeHeldFixtureTree(t *testing.T, root string) {
+	t.Helper()
+	deadline := time.Now().Add(releasedHookExitWait)
+	for {
+		err := os.RemoveAll(root)
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("fixture error: the held push's fixture tree %s is still in use %v after the release: %v", root, releasedHookExitWait, err)
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// releasedHookExitWait bounds how long the cleanup waits for a released
+// Windows hook to exit.
+const releasedHookExitWait = 30 * time.Second
+
+// removeReleasedHook removes the Windows hook entry of a released hold,
+// retrying while a hook process still runs it (Windows refuses to delete a
+// running image), and fails the test as a fixture error when the hook is
+// still running after releasedHookExitWait.
+func removeReleasedHook(t *testing.T, hook string) {
+	t.Helper()
+	deadline := time.Now().Add(releasedHookExitWait)
+	for {
+		err := os.Remove(hook)
+		if err == nil || errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("fixture error: the released hook %s still runs %v after its release: %v", hook, releasedHookExitWait, err)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // finishingRealClock puts the supervisor of the git fixture on the real
@@ -225,13 +285,13 @@ func requireBudgetFailed(t *testing.T, f *supGitFixture, exit int, err error, fr
 func TestSuperviseFinishingStalledPushIsBoundedAndFailsTruthfully(t *testing.T) {
 	f := newSupGitFixture(t, supGitGhRules)
 	f.job.commitIn(t, "feat: first")
-	holdRemotePush(t, f, 8*time.Second)
-	finishingRealClock(f, finishingLimits{Budget: 2 * time.Second, Git: time.Second})
+	holdRemotePush(t, f, scaledDuration(8*time.Second))
+	finishingRealClock(f, finishingLimits{Budget: scaledDuration(2 * time.Second), Git: scaledDuration(time.Second)})
 	exit, err, elapsed := finishDone(t, f)
 	t.Logf("stalled push: terminal in %v", elapsed)
 	requireRemoteHookCalls(t, f, 1)
-	if elapsed > 2*time.Second+3*time.Second {
-		t.Errorf("terminal path took %v, want at most the 2s budget + 3s", elapsed)
+	if limit := scaledDuration(2*time.Second + 3*time.Second); elapsed > limit {
+		t.Errorf("terminal path took %v, want at most the budget + slack (%v)", elapsed, limit)
 	}
 	requireBudgetFailed(t, f, exit, err, "the final push")
 	if st := f.state(t); st.FinishingSynced {
@@ -243,13 +303,13 @@ func TestSuperviseFinishingStalledPushIsBoundedAndFailsTruthfully(t *testing.T) 
 func TestSuperviseFinishingStalledPushIsCutByTheGitStepBeforeTheBudget(t *testing.T) {
 	f := newSupGitFixture(t, supGitGhRules)
 	f.job.commitIn(t, "feat: first")
-	holdRemotePush(t, f, 8*time.Second)
-	finishingRealClock(f, finishingLimits{Budget: 30 * time.Second, Git: time.Second})
+	holdRemotePush(t, f, scaledDuration(8*time.Second))
+	finishingRealClock(f, finishingLimits{Budget: scaledDuration(30 * time.Second), Git: scaledDuration(time.Second)})
 	exit, err, elapsed := finishDone(t, f)
 	t.Logf("stalled push, long budget: terminal in %v", elapsed)
 	requireRemoteHookCalls(t, f, 1)
-	if elapsed > time.Second+3*time.Second {
-		t.Errorf("terminal path took %v, want at most the 1s git step + 3s", elapsed)
+	if limit := scaledDuration(time.Second + 3*time.Second); elapsed > limit {
+		t.Errorf("terminal path took %v, want at most the git step + slack (%v)", elapsed, limit)
 	}
 	requireBudgetFailed(t, f, exit, err, "the final push")
 }
@@ -258,18 +318,18 @@ func TestSuperviseFinishingStalledPushIsCutByTheGitStepBeforeTheBudget(t *testin
 // the result is the same truthful failed.
 func TestSuperviseFinishingStalledGhIsBoundedAndFailsTruthfully(t *testing.T) {
 	rules := []fakecli.Rule{
-		{Argv: ghListArgv(), Stdout: "[]\n", Delay: 8000},
+		{Argv: ghListArgv(), Stdout: "[]\n", Delay: scaledMS(8000)},
 		{Argv: ghCreateArgv("feat: first", supGitPRBody), Stdout: "Creating pull request\n" + gitSyncPRURL + "\n"},
 	}
 	f := newSupGitFixture(t, rules)
 	f.job.commitIn(t, "feat: first")
 	// The budget and the git step are far longer than the gh step, so only
 	// the gh step's own bound can end the hang.
-	finishingRealClock(f, finishingLimits{Budget: 30 * time.Second, Git: 20 * time.Second, GH: time.Second})
+	finishingRealClock(f, finishingLimits{Budget: scaledDuration(30 * time.Second), Git: scaledDuration(20 * time.Second), GH: scaledDuration(time.Second)})
 	exit, err, elapsed := finishDone(t, f)
 	t.Logf("stalled gh: terminal in %v", elapsed)
-	if elapsed > time.Second+3*time.Second {
-		t.Errorf("terminal path took %v, want at most the 1s gh step + 3s", elapsed)
+	if limit := scaledDuration(time.Second + 3*time.Second); elapsed > limit {
+		t.Errorf("terminal path took %v, want at most the gh step + slack (%v)", elapsed, limit)
 	}
 	requireBudgetFailed(t, f, exit, err, "the draft pull request")
 	if n := countTipes(f.events(t), "push"); n != 1 {
@@ -285,8 +345,8 @@ func TestSuperviseFinishingStalledGhIsBoundedAndFailsTruthfully(t *testing.T) {
 func TestSuperviseFinishingBudgetKeepsTheStopOutcome(t *testing.T) {
 	f := newSupGitFixture(t, supGitGhRules)
 	f.job.commitIn(t, "feat: first")
-	holdRemotePush(t, f, 8*time.Second)
-	finishingRealClock(f, finishingLimits{Budget: 2 * time.Second, Git: time.Second})
+	holdRemotePush(t, f, scaledDuration(8*time.Second))
+	finishingRealClock(f, finishingLimits{Budget: scaledDuration(2 * time.Second), Git: scaledDuration(time.Second)})
 	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
 		t.Fatal(err)
 	}
@@ -296,8 +356,8 @@ func TestSuperviseFinishingBudgetKeepsTheStopOutcome(t *testing.T) {
 		t.Fatalf("finishOutcome = %d %v %v, want canceled with exit %d", exit, done, err, ExitCanceled)
 	}
 	requireRemoteHookCalls(t, f, 1)
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("terminal path took %v, want it bounded by the budget", elapsed)
+	if elapsed, limit := time.Since(start), scaledDuration(5*time.Second); elapsed > limit {
+		t.Errorf("terminal path took %v, want it bounded by the budget (%v)", elapsed, limit)
 	}
 	st := f.state(t)
 	if st.Status != StatusCanceled || st.Motivo != nil && *st.Motivo == budgetMotivoText {
