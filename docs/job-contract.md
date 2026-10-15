@@ -50,7 +50,7 @@ Requirements: Herdr 0.9.1 or newer (0.9.3 or newer recommended on Windows). `cap
 | code | meaning |
 |---|---|
 | 0 | `done`, or a read/control command succeeded |
-| 2 | bad usage, organization out of scope, invalid brief, no team configuration, an `--id` found in two state directories |
+| 2 | bad usage, organization out of scope, invalid brief, no team configuration, an `--id` found in two state directories, an `amend`, `send` or `checkpoint` under a pending cancel (`job: cancel_pending: the job is being canceled`) |
 | 3 | unknown `--id` (`{"status":"not_found"}`) |
 | 4 | Herdr failure or unavailable (including no reachable Herdr server on Windows) |
 | 7 | `blocked`: a question, approval or dialog needs a person |
@@ -144,9 +144,15 @@ accepted -> preparing -> running <-> blocked -> finishing -> {done | failed | bl
 
 State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: temp file next to the target, then rename; mode 0600), `events.jsonl`, `brief.json`, `brief.md`, `report.md`, `report.json`, `lock` and `control/`. The directory sits at the state root, outside any workspace id, so it survives the workspace.
 
+- Two optional fields of `state.json` carry the cancel's anchor: `cancel_requested_at` and `cancel_deadline`, the wall times (RFC 3339) of the acceptance of the `job cancel` and of the acceptance plus the requested grace. They are set once, at the acceptance, and are not cleared when the cancel completes; they are absent from every state that never accepted a cancel and from states written by a binary before the fields existed, and a reader that sees them changes nothing.
 - Idempotency: a lock per id. `start` again with the same brief hash returns the current state with `duplicate_of`; a different hash exits 20. Repeated `close`, `cancel`, `ack` and `checkpoint` calls with nothing to do exit 0.
 - Error reports: once `--id` is valid, every terminal state writes `report.json`, including preparation failures, timeouts and cancellations.
 - Cancel and timeout: the job orchestrator receives a "stop and report what you have" amendment, the job waits `--grace` seconds (default 120; 120 for a timeout), commits and pushes leftovers, finishes the job's collaborations (see Collaborations at the end of a job), releases every worker with `--close --force`, and ends `canceled` (21) or `timeout` (9). The state's `motivo` names the reason: `cancelado`, `tempo esgotado` (active budget) or `tempo de bloqueio esgotado` (blocked ceiling).
+- The grace starts at the acceptance: the acceptance of a `job cancel` records the anchor (`cancel_requested_at`, the wall time of the acceptance) and the deadline (`cancel_deadline`, the acceptance plus the requested grace) in `state.json` in the same locked write as the request file, and the supervisor ends the stop on the persisted deadline; a restarted supervisor re-anchors the grace on the persisted deadline and never restarts it, and a job accepted before the fields existed, or with an unreadable deadline, keeps the full grace measured from its own process, with one friction line.
+- While a cancel is pending, `job amend`, `job send` and `job checkpoint` are refused with exit 2 (`job: cancel_pending: the job is being canceled`), before anything enters `control/`, and a second `job cancel` stays the no-op that changes neither the anchor nor the request file.
+- The supervisor's deliveries are interrupted by the arrival of the cancel, and every delivery of the stop (the stop amendment and the deliveries of the pending queue) is limited to the grace remaining at its start, with no extra time and no retry; a delivery cut by the cancel records a `delivery_uncertain` event (`refs.seq_ref` the request's counter), is never re-sent automatically, and the request stays in `control/` for the dispatcher.
+- From the acceptance of the `job cancel` to the durable terminal record (`state.json` in `canceled`, written by the terminal transition of the stop), the time is at most `--grace` plus one supervisor poll interval (5 s) plus the finishing budget (`job_finishing_timeout`): the stop ends on the first supervisor tick at or past the persisted deadline, at most one poll after it, and the final `wip(job): checkpoint` commit and the final push run inside the finishing budget after the grace.
+<!-- measured margin -->
 - Blocked jobs: a `blocked` job stays alive, with its job orchestrator in its pane, waiting for `job amend`. It does not consume the active budget while it waits, but it consumes the blocked ceiling; when the ceiling is reached the job ends through the same stop path as a timeout. The owner may still cancel it at any time.
 - Unblocking: `job amend` on a `blocked` job sends a formal amendment and moves it back to `running` with the same workspace, worktree and pull request.
 
@@ -272,6 +278,7 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 | `blocked` | supervisor | yes, immediately | dialog, approval, quota, provider error, rejected push |
 | `unblocked` | supervisor | no | back to `running` after an amendment |
 | `amend_received` | supervisor | no | an `amend` or `send` was delivered (`refs.seq_ref`) |
+| `delivery_uncertain` | supervisor | no | a delivery of the pending queue was interrupted by the cancel's stop (`refs.seq_ref` the request's counter; the request stays in `control/`) |
 | `decision` | orchestrator | yes | a relevant decision (`job note --tipo decision`) |
 | `decision_acked` | supervisor | no | `job ack` received |
 | `timeout_warning` | supervisor | yes | 80% of the active budget used (blocked time excluded) |
@@ -279,7 +286,7 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 | `failure` | supervisor | yes | preparation failure, worker gone, failed acceptance check, no report |
 | `note` | orchestrator | no | an observation that is not a decision |
 | `terminal` | supervisor | yes | final state (`refs.motivo`, `refs.exit`) |
-| `cleanup` | supervisor | no | release and workspace close; the worktree is always kept, with an informational `removivel` |
+| `cleanup` | supervisor | no | release and workspace close, emitted only after a successful release; the worktree is always kept, with an informational `removivel` |
 
 `job note` accepts only `checkpoint`, `question`, `decision` and `note`.
 

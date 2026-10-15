@@ -361,12 +361,12 @@ func (s *Supervisor) finalSync(status string) (cut bool) {
 // outcome is recorded and finalSync has pushed: the collaboration
 // settlement of the persisted outcomes (a fresh process over a terminal
 // job captures them first), the release of the job orchestrator, the
-// team, and the registered copies and processes, the cleanup event
-// (checked against the log first so a retry converges), and the Herdr
-// workspace close last. It never removes a worktree, a directory, a
-// branch, or a pull request; its failures go to friction and the path
-// continues, because everything durable is written before the process may
-// end with the workspace.
+// team, and the registered copies and processes, the cleanup event (the
+// release gate and the log check below), and the Herdr workspace close
+// last. It never removes a worktree, a directory, a branch, or a pull
+// request; its failures go to friction and the path continues, because
+// everything durable is written before the process may end with the
+// workspace.
 func (s *Supervisor) finalize(status string) {
 	jobDir, err := s.Store.readDir(s.ID)
 	if err != nil {
@@ -444,23 +444,35 @@ func (s *Supervisor) finalize(status string) {
 
 	// Release: the job orchestrator, then the remaining workers, then
 	// the job's registered copies and processes. Errors are friction; the
-	// path continues.
+	// path continues, but a failed release in this pass keeps the cleanup
+	// event out of this pass (the gate below): the event claims the
+	// processes are released, so it lands only on a pass whose release
+	// ended clean; a later pass re-evaluates the release and appends it
+	// then.
+	released := true
 	if snap.State.WorkspaceID != "" {
 		if snap.State.Orchestrator != "" {
 			if err := s.Ops.Release(snap.State.Orchestrator); err != nil {
 				s.frictionf(err.Error())
+				released = false
 			}
 		}
 		if err := s.Ops.ReleaseTeam(); err != nil {
 			s.frictionf(err.Error())
+			released = false
 		}
 		if err := s.Ops.GC(); err != nil {
 			s.frictionf(err.Error())
+			released = false
 		}
 	}
 
 	// The cleanup event is checked against the log first: a crashed first
-	// attempt may have recorded it already, and the retry converges.
+	// attempt may have recorded it already, and the retry converges. The
+	// release gate: it is appended only when the release of this pass
+	// ended clean, so a failed release keeps the event pending for a
+	// later pass (and a pass whose release fails after the event is
+	// recorded adds nothing, the log already carries it).
 	cleanupDone := false
 	for _, event := range events {
 		if event.Tipo == "cleanup" {
@@ -468,7 +480,7 @@ func (s *Supervisor) finalize(status string) {
 			break
 		}
 	}
-	if !cleanupDone {
+	if !cleanupDone && released {
 		if _, err := s.Store.Append(s.ID, EventIn{
 			Tipo:   "cleanup",
 			Resumo: "processes released; worktree kept",

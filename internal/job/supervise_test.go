@@ -50,9 +50,15 @@ type fakeTeam struct {
 	releaseCalls     int
 	releaseTeamCalls int
 	gcCalls          int
-	rosterRows       []rosterRow
-	rosterErr        error
-	rosterCalls      int
+	// releaseErr, releaseTeamErr and gcErr, when set, are returned by the
+	// release-family calls so the finalize release gate can be driven: the
+	// cleanup event lands only on a pass whose release ended clean.
+	releaseErr     error
+	releaseTeamErr error
+	gcErr          error
+	rosterRows     []rosterRow
+	rosterErr      error
+	rosterCalls    int
 	// recoveryStatus is the one-shot per-name status the recovery candidate
 	// read consumes: the watch-loop script is not consumed by that read, and
 	// a second read for the same name falls back to the script.
@@ -152,17 +158,17 @@ func (f *fakeTeam) Status(name string) (string, string, error) {
 
 func (f *fakeTeam) Release(name string) error {
 	f.releaseCalls++
-	return nil
+	return f.releaseErr
 }
 
 func (f *fakeTeam) ReleaseTeam() error {
 	f.releaseTeamCalls++
-	return nil
+	return f.releaseTeamErr
 }
 
 func (f *fakeTeam) GC() error {
 	f.gcCalls++
-	return nil
+	return f.gcErr
 }
 
 func (f *fakeTeam) Roster() ([]rosterRow, error) {
