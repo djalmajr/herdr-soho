@@ -173,12 +173,15 @@ func holdRemotePush(t *testing.T, f *supGitFixture, hold time.Duration) {
 		free()
 		if runtime.GOOS == "windows" {
 			removeReleasedHook(t, hook)
-			removeHeldFixtureTree(t, f.job.base.root)
 		}
+		// On every system the released push may still be writing into
+		// the bare remote when the test ends: remove the fixture tree
+		// with retries before the testing package's own short cleanup.
+		removeHeldFixtureTree(t, f.job.base.root)
 	})
 }
 
-// removeHeldFixtureTree removes the fixture tree of a held push on Windows,
+// removeHeldFixtureTree removes the fixture tree of a held push,
 // retrying while the git processes the cut left behind still hold its
 // files, and fails the test as a fixture error when the tree is still held
 // after releasedHookExitWait. The testing package's own removal retries for
