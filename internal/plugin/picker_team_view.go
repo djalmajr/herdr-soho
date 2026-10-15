@@ -14,7 +14,7 @@ import (
 // configuration of the selected row's workspace, for rows of the local
 // machine. The same type serves the picker's state and the board
 // runtime's state (the runtime the picker command runs on). The two CLI reads (roster and roles, exactly) run off the key
-// path with HERDR_SOHO_NOWRITE=1 through the shared teamCall, and only
+// path with SOHO_NOWRITE=1 through the shared teamCall, and only
 // their finished result comes back to the list's goroutine, where
 // applyTeamView applies it. A late result of another row or of a
 // superseded open is discarded, and nothing here writes: a failed call

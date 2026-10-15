@@ -45,13 +45,13 @@ func CopyText(text string, env platform.Env, platformName string) ClipboardResul
 
 func PluginCommand(args []string, env platform.Env, platformName, executable string, stdin string) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho plugin: expected 'board', 'bridge', 'clipboard', 'picker' or 'team'")
+		_, _ = fmt.Fprintln(platform.Stderr, "soho plugin: expected 'board', 'bridge', 'clipboard', 'picker' or 'team'")
 		return ExitInvalidTarget
 	}
 	switch args[0] {
 	case "bridge":
 		if len(args) < 2 {
-			_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho plugin: expected 'doctor', 'roster', 'team', 'board' or 'pick'")
+			_, _ = fmt.Fprintln(platform.Stderr, "soho plugin: expected 'doctor', 'roster', 'team', 'board' or 'pick'")
 			return ExitInvalidTarget
 		}
 		r, err := Bridge(args[1], env, platformName, executable)
@@ -60,7 +60,7 @@ func PluginCommand(args []string, env platform.Env, platformName, executable str
 			if !ok {
 				panic(err)
 			}
-			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho plugin: %s\n", bridgeErr.Message)
+			_, _ = fmt.Fprintf(platform.Stderr, "soho plugin: %s\n", bridgeErr.Message)
 			return bridgeErr.Code
 		}
 		_, _ = fmt.Fprint(platform.Stdout, r.Out)
@@ -76,7 +76,7 @@ func PluginCommand(args []string, env platform.Env, platformName, executable str
 	case "team":
 		return RunTeam(env, platformName, executable, args[1:])
 	default:
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho plugin: unknown command '%s'\n", args[0])
+		_, _ = fmt.Fprintf(platform.Stderr, "soho plugin: unknown command '%s'\n", args[0])
 		return ExitInvalidTarget
 	}
 }

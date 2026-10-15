@@ -14,7 +14,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
-// pickerTeamFixture installs the fake herdr-soho CLI (roster, roles) with
+// pickerTeamFixture installs the fake soho CLI (roster, roles) with
 // env capture, plus the fake herdr (which the view must never call: the
 // target comes from the selected row, not the focused pane). The env
 // carries the shell HERDR_* decoys that the target ids must win over.
@@ -24,7 +24,7 @@ func pickerTeamFixture(t *testing.T, rules []fakecli.Rule) (platform.Env, string
 	dir := t.TempDir()
 	cwd := t.TempDir()
 	cli, err := fakecli.InstallWithOptions(t, dir, "cli", rules, fakecli.InstallOptions{
-		CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_SOHO_NOWRITE"},
+		CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_PANE_ID", "HERDR_TAB_ID", "SOHO_NOWRITE"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func pickerTeamFixture(t *testing.T, rules []fakecli.Rule) (platform.Env, string
 	env["HERDR_WORKSPACE_ID"] = "shell-ws"
 	env["HERDR_PANE_ID"] = "shell-pane"
 	env["HERDR_TAB_ID"] = "shell-tab"
-	env["HERDR_SOHO_NOWRITE"] = "0"
+	env["SOHO_NOWRITE"] = "0"
 	return env, cli, cwd
 }
 
@@ -155,8 +155,8 @@ func TestPickerTeamViewIOpensLocalRowWithNowriteReads(t *testing.T) {
 		t.Fatalf("CLI calls=%#v want exactly roster then roles", calls)
 	}
 	for i, call := range calls {
-		if call.Env["HERDR_SOHO_NOWRITE"] != "1" {
-			t.Errorf("call %d %v: HERDR_SOHO_NOWRITE=%q want 1", i, call.Argv, call.Env["HERDR_SOHO_NOWRITE"])
+		if call.Env["SOHO_NOWRITE"] != "1" {
+			t.Errorf("call %d %v: SOHO_NOWRITE=%q want 1", i, call.Argv, call.Env["SOHO_NOWRITE"])
 		}
 		if call.Env["HERDR_WORKSPACE_ID"] != "w1" || call.Env["HERDR_PANE_ID"] != "p1" {
 			t.Errorf("call %d: target ids=%q want the row's w1/p1, not the shell decoys", i, call.Env)

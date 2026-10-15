@@ -24,7 +24,7 @@ const teamRosterFixture = "NAME  KIND  STATUS  TASK\n" +
 const teamExplainFixture = "A equipe está implementando o módulo de relatórios.\n" +
 	"worker-1 implementa e worker-2 faz a revisão.\n"
 
-// teamPanelFixture installs the fake herdr (pane get) and the fake herdr-soho
+// teamPanelFixture installs the fake herdr (pane get) and the fake soho
 // CLI (explain, roster, doctor, friction, gc, collect, release) with env
 // capture, plus the panel's environment (the focused context and shell
 // HERDR_* decoys that the target ids must win over).
@@ -51,7 +51,7 @@ func teamPanelFixture(t *testing.T) (platform.Env, string, string) {
 		{Argv: []string{"collect", "worker-2", "--lines", "60"}, Stdout: "report two line\n"},
 		{Argv: []string{"release", "worker-1", "--close"}, Stdout: "released one\n"},
 		{Argv: []string{"release", "worker-2", "--close"}, Stdout: "released two\n"},
-	}, fakecli.InstallOptions{CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_SOHO_NOWRITE", "PATH"}})
+	}, fakecli.InstallOptions{CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_PANE_ID", "HERDR_TAB_ID", "SOHO_NOWRITE", "HERDR_SOHO_NOWRITE", "PATH"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestTeamPanelShowsFirstLineAndTeamView(t *testing.T) {
 	firstLine := teamLastFrameFirstLine(teamReadOutput(output))
 	// Non-TTY panels render at 80 columns; the long test cwd makes the
 	// first line the displaySlice of the full line.
-	if want := displaySlice("herdr-soho · ws-a · "+cwd, 80); firstLine != want {
+	if want := displaySlice("soho · ws-a · "+cwd, 80); firstLine != want {
 		t.Fatalf("first line=%q want %q", firstLine, want)
 	}
 	data := teamReadOutput(output)
@@ -315,7 +315,7 @@ func TestTeamPanelRejectsMissingCwd(t *testing.T) {
 }
 
 // TestTeamPanelReadsCarryNowriteCwdAndTargetIDs: every read call carries
-// HERDR_SOHO_NOWRITE=1, runs in the target's cwd, and uses the target's
+// SOHO_NOWRITE=1, runs in the target's cwd, and uses the target's
 // HERDR_* ids (not the invoking shell's).
 func TestTeamPanelReadsCarryNowriteCwdAndTargetIDs(t *testing.T) {
 	env, cli, cwd := teamPanelFixture(t)
@@ -342,7 +342,7 @@ func TestTeamPanelReadsCarryNowriteCwdAndTargetIDs(t *testing.T) {
 			t.Fatalf("call %d argv=%#v want %#v", i, calls[i].Argv, want)
 		}
 		e := calls[i].Env
-		if e["HERDR_SOHO_NOWRITE"] != "1" || e["HERDR_WORKSPACE_ID"] != "ws-a" || e["HERDR_PANE_ID"] != "pane-a" || e["HERDR_TAB_ID"] != "tab-a" {
+		if e["SOHO_NOWRITE"] != "1" || e["HERDR_WORKSPACE_ID"] != "ws-a" || e["HERDR_PANE_ID"] != "pane-a" || e["HERDR_TAB_ID"] != "tab-a" {
 			t.Fatalf("read %d (%v) env=%#v (NOWRITE, target ids)", i, want, e)
 		}
 	}
@@ -386,7 +386,7 @@ func TestTeamPanelEnterCollectsSelectedWorker(t *testing.T) {
 	if i < 0 {
 		t.Fatalf("no collect call for the selected worker: %#v", calls)
 	}
-	if got := calls[i].Env["HERDR_SOHO_NOWRITE"]; got != "1" {
+	if got := calls[i].Env["SOHO_NOWRITE"]; got != "1" {
 		t.Fatalf("collect env NOWRITE=%q want 1 (a read)", calls[i].Env)
 	}
 	_, _ = writer.Write([]byte("\x1b")) // Esc: back to the team view
@@ -422,10 +422,13 @@ func TestTeamPanelXCancelNeverCallsRelease(t *testing.T) {
 }
 
 // TestTeamPanelXConfirmsReleaseWithoutNowriteAndReloads: y runs
-// `release <agent> --close` WITHOUT HERDR_SOHO_NOWRITE, the view shows the
-// output and reloads (explain and roster run again after the release).
+// `release <agent> --close` WITHOUT the NOWRITE gate — neither the
+// current SOHO_NOWRITE nor the legacy HERDR_SOHO_NOWRITE inherited from
+// the environment — the view shows the output and reloads (explain and
+// roster run again after the release).
 func TestTeamPanelXConfirmsReleaseWithoutNowriteAndReloads(t *testing.T) {
 	env, cli, cwd := teamPanelFixture(t)
+	env["HERDR_SOHO_NOWRITE"] = "1" // the legacy gate must not survive into a write
 	writer, output, finished := teamStartWithPipes(t, env, cli, nil)
 	teamWaitForOutput(t, output, "worker-1")
 	_, _ = writer.Write([]byte("\x1b[B")) // down: select worker-2
@@ -440,8 +443,11 @@ func TestTeamPanelXConfirmsReleaseWithoutNowriteAndReloads(t *testing.T) {
 	if release < 0 {
 		t.Fatalf("no release call: %#v", calls)
 	}
-	if got := calls[release].Env["HERDR_SOHO_NOWRITE"]; got != "" {
+	if got := calls[release].Env["SOHO_NOWRITE"]; got != "" {
 		t.Fatalf("release env NOWRITE=%q want absent (a write)", calls[release].Env)
+	}
+	if got := calls[release].Env["HERDR_SOHO_NOWRITE"]; got != "" {
+		t.Fatalf("release env legacy NOWRITE=%q want stripped (a write)", calls[release].Env)
 	}
 	for _, want := range [][]string{{"explain"}, {"roster"}} {
 		if i := teamCallIndexAfter(calls, release, want); i < 0 {
@@ -463,7 +469,7 @@ func teamCallIndexAfter(calls []fakecli.Call, after int, want []string) int {
 }
 
 // TestTeamPanelGConfirmsGCYes: g opens the confirmation; n cancels; y runs
-// `gc --yes` WITHOUT HERDR_SOHO_NOWRITE, the view shows the output and
+// `gc --yes` WITHOUT SOHO_NOWRITE, the view shows the output and
 // reloads the dry-run.
 func TestTeamPanelGConfirmsGCYes(t *testing.T) {
 	env, cli, cwd := teamPanelFixture(t)
@@ -487,7 +493,7 @@ func TestTeamPanelGConfirmsGCYes(t *testing.T) {
 	if gcYes < 0 {
 		t.Fatalf("no gc --yes call: %#v", calls)
 	}
-	if got := calls[gcYes].Env["HERDR_SOHO_NOWRITE"]; got != "" {
+	if got := calls[gcYes].Env["SOHO_NOWRITE"]; got != "" {
 		t.Fatalf("gc --yes env NOWRITE=%q want absent (a write)", calls[gcYes].Env)
 	}
 	if i := teamCallIndexAfter(calls, gcYes, []string{"gc"}); i < 0 {
@@ -512,7 +518,7 @@ func TestTeamPanelCLIFailureShowsExitAndStderr(t *testing.T) {
 		{Argv: []string{"explain"}, Stdout: teamExplainFixture},
 		{Argv: []string{"roster"}, Stdout: teamRosterFixture},
 		{Argv: []string{"doctor"}, Stderr: "boom\n", Code: 3},
-	}, fakecli.InstallOptions{CaptureEnv: []string{"HERDR_SOHO_NOWRITE"}})
+	}, fakecli.InstallOptions{CaptureEnv: []string{"SOHO_NOWRITE"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -624,7 +630,7 @@ func TestTeamBracketedPasteNeverExecutesWrites(t *testing.T) {
 	}
 	for _, call := range teamCalls(t, cli) {
 		if len(call.Argv) > 0 && call.Argv[0] == "release" {
-			t.Fatalf("bracketed paste invoked a write argv=%#v NOWRITE=%q", call.Argv, call.Env["HERDR_SOHO_NOWRITE"])
+			t.Fatalf("bracketed paste invoked a write argv=%#v NOWRITE=%q", call.Argv, call.Env["SOHO_NOWRITE"])
 		}
 		if reflect.DeepEqual(call.Argv, []string{"gc", "--yes"}) {
 			t.Fatalf("bracketed paste invoked gc --yes: %#v", call)

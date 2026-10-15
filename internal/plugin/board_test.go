@@ -807,8 +807,9 @@ func TestBridgeBoardOpensBoardPane(t *testing.T) {
 		t.Fatalf("herdr calls=%#v err=%v", calls, err)
 	}
 	// The board action is the compatibility alias of the unified picker:
-	// the supplied bridge opens the picker entrypoint for both.
-	want := []string{"plugin", "pane", "open", "--plugin", "djalmajr.herdr-soho", "--entrypoint", "picker", "--focus"}
+	// the supplied bridge opens the picker entrypoint for both, under the
+	// soho id (the fixture does not set HERDR_PLUGIN_ID).
+	want := PickerArguments()
 	if !reflect.DeepEqual(calls[1].Argv, want) {
 		t.Fatalf("pane open argv=%#v want %#v", calls[1].Argv, want)
 	}

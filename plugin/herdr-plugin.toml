@@ -1,21 +1,23 @@
-# herdr-soho optional plugin — read-only actions, the unified session picker and the team panel.
+# soho optional plugin — read-only actions, the unified session picker and the team panel.
 # Manifest contract: https://herdr.dev/docs/plugins/
-# Every command runs the `herdr-soho` binary (the Go CLI), which must be
+# Every command runs the `soho` binary (the Go CLI), which must be
 # on the Herdr server's PATH. The read-only actions (team, roster, doctor)
-# call `herdr-soho plugin bridge <subcommand>`; the bridge resolves the
+# call `soho plugin bridge <subcommand>`; the bridge resolves the
 # focused target from HERDR_PLUGIN_CONTEXT_JSON, validates the pane with
 # HERDR_BIN_PATH, and opens the team panel over the focused pane (`plugin
-# pane open`). The panel itself runs the herdr-soho reads (explain, roster,
-# doctor, friction, gc) with HERDR_SOHO_NOWRITE=1; only `x` and `g`, after
-# their confirmation, run a release or `gc --yes`. The `pick` action opens
-# the unified session popup. Nothing the plugin does writes to the
-# focused project without a confirmation (no .gitignore entry, no state
-# directory).
-id = "djalmajr.herdr-soho"
-name = "herdr-soho"
+# pane open`). The bridge opens the pane under the id of the plugin that
+# invoked the action (HERDR_PLUGIN_ID), so the same binary also serves
+# the legacy shim in plugin-legacy/herdr-plugin.toml. The panel itself
+# runs the soho reads (explain, roster, doctor, friction, gc) with
+# SOHO_NOWRITE=1; only `x` and `g`, after their confirmation, run a
+# release or `gc --yes`. The `pick` action opens the unified session
+# popup. Nothing the plugin does writes to the focused project without a
+# confirmation (no .gitignore entry, no state directory).
+id = "djalmajr.soho"
+name = "soho"
 version = "0.3.0"
 min_herdr_version = "0.9.1"
-description = "Read-only actions (team, roster, doctor) around the focused workspace — the team panel shows who is running, what it does, the doctor, the resources and the friction — plus a unified session picker (pick) with scope/status filters and table/tree views. The actions run the herdr-soho binary in read-only mode — it must be on the Herdr server's PATH — and only write after the panel's explicit confirmations (x, g)."
+description = "Read-only actions (team, roster, doctor) around the focused workspace — the team panel shows who is running, what it does, the doctor, the resources and the friction — plus a unified session picker (pick) with scope/status filters and table/tree views. The actions run the soho binary in read-only mode — it must be on the Herdr server's PATH — and only write after the panel's explicit confirmations (x, g)."
 platforms = ["linux", "macos", "windows"]
 
 [[actions]]
@@ -23,48 +25,48 @@ id = "doctor"
 title = "Doctor: open the team panel on the doctor view"
 description = "Read-only: opens the team panel on the focused workspace, starting at the doctor view (config, hooks, memory, dispatch state, panes and the Herdr/CLI versions). Only the panel's `x` and `g` confirmations write."
 contexts = ["workspace"]
-command = ["herdr-soho", "plugin", "bridge", "doctor"]
+command = ["soho", "plugin", "bridge", "doctor"]
 
 [[actions]]
 id = "roster"
 title = "Roster: open the team panel"
 description = "Read-only: opens the team panel on the focused workspace (who is running, what it does, and the roster, orchestrator first). Only the panel's `x` and `g` confirmations write."
 contexts = ["workspace"]
-command = ["herdr-soho", "plugin", "bridge", "roster"]
+command = ["soho", "plugin", "bridge", "roster"]
 
 [[actions]]
 id = "team"
 title = "Team: open the team panel"
 description = "Read-only: opens the team panel on the focused workspace: the team explanation, the workers (release with x, after confirmation), the doctor, the resources (gc, with g, after confirmation) and the friction. Reload with r."
 contexts = ["workspace"]
-command = ["herdr-soho", "plugin", "bridge", "team"]
+command = ["soho", "plugin", "bridge", "team"]
 
 [[panes]]
 id = "picker"
-title = "herdr-soho: find a session"
+title = "soho: find a session"
 placement = "popup"
 width = "80%"
 height = "80%"
 platforms = ["linux", "macos", "windows"]
-command = ["herdr-soho", "plugin", "picker"]
+command = ["soho", "plugin", "picker"]
 
 [[panes]]
 id = "team"
-title = "herdr-soho: team"
+title = "soho: team"
 placement = "overlay"
 platforms = ["linux", "macos", "windows"]
-command = ["herdr-soho", "plugin", "team"]
+command = ["soho", "plugin", "team"]
 
 [[panes]]
 id = "team-doctor"
-title = "herdr-soho: doctor"
+title = "soho: doctor"
 placement = "overlay"
 platforms = ["linux", "macos", "windows"]
-command = ["herdr-soho", "plugin", "team", "--view", "doctor"]
+command = ["soho", "plugin", "team", "--view", "doctor"]
 
 [[actions]]
 id = "pick"
 title = "Sessions: search, copy or focus"
 description = "Opens a centered session popup at 80% of the terminal width and height. All panes, agents or terminals can be filtered by status and task. Table and tree views group by machine and workspace; v switches views, f/t filter, p/w/s sort, and Tab switches search/list focus. Arrow keys, PgUp/PgDn and the mouse wheel select items. It refreshes every 10 s or with r/Ctrl-R. With the list focused, c copies only machine/pane and shows status-bar feedback without closing. Enter focuses the selection; Esc or Ctrl-C close."
 contexts = ["workspace"]
-command = ["herdr-soho", "plugin", "bridge", "pick"]
+command = ["soho", "plugin", "bridge", "pick"]
