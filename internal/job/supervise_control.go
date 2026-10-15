@@ -128,21 +128,27 @@ func (s *Supervisor) deliverControlBody(item ControlItem, amend bool) error {
 // the stop amendment (atomic, 0600, the exact contract body), dispatches it
 // to the job orchestrator as an amendment (a failure goes to friction and
 // the stop continues), and records the kind and its monotonic deadline.
-// checkBudget decides the stop's end from here on. stopping and the
-// deadline live only in this process: a supervisor that restarts and finds
-// the still-pending cancel starts the stop once more — one stop amendment
-// per supervisor process, the request's full grace measured on that
-// process's own monotonic clock. That is the accepted bound: the grace
-// restarts on a supervisor restart, never on a tick.
+// checkBudget decides the stop's end from here on. The deadline of a cancel
+// is the acceptance's persisted CancelDeadline converted once to this
+// process's monotonic clock (the same idiom as ensureIntervalBase and
+// ensureFinishingBase): a supervisor that restarts and finds the
+// still-pending cancel starts the stop once more — one stop amendment per
+// process — and ends the grace on the same wall instant; a restart never
+// restarts the grace. A state without the fields (a job accepted by a
+// binary before them) or with an unreadable deadline keeps the bound the
+// persisted deadline replaces: the request's full grace measured on this
+// process's own monotonic clock, with one friction line. The timeout and
+// the blocked ceiling have no persisted anchor and always measure their
+// grace on the process's own monotonic clock.
 func (s *Supervisor) beginStop(kind string, grace time.Duration) {
-	snap, err := s.Store.Snapshot(s.ID)
-	if err != nil {
+	snap, snapErr := s.Store.Snapshot(s.ID)
+	if snapErr != nil {
 		if s.Friction != nil {
 			s.Friction("job: the supervisor cannot read the state to stop the job")
 		}
 	}
 	name := ""
-	if err == nil {
+	if snapErr == nil {
 		name = snap.State.Orchestrator
 	}
 	jobDir, err := s.Store.readDir(s.ID)
@@ -162,7 +168,29 @@ func (s *Supervisor) beginStop(kind string, grace time.Duration) {
 		s.askCollaborations()
 	}
 	s.stopping = kind
-	s.stopDeadline = s.Clock.Monotonic() + int64(grace.Nanoseconds())
+	monoNow := s.Clock.Monotonic()
+	deadline := monoNow + int64(grace.Nanoseconds())
+	if kind == "canceled" && snapErr == nil {
+		if anchor := snap.State.CancelDeadline; anchor != "" {
+			if dl, parseErr := time.Parse(time.RFC3339Nano, anchor); parseErr == nil {
+				// The persisted acceptance deadline converted to this
+				// process's monotonic clock: the wall clock is compared only
+				// here, so from then on the stop runs on the monotonic clock
+				// only, and a backwards Now never extends the grace.
+				deadline = monoNow + int64(dl.Sub(s.Clock.Now()))
+			} else if s.Friction != nil {
+				s.Friction("job: the persisted cancel deadline is absent or unreadable: the stop measures the full grace from this process")
+			}
+		} else if s.Friction != nil {
+			s.Friction("job: the persisted cancel deadline is absent or unreadable: the stop measures the full grace from this process")
+		}
+	}
+	// Never below monoNow: a wall clock that stepped past the deadline ends
+	// the stop on the first check instead of already being past it.
+	if deadline < monoNow {
+		deadline = monoNow
+	}
+	s.stopDeadline = deadline
 }
 
 // checkBudget applies the job's time budgets and decides the stop path's

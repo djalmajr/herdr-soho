@@ -1,9 +1,12 @@
 package job
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -12,11 +15,12 @@ import (
 // supervisor restart: the request stays pending in control/ through the
 // grace, a second request during the grace is a no-op on the pending file,
 // a restarted supervisor starts the stop path once (one stop amendment per
-// process, the full grace on its own monotonic clock), and the cancel
-// retires only after the terminal outcome is recorded. A supervisor started
-// on a job that is already canceled while the cancel is still pending
-// retires it once, idempotently, and dispatches nothing. The timeout stop
-// path restarts the same way without a duplicate timeout_warning.
+// process) and ends the grace on the acceptance's persisted deadline — a
+// restart never restarts the grace — and the cancel retires only after the
+// terminal outcome is recorded. A supervisor started on a job that is
+// already canceled while the cancel is still pending retires it once,
+// idempotently, and dispatches nothing. The timeout stop path restarts the
+// same way without a duplicate timeout_warning.
 
 var errCancelRestartCrash = errors.New("the first supervisor dies inside the grace")
 
@@ -127,11 +131,193 @@ func TestSuperviseCancelSurvivesSupervisorRestart(t *testing.T) {
 		t.Fatalf("friction = %v, want none", friction)
 	}
 	// The stop in process two ended on the orchestrator's done at the
-	// second tick, well inside the fresh 60 s grace: one sleep between the
-	// two ticks.
+	// second tick, inside the persisted deadline (the acceptance plus the
+	// grace, not a fresh measure): one sleep between the two ticks.
 	if clock2.sleeps != 1 {
-		t.Fatalf("restart sleeps = %d, want 1 (the done beat the fresh grace)", clock2.sleeps)
+		t.Fatalf("restart sleeps = %d, want 1 (the done beat the persisted deadline)", clock2.sleeps)
 	}
+}
+
+// cancelAnchor reads the persisted grace anchor straight from state.json
+// (the raw fields, not the State projection), so the proof holds on a
+// source that predates the fields: absent fields read as empty strings.
+type cancelAnchor struct {
+	RequestedAt string `json:"cancel_requested_at"`
+	Deadline    string `json:"cancel_deadline"`
+}
+
+func readCancelAnchor(t *testing.T, jobDir string) cancelAnchor {
+	t.Helper()
+	var a cancelAnchor
+	raw, err := os.ReadFile(filepath.Join(jobDir, "state.json"))
+	if err != nil {
+		t.Fatalf("state.json: %v", err)
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		t.Fatalf("state.json: %v", err)
+	}
+	return a
+}
+
+// TestSuperviseCancelRestartKeepsPersistedDeadline: process one accepts the
+// cancel with a 60 s grace at T0 and dies inside the grace; process two
+// starts with the wall clock one second past the persisted deadline
+// (T0+60 s). The stop ends on the first check — the persisted deadline, not
+// a fresh grace: no tick boundary is crossed, one terminal event, the
+// cancel retires, and no friction (the deadline was readable).
+func TestSuperviseCancelRestartKeepsPersistedDeadline(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+	// Process one accepts the cancel with a 60 s grace at T0; the
+	// acceptance anchors the grace in the state.
+	if queued, err := store.RequestCancel("job-1", 60); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	t0 := clock.now
+	anchor := readCancelAnchor(t, jobDir)
+	if want := t0.Format(time.RFC3339Nano); anchor.RequestedAt != want {
+		t.Fatalf("cancel_requested_at = %q, want %q (the acceptance instant)", anchor.RequestedAt, want)
+	}
+	if want := t0.Add(60 * time.Second).Format(time.RFC3339Nano); anchor.Deadline != want {
+		t.Fatalf("cancel_deadline = %q, want %q (the acceptance plus the grace)", anchor.Deadline, want)
+	}
+	// The orchestrator keeps working through the first process, which dies
+	// inside the grace; the cancel stays pending.
+	team.statusScript = []fakeStatus{{State: "working"}}
+	clock.stopAfter = 1
+	clock.stop = errCancelRestartCrash
+	runUntilStop(t, sup, errCancelRestartCrash)
+	if st := supState(t, store); st.Status != StatusRunning {
+		t.Fatalf("status after the interrupted grace = %s, want running", st.Status)
+	}
+
+	// Process two starts with the wall clock one second past the persisted
+	// deadline (T0+61 s): the first check must end the stop without
+	// crossing a tick boundary, no fresh grace measured.
+	clock2 := &nsClock{now: t0.Add(61 * time.Second)}
+	team.statusScript = []fakeStatus{{State: "working"}}
+	sup2 := &Supervisor{Store: store, ID: "job-1", Ops: team, Clock: clock2, Poll: 10 * time.Second, Friction: sup.Friction}
+	exit, err := sup2.Run()
+	if err != nil {
+		t.Fatalf("restart Run: %v", err)
+	}
+	if exit != ExitCanceled {
+		t.Fatalf("exit = %d, want %d (the in-flight cancel must survive the restart)", exit, ExitCanceled)
+	}
+	if st := supState(t, store); st.Status != StatusCanceled {
+		t.Fatalf("status = %s, want canceled", st.Status)
+	}
+	// The first checkBudget check ended the stop: the persisted deadline had
+	// already passed, so no tick boundary was crossed.
+	if clock2.sleeps != 0 {
+		t.Fatalf("restart sleeps = %d, want 0 (the persisted deadline beat the restart, no fresh grace)", clock2.sleeps)
+	}
+	// One stop amendment per supervisor process (two in total), nothing
+	// else.
+	stopPath := filepath.Join(jobDir, "stop-amend.md")
+	stops := 0
+	for _, d := range team.dispatches {
+		if d.Path == stopPath && d.Amend {
+			stops++
+		}
+	}
+	if len(team.dispatches) != 3 || stops != 2 {
+		t.Fatalf("dispatches = %+v, want the brief and one stop amendment per process (2 in total)", team.dispatches)
+	}
+	assertStopAmend(t, jobDir)
+	// The cancel retired exactly once, after the terminal outcome.
+	if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"seq"}) {
+		t.Fatalf("pending control = %v, want only seq", got)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"cancel.json-000001"}) {
+		t.Fatalf("retired control = %v, want the single retired cancel", got)
+	}
+	// Exactly one terminal event with the canceled outcome.
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countTipe(events, "terminal"); n != 1 {
+		t.Fatalf("terminal events = %d, want 1", n)
+	}
+	if want := []string{"accepted", "worker_spawned", "terminal", "cleanup"}; !reflect.DeepEqual(eventTipes(events), want) {
+		t.Fatalf("event types = %v, want %v", eventTipes(events), want)
+	}
+	if terminal := eventsLast(t, jobDir); terminal.Refs["exit"] != "21" || terminal.Refs["motivo"] != "cancelado" {
+		t.Fatalf("terminal refs = %+v", terminal.Refs)
+	}
+	// The persisted deadline was readable in the restarted process: no
+	// friction.
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v, want none", friction)
+	}
+}
+
+// TestSuperviseCancelLegacyStateMeasuresFreshGrace: without the persisted
+// anchor the stop keeps the bound the persisted deadline replaces — the
+// request's full grace on this process's own monotonic clock — and writes
+// one friction line; an unreadable deadline does the same.
+func TestSuperviseCancelLegacyStateMeasuresFreshGrace(t *testing.T) {
+	runLegacyCancel := func(t *testing.T, store *Store, jobDir string, clock *nsClock, team *fakeTeam, sup *Supervisor, friction *[]string) {
+		working := make([]fakeStatus, 7)
+		for i := range working {
+			working[i] = fakeStatus{State: "working"}
+		}
+		team.statusScript = working
+		exit, err := sup.Run()
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if exit != ExitCanceled {
+			t.Fatalf("exit = %d, want %d", exit, ExitCanceled)
+		}
+		if st := supState(t, store); st.Status != StatusCanceled {
+			t.Fatalf("state = %+v", st)
+		}
+		// The full fresh grace on this process's clock: six 10 s ticks.
+		if clock.sleeps != 6 {
+			t.Fatalf("sleeps = %d, want 6 (the full grace from this process)", clock.sleeps)
+		}
+		if len(*friction) != 1 || !strings.Contains((*friction)[0], "the persisted cancel deadline is absent or unreadable") {
+			t.Fatalf("friction = %v, want the one line naming the missing anchor", *friction)
+		}
+		if terminal := eventsLast(t, jobDir); terminal.Refs["exit"] != "21" || terminal.Refs["motivo"] != "cancelado" {
+			t.Fatalf("terminal refs = %+v", terminal.Refs)
+		}
+		if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"seq"}) {
+			t.Fatalf("pending control = %v, want only seq", got)
+		}
+		if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"cancel.json-000001"}) {
+			t.Fatalf("retired control = %v, want the single retired cancel", got)
+		}
+	}
+
+	t.Run("a state without the fields", func(t *testing.T) {
+		var friction []string
+		store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+		// The legacy acceptance: the pending file without the state anchors.
+		ctl := filepath.Join(jobDir, "control")
+		if err := os.MkdirAll(ctl, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(ctl, "cancel.json"), []byte(`{"grace":60}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runLegacyCancel(t, store, jobDir, clock, team, sup, &friction)
+	})
+
+	t.Run("an unreadable deadline", func(t *testing.T) {
+		var friction []string
+		store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+		if queued, err := store.RequestCancel("job-1", 60); !queued || err != nil {
+			t.Fatalf("cancel: queued=%v err=%v", queued, err)
+		}
+		// A hostile state: the deadline does not parse.
+		if _, err := store.Record("job-1", func(st *State) { st.CancelDeadline = "not-a-timestamp" }); err != nil {
+			t.Fatal(err)
+		}
+		runLegacyCancel(t, store, jobDir, clock, team, sup, &friction)
+	})
 }
 
 // TestSuperviseTerminalRestartRetiresPendingCancel: a supervisor started on
