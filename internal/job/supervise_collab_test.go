@@ -384,7 +384,7 @@ func TestSuperviseCollabDoneIntroducesPartial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "worker_done", "terminal", "cleanup"}) {
+	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "worker_done", "terminal", "cleanup", "folder_retained", "workspace_closed"}) {
 		t.Fatalf("event kinds = %v", got)
 	}
 }
@@ -582,7 +582,7 @@ func TestSuperviseCollabTimeoutIntroducesPartial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "timeout_warning", "terminal", "cleanup"}) {
+	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "timeout_warning", "terminal", "cleanup", "folder_retained", "workspace_closed"}) {
 		t.Fatalf("event kinds = %v", got)
 	}
 	if len(friction) != 0 {

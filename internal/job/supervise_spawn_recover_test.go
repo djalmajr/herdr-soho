@@ -65,10 +65,20 @@ func assertRecoveryFailed(t *testing.T, store *Store, jobDir string, team *fakeT
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "failure", "terminal", "cleanup"}) {
-		t.Fatalf("event types = %v", got)
+	// With a Herdr adapter the finalize closes the workspace last and
+	// lands the folder_retained and workspace_closed events; without one
+	// the pass stops at the cleanup (and the terminal event stays two
+	// from the end).
+	want := []string{"accepted", "failure", "terminal", "cleanup"}
+	terminalIdx := len(want) - 2
+	if st.WorkspaceClosed {
+		want = append(want, "folder_retained", "workspace_closed")
+		terminalIdx = len(want) - 4
 	}
-	if terminal := events[len(events)-2]; terminal.Refs["exit"] != "4" {
+	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("event types = %v, want %v", got, want)
+	}
+	if terminal := events[terminalIdx]; terminal.Refs["exit"] != "4" {
 		t.Fatalf("terminal refs = %+v, want exit 4", terminal.Refs)
 	}
 	// herdr is non-nil only when the subtest asserts the list was never
@@ -96,8 +106,8 @@ func TestSuperviseSpawnRecoverZeroCandidatesSinglePaneSpawns(t *testing.T) {
 	if err != nil || exit != 0 {
 		t.Fatalf("second Run: %d %v, want 0", exit, err)
 	}
-	if team.rosterCalls != 1 || herdr.ListReads != 1 {
-		t.Fatalf("roster calls = %d list reads = %d, want 1/1", team.rosterCalls, herdr.ListReads)
+	if team.rosterCalls != 2 || herdr.ListReads != 1 {
+		t.Fatalf("roster calls = %d list reads = %d, want 2/1 (the recovery read and the close watch's pane classification)", team.rosterCalls, herdr.ListReads)
 	}
 	if team.spawnCalls != 2 {
 		t.Fatalf("spawn calls = %d, want 2 (one per run)", team.spawnCalls)
@@ -112,7 +122,7 @@ func TestSuperviseSpawnRecoverZeroCandidatesSinglePaneSpawns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "worker_done", "terminal", "cleanup"}) {
+	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "worker_done", "terminal", "cleanup", "folder_retained", "workspace_closed"}) {
 		t.Fatalf("event types = %v", got)
 	}
 	if n := countTipe(events, "worker_spawned"); n != 1 {

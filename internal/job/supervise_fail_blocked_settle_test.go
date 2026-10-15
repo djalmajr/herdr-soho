@@ -186,8 +186,8 @@ func TestSuperviseFailBlockedGoneSettlesTheBlockedClock(t *testing.T) {
 		t.Fatalf("motivo = %v, want the failure motivo", st.Motivo)
 	}
 	events := mustEvents(t, jobDir)
-	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "blocked", "failure", "terminal", "cleanup"}) {
-		t.Fatalf("event types = %v, want accepted, worker_spawned, blocked, failure, terminal, cleanup", got)
+	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "blocked", "failure", "terminal", "cleanup", "folder_retained", "workspace_closed"}) {
+		t.Fatalf("event types = %v, want accepted, worker_spawned, blocked, failure, terminal, cleanup, folder_retained, workspace_closed", got)
 	}
 	if terminal := events[4]; terminal.Refs["exit"] != "19" {
 		t.Fatalf("terminal refs = %+v, want exit 19", terminal.Refs)
@@ -243,8 +243,8 @@ func TestSuperviseFailBlockedStatusErrorSettlesTheBlockedClock(t *testing.T) {
 	if st.TerminalIntent == nil || st.TerminalIntent.Status != StatusFailed || st.TerminalIntent.Exit != ExitFailed {
 		t.Fatalf("intent = %+v, want the failed intent", st.TerminalIntent)
 	}
-	if got := eventTipes(mustEvents(t, jobDir)); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "blocked", "failure", "terminal", "cleanup"}) {
-		t.Fatalf("event types = %v, want accepted, worker_spawned, blocked, failure, terminal, cleanup", got)
+	if got := eventTipes(mustEvents(t, jobDir)); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "blocked", "failure", "terminal", "cleanup", "folder_retained", "workspace_closed"}) {
+		t.Fatalf("event types = %v, want accepted, worker_spawned, blocked, failure, terminal, cleanup, folder_retained, workspace_closed", got)
 	}
 	if team.releaseCalls != 1 || team.releaseTeamCalls != 1 || team.gcCalls != 1 {
 		t.Fatalf("release = %d team %d gc %d, want 1/1/1", team.releaseCalls, team.releaseTeamCalls, team.gcCalls)
@@ -328,7 +328,7 @@ func TestSuperviseFailBlockedHardStopBeforeCrossingCommit(t *testing.T) {
 		t.Fatalf("intent = %+v, want the failed intent", st.TerminalIntent)
 	}
 	events := mustEvents(t, jobDir)
-	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "blocked", "failure", "terminal", "cleanup"}) {
+	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "blocked", "failure", "terminal", "cleanup", "folder_retained", "workspace_closed"}) {
 		t.Fatalf("event types = %v, want the failed outcome exactly once", got)
 	}
 	if n := countTipe(events, "terminal"); n != 1 {
@@ -540,8 +540,8 @@ func TestSuperviseFailRunningKeepsTheBaseAccounting(t *testing.T) {
 		t.Fatalf("motivo = %v, want the failure motivo", st.Motivo)
 	}
 	events := mustEvents(t, jobDir)
-	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "failure", "terminal", "cleanup"}) {
-		t.Fatalf("event types = %v, want accepted, worker_spawned, failure, terminal, cleanup", got)
+	if got := eventTipes(events); !reflect.DeepEqual(got, []string{"accepted", "worker_spawned", "failure", "terminal", "cleanup", "folder_retained", "workspace_closed"}) {
+		t.Fatalf("event types = %v, want accepted, worker_spawned, failure, terminal, cleanup, folder_retained, workspace_closed", got)
 	}
 	if terminal := events[3]; terminal.Refs["exit"] != "19" {
 		t.Fatalf("terminal refs = %+v, want exit 19", terminal.Refs)

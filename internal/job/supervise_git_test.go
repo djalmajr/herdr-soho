@@ -527,6 +527,20 @@ func (h *closingHerdr) Close(id string) error {
 func (h closingHerdr) ServerReachable() bool           { return h.inner.ServerReachable() }
 func (h closingHerdr) List() ([]herdrWorkspace, error) { return h.inner.List() }
 
+// Panes exposes the pane list to the finalize close watch (which
+// type-asserts the Herdr client for it): the wrapper delegates to the
+// inner client when it has one, so the watch runs as with the plain
+// fake; the close recording and the order log are untouched.
+func (h closingHerdr) Panes(workspaceID string) ([]herdrPane, error) {
+	list, ok := h.inner.(interface {
+		Panes(workspaceID string) ([]herdrPane, error)
+	})
+	if !ok {
+		return nil, errors.New("job: the inner Herdr client has no pane list")
+	}
+	return list.Panes(workspaceID)
+}
+
 // crashingHerdr panics once in Close: a crash after the cleanup event and
 // before the workspace close.
 type crashingHerdr struct {
@@ -603,9 +617,11 @@ func TestSuperviseRelease(t *testing.T) {
 			t.Fatalf("report limpeza = %v, want the closed workspace and the removable clean tree", rep["limpeza"])
 		}
 
-		// The release calls happen once each and the workspace close is
+		// The release calls happen once each, the close watch reads the
+		// roster to classify the job's own panes (and the watch observes
+		// the panes once, before the close), and the workspace close is
 		// the last call.
-		want := []string{"release:orch-1", "releaseTeam", "gc", "herdrClose:ws-1"}
+		want := []string{"release:orch-1", "releaseTeam", "gc", "roster", "herdrClose:ws-1"}
 		if !reflect.DeepEqual(order, want) {
 			t.Fatalf("release order = %v, want %v", order, want)
 		}
@@ -619,7 +635,7 @@ func TestSuperviseRelease(t *testing.T) {
 		if n := countTipes(events, "cleanup"); n != 1 {
 			t.Fatalf("cleanup events = %d, want 1", n)
 		}
-		cleanup := events[len(events)-1]
+		cleanup := events[len(events)-3]
 		if cleanup.Tipo != "cleanup" || cleanup.Resumo != "processes released; worktree kept" {
 			t.Fatalf("cleanup event = %+v", cleanup)
 		}
@@ -780,7 +796,7 @@ func TestSuperviseRelease(t *testing.T) {
 		// The final push runs while the job is finishing: its push and
 		// pr_opened events precede the terminal event, so they wake the
 		// dispatcher before the job ends.
-		if got := eventTipes(f.events(t)); !reflect.DeepEqual(got[len(got)-5:], []string{"commit", "push", "pr_opened", "terminal", "cleanup"}) {
+		if got := eventTipes(f.events(t)); !reflect.DeepEqual(got[len(got)-7:], []string{"commit", "push", "pr_opened", "terminal", "cleanup", "folder_retained", "workspace_closed"}) {
 			t.Fatalf("event types = %v, want the final push and pr_opened before terminal", got)
 		}
 

@@ -31,6 +31,15 @@ type fakeHerdr struct {
 	RunErr            error
 	Workspaces        []herdrWorkspace
 	ListErr           error
+	// PanesRows, when set, is the pane list returned by Panes (a copy);
+	// PanesErr fails every Panes call; PanesFn, when set, overrides both
+	// with one scripted list per call, indexed by the 1-based call number
+	// (nil is an empty list). The default is an empty list and no error: no
+	// foreign pane, so the finalize close watch closes at the first
+	// observation.
+	PanesRows []herdrPane
+	PanesErr  error
+	PanesFn   func(call int) []herdrPane
 	// OnRun, when set, runs after a Run is recorded, before its result is
 	// returned: start tests use it to stand in for the launched supervisor
 	// (an implementation-generated confirmation, never evidence of a real
@@ -38,11 +47,13 @@ type fakeHerdr struct {
 	OnRun func(paneID string, argv []string)
 
 	// Recorded calls.
-	CreateCalls []fakeHerdrCreateCall
-	CloseIDs    []string
-	ListCalls   int
-	ListReads   int
-	RunCalls    []fakeHerdrRunCall
+	CreateCalls  []fakeHerdrCreateCall
+	CloseIDs     []string
+	ListCalls    int
+	ListReads    int
+	RunCalls     []fakeHerdrRunCall
+	PanesCalls   int
+	PanesCallIDs []string
 }
 
 func (f *fakeHerdr) Create(cwd, label string, env map[string]string) (string, string, error) {
@@ -56,6 +67,24 @@ func (f *fakeHerdr) Create(cwd, label string, env map[string]string) (string, st
 func (f *fakeHerdr) Close(workspaceID string) error {
 	f.CloseIDs = append(f.CloseIDs, workspaceID)
 	return f.CloseErr
+}
+
+// Panes lists the workspace's panes: the finalize close watch
+// type-asserts the fake for this method. By default it returns no pane
+// and no error (no foreign pane: the watch closes at the first
+// observation); PanesErr fails every call, and PanesFn scripts one list
+// per call. PanesCalls counts the calls and PanesCallIDs records the
+// queried workspace ids.
+func (f *fakeHerdr) Panes(workspaceID string) ([]herdrPane, error) {
+	f.PanesCalls++
+	f.PanesCallIDs = append(f.PanesCallIDs, workspaceID)
+	if f.PanesErr != nil {
+		return nil, f.PanesErr
+	}
+	if f.PanesFn != nil {
+		return f.PanesFn(f.PanesCalls), nil
+	}
+	return append([]herdrPane(nil), f.PanesRows...), nil
 }
 
 func (f *fakeHerdr) ServerReachable() bool {

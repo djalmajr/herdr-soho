@@ -6,13 +6,18 @@
 // same way — checkpoint the leftovers of a canceled or timed-out job, run
 // the final push and pull request, publish the complete report facts,
 // release the job orchestrator, the team and the registered copies and
-// processes, record the cleanup event, and close the Herdr workspace
-// last. It never removes a worktree, a directory, a branch, or a pull
-// request.
+// processes, record the cleanup event, and — with the job's automatic
+// cleanup on — remove the job's own worktree when the report facts say
+// the work is clean and pushed, record the job folder retained, decide
+// the close on the workspace's panes through the close watch, close the
+// Herdr workspace last, and record the workspace closed. It never
+// removes a directory, a branch, or a pull request, and it never
+// deletes the job folder.
 package job
 
 import (
 	"errors"
+	"io/fs"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -411,11 +416,23 @@ func (s *Supervisor) finalSync(status string) (cut bool) {
 // settlement of the persisted outcomes (a fresh process over a terminal
 // job captures them first), the release of the job orchestrator, the
 // team, and the registered copies and processes, the cleanup event (the
-// release gate and the log check below), and the Herdr workspace close
-// last. It never removes a worktree, a directory, a branch, or a pull
-// request; its failures go to friction and the path continues, because
-// everything durable is written before the process may end with the
-// workspace.
+// release gate and the log check below), and the automatic cleanup and
+// the Herdr workspace close last: with the job's automatic cleanup on
+// (the job_auto_cleanup setting recorded at start) the pass removes the
+// job's own worktree (worktree mode, only on a pass whose release ended
+// clean, with the report facts saying the work is clean and pushed; a
+// refusal keeps the worktree and appends the needs_attention with its
+// motivo, at most one per motivo per job), appends the folder_retained
+// event (once per job, before the close decision), decides the close on
+// the workspace's panes through the close watch (wait sleeps the poll
+// through the clock, close closes, needs_attention with motivo
+// human_input keeps the workspace open), closes the workspace, and
+// appends the workspace_closed event right after the successful close
+// and before the WorkspaceClosed record. The opt-out removes nothing,
+// closes nothing, and lands only the folder_retained. It never removes
+// a directory or a branch and never deletes the job folder; its
+// failures go to friction and the path continues, because everything
+// durable is written before the process may end with the workspace.
 func (s *Supervisor) finalize(status string) {
 	jobDir, err := s.Store.readDir(s.ID)
 	if err != nil {
@@ -539,9 +556,64 @@ func (s *Supervisor) finalize(status string) {
 		}
 	}
 
-	// The workspace close is last: the supervisor process may end with
-	// the workspace; everything durable is already written.
+	// The automatic cleanup and the workspace close are last: the
+	// supervisor process may end with the workspace; everything durable
+	// is already written. A job without a recorded workspace, without
+	// the Herdr adapter, or with the close already recorded ends as
+	// before.
 	if snap.State.WorkspaceID == "" || s.Herdr == nil || snap.State.WorkspaceClosed {
+		return
+	}
+	if snap.State.AutoCleanupOn() && snap.State.Modo == "worktree" && released {
+		// The worktree removal: only when the release of this pass ended
+		// clean (the same gate as the cleanup event), in worktree mode,
+		// and with the automatic cleanup on, with the report facts
+		// finalize already computed. A removal records the state and
+		// rewrites the report (limpeza.worktree "removed"); a refusal
+		// keeps the worktree, appends the needs_attention with its
+		// motivo (at most one per motivo per job, the log deduplicates
+		// it), and the close proceeds. The workspace mode never removes.
+		if removed, motivo := removeOwnedWorktree(snap.State.Checkout, snap.State.Dir, s.ID, facts); removed {
+			if _, err := s.Store.Record(s.ID, func(st *State) { st.WorktreeRemoved = true }); err != nil {
+				s.frictionf("job: finalize: " + err.Error())
+				return
+			}
+			if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
+				s.frictionf("job: finalize: " + err.Error())
+				return
+			}
+		} else if motivo != "" && !needsAttentionLogged(events, motivo) {
+			if _, err := s.Store.Append(s.ID, EventIn{
+				Tipo:   "needs_attention",
+				Resumo: "worktree kept: " + motivo,
+				Refs:   map[string]string{"motivo": motivo},
+			}); err != nil {
+				s.frictionf("job: finalize: " + err.Error())
+				return
+			}
+		}
+	}
+	// The job folder is retained: one folder_retained per job, before
+	// the close decision, with the folder's path and its total size in
+	// bytes. The opt-out lands it too — and nothing else.
+	s.appendFolderRetained(events, jobDir)
+	if !snap.State.AutoCleanupOn() {
+		// The opt-out: the worktree and the workspace stay; the report
+		// says the workspace stays open.
+		facts.Workspace = "open"
+		if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
+			s.frictionf("job: finalize: " + err.Error())
+		}
+		return
+	}
+	// The close decision: the automatic close watch over the workspace's
+	// panes (the job's own panes ignored). The watch keeps the workspace
+	// open when it asks for human input.
+	if !s.closeWatchMayClose(snap.State, events) {
+		facts.Workspace = "open"
+		if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
+			s.frictionf("job: finalize: " + err.Error())
+		}
 		return
 	}
 	if !validWorkspaceID(snap.State.WorkspaceID) {
@@ -558,6 +630,18 @@ func (s *Supervisor) finalize(status string) {
 		return
 	}
 	if err := s.Herdr.Close(snap.State.WorkspaceID); err == nil {
+		// The workspace_closed event: once per job, right after the
+		// successful close and before the WorkspaceClosed record — a
+		// crash in between converges on the log, and a later supervisor
+		// never closes the workspace twice.
+		if !hasTipo(events, "workspace_closed") {
+			if _, err := s.Store.Append(s.ID, EventIn{
+				Tipo:   "workspace_closed",
+				Resumo: "workspace closed",
+			}); err != nil {
+				s.frictionf("job: finalize: " + err.Error())
+			}
+		}
 		// Recorded so a later supervisor never closes the workspace twice;
 		// the process may end with the workspace right after this.
 		if _, err := s.Store.Record(s.ID, func(st *State) { st.WorkspaceClosed = true }); err != nil {
@@ -572,6 +656,144 @@ func (s *Supervisor) finalize(status string) {
 			s.frictionf("job: finalize: " + err.Error())
 		}
 	}
+}
+
+// closeWatchMayClose runs the automatic close watch over the job
+// workspace's panes (the Panes method, type-asserted on the Herdr
+// client) and reports whether the workspace may be closed this pass. A
+// client without the method, a failed pane read, or a failed roster read
+// closes as today, with one fixed friction line each. Otherwise the
+// job's own panes — the workspace root pane and the rostered workers of
+// this workspace — are ignored, and the watch's decisions drive the
+// pass: wait sleeps the poll through the supervisor's clock and
+// observes again, close closes, and needs_attention (motivo human_input,
+// at most one per job, the log deduplicates it) appends the event and
+// keeps the workspace open. A restart in the middle of a wait starts the
+// observation again, which is conservative.
+func (s *Supervisor) closeWatchMayClose(st State, events []Event) bool {
+	lister, ok := s.Herdr.(interface {
+		Panes(workspaceID string) ([]herdrPane, error)
+	})
+	if !ok {
+		s.frictionf("job: the Herdr client has no pane list; closing the workspace without the close watch")
+		return true
+	}
+	jobPanes, ok := s.jobPanes(st)
+	if !ok {
+		s.frictionf("job: the roster could not be read; closing the workspace without the close watch")
+		return true
+	}
+	wait := st.HumanInputWait()
+	watch := closeWatch{}
+	for {
+		panes, err := lister.Panes(st.WorkspaceID)
+		if err != nil {
+			s.frictionf("job: the workspace pane list failed; closing the workspace without the close watch")
+			return true
+		}
+		outcome, next := closeWatchStep(panes, jobPanes, s.clk().Now(), wait, watch)
+		watch = next
+		switch outcome.Decision {
+		case CloseWatchWait:
+			s.clockSleep(s.poll())
+		case CloseWatchNeedsAttention:
+			if !needsAttentionLogged(events, outcome.Motivo) {
+				if _, err := s.Store.Append(s.ID, EventIn{
+					Tipo:   "needs_attention",
+					Resumo: "human input needed",
+					Refs:   map[string]string{"motivo": outcome.Motivo},
+				}); err != nil {
+					s.frictionf("job: finalize: " + err.Error())
+				}
+			}
+			return false
+		default:
+			return true
+		}
+	}
+}
+
+// jobPanes is the set of the job's own pane ids the automatic close watch
+// ignores: the workspace root pane (the job orchestrator) and the
+// rostered workers of this workspace. The roster's pane column is
+// workspace:pane; only a row of the job's own workspace adds its pane.
+// A roster failure reports false: without the roster the watch cannot
+// tell the job's panes from foreign ones.
+func (s *Supervisor) jobPanes(st State) (map[string]bool, bool) {
+	job := map[string]bool{}
+	if st.RootPane != "" {
+		job[st.RootPane] = true
+	}
+	rows, err := s.Ops.Roster()
+	if err != nil {
+		return nil, false
+	}
+	for _, row := range rows {
+		workspace, pane, ok := strings.Cut(row.Pane, ":")
+		if !ok || workspace != st.WorkspaceID || pane == "" {
+			continue
+		}
+		job[pane] = true
+	}
+	return job, true
+}
+
+// appendFolderRetained appends the job's folder_retained event once per
+// job (the log deduplicates it): the job folder's path and its total size
+// in bytes, before the close decision. A size read or an append failure
+// goes to friction; the event lands on a later pass and the close never
+// waits on it.
+func (s *Supervisor) appendFolderRetained(events []Event, jobDir string) {
+	if hasTipo(events, "folder_retained") {
+		return
+	}
+	bytes, err := jobFolderBytes(jobDir)
+	if err != nil {
+		s.frictionf("job: finalize: " + err.Error())
+		return
+	}
+	if _, err := s.Store.Append(s.ID, EventIn{
+		Tipo:   "folder_retained",
+		Resumo: "job folder retained",
+		Refs:   map[string]string{"path": jobDir, "bytes": strconv.FormatInt(bytes, 10)},
+	}); err != nil {
+		s.frictionf("job: finalize: " + err.Error())
+	}
+}
+
+// jobFolderBytes is the total size in bytes of every file under dir,
+// walking the subdirectories: a regular file counts its size, a symlink
+// its own, and a directory nothing. A missing or unreadable entry is an
+// error (the caller frictions and defers the event to a later pass).
+func jobFolderBytes(dir string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		mode := entry.Type()
+		if mode.IsRegular() || mode&fs.ModeSymlink != 0 {
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
+}
+
+// needsAttentionLogged reports whether the log already carries a
+// needs_attention event with the motivo: at most one per motivo per job,
+// checked against the log so a retry converges.
+func needsAttentionLogged(events []Event, motivo string) bool {
+	for _, event := range events {
+		if event.Tipo == "needs_attention" && event.Refs["motivo"] == motivo {
+			return true
+		}
+	}
+	return false
 }
 
 // releaseOrchestrator releases the job orchestrator, counting a release of

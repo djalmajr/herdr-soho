@@ -52,8 +52,14 @@ type State struct {
 	WorkspaceID          string   `json:"workspace_id,omitempty"`
 	RootPane             string   `json:"root_pane,omitempty"`
 	WorkspaceClosed      bool     `json:"workspace_closed,omitempty"`
-	TimeoutMin           int      `json:"timeout_min,omitempty"`
-	StartedAt            string   `json:"started_at,omitempty"`
+	// WorktreeRemoved records that the end-of-job removal (the finalize
+	// automatic cleanup) removed the job's own worktree: the report's
+	// limpeza.worktree is "removed" when it is set, "kept" otherwise.
+	// omitempty, so a state that predates it serializes byte for byte as
+	// before.
+	WorktreeRemoved bool   `json:"worktree_removed,omitempty"`
+	TimeoutMin      int    `json:"timeout_min,omitempty"`
+	StartedAt       string `json:"started_at,omitempty"`
 	// IntervalStart is the wall ts of the current budget interval's start.
 	// The interval kind needs no field of its own: it is blocked iff the
 	// status is blocked (steady state), so the anchor moves only with the
