@@ -432,6 +432,36 @@ func TestWorktreeRemoveHeldDirectory(t *testing.T) {
 			t.Fatalf("the leftover directory still exists after the hold ended (lstat err %v)", err)
 		}
 	})
+	t.Run("content that appears before the leftover's deletion refuses the convergence", func(t *testing.T) {
+		f := newWorktreeRemoveFixture(t)
+		facts := f.facts(true)
+		if err := os.RemoveAll(f.dir); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := f.git(f.checkout, "worktree", "prune"); err != nil {
+			t.Fatalf("git worktree prune: %s: %v", out, err)
+		}
+		if err := os.MkdirAll(f.dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		old := removeLeftoverDir
+		removeLeftoverDir = func(dir string) error {
+			// A process still in the directory writes a file between the
+			// emptiness check and the deletion.
+			if err := os.WriteFile(filepath.Join(dir, "late.txt"), []byte("late\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return old(dir)
+		}
+		t.Cleanup(func() { removeLeftoverDir = old })
+		removed, motivo := removeOwnedWorktree(f.checkout, f.dir, worktreeRemovalID, facts)
+		if removed || motivo != WorktreeRemoveNotOwned {
+			t.Fatalf("removeOwnedWorktree = %v %q, want false %q", removed, motivo, WorktreeRemoveNotOwned)
+		}
+		if _, err := os.Stat(filepath.Join(f.dir, "late.txt")); err != nil {
+			t.Fatalf("the late file was touched: %v", err)
+		}
+	})
 	t.Run("an unregistered directory that is not empty stays not_owned", func(t *testing.T) {
 		f := newWorktreeRemoveFixture(t)
 		if err := os.RemoveAll(f.dir); err != nil {

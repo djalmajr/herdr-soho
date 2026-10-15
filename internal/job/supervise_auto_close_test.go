@@ -428,6 +428,9 @@ func TestSuperviseAutoClose(t *testing.T) {
 		if st := f.state(t); st.WorkspaceClosed {
 			t.Fatalf("state = %+v, want the workspace left open", st)
 		}
+		if limpeza := f.report(t)["limpeza"].(map[string]any); limpeza["workspace"] != "open" {
+			t.Fatalf("report limpeza after the unreadable list = %v, want the open workspace (the close is not confirmed)", limpeza)
+		}
 	})
 
 	t.Run("the opt-out removes nothing and closes nothing, and only the folder_retained lands", func(t *testing.T) {

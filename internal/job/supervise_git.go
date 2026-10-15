@@ -620,7 +620,13 @@ func (s *Supervisor) finalize(status string) {
 	if closeIssued {
 		listed, err := s.workspaceListed(snap.State.WorkspaceID)
 		if err != nil {
+			// The close is not confirmed: the report says open until a
+			// later pass can read the list.
 			s.frictionf(err.Error())
+			facts.Workspace = "open"
+			if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
+				s.frictionf("job: finalize: " + err.Error())
+			}
 			return
 		}
 		if !listed {

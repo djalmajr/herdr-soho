@@ -72,9 +72,8 @@ func removeOwnedWorktree(checkout, dir, id string, facts ReportFacts) (removed b
 	}
 	env := platform.EnvFromOS()
 	env["GIT_TERMINAL_PROMPT"] = "0"
-	if emptyLeftover(checkout, dir, env) {
+	if emptyLeftover(checkout, dir, env) && acceptLeftover(dir) {
 		// What an earlier removal left behind: the directory alone.
-		_ = os.Remove(dir)
 		return true, ""
 	}
 	if !jobWorktreeOwned(checkout, dir, "job/"+id, env) {
@@ -104,13 +103,33 @@ func removeOwnedWorktree(checkout, dir, id string, facts ReportFacts) (removed b
 		return false, WorktreeRemoveDirty
 	}
 	if _, err := runStep("git", []string{"-C", checkout, "worktree", "remove", dir}, defaultLocalSyncTimeout, env); err != nil {
-		if emptyLeftover(checkout, dir, env) {
-			_ = os.Remove(dir)
+		if emptyLeftover(checkout, dir, env) && acceptLeftover(dir) {
 			return true, ""
 		}
 		return false, WorktreeRemoveRefused
 	}
 	return true, ""
+}
+
+// removeLeftoverDir deletes the leftover directory; tests replace it to
+// put content in the directory between the check and the deletion.
+var removeLeftoverDir = os.Remove
+
+// acceptLeftover deletes the empty leftover directory and reports whether
+// it counts as removed: deleted, already gone, or — when the deletion
+// fails, as for a directory still held on Windows — still an empty real
+// directory on a fresh read. Content that appeared in the meantime, or a
+// read that cannot tell, refuses the convergence.
+func acceptLeftover(dir string) bool {
+	err := removeLeftoverDir(dir)
+	if err == nil || os.IsNotExist(err) {
+		return true
+	}
+	if !exactDirectory(dir) {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	return err == nil && len(entries) == 0
 }
 
 // emptyLeftover reports whether dir is an empty real directory that the
