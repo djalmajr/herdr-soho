@@ -374,17 +374,20 @@ func TestWakeRetry(t *testing.T) {
 	})
 }
 
-// TestWakeTimeout: each attempt is bounded by Timeout; the whole Run with a
-// zero-duration sleeper finishes well under the 5 s the fake would take per
-// attempt, and the cause is timeout.
+// TestWakeTimeout: each attempt is bounded by the 1.5 s Timeout against a
+// 30 s fake delay, so every attempt still ends by timeout, with room for
+// the process to start and log its call before the kill (a slow start on
+// Windows used to lose the race against the 200 ms bound); the whole Run
+// with a zero-duration sleeper finishes well under the 20 s bound, and the
+// cause is timeout.
 func TestWakeTimeout(t *testing.T) {
-	fakeDir, env := newWakeHookEnv(t, []fakecli.Rule{{AnyArgs: true, Delay: 5000}})
+	fakeDir, env := newWakeHookEnv(t, []fakecli.Rule{{AnyArgs: true, Delay: 30000}})
 	var frictions []string
 	hook := WakeHook{
 		Cmd:      "wakehook slow",
 		JobID:    "job-1",
 		Env:      env,
-		Timeout:  200 * time.Millisecond,
+		Timeout:  1500 * time.Millisecond,
 		Sleep:    func(time.Duration) {},
 		Friction: func(msg string) { frictions = append(frictions, msg) },
 	}
@@ -397,8 +400,8 @@ func TestWakeTimeout(t *testing.T) {
 	if calls := wakeHookCalls(t, fakeDir); len(calls) != 4 {
 		t.Fatalf("hook calls = %d, want 4", len(calls))
 	}
-	if elapsed >= 10*time.Second {
-		t.Fatalf("Run took %s, want under 10s (4 x 200ms attempts)", elapsed)
+	if elapsed >= 20*time.Second {
+		t.Fatalf("Run took %s, want under 20s (4 x 1500ms attempts)", elapsed)
 	}
 	wantFriction(t, frictions, "job: wake hook failed for job-1:7 after 4 attempts (timeout)")
 }

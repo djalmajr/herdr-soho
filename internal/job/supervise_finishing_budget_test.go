@@ -842,12 +842,15 @@ func TestSuperviseFinishingGhErrorKeepsDoneAndIsNotSynced(t *testing.T) {
 }
 
 // A push that fails on its own command timeout (not the step's clamp) is a
-// plain step error: the job keeps done and the sync is not recorded.
+// plain step error: the job keeps done and the sync is not recorded. The
+// 2 s command timeout stays below the 20 s step bound while giving the
+// remote hook time to start and log on a slow Windows CI; the hook is held
+// for 10 s, so it is still waiting when the timeout kills the push.
 func TestSuperviseFinishingPushErrorBelowTheStepBoundIsNotSynced(t *testing.T) {
 	f := newSupGitFixture(t, supGitGhRules)
 	f.job.commitIn(t, "feat: first")
-	holdRemotePush(t, f, 3*time.Second)
-	f.sup.Git.NetTimeout = 300 * time.Millisecond
+	holdRemotePush(t, f, 10*time.Second)
+	f.sup.Git.NetTimeout = 2 * time.Second
 	finishingRealClock(f, finishingLimits{Budget: 30 * time.Second, Git: 20 * time.Second})
 	exit, err, _ := finishDone(t, f)
 	if err != nil || exit != 0 {
