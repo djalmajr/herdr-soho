@@ -140,9 +140,16 @@ When the checkout is missing, the job clones it into `<job_repos_root>/<org>/<re
 ## Lifecycle
 
 ```text
-accepted -> preparing -> running <-> blocked -> finishing -> {done | failed | blocked | timeout | canceled}
-                                                                     -> collected -> closed
+accepted -> preparing -> running <-> blocked
+                         running -> finishing
+                         blocked -> finishing
+finishing -> {done | failed | timeout | canceled} -> closed
+finishing -> blocked
 ```
+
+The graph shows every edge the job store allows, except the legacy `collected` edges described below; a start or preparation failure reaches `failed` along these same edges.
+
+The `closed` edge is the owner's `job close`, accepted only from a terminal outcome, from `collected` or from `closed` itself (a no-op retry): a live `blocked` job is never closed, and the blocked ceiling ends the job `timeout` through the stop path (see Blocked jobs below). `collected` is a legacy state no current command records: `job collect` is a read that leaves the status at the terminal outcome, and `job close` moves a terminal job straight to `closed`, so `collected` can only appear in a `state.json` written by an older binary. The read commands treat it as a report-carrying state, and `job close` from it finishes the close as from a terminal outcome.
 
 State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: temp file next to the target, then rename; mode 0600), `events.jsonl`, `brief.json`, `brief.md`, `report.md`, `report.json`, `lock` and `control/`. The directory sits at the state root, outside any workspace id, so it survives the workspace.
 
@@ -245,7 +252,7 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
   "eventos": { "total": 42, "ultimo_seq": 42, "arquivo": "<abs>/events.jsonl" },
   "custo": { "inicio": "<ISO 8601 with offset>", "fim": "<ISO 8601 with offset>", "duracao_s": 2710, "workers": 3 },
   "logs": { "report_md": "<abs>", "state_dir": "<abs>", "friction": "<abs>" },
-  "limpeza": { "workspace": "closed", "worktree": "kept", "panes_fechados": 4, "removivel": true },
+  "limpeza": { "workspace": "closed", "worktree": "kept", "removivel": true },
   "publico": { "verdict": "pass", "blockers": [], "ids": ["TASK-123", "PR#12"] }
 }
 ```
@@ -254,6 +261,7 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 - `failed`: partial items with no pending decision, a failed check or review, or a job orchestrator that settled without a report or disappeared.
 - `blocked`: an unresolved question, dialog, quota or provider error; the question goes in `perguntas`.
 - `memoria.global` holds suggestions that may apply beyond this repository; `memoria.projeto` holds notes that apply only to it. The job never writes them anywhere else; the dispatcher routes them.
+- `limpeza`: `worktree` (`removed` or `kept`) and `removivel` are always present; `workspace` is present when the supervisor records the workspace outcome — `closed` when the workspace closed, `open` when it did not — and is absent from a report without a recorded outcome. The example shows the fields the report produces.
 - `limpeza.removivel` is informational: true when the job worktree is clean and in sync with `origin/job/<id>`, the same facts the automatic close checks before removing it (see Release and automatic close); it never causes a removal.
 - `partial` and `partial_collaborations`: as in Status; `colaboracoes` (present only when the job had collaborations) holds the per-collaboration evidence and outcome. `parciais` keeps counting the `[partial]` items of the orchestrator's report; partial items with no pending decision still end the job `failed`.
 - `publico` is built from an allowlist of fields. It is the only part of a report that may appear on a public forge.
