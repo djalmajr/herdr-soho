@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/djalmajr/soho/internal/core"
 	"github.com/djalmajr/soho/internal/platform"
 )
 
@@ -64,6 +65,33 @@ func TestTeam(t *testing.T) {
 		f := newTeamFix(t)
 		writeTeamFile(t, filepath.Join(f.repo, ".agents", "herdr-soho.conf"), "lane.build.roles=implementer\n")
 		f.wantCode(t, nil, 2)
+	})
+
+	t.Run("a team file only in the former herdr-soho directory is read", func(t *testing.T) {
+		f := newTeamFix(t)
+		legacy := filepath.Join(filepath.Dir(core.LegacyUserConfigPath("linux", f.env)), "teams", teamOrg, teamRepo+".conf")
+		writeTeamFile(t, legacy, "panes=3\nlane.build.roles=implementer\n")
+		team, err := f.resolve(nil)
+		if err != nil {
+			t.Fatalf("ResolveTeam: %v", err)
+		}
+		if team.Source != "teams/"+teamOrg+"/"+teamRepo+".conf" || team.File != legacy {
+			t.Fatalf("team = %s %s, want the legacy repository file", team.Source, team.File)
+		}
+	})
+
+	t.Run("the soho team file wins over the former one", func(t *testing.T) {
+		f := newTeamFix(t)
+		legacy := filepath.Join(filepath.Dir(core.LegacyUserConfigPath("linux", f.env)), "teams", teamOrg, teamRepo+".conf")
+		writeTeamFile(t, legacy, "panes=3\nlane.build.roles=implementer\n")
+		f.writeTeam(t, "repo", "panes=4\nlane.build.roles=implementer\n")
+		team, err := f.resolve(nil)
+		if err != nil {
+			t.Fatalf("ResolveTeam: %v", err)
+		}
+		if team.File != f.repoFile() {
+			t.Fatalf("team file = %s, want the soho one %s", team.File, f.repoFile())
+		}
 	})
 
 	t.Run("no configuration exits 2", func(t *testing.T) {

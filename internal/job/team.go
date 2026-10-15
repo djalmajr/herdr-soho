@@ -41,7 +41,10 @@ type teamCandidate struct {
 }
 
 // ResolveTeam reads teams/<org>/<repo>.conf, then teams/default.conf, then
-// <repoRoot>/.agents/soho.conf when that file sets lane.*.roles.
+// <repoRoot>/.agents/soho.conf when that file sets lane.*.roles. Each team
+// file is read from the soho user configuration directory, or, while it
+// is absent there, from the former herdr-soho directory (the
+// compatibility window); the source keeps the same relative name.
 // osName is the platform name platform.UserConfigPath expects.
 // overrides is the brief equipe map; nil means none. Keys and values are
 // checked with core.ConfigKeyOk and core.ConfigValueOk, the session set
@@ -55,9 +58,13 @@ func ResolveTeam(osName string, env platform.Env, repoRoot, org, repo string, ov
 		return Team{}, exitErr(2, "team: invalid repository")
 	}
 	userDir := filepath.Dir(platform.UserConfigPath(osName, env))
+	legacyDir := filepath.Dir(core.LegacyUserConfigPath(osName, env))
+	userTeamFile := func(parts ...string) string {
+		return core.EffectiveConfigFile(filepath.Join(append([]string{userDir, "teams"}, parts...)...), filepath.Join(append([]string{legacyDir, "teams"}, parts...)...))
+	}
 	candidates := []teamCandidate{
-		{source: "teams/" + org + "/" + repo + ".conf", file: filepath.Join(userDir, "teams", org, repo+".conf")},
-		{source: "teams/default.conf", file: filepath.Join(userDir, "teams", "default.conf")},
+		{source: "teams/" + org + "/" + repo + ".conf", file: userTeamFile(org, repo+".conf")},
+		{source: "teams/default.conf", file: userTeamFile("default.conf")},
 		{source: ".agents/soho.conf", file: filepath.Join(repoRoot, ".agents", "soho.conf"), roles: true},
 	}
 	var chosen teamCandidate
