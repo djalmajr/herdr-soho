@@ -59,8 +59,19 @@ func ResolveTeam(osName string, env platform.Env, repoRoot, org, repo string, ov
 	}
 	userDir := filepath.Dir(platform.UserConfigPath(osName, env))
 	legacyDir := filepath.Dir(core.LegacyUserConfigPath(osName, env))
+	// The former file is read only when the soho path does not exist at
+	// all: a soho path that exists but is not a regular file still goes
+	// to regularTeamFile, which refuses it.
 	userTeamFile := func(parts ...string) string {
-		return core.EffectiveConfigFile(filepath.Join(append([]string{userDir, "teams"}, parts...)...), filepath.Join(append([]string{legacyDir, "teams"}, parts...)...))
+		current := filepath.Join(append([]string{userDir, "teams"}, parts...)...)
+		if _, err := os.Lstat(current); !os.IsNotExist(err) {
+			return current
+		}
+		legacy := filepath.Join(append([]string{legacyDir, "teams"}, parts...)...)
+		if _, err := os.Lstat(legacy); err == nil {
+			return legacy
+		}
+		return current
 	}
 	candidates := []teamCandidate{
 		{source: "teams/" + org + "/" + repo + ".conf", file: userTeamFile(org, repo+".conf")},

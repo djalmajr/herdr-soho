@@ -94,6 +94,16 @@ func TestTeam(t *testing.T) {
 		}
 	})
 
+	t.Run("a soho team path that is not a file is refused even with a former file", func(t *testing.T) {
+		f := newTeamFix(t)
+		legacy := filepath.Join(filepath.Dir(core.LegacyUserConfigPath("linux", f.env)), "teams", teamOrg, teamRepo+".conf")
+		writeTeamFile(t, legacy, "panes=3\nlane.build.roles=implementer\n")
+		if err := os.MkdirAll(f.repoFile(), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		f.wantCode(t, nil, 2)
+	})
+
 	t.Run("no configuration exits 2", func(t *testing.T) {
 		f := newTeamFix(t)
 		f.wantCode(t, nil, 2)
