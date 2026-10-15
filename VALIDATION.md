@@ -30,13 +30,14 @@ If one of these is unavailable, the verdict is BLOCKED (see Verdict criteria), n
 - The machine configuration keys `machine_label`, `job_orgs` (it must list the sandbox organization), `job_repos_root`, and optionally `job_timeout` and `job_blocked_timeout`, exist in the user configuration file `config` inside the `herdr-soho` user configuration directory.
 - A team file exists in that directory (`teams/<org>/<repo>.conf` or `teams/default.conf`), or the sandbox repository carries `.agents/herdr-soho.conf` with at least one `lane.*.roles`. A job never falls back to the built-in pane presets, so without one of these `job start` exits 2.
 - The worker CLI named by the team is installed and authenticated, runs without interactive approvals (`approvals=full` in the team file), and will not stop at a first-use workspace trust dialog for a new directory. See [docs/startup-trust.md](docs/startup-trust.md); a job that ends `blocked` at such a dialog is BLOCKED, not PASS.
-- `auto_approve` stays off, so that no unclassified dialog is answered automatically.
+- Before the first smoke, open the job orchestrator's CLI once, interactively, at the sandbox checkout's root, and accept its trust prompt; the job worktrees below that root inherit the trust and open without the dialog. See [docs/startup-trust.md](docs/startup-trust.md) for the other CLIs. Never grant trust to the home directory, to a parent directory outside the sandbox, or to the product repository.
+- `auto_approve` stays off, so that no unclassified dialog is answered automatically. That does not disable launch-time grants: `approvals=full` already grants trust and MCP access at launch in some adapters (for example the Cursor `--trust` and `--approve-mcps` flags and the Claude project MCP enablement), so before launch inspect the server account's inherited project resources and MCP configuration and record the installed adapter's full-mode trust and MCP grants.
 
 ### Environment consistency
 
 `job start` creates the job workspace without forwarding environment variables. The supervisor therefore runs with the environment of the Herdr server and reads the user configuration file that environment resolves. `job supervise` finds the job by scanning `<job_repos_root>/*/*` from that configuration, and the other subcommands (`status`, `wait`, `events`, `collect`, `ack`, `cancel`, `close`, `list`) locate the job the same way from the configuration of the shell that runs them.
 
-The configuration that `job start` reads (for example through `XDG_CONFIG_HOME`) must resolve to the same user configuration file as the Herdr server's environment, or at least to the same `job_repos_root`; otherwise the supervisor cannot find the job. Overriding the configuration only in the invoking shell is not a valid isolated setup. Record the user configuration directory and `job_repos_root` that both sides use in the evidence, with secrets redacted.
+The configuration that `job start` reads (for example through `XDG_CONFIG_HOME`) must resolve to the same user configuration file as the Herdr server's environment; otherwise the supervisor cannot find the job. Each side also resolves its own absolute state root: `HERDR_SOHO_DIR` takes precedence over `HERDR_SOHO_STATE_DIR`, which takes precedence over the `state_dir` setting, and the legacy `HERDR_AGENTS_DIR` and `HERDR_AGENTS_STATE_DIR` variables are copied when the new ones are absent, so a state override in only one environment is not a valid isolated setup. The machine keys are read only from the user configuration file, with no project or session override. Record the effective user configuration, the machine keys, the team and session configuration and the absolute state root for the invoking shell, the Herdr server environment and the worker environment, with secrets redacted, and stop, as BLOCKED, unless both job readers resolve the same stored job.
 
 ## Build provenance
 
@@ -53,15 +54,17 @@ go version -m <evidence-dir>/herdr-soho
 
 On Windows the output file is `<evidence-dir>/herdr-soho.exe`. Then compute the SHA-256 of the binary with the platform's hash tool and record the value.
 
+Copy the `skills/herdr-soho` tree of the same checkout into the binary's directory, so that `SKILL.md`, `roles/` and the rest sit next to `<evidence-dir>/herdr-soho`. Then run `<bin> env` and require the line `skill dir: <evidence-dir> (executable)`. The binary resolves the roles in the order `HERDR_SOHO_SKILL_DIR`, a skill tree beside the executable (searched in the executable's directory and its parents), the skill installed in the home directory, and the embedded skill; the tree beside the executable must be the one that wins, because `HERDR_SOHO_SKILL_DIR` would only apply in the shell that defines it while the Herdr server launches the supervisor with the same executable. Without it, a candidate that adds a role runs against an older installed skill and the job ends `failed` with the motivo `job: cannot ensure the job lane`, because the lane setup rejects the new role as an invalid value.
+
 - `git status --porcelain` must print nothing.
 - The pull request head SHA as the forge reports it must equal `git rev-parse HEAD`.
 - In the `go version -m` output, `vcs.revision` must equal that head SHA and `vcs.modified` must be `false`.
 
-Every later command runs that binary by its absolute path (called `<bin>` below), never a binary found on `PATH`, because `job start` launches the supervisor with its own executable path. A provenance mismatch stops the validation as FAIL.
+Every later command runs that binary by its absolute path (called `<bin>` below), never a binary found on `PATH`. `job start` launches the supervisor with the launcher path, which prefers the `HERDR_SOHO_BIN` override (and its legacy `HERDR_AGENTS_BIN` fallback) over the candidate's own executable path. Before invoking the candidate, ensure both are absent or resolve to the verified candidate, and enforce the same executable identity in the Herdr server and worker environments. A provenance mismatch stops the validation as FAIL.
 
 ## Sandbox repository and bounded task
 
-Use a dedicated, disposable repository that the maintainer controls, referred to as `<org>/<sandbox-repo>`. Never use the product repository or any production repository. The effects of a job on it are:
+Use a dedicated, disposable repository that the maintainer controls, referred to as `<org>/<sandbox-repo>`. Never use the product repository or any production repository. Before any `job start`, preflight the sandbox checkout: it must exist from an SSH clone, and every effective origin fetch and push URL must be recorded and verified against the intended forge repository and base. The supervisor pushes through that origin, while the pull request uses the repository given to it; a reused checkout with a divergent fetch or push URL can receive commits outside the sandbox before the job's own checks run. Stop on any mismatch and record the verdict as BLOCKED with the recorded URLs in the evidence. The effects of a job on it are:
 
 - With `--mode worktree` (the default), the job creates `<checkout>/.worktrees/job-<id>` on branch `job/<id>`, where `<checkout>` is `<job_repos_root>/<org>/<sandbox-repo>`.
 - The supervisor pushes `job/<id>` to the sandbox remote even when the job made no commit; the remote branch then points at the base commit.
@@ -113,7 +116,7 @@ Run each command through `<bin>`, and capture each command's stdout, stderr and 
 5. Read the state: `<bin> job status --id <id>`.
 6. Follow the events, repeating with the last `ultimo_seq` until the state is terminal: `<bin> job events --id <id> --since 0 --wait <ms>`, then `<bin> job events --id <id> --since <ultimo_seq> --wait <ms>`. `--wait` accepts at most 600000 ms.
 7. Wait for the terminal state, repeating until the printed `status` is terminal: `<bin> job wait --id <id> --timeout 600000`. The maximum per call is 600000 ms; repeating a read does not widen the job budget. See Observing the run for the exit codes of this command.
-8. Collect the report in three forms: `<bin> job collect --id <id>`, `<bin> job collect --id <id> --md` and `<bin> job collect --id <id> --verify`. The last one recomputes the SHA-256 of every `artefatos[].path` of `report.json` and exits 16 when one differs or is missing.
+8. After the terminal status, read `job events` until the `cleanup` event, and only then collect the report in three forms: `<bin> job collect --id <id>`, `<bin> job collect --id <id> --md` and `<bin> job collect --id <id> --verify`. `limpeza.workspace` in `report.json` is written only after the cleanup finishes, so a collect before the `cleanup` event is incomplete; the last command recomputes the SHA-256 of every `artefatos[].path` of `report.json` and exits 16 when one differs or is missing.
 9. Record `herdr workspace list` again after the terminal state, as described in Observing the run.
 10. Only when `decisions_pendentes`, as printed by `job status` and `job collect`, is not empty: read each pending decision, record it in the evidence, and run `<bin> job ack --id <id> --upto <seq>` with the highest pending `seq`.
 11. Close the job: `<bin> job close --id <id>`. Never use `--force` in a validation run. It exits 24 while a decision is unacknowledged.
@@ -128,7 +131,7 @@ Observation is read-only. Never type into, answer a dialog in, or otherwise act 
 - The events must include `accepted`, `preparing`, `worker_spawned`, `worker_done`, `terminal` and `cleanup`, and their `seq` values must be consecutive integers from 1 with no gaps. The last line of `job events` is always `{"eventos":"fim","ultimo_seq":N,"estado":"<state>"}`. A job that made a commit also has `commit`, `push` and `pr_opened` events.
 - The terminal status becomes visible before the supervisor releases the workers, appends `cleanup` and closes the workspace, and `limpeza.workspace` in `report.json` is written before the close happens. After `job wait` returns a terminal status, keep reading `job events` until the `cleanup` event, then run `herdr workspace list` (repeat it for a short while if the workspace is still listed). The workspace `job-<id>` must no longer be listed; the report field alone is not proof.
 - `job wait` exits 0 for `done`, 7 for `blocked`, 9 for `timeout`, 19 for `failed` and 21 for `canceled`. It also returns when the job is `blocked`, and it exits 9 when its own `--timeout` bound elapses with the job still running, so read the `status` in the printed line instead of the exit code alone.
-- A `blocked` job is not finished. The validation does not answer it; record its events and `motivo`, and end the attempt with `<bin> job cancel --id <id>`, recording that command like the others. The `blocked` exit codes 11 (quota) and 14 (provider error) carry the reason in `motivo`.
+- A `blocked` job is not finished. The validation does not answer it; record its events and `motivo`. `job wait` exits 7 for every `blocked` status, whether the reason is quota, a provider error or a dialog, so distinguish the cause using `motivo` and the recorded events, not exit codes. End the attempt with `<bin> job cancel --id <id>`, recording that command like the others. Cancel queues a stop request and returns without waiting for the finalization; it may commit and push unfinished files and create or retain a draft pull request. After cancel, observe the terminal `canceled` state, the `cleanup` event and the actual disappearance of the workspace, and retain all resulting evidence.
 
 ## Verdict criteria (PASS, FAIL, BLOCKED)
 
@@ -139,7 +142,7 @@ PASS requires all of these:
 - The workspace `job-<id>` was observed live with the supervisor pane and the job orchestrator's pane.
 - The events include `accepted`, `preparing`, `worker_spawned`, `worker_done`, `terminal` and `cleanup`, with consecutive `seq`.
 - The terminal `status` is `done` (exit 0) with `partial: false`.
-- `report.json` has every item in `itens` with `estado` `done`, and `limpeza.workspace` is `closed`.
+- Every item in `report.json` `itens` that comes from the brief — the objective, the `aceite` criteria and the `decisoes` — has `estado` `done`; an item the job orchestrator adds about its own process may be `skipped` only when its role permits it and the item carries the reason. Any item with `estado` `partial` is FAIL. `limpeza.workspace` is `closed`.
 - `report.md` exists.
 - `job collect --verify` exits 0.
 - The sandbox shows the expected file on `job/<id>` and the draft pull request.
@@ -176,17 +179,21 @@ date -u +%Y-%m-%dT%H:%M:%SZ > <evidence-dir>/<step>.end
 
 In PowerShell, read the exit code from `$LASTEXITCODE` and the timestamps from `(Get-Date).ToUniversalTime().ToString('o')`.
 
-In the pull request or the validation record:
+In the private validation record:
 
+- Keep the sanitized raw command output, the reports and the events, with their hashes, exclusively here.
 - Paste stdout, stderr and exit codes verbatim in fenced code blocks, unedited and untruncated. The only permitted change is redacting secrets, and each redaction is named (what kind of value, and where).
 - Include the exact head SHA, the tree hash, the binary SHA-256 and the full `go version -m` output.
 - Include the final `report.json` and `report.md` from `job collect`, and the events log.
 - Keep a hash index: the SHA-256 of every evidence file, one per line.
-- Public pull request text carries only product content and issue identifiers. Machine names, local paths, hosts, accounts, models and costs stay in the private evidence directory.
+
+In the pull request:
+
+- Publish only the public summary, the issue identifiers and the verdict. Machine names, local paths, hosts, accounts, models and costs stay in the private validation record.
 
 ## What this validation does not prove
 
 - It does not replace the repository gates. `gofmt`, `go vet ./...`, `go test ./...` and `go test -race -timeout=30m ./...` still run on the same frozen head, and each must pass.
-- It does not replace green CI or a separate review. A merge needs both, and the author never merges their own pull request.
+- It does not replace green CI or a separate review. Only the repository owner-maintainer merges, and only after a review OK on the exact head, green CI and a recorded smoke PASS. A CI failure stops blocking only when it is proven, with the evidence recorded, that it already exists on the base and is unrelated to the pull request; that exception never waives the smoke.
 - It proves one bounded task with one team shape on one machine and one platform. It does not prove other team shapes, other worker CLIs, other platforms, blocked-job recovery, cancellation, timeouts or large repositories unless the pull request changes them and the validation exercises them.
 - It does not prove the quality of a worker's output beyond the bounded task, nor the behavior of the sandbox forge or of the worker provider.
