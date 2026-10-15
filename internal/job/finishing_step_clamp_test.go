@@ -2,6 +2,7 @@ package job
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -10,12 +11,49 @@ import (
 
 // finishing_step_clamp_test.go pins that the finishing clamp is applied to
 // each real subprocess of a multi-command GitSync step, not once per step:
-// a later command gets only what is left of the step when it starts.
+// a later command gets only what is left of the step when it starts. On
+// Windows every scenario duration is multiplied by clampScale, and the
+// step-consuming command is shortened by spawnAllowance: opening a fake
+// process there costs close to a second, and each scenario opens two.
 
 // clampSlack is the slack over a step's bound the regressions allow: the
 // platform WaitDelay is 1 s per killed command, plus 0.5 s for the process
-// spawn, the git push and the store writes around it.
+// spawn, the git push and the store writes around it. It scales with
+// clampScale like the scenario durations.
 const clampSlack = 1500 * time.Millisecond
+
+// clampScale is the Windows factor of the scenario durations: the step,
+// the command delays and the slack are all multiplied by it, keeping the
+// proportions between them, and the assertions scale with them. On Unix
+// the durations are unchanged.
+var clampScale = 1
+
+// spawnAllowance is the Windows margin of the step-consuming command: it
+// runs for its scenario proportion of the scaled step minus the allowance
+// (0.9 x the step for the 2 s scenarios), so the next command still opens
+// inside the step. It is 3 s on Windows and zero on Unix, where the
+// durations are unchanged.
+var spawnAllowance = 0 * time.Second
+
+func init() {
+	if runtime.GOOS == "windows" {
+		clampScale = 4
+		spawnAllowance = 3 * time.Second
+	}
+}
+
+// scaledDuration scales a scenario duration by clampScale.
+func scaledDuration(d time.Duration) time.Duration {
+	return time.Duration(int64(d) * int64(clampScale))
+}
+
+// scaledMS scales a fake command delay, in milliseconds, by clampScale.
+func scaledMS(ms int) int { return ms * clampScale }
+
+// stepConsumingDelay is the delay of the command that consumes the step:
+// its scenario proportion of the step, scaled, minus the spawn allowance
+// (zero on Unix: the durations are unchanged there).
+func stepConsumingDelay(ms int) int { return scaledMS(ms) - int(spawnAllowance/time.Millisecond) }
 
 // stepDeadlineLimit models the supervisor's finCap for a GitSync used on its
 // own: every timeout is the default or what is left of the step, never below
@@ -47,17 +85,19 @@ func TestFinishingGhStepBoundsTheSecondCommandByTheRemainder(t *testing.T) {
 		{"step 5s, list 4s", 5 * time.Second, 4000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			step := scaledDuration(tc.step)
+			delay := stepConsumingDelay(tc.delay)
 			rules := []fakecli.Rule{
-				{Argv: ghListArgv(), Stdout: "[]\n", Delay: tc.delay},
+				{Argv: ghListArgv(), Stdout: "[]\n", Delay: delay},
 				{Argv: ghCreateArgv("feat: first", supGitPRBody), Stdout: gitSyncPRURL + "\n", Delay: 60000},
 			}
 			f := newSupGitFixture(t, rules)
 			f.job.commitIn(t, "feat: first")
-			finishingRealClock(f, finishingLimits{Budget: 60 * time.Second, Git: 30 * time.Second, GH: tc.step})
+			finishingRealClock(f, finishingLimits{Budget: 60 * time.Second, Git: 30 * time.Second, GH: step})
 			exit, err, elapsed := finishDone(t, f)
-			t.Logf("gh step %v, list %dms, create hangs: terminal in %v", tc.step, tc.delay, elapsed)
-			if elapsed > tc.step+clampSlack {
-				t.Errorf("terminal path took %v, want at most the %v gh step + %v", elapsed, tc.step, clampSlack)
+			t.Logf("gh step %v, list %dms, create hangs: terminal in %v", step, delay, elapsed)
+			if elapsed > step+scaledDuration(clampSlack) {
+				t.Errorf("terminal path took %v, want at most the %v gh step + %v", elapsed, step, scaledDuration(clampSlack))
 			}
 			requireBudgetFailed(t, f, exit, err, "the draft pull request")
 			if got := len(f.job.base.ghCalls()); got != 2 {
@@ -85,6 +125,8 @@ func TestCheckpointBoundsTheLaterCommandsByTheStepRemainder(t *testing.T) {
 		{"step 2s, add 1.8s, diff hangs", 2 * time.Second, 1800, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			step := scaledDuration(tc.step)
+			delay := stepConsumingDelay(tc.delay)
 			dir := t.TempDir()
 			fakeDir := t.TempDir()
 			diffRule := fakecli.Rule{Argv: []string{"-C", dir, "diff", "--cached", "--quiet"}, Code: 1}
@@ -95,7 +137,7 @@ func TestCheckpointBoundsTheLaterCommandsByTheStepRemainder(t *testing.T) {
 				commitRule.Delay = 60000
 			}
 			rules := []fakecli.Rule{
-				{Argv: []string{"-C", dir, "add", "-A"}, Delay: tc.delay},
+				{Argv: []string{"-C", dir, "add", "-A"}, Delay: delay},
 				diffRule,
 				commitRule,
 			}
@@ -104,21 +146,21 @@ func TestCheckpointBoundsTheLaterCommandsByTheStepRemainder(t *testing.T) {
 			}
 			g := &GitSync{Env: envFromPairs(t, fakecli.Env(nil, fakeDir)), Dir: dir, Branch: gitSyncBranch, Base: "main", Repo: gitSyncRepo}
 			start := time.Now()
-			g.Limit = stepDeadlineLimit(start.Add(tc.step))
+			g.Limit = stepDeadlineLimit(start.Add(step))
 			committed, err := g.Checkpoint()
 			elapsed := time.Since(start)
-			t.Logf("checkpoint step %v, add %dms, hang on diff=%v: returned in %v (committed=%v err=%v)", tc.step, tc.delay, tc.hangDiff, elapsed, committed, err)
+			t.Logf("checkpoint step %v, add %dms, hang on diff=%v: returned in %v (committed=%v err=%v)", step, delay, tc.hangDiff, elapsed, committed, err)
 			// A killed diff counts as a staged diff and the commit then runs on
 			// the 1 ms the step has left, so only the hung commit has a fixed
 			// result.
 			if !tc.hangDiff && (err == nil || committed) {
 				t.Errorf("Checkpoint = %v, %v, want the checkpoint error", committed, err)
 			}
-			if elapsed < time.Duration(tc.delay)*time.Millisecond {
-				t.Errorf("returned in %v, before the %dms add: the scenario did not run", elapsed, tc.delay)
+			if elapsed < time.Duration(delay)*time.Millisecond {
+				t.Errorf("returned in %v, before the %dms add: the scenario did not run", elapsed, delay)
 			}
-			if elapsed > tc.step+clampSlack {
-				t.Errorf("Checkpoint took %v, want at most the %v step + %v", elapsed, tc.step, clampSlack)
+			if elapsed > step+scaledDuration(clampSlack) {
+				t.Errorf("Checkpoint took %v, want at most the %v step + %v", elapsed, step, scaledDuration(clampSlack))
 			}
 			calls, err := fakecli.ReadCalls(filepath.Join(fakeDir, "git.calls.jsonl"))
 			if want := 3; err != nil || len(calls) < want-1 || !tc.hangDiff && len(calls) != want {
