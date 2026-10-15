@@ -122,7 +122,9 @@ func TestTM8LegacyCore(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, ".agents", "herdr-agents.conf"), []byte("max_workers=11\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HOME": t.TempDir()}
+		// The repository's skill supplies the defaults on every system: a
+		// Windows lookup finds none from HOME alone.
+		env := platform.Env{"HOME": t.TempDir(), "SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho")}
 		if got := ProjectConfigFileUsed(env, root); got != "" {
 			t.Fatalf("herdr-agents.conf is still used=%q", got)
 		}

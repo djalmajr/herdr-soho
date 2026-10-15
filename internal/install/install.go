@@ -203,6 +203,11 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := src.Close(); err != nil {
 		return Result{}, fmt.Errorf("install: closing temp file: %w", err)
 	}
+	// Closed before the rename: Windows refuses to rename a file that is
+	// still open.
+	if err := copyTmp.Close(); err != nil {
+		return Result{}, fmt.Errorf("install: closing temp file: %w", err)
+	}
 
 	// Executable mode on POSIX for both files; the renames below carry the
 	// mode to the destinations. Windows needs no mode change.
