@@ -609,9 +609,9 @@ func TestSessionRenderTreeSelectedLeafVisibleWithParentContext(t *testing.T) {
 		entries = append(entries, add(i, "remote-b", "shared", "id-2"))
 	}
 	for _, sel := range []int{0, 40, 61} {
-		out := renderSessionTestFrame(entries, sel, 40, 14, false, true, "")
-		lines := assertSessionBounded(t, out, 40, 14)
-		if len(lines) != 14 {
+		out := renderSessionTestFrame(entries, sel, 40, 18, false, true, "")
+		lines := assertSessionBounded(t, out, 40, 18)
+		if len(lines) != 18 {
 			t.Fatalf("sel=%d: frame must fill the viewport, got %d lines:\n%s", sel, len(lines), out)
 		}
 		highlighted := sessionHighlightedLines(t, lines)
@@ -628,8 +628,8 @@ func TestSessionRenderTreeSelectedLeafVisibleWithParentContext(t *testing.T) {
 	// Entry 62 (index 61) is the sixth leaf of the remote-b 'shared
 	// · id-2' group, so the header fits above the window and the
 	// leaf stays visible.
-	out := renderSessionTestFrame(entries, 61, 40, 14, false, true, "")
-	lines := assertSessionBounded(t, out, 40, 14)
+	out := renderSessionTestFrame(entries, 61, 40, 18, false, true, "")
+	lines := assertSessionBounded(t, out, 40, 18)
 	window := lines[2:] // header and search on top; a full window takes no separator
 	if len(window) == 0 {
 		t.Fatalf("no window lines:\n%s", out)
@@ -720,7 +720,7 @@ func TestSessionRenderSearchLoadingFailureAndPinStates(t *testing.T) {
 	})
 }
 
-func TestSessionRenderFooterAnchoredAtLastRow(t *testing.T) {
+func TestSessionRenderFooterAboveTheFixedStatusStrip(t *testing.T) {
 	entries := sessionTestEntries(1)
 	for height := 1; height <= 30; height++ {
 		out := renderSessionTestFrame(entries, 0, 70, height, false, false, "")
@@ -729,37 +729,62 @@ func TestSessionRenderFooterAnchoredAtLastRow(t *testing.T) {
 			t.Fatalf("height %d: frame must fill the viewport, got %d lines:\n%s", height, len(lines), out)
 		}
 		last := stripSessionSGR(lines[len(lines)-1])
-		if !strings.HasSuffix(last, "Esc Close") && height >= 3 {
-			// The Esc guidance survives; the full wording needs room.
+		switch {
+		case height >= 10:
+			// The fixed status strip ends the frame: the divider and the
+			// Ready status line below the shortcuts, in order.
+			if !strings.HasSuffix(last, "Ready") {
+				t.Fatalf("height %d: status line must close the frame: %q", height, last)
+			}
+			if div := stripSessionSGR(lines[len(lines)-2]); !strings.Contains(div, "\u2500") {
+				t.Fatalf("height %d: divider missing above the status line: %q", height, div)
+			}
+			if !strings.HasSuffix(stripSessionSGR(lines[len(lines)-3]), "Esc Close") {
+				t.Fatalf("height %d: footer lost above the divider: %q", height, lines[len(lines)-3])
+			}
+		case height >= 7:
+			// Degraded strip: the status line keeps its row, the divider
+			// drops, the footer sits directly above.
+			if !strings.HasSuffix(last, "Ready") {
+				t.Fatalf("height %d: status line must close the frame: %q", height, last)
+			}
+			if !strings.HasSuffix(stripSessionSGR(lines[len(lines)-2]), "Esc Close") {
+				t.Fatalf("height %d: footer lost above the status line: %q", height, lines[len(lines)-2])
+			}
+		default:
+			// No strip room: the footer keeps its bottom anchor.
 			if !strings.Contains(last, "Esc") {
 				t.Fatalf("height %d: Esc guidance lost: %q", height, last)
 			}
 		}
-		if height >= 8 {
-			// The full three-line footer, in order, on the last rows.
-			a := stripSessionSGR(lines[len(lines)-3])
-			b := stripSessionSGR(lines[len(lines)-2])
-			c := stripSessionSGR(lines[len(lines)-1])
-			if !strings.Contains(a, "↑↓ Select") || !strings.Contains(a, "v Tree") {
-				t.Fatalf("height %d: footer line 1 wrong: %q", height, a)
-			}
-			if !strings.Contains(b, "p Pane") || !strings.Contains(b, "s Status") {
-				t.Fatalf("height %d: footer line 2 wrong: %q", height, b)
-			}
-			if !strings.Contains(c, "c Copy") || !strings.Contains(c, "Enter Focus") || !strings.Contains(c, "Esc Close") {
-				t.Fatalf("height %d: footer line 3 wrong: %q", height, c)
-			}
+	}
+	// The full three-line footer, in order, above the strip.
+	for height := 10; height <= 30; height += 5 {
+		out := renderSessionTestFrame(entries, 0, 70, height, false, false, "")
+		lines := assertSessionBounded(t, out, 70, height)
+		a := stripSessionSGR(lines[len(lines)-5])
+		b := stripSessionSGR(lines[len(lines)-4])
+		c := stripSessionSGR(lines[len(lines)-3])
+		if !strings.Contains(a, "↑↓ Select") || !strings.Contains(a, "v Tree") {
+			t.Fatalf("height %d: footer line 1 wrong: %q", height, a)
+		}
+		if !strings.Contains(b, "p Pane") || !strings.Contains(b, "s Status") {
+			t.Fatalf("height %d: footer line 2 wrong: %q", height, b)
+		}
+		if !strings.Contains(c, "c Copy") || !strings.Contains(c, "Enter Focus") || !strings.Contains(c, "Esc Close") {
+			t.Fatalf("height %d: footer line 3 wrong: %q", height, c)
 		}
 	}
 	// The board footer gains r Refresh in the remaining space, and the
 	// view toggle flips with the view.
 	board := renderSessionTestFrame(sessionTestEntries(3), 0, 70, 16, true, false, "")
 	boardLines := strings.Split(strings.TrimSuffix(board, "\n"), "\n")
-	if !strings.Contains(stripSessionSGR(boardLines[len(boardLines)-3]), "r Refresh") {
+	if !strings.Contains(stripSessionSGR(boardLines[len(boardLines)-5]), "r Refresh") {
 		t.Fatalf("board footer missing r Refresh:\n%s", board)
 	}
 	tree := renderSessionTestFrame(sessionTestEntries(3), 0, 70, 16, false, true, "")
-	if !strings.Contains(tree, "v Table") {
+	treeLines := strings.Split(strings.TrimSuffix(tree, "\n"), "\n")
+	if !strings.Contains(stripSessionSGR(treeLines[len(treeLines)-5]), "v Table") {
 		t.Fatalf("tree footer must offer v Table:\n%s", tree)
 	}
 }
@@ -899,15 +924,15 @@ func TestSessionRenderAgentColumnDropsBeforeCompression(t *testing.T) {
 		{"ref": "r2", "name": "short-2", "kind": "longagentname2", "status": "blocked", "workspace_label": "ws-2", "tab_label": "t", "cwd": "/tmp/b", "machine": "local"},
 	}
 	// Wide: the agent column is present and aligned.
-	wide := renderSessionTestFrame(entries, 0, 80, 10, false, false, "")
+	wide := renderSessionTestFrame(entries, 0, 80, 14, false, false, "")
 	if !strings.Contains(wide, "longagentname1") || !strings.Contains(wide, "longagentname2") {
 		t.Fatalf("wide window must keep the agent column:\n%s", wide)
 	}
 	// Narrow: the agent column is dropped before the essential columns
 	// are compressed, and the pane stays readable (the header labels
 	// Machine/Workspace/Status take part in the sizing).
-	narrow := renderSessionTestFrame(entries, 0, 40, 10, false, false, "")
-	lines := assertSessionBounded(t, narrow, 40, 10)
+	narrow := renderSessionTestFrame(entries, 0, 40, 14, false, false, "")
+	lines := assertSessionBounded(t, narrow, 40, 14)
 	text := strings.Join(lines, "\n")
 	if strings.Contains(text, "longagentname") {
 		t.Fatalf("agent column must be dropped at 40 columns:\n%s", narrow)
@@ -1019,8 +1044,26 @@ func TestSessionRenderEnabledGateKeepsLegacyContract(t *testing.T) {
 			t.Fatalf("the shared renderer must not repeat the popup title:\n%s", out)
 		}
 		lines := assertSessionBounded(t, out, 60, 20)
-		if !strings.HasSuffix(stripSessionSGR(lines[len(lines)-1]), "Esc Close") {
-			t.Fatalf("new footer missing: %q", lines[len(lines)-1])
+		// The shortcuts sit above the fixed status strip (divider + line).
+		if !strings.HasSuffix(stripSessionSGR(lines[len(lines)-3]), "Esc Close") {
+			t.Fatalf("new footer missing: %q", lines[len(lines)-3])
+		}
+	})
+	t.Run("new picker shows the copy notice in the fixed strip", func(t *testing.T) {
+		state := NewPickerState()
+		state.Entries = entries
+		state.ViewState.Enabled = true
+		state.Selected = 2
+		out := renderPickerModal(state, 60, 20, "Copied local/w3:p")
+		lines := assertSessionBounded(t, out, 60, 20)
+		if got := strings.TrimLeft(stripSessionSGR(lines[len(lines)-1]), " "); got != "STATUS  Copied local/w3:p" {
+			t.Fatalf("copy notice missing from the fixed status line: %q", got)
+		}
+		if !strings.Contains(lines[len(lines)-1], sessionStyleBold+"Copied local/w3:p"+sessionStyleReset) {
+			t.Fatalf("the confirmed copy must be bold: %q", lines[len(lines)-1])
+		}
+		if !strings.HasSuffix(stripSessionSGR(lines[len(lines)-3]), "Esc Close") {
+			t.Fatalf("shortcuts must stay above the status line: %q", lines[len(lines)-3])
 		}
 	})
 }
@@ -1066,8 +1109,8 @@ func TestSessionRenderTreeIncomingOrderAndConnectors(t *testing.T) {
 		{"ref": "r1", "name": "agent-01", "kind": "claude", "status": "working", "workspace_label": "alpha", "workspace_id": "a1", "tab_label": "main", "cwd": "/tmp/a"},
 		{"ref": "r2", "name": "agent-02", "kind": "claude", "status": "idle", "workspace_label": "alpha", "workspace_id": "a1", "tab_label": "main", "cwd": "/tmp/a", "machine": "local"},
 	}
-	out = renderSessionTestFrame(missing, 0, 90, 12, false, true, "")
-	lines = assertSessionBounded(t, out, 90, 12)
+	out = renderSessionTestFrame(missing, 0, 90, 14, false, true, "")
+	lines = assertSessionBounded(t, out, 90, 14)
 	if !strings.Contains(stripSessionSGR(strings.Join(lines, "\n")), "local (2)") {
 		t.Fatalf("a missing machine must read local:\n%s", out)
 	}
@@ -1083,13 +1126,18 @@ func TestSessionRenderTableHeaderPinnedAboveScroll(t *testing.T) {
 		t.Fatalf("column header row must be pinned above the rows: %q", header)
 	}
 	text := strings.Join(stripAll(lines), "\n")
-	// The window scrolled to the selection: early rows are out of view,
-	// the selected row is inside the window, the header did not scroll.
+	// The window scrolled to the selection with the strip- and
+	// detail-reserved budget (9 data rows at 90x20): early rows are out
+	// of view, the selected row is inside the window, the header did not
+	// scroll.
 	if strings.Contains(text, "agent-01") {
 		t.Fatalf("the header must stay pinned while the rows scroll:\n%s", out)
 	}
-	if !strings.Contains(text, "agent-35") || !strings.Contains(text, "agent-47") {
+	if !strings.Contains(text, "agent-37") || !strings.Contains(text, "agent-45") {
 		t.Fatalf("scrolled window missing its rows:\n%s", out)
+	}
+	if strings.Contains(text, "agent-35") || strings.Contains(text, "agent-47") {
+		t.Fatalf("the reserved budget must shrink the window:\n%s", out)
 	}
 	highlighted := sessionHighlightedLines(t, lines)
 	if len(highlighted) != 1 || !strings.Contains(stripSessionSGR(highlighted[0]), "agent-41") || !strings.HasPrefix(strings.TrimLeft(stripSessionSGR(highlighted[0]), " "), "> ") {

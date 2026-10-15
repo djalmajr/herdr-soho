@@ -70,6 +70,19 @@ type BoardState struct {
 	refreshOld           []PickerEntry
 	viewPreferencePath   string
 	viewPreferenceFailed bool
+	// lastFrameSeq, lastFrameW and lastFrameH record the exact frame bytes
+	// this runtime last painted and the viewport they were painted
+	// against. An identical frame for the same viewport is not written
+	// again (no repeated full-screen frame for a no-op key or an unchanged
+	// publication); the record is per runtime state, so independent
+	// sessions never share it, and a failed or short write invalidates it,
+	// so a later request of the previously painted frame is written
+	// completely again (a partial failed frame may be on screen).
+	lastFrameSeq     string
+	lastFrameText    string
+	lastFrameW       int
+	lastFrameH       int
+	lastFramePainted bool
 }
 
 func NewBoardState() *BoardState {
@@ -841,6 +854,22 @@ func requestBoardUpdate(updateReq chan<- struct{}) {
 // step against it with the shared renderer viewport math). When the mouse
 // negotiation has settled without being able to deliver the wheel, the
 // frame says so honestly instead of pretending the control works.
+//
+// The shared transport paints the complete frame as one bounded write
+// without clearing the viewport before the paint: each row is erased at
+// its addressed start, immediately before its own content (a trailing
+// erase would drop the last column of a full-width row on terminals with
+// pending auto-wrap), so no stale cell survives; stale rows left below a
+// shorter frame (a list or dimension change) are cleared after the paint,
+// from the first row the new frame does not paint, never by a newline
+// scroll of the final viewport row. An identical frame for the same
+// viewport is skipped (per runtime, not across independent sessions). A
+// failed or short write may leave a partial frame on screen, so it
+// invalidates the painted cache - the next draw, even of the previously
+// painted frame, is written completely again - while a successful draw is
+// the only thing ever recorded as painted. The single write removes the
+// old separate clear and per-row writes; it is not pixel-level proof that
+// a terminal never shows intermediate processing of the frame.
 func redrawSession(w io.Writer, state *BoardState, width int) {
 	width, height := modalDimensions(w, width)
 	state.FrameWidth, state.FrameHeight = width, height
@@ -856,7 +885,30 @@ func redrawSession(w io.Writer, state *BoardState, width int) {
 	case state.Mouse != nil && state.Mouse.decided && !state.Mouse.wheelAvailable():
 		notice = "mouse wheel unavailable: SGR mouse modes unconfirmed"
 	}
-	redrawModal(w, renderSessionModal(state, width, height, notice))
+	frame := renderSessionModal(state, width, height, notice)
+	seq := buildModalFrame(frame)
+	if rows := modalFrameRows(frame); rows < height {
+		// Stale rows of a taller previous frame: clear them, after the
+		// paint, from the first row the new frame does not paint. When the
+		// frame fills the viewport there is nothing below it to clear.
+		seq += fmt.Sprintf("\x1b[%d;1H\x1b[J", rows+1)
+	}
+	if state.lastFramePainted && state.lastFrameW == width && state.lastFrameH == height && state.lastFrameSeq == seq {
+		return // identical frame for the same viewport: nothing to repaint
+	}
+	paint := seq
+	if state.lastFramePainted && state.lastFrameW == width && state.lastFrameH == height {
+		paint = buildModalPatch(state.lastFrameText, frame)
+	}
+	if err := writeModalFrame(w, paint); err != nil {
+		// A failed or short write may have left a partial frame on screen:
+		// invalidate the painted cache so the next draw - even of the
+		// previously painted frame - is written completely again.
+		state.lastFramePainted = false
+		return
+	}
+	state.lastFrameSeq, state.lastFrameW, state.lastFrameH, state.lastFramePainted = seq, width, height, true
+	state.lastFrameText = frame
 }
 
 func RunBoard(env platform.Env, platformName, executable string) (code int) {

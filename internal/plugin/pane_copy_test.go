@@ -231,12 +231,18 @@ func TestPaneCopy(t *testing.T) {
 	t.Run("footer guidance at normal and narrow widths", func(t *testing.T) {
 		opts := SessionRenderOptions{Entries: paneCopyEntries(), Selected: 0, Noun: "session", Board: true}
 		normalLines := strings.Split(strings.TrimSuffix(renderSessionPopup(opts, 80, 24), "\n"), "\n")
-		if got := normalLines[len(normalLines)-1]; !strings.Contains(got, "c Copy · Enter Focus · Esc Close") {
+		if got := normalLines[len(normalLines)-3]; !strings.Contains(got, "c Copy · Enter Focus · Esc Close") {
 			t.Fatalf("enhanced normal footer=%q want the full guidance", got)
 		}
+		if got := strings.TrimSpace(stripSessionSGR(normalLines[len(normalLines)-1])); got != "STATUS  Ready" {
+			t.Fatalf("enhanced normal status=%q want STATUS  Ready below the footer", got)
+		}
 		narrowLines := strings.Split(strings.TrimSuffix(renderSessionPopup(opts, 30, 24), "\n"), "\n")
-		if got := strings.TrimLeft(narrowLines[len(narrowLines)-1], " "); got != "Enter Focus · Esc Close" {
+		if got := strings.TrimLeft(narrowLines[len(narrowLines)-3], " "); got != "Enter Focus · Esc Close" {
 			t.Fatalf("enhanced narrow footer=%q want Enter Focus · Esc Close (the close keeps its priority)", got)
+		}
+		if got := strings.TrimSpace(stripSessionSGR(narrowLines[len(narrowLines)-1])); got != "STATUS  Ready" {
+			t.Fatalf("enhanced narrow status=%q want STATUS  Ready below the footer", got)
 		}
 		// the legacy modal footer, normal and tiny
 		legacyLines := strings.Split(strings.TrimSuffix(renderPickerLegacyModal(paneCopyEntries(), 0, 3, "", 0, false, nil, "", 80, 24), "\n"), "\n")

@@ -514,10 +514,10 @@ func TestModalRedrawUsesRowsWithoutRawLineFeed(t *testing.T) {
 	var out bytes.Buffer
 	redrawModal(&out, "12345678\nabcdefgh\nEsc     \n")
 	got := out.String()
-	if strings.ContainsAny(got, "\r\n") || !strings.Contains(got, "\x1b[1;1H12345678\x1b[2;1Habcdefgh\x1b[3;1HEsc     ") {
+	if strings.ContainsAny(got, "\r\n") || !strings.Contains(got, "\x1b[1;1H\x1b[K12345678\x1b[2;1H\x1b[Kabcdefgh\x1b[3;1H\x1b[KEsc     ") {
 		t.Fatalf("frame is not positioned by row: %q", got)
 	}
-	if !strings.HasPrefix(got, "\x1b[H\x1b[J") || !strings.HasSuffix(got, "Esc     ") {
+	if !strings.HasPrefix(got, "\x1b[1;1H\x1b[K") || strings.Contains(got, "\x1b[J") || !strings.HasSuffix(got, "Esc     ") {
 		t.Fatalf("frame clears content after its final cell: %q", got)
 	}
 }
