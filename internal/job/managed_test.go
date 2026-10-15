@@ -307,6 +307,7 @@ func TestManagedParentSuperviseShape(t *testing.T) {
 		{"repo before id", []string{"job", "supervise", "--repo", "example-org/example-repo", "--id", "job-1"}, kindUnknown},
 		{"repeated repo", []string{"job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo", "--repo", "example-org/example-repo"}, kindUnknown},
 		{"invalid repo", []string{"job", "supervise", "--id", "job-1", "--repo", "inválido"}, kindUnknown},
+		{"empty repo", []string{"job", "supervise", "--id", "job-1", "--repo", ""}, kindUnknown},
 		{"extra argument", []string{"job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo", "extra"}, kindUnknown},
 		{"repo without value", []string{"job", "supervise", "--id", "job-1", "--repo"}, kindUnknown},
 		{"invalid id", []string{"job", "supervise", "--id", "../job-1"}, kindUnknown},

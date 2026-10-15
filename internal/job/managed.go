@@ -373,18 +373,19 @@ func managedParent(env platform.Env) (managedParentInfo, parentKind) {
 	// `--id <ID> --repo <ORG/REPO>`; any other variation is the invalid
 	// shape.
 	var id, repo string
+	hasRepo := false
 	switch {
 	case len(argv) == 5 && argv[3] == "--id":
 		id = argv[4]
 	case len(argv) == 7 && argv[3] == "--id" && argv[5] == "--repo":
-		id, repo = argv[4], argv[6]
+		id, repo, hasRepo = argv[4], argv[6], true
 	default:
 		return managedParentInfo{}, parentUnknown
 	}
-	// The id and the repo, when present, are valid by the same rules
-	// (job.Dir's regex; the repo's org/name pattern): an invalid value is
-	// the invalid shape.
-	if _, err := Dir("", id); err != nil || (repo != "" && !repoPattern.MatchString(repo)) || !SameExecutable(exe) {
+	// The id and, in the seven-argument form, the repo (an empty value
+	// included) are valid by the same rules (job.Dir's regex; the repo's
+	// org/name pattern): an invalid value is the invalid shape.
+	if _, err := Dir("", id); err != nil || (hasRepo && !repoPattern.MatchString(repo)) || !SameExecutable(exe) {
 		return managedParentInfo{}, parentUnknown
 	}
 	after, _, live := platform.ProcStartIdentity(ppid, env)
