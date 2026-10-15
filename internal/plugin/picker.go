@@ -50,6 +50,14 @@ type PickerState struct {
 	NavPending bool
 	NavTarget  PickerEntry
 	NavFailure *PickerFailure // action feedback survives discovery publications
+	// TeamView is the open read-only team view of the selected row (DJA-317
+	// slice A): nil while the list has the frame. While it is open the
+	// list's keys never move the selection, so Esc and i return to the
+	// same row, by the full ref, like the picker's selection rule.
+	TeamView *pickerTeamView
+	// teamLoadSeq counts team-view opens: every open (a re-open included)
+	// bumps it, so a late result of a superseded open is discarded.
+	teamLoadSeq int
 }
 
 func NewPickerState() *PickerState {
@@ -253,6 +261,28 @@ func RenderPicker(state *PickerState, width int) string {
 }
 
 func (s *PickerState) ApplyKey(key string) string {
+	// The read-only team view (DJA-317 slice A) overlays the list: while
+	// it is open, Esc and i go back to the list with the same selection,
+	// the arrow and page keys scroll its content, Ctrl-C closes the modal
+	// as before, and the list keys and the search text never reach the
+	// list underneath (the view is read-only and the selection is frozen
+	// for it).
+	if s.TeamView != nil {
+		switch key {
+		case "esc", "i":
+			s.TeamView = nil
+			return ""
+		case "ctrl-c":
+			if s.Exit == "" {
+				s.Exit = "esc"
+			}
+			return s.Exit
+		case "up", "down", "page-up", "page-down":
+			s.teamViewScroll(key)
+			return ""
+		}
+		return ""
+	}
 	switch key {
 	case "enter", "ctrl-enter":
 		// Enter navigates and focuses the selected pane (Ctrl+Enter stays
@@ -286,6 +316,20 @@ func (s *PickerState) ApplyKey(key string) string {
 		s.LastEntry = entry
 		s.Copied = &payload
 		return "copy"
+	case "i":
+		// i opens the read-only team view of the selected row in the
+		// enhanced list focus (DJA-317 slice A); in the enhanced search
+		// focus the same key is ordinary search text, as c already is, and
+		// the legacy input keeps it as query text (frozen contract).
+		if s.NavPending || s.Exit != "" {
+			return ""
+		}
+		if !s.ViewState.Enabled || s.ViewState.SearchFocused {
+			s.applyPickerChar("i")
+			return ""
+		}
+		s.openPickerTeamView()
+		return ""
 	case "update":
 		// The board understands the legacy Ctrl+R; the picker ignores it.
 		return ""
