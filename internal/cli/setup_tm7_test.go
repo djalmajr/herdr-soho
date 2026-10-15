@@ -155,7 +155,7 @@ func readSetupTM7Golden[T any](t *testing.T, name string) T {
 // The frozen oracles keep the old line in the expected stderr; this
 // exact-line rewrite (and nothing else) adapts the expected hook output to
 // the native advisory. The PROG: prefix is the test's stderr normalization
-// of the "herdr-soho: " prefix.
+// of the "soho: " prefix.
 const (
 	legacyHookAdviceLine = "PROG: warning: SessionStart hook cannot resolve herdr-soho; install the skill under the project's or user's .agents/skills or .claude/skills directory"
 	nativeHookAdviceLine = "PROG: warning: SessionStart hook cannot resolve soho in PATH; add the native soho binary to PATH so the generated hooks ('soho hook reminder', 'soho hook doctor') can run"
@@ -220,7 +220,7 @@ func runSetupTM7Steps(t *testing.T, fix setupTM7Fixture, steps []setupTM7Step) [
 		}
 		stdout = strings.ReplaceAll(stdout, program, "PROG")
 		stderr = strings.ReplaceAll(stderr, program, "PROG")
-		stderr = strings.ReplaceAll(stderr, "herdr-soho: ", "PROG: ")
+		stderr = strings.ReplaceAll(stderr, "soho: ", "PROG: ")
 		got = append(got, setupTM7Step{Args: step.Args, RC: code, Out: stdout, Err: stderr})
 	}
 	return got

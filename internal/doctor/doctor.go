@@ -92,7 +92,7 @@ func CmdInit(ctx *core.Config, env platform.Env, cwd string) {
 	// inside the skill before the refusal. Decided with StateInSkill/
 	// StateRootPath, so the refusal itself has no side effect.
 	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
-		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was written)", core.StateRootPath(ctx, env, cwd), skill), 2)
+		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the soho skill ('%s'); run soho from the project's directory (nothing was written)", core.StateRootPath(ctx, env, cwd), skill), 2)
 	}
 	oldOut := platform.Stdout
 	platform.Stdout = platform.Stderr
@@ -337,7 +337,7 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 	// A state dir inside the skill is a warn, not a probe: no StateRoot, no
 	// MkdirAll, and the doctor goes on.
 	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
-		s.Warning(fmt.Sprintf("state dir: '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory", core.StateRootPath(ctx, env, cwd), skill))
+		s.Warning(fmt.Sprintf("state dir: '%s' would be inside the soho skill ('%s'); run soho from the project's directory", core.StateRootPath(ctx, env, cwd), skill))
 	} else {
 		d := core.StateRoot(ctx, env, cwd)
 		if core.Nowrite(env) {
@@ -845,7 +845,7 @@ func doctorOrphans(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 		if state == "" {
 			state = "null"
 		}
-		s.Warning(fmt.Sprintf("orphan pane: '%s' (%s, %s) is not in the roster; close it with: herdr-soho release %s --close", orphan.Name, orphan.Pane, state, orphan.Name))
+		s.Warning(fmt.Sprintf("orphan pane: '%s' (%s, %s) is not in the roster; close it with: soho release %s --close", orphan.Name, orphan.Pane, state, orphan.Name))
 	}
 }
 

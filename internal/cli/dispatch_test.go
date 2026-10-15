@@ -154,11 +154,11 @@ func TestDispatchUsageErrorsPortedCases(t *testing.T) {
 		code   int
 		stderr string
 	}{
-		{name: "missing agent", args: nil, code: 1, stderr: "herdr-soho: 1: agent\n"},
-		{name: "missing brief", args: []string{"worker"}, code: 1, stderr: "herdr-soho: 2: brief.md\n"},
-		{name: "unknown option", args: []string{"worker", f.brief, "--not-an-option"}, code: 2, stderr: "herdr-soho: dispatch: unknown option --not-an-option\n"},
-		{name: "missing file", args: []string{"worker", filepath.Join(f.root, "missing.md")}, code: 2, stderr: "herdr-soho: brief not found: " + filepath.Join(f.root, "missing.md") + "\n"},
-		{name: "unknown agent", args: []string{"other", f.brief}, code: 3, stderr: "herdr-soho: agent 'other' is not in this skill's roster (spawn it first, or pass a name you spawned)\n"},
+		{name: "missing agent", args: nil, code: 1, stderr: "soho: 1: agent\n"},
+		{name: "missing brief", args: []string{"worker"}, code: 1, stderr: "soho: 2: brief.md\n"},
+		{name: "unknown option", args: []string{"worker", f.brief, "--not-an-option"}, code: 2, stderr: "soho: dispatch: unknown option --not-an-option\n"},
+		{name: "missing file", args: []string{"worker", filepath.Join(f.root, "missing.md")}, code: 2, stderr: "soho: brief not found: " + filepath.Join(f.root, "missing.md") + "\n"},
+		{name: "unknown agent", args: []string{"other", f.brief}, code: 3, stderr: "soho: agent 'other' is not in this skill's roster (spawn it first, or pass a name you spawned)\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, out, stderr := f.run(t, tc.args...)
@@ -171,7 +171,7 @@ func TestDispatchUsageErrorsPortedCases(t *testing.T) {
 		for _, tc := range []struct {
 			args []string
 			want string
-		}{{[]string{"run"}, "herdr-soho: 1: role\n"}, {[]string{"run", "implementer"}, "herdr-soho: 2: brief.md\n"}} {
+		}{{[]string{"run"}, "soho: 1: role\n"}, {[]string{"run", "implementer"}, "soho: 2: brief.md\n"}} {
 			oldErr := platform.Stderr
 			var stderr bytes.Buffer
 			platform.Stderr = &stderr
@@ -196,7 +196,7 @@ func TestDispatchWaitEmptyExitErrorRecordsFriction(t *testing.T) { // Mutation c
 	t.Cleanup(func() { dispatchWaitFor = oldWait })
 	code, _, stderr := f.run(t, "worker", f.brief)
 	log, err := os.ReadFile(filepath.Join(f.state, "ws", "friction.log"))
-	if err != nil || code != 1 || !strings.HasSuffix(stderr, "herdr-soho: \n") || !strings.Contains(string(log), "error(exit 1)\tdispatch\t\n") {
+	if err != nil || code != 1 || !strings.HasSuffix(stderr, "soho: \n") || !strings.Contains(string(log), "error(exit 1)\tdispatch\t\n") {
 		t.Fatalf("code=%d stderr=%q friction=%q err=%v", code, stderr, log, err)
 	}
 }

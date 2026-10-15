@@ -276,7 +276,7 @@ func TestStateParity(t *testing.T) {
 		platform.Stderr = &stderr
 		Warn("careful", file, "roster")
 		platform.Stderr = old
-		if stderr.String() != "herdr-soho: warning: careful\n" {
+		if stderr.String() != "soho: warning: careful\n" {
 			t.Fatalf("stderr=%q", stderr.String())
 		}
 		data, err := os.ReadFile(file)
@@ -382,7 +382,7 @@ func TestStateParity(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte("worker\tpane-1\n"), 0o600)
 		_ = os.WriteFile(filepath.Join(dir, "task-worker"), []byte("Task title\n\n"), 0o600)
 		fakeDir := t.TempDir()
-		_, err := fakecli.Install(t, fakeDir, "herdr", []fakecli.Rule{{Argv: []string{"pane", "report-metadata", "pane-1", "--source", "herdr-soho", "--title", "Task title ✓"}}})
+		_, err := fakecli.Install(t, fakeDir, "herdr", []fakecli.Rule{{Argv: []string{"pane", "report-metadata", "pane-1", "--source", "soho", "--title", "Task title ✓"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -401,7 +401,7 @@ func TestStateParity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(calls) != 1 || strings.Join(calls[0].Argv, " ") != "pane report-metadata pane-1 --source herdr-soho --title Task title ✓" {
+		if len(calls) != 1 || strings.Join(calls[0].Argv, " ") != "pane report-metadata pane-1 --source soho --title Task title ✓" {
 			t.Fatalf("calls=%+v", calls)
 		}
 		calls, _ = fakecli.ReadCalls(filepath.Join(fakeDir, "herdr.calls.jsonl"))

@@ -607,7 +607,7 @@ func TestDispatchWorkingTargetTakesThePromptAfterItsTurn(t *testing.T) {
 		fakecli.Rule{Argv: get, Stdout: state("working", 7)},
 	)
 	f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\n", "10", extra...)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	f.env["SOHO_WAIT_POLL_MS"] = "500"
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	if code != 0 || dispatchOutputStatus(t, out) != "submitted" {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
@@ -621,7 +621,7 @@ func TestDispatchWorkingTargetTakesThePromptAfterItsTurn(t *testing.T) {
 // when the turn does not end within prompt_settle_seconds.
 func TestDispatchWorkingTargetStillBusyAfterTheSettleWindow(t *testing.T) {
 	f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\n", "2")
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	f.env["SOHO_WAIT_POLL_MS"] = "500"
 	start := time.Now()
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
@@ -684,7 +684,7 @@ func runAltScreenDispatch(t *testing.T, screen func(stamp string) string, screen
 		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped"}, ArgvPrefix: true, Code: 1, Stderr: notIdle},
 		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: screen(screenStamp)},
 	)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	f.env["SOHO_WAIT_POLL_MS"] = "500"
 	start := time.Now()
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	return code, out, errText, time.Since(start)

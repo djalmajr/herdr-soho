@@ -45,7 +45,7 @@ func StatePathInSkill(env platform.Env, statePath string) string {
 // land inside the installed skill: the same sentence StateDir uses, with
 // command prefixed like the command's other errors when it is not "".
 func StateInSkillMessage(command, path, skill string) string {
-	phrase := fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was written)", path, skill)
+	phrase := fmt.Sprintf("the state dir '%s' would be inside the soho skill ('%s'); run soho from the project's directory (nothing was written)", path, skill)
 	if command == "" {
 		return phrase
 	}

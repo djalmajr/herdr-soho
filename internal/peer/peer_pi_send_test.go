@@ -65,7 +65,7 @@ func TestSendPiInputBox(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: piSendScreen(history+"\n"+prompt, "")},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -87,7 +87,7 @@ func TestSendPiInputBox(t *testing.T) {
 		}
 		_ = prompt
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		if code != 0 || !strings.HasPrefix(out, "queued for local/w0test:p0a") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -115,7 +115,7 @@ func TestSendPiInputBox(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 4, Stdout: piSendScreen(history+"\n"+prompt, "")},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -143,7 +143,7 @@ func TestSendPiInputBox(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 5, Stdout: agentJSONKind("pi", "idle", "1")},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 15 || out != "" || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -177,7 +177,7 @@ func TestSendPiInputBox(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 6, Stdout: agentJSONKind("claude", "idle", "1")},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -204,7 +204,7 @@ func TestSendPiInputBox(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 5, Stdout: agentJSONKind("pi", "idle", "1")},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -232,7 +232,7 @@ func TestSendPiInputBox(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Call: 2, Delay: 5, Stdout: "old transcript without id\n"},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)

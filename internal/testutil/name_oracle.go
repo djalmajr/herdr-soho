@@ -7,7 +7,11 @@
 // Go implementation now emits as soho/config, .agents/soho.conf, .soho and
 // SOHO_ (the legacy herdr-soho names are read through the legacy bridge).
 // This adapter rewrites only those frozen name strings to the Go names so
-// the frozen expectations compare against the Go behavior. Every rewrite is
+// the frozen expectations compare against the Go behavior. The pre-rename
+// slice also renamed user-visible message names (the soho launcher,
+// the wait/roles suggestions, the dispatch scratch paths under TMPDIR
+// and the Herdr report-metadata source); its anchored pairs are listed
+// below with the same guarantee. Every rewrite is
 // an exact, anchored substring: the setup-instruction block (still frozen
 // as herdr-soho text, rewritten by a later slice) names the same files
 // and must flow through the goldens unchanged, which the anchors guarantee
@@ -32,6 +36,16 @@ var sohoNamePairs = [][2]string{
 	{"HERDR_SOHO_<KEY>", "SOHO_<KEY>"},
 	{"/.agents/herdr-soho.conf", "/.agents/soho.conf"},
 	{"herdr-soho/config", "soho/config"},
+	// User-visible message renames of the pre-rename slice (the CLI,
+	// the launcher and the wait/roles suggestions now carry the soho
+	// name; the frozen goldens still name the pre-rename binary). Anchored
+	// pairs, as above.
+	{"(run: herdr-soho roles)", "(run: soho roles)"},
+	{"Run: herdr-soho wait ", "Run: soho wait "},
+	{"wait again: herdr-soho wait ", "wait again: soho wait "},
+	{"tmp/herdr-soho", "tmp/soho"},
+	{"--source herdr-soho", "--source soho"},
+	{"herdr-soho runs a small team", "soho runs a small team"},
 }
 
 // RewriteSohoName rewrites the frozen name-layer strings of one parity

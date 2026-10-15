@@ -156,7 +156,7 @@ func WaitRank(code int) int {
 }
 
 func PollIntervalMs(env platform.Env) int {
-	raw := env.Get("HERDR_SOHO_WAIT_POLL_MS")
+	raw := env.Get("SOHO_WAIT_POLL_MS")
 	if !uintPattern.MatchString(raw) {
 		return 3000
 	}
@@ -743,7 +743,7 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 					}
 				}
 				if core.Cfg(ctx, "notify", "off", env) == "on" {
-					herdr.NotificationShow("herdr-soho: "+agent+" finished", report, env)
+					herdr.NotificationShow("soho: "+agent+" finished", report, env)
 				}
 				_ = core.MarkTaskDone(sd, agent, env)
 				mirrorReport(sd, agent, report, ctx, env, cwd)
@@ -870,12 +870,12 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 						suffix = fmt.Sprintf(" --timeout %s", formatTimeout(timeoutMs))
 					}
 					if ceiling != nil {
-						_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: checkpoint: '%s' is still working (screen changed within the last %ds); wait again: herdr-soho wait %s%s\n", agent, *ceiling, agent, suffix)
+						_, _ = fmt.Fprintf(platform.Stderr, "soho: checkpoint: '%s' is still working (screen changed within the last %ds); wait again: soho wait %s%s\n", agent, *ceiling, agent, suffix)
 					} else {
-						_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: checkpoint: '%s' is still working (screen changed %ds ago); wait again: herdr-soho wait %s%s\n", agent, *age, agent, suffix)
+						_, _ = fmt.Fprintf(platform.Stderr, "soho: checkpoint: '%s' is still working (screen changed %ds ago); wait again: soho wait %s%s\n", agent, *age, agent, suffix)
 					}
 				} else if !math.IsNaN(timeoutMs) && !math.IsInf(timeoutMs, 0) {
-					sendWarning(fmt.Sprintf("timeout waiting for '%s'; it may still be working (state: %s). Run: herdr-soho wait %s --timeout %s", agent, tag, agent, formatTimeout(timeoutMs*2)))
+					sendWarning(fmt.Sprintf("timeout waiting for '%s'; it may still be working (state: %s). Run: soho wait %s --timeout %s", agent, tag, agent, formatTimeout(timeoutMs*2)))
 				} else {
 					sendWarning(fmt.Sprintf("timeout waiting for '%s'; it may still be working (state: %s)", agent, tag))
 				}
@@ -928,7 +928,7 @@ func mirrorReport(sd, agent, report string, ctx *core.Config, env platform.Env, 
 	if tmp == "" {
 		tmp = os.TempDir()
 	}
-	dir := filepath.Join(tmp, "herdr-soho", core.WorkspaceID(ctx, env, cwd), "reports")
+	dir := filepath.Join(tmp, "soho", core.WorkspaceID(ctx, env, cwd), "reports")
 	if !strings.HasPrefix(report, dir+string(os.PathSeparator)) {
 		return
 	}
@@ -1007,7 +1007,7 @@ func CmdWait(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		}
 	}
 	// cmdWait turns every DieError out of waitFor into dieFriction, the
-	// empty one included: die prints "herdr-soho: " and the log gets an
+	// empty one included: die prints "soho: " and the log gets an
 	// error(exit N) line with no text.
 	defer func() {
 		value := recover()
@@ -1017,7 +1017,7 @@ func CmdWait(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		if exitErr, ok := value.(*platform.ExitError); ok && !exitErr.Friction {
 			if exitErr.Msg == "" {
 				core.RecordFrictionError("", exitErr.Code, frictionLogFile, "wait")
-				_, _ = fmt.Fprint(platform.Stderr, "herdr-soho: \n")
+				_, _ = fmt.Fprint(platform.Stderr, "soho: \n")
 			} else {
 				exitErr.Friction = true
 			}

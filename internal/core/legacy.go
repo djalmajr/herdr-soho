@@ -110,7 +110,7 @@ func MigrateLegacyConfigFile(dest string, env platform.Env, cwd string) bool {
 		cleanup()
 		platform.Die(fmt.Sprintf("config set: could not rewrite %s (file left untouched)", dest), 4)
 	}
-	fmt.Fprintf(platform.Stderr, "herdr-soho: warning: copied legacy config %s to %s; the legacy file is no longer read\n", legacy, dest)
+	fmt.Fprintf(platform.Stderr, "soho: warning: copied legacy config %s to %s; the legacy file is no longer read\n", legacy, dest)
 	return true
 }
 

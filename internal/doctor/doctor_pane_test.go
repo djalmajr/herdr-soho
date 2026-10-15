@@ -232,7 +232,7 @@ func Test_init_sub_orchestrator_init_in_roster_keeps_name(t *testing.T) {
 	if !strings.Contains(out, `"orchestrator": "cinzel-opus"`) || !strings.Contains(out, `"pane_id": "w0test:p0a"`) || !strings.Contains(out, `"title": ""`) {
 		t.Fatalf("the init did not report the roster worker as is (title left untouched, not set to 'orchestrator: …'):\n%s", out)
 	}
-	want := "herdr-soho: init: this pane is 'cinzel-opus' in the roster (a sub-orchestrator opened by another orchestrator); keeping its name\n"
+	want := "soho: init: this pane is 'cinzel-opus' in the roster (a sub-orchestrator opened by another orchestrator); keeping its name\n"
 	if !strings.Contains(stderr, want) {
 		t.Fatalf("missing the roster line:\n%s", stderr)
 	}

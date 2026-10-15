@@ -612,7 +612,7 @@ func TestJobPhase2SubsValidateThenRefuse(t *testing.T) {
 		{"supervise", "--id", "nope"},
 	} {
 		code, out, errOut := f.run(t, args...)
-		want := "herdr-soho: job supervise: run it inside the job's Herdr workspace\n"
+		want := "soho: job supervise: run it inside the job's Herdr workspace\n"
 		if code != 2 || out != "" || errOut != want {
 			t.Fatalf("%v code=%d out=%q err=%q", args, code, out, errOut)
 		}
@@ -747,7 +747,7 @@ func TestJobControlAmendSendWriteRequests(t *testing.T) {
 	// supervise, outside a Herdr workspace, refuses (the phase-1 row
 	// adapted for slice 6c: the supervisor arrives in the same slice).
 	code, out, errOut = f.run(t, "supervise", "--id", "job-1")
-	if code != 2 || out != "" || errOut != "herdr-soho: job supervise: run it inside the job's Herdr workspace\n" {
+	if code != 2 || out != "" || errOut != "soho: job supervise: run it inside the job's Herdr workspace\n" {
 		t.Fatalf("supervise code=%d out=%q err=%q", code, out, errOut)
 	}
 }
@@ -957,7 +957,7 @@ func TestJobNowrite(t *testing.T) {
 
 	for _, sub := range []string{"start", "supervise", "amend", "send", "ack", "cancel", "close", "checkpoint", "note"} {
 		code, out, errOut := f.runEnv(t, env, sub, "--id", "job-1")
-		want := "herdr-soho: SOHO_NOWRITE=1 is read-only: job " + sub + " writes; only job status, wait, events, collect and list run\n"
+		want := "soho: SOHO_NOWRITE=1 is read-only: job " + sub + " writes; only job status, wait, events, collect and list run\n"
 		if code != 2 || out != "" || errOut != want {
 			t.Fatalf("%s code=%d out=%q err=%q", sub, code, out, errOut)
 		}
@@ -1420,7 +1420,7 @@ func TestJobSuperviseCLIRefusals(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	want := "herdr-soho: job supervise: run it inside the job's Herdr workspace\n"
+	want := "soho: job supervise: run it inside the job's Herdr workspace\n"
 
 	// Outside Herdr, both a known and an unknown id refuse with exit 2.
 	for _, args := range [][]string{
@@ -1469,7 +1469,7 @@ func TestJobSuperviseRepoLookup(t *testing.T) {
 	co2 := f.checkout(t, "example-org", "example-repo-2")
 	f.startJob(t, co)
 	f.startJob(t, co2)
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 	body := fmt.Sprintf(`{"schema":1,"id":"job-1","status":"running","brief_sha256":"x","decisions_acked_seq":0,"motivo":null,"dir":%q}`+"\n", co)
 	if err := os.WriteFile(filepath.Join(jobDir, "state.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -1500,7 +1500,7 @@ func TestJobSuperviseRepoLookup(t *testing.T) {
 	// does.
 	base := filepath.Clean(filepath.Join(f.root, "xdg"))
 	code, out, errOut = f.runEnv(t, withEnv(herdr, testLaunchBaseVar, base), "supervise", "--id", "job-1", "--repo", "example-org/example-repo")
-	if code != 4 || !strings.Contains(out, `"status":"running"`) || errOut != "herdr-soho: warning: job: the supervisor is not bound to its launch: the job has no launch record\n" {
+	if code != 4 || !strings.Contains(out, `"status":"running"`) || errOut != "soho: warning: job: the supervisor is not bound to its launch: the job has no launch record\n" {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 	}
 	// The friction line went to the named checkout's job only: the other
@@ -1509,7 +1509,7 @@ func TestJobSuperviseRepoLookup(t *testing.T) {
 	if err != nil || !strings.Contains(string(friction), "the supervisor is not bound to its launch") {
 		t.Fatalf("friction = %q err=%v", friction, err)
 	}
-	if _, err := os.Lstat(filepath.Join(co2, ".herdr-soho", "jobs", "job-1", "friction.log")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(co2, ".soho", "jobs", "job-1", "friction.log")); !os.IsNotExist(err) {
 		t.Fatalf("the other checkout's job was touched: %v", err)
 	}
 }
@@ -1607,7 +1607,7 @@ func TestJobSuperviseRunsTheSupervisor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(brief), "- Job id: job-1\n") || !strings.Contains(string(brief), "herdr-soho job checkpoint --id job-1") {
+	if !strings.Contains(string(brief), "- Job id: job-1\n") || !strings.Contains(string(brief), "soho job checkpoint --id job-1") {
 		t.Fatalf("orchestrator brief = %q", brief)
 	}
 	state, err := os.ReadFile(filepath.Join(jobDir, "state.json"))

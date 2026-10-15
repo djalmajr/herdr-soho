@@ -31,7 +31,7 @@ func TestJobStartInvalidFinishingTimeoutExitsTwoBeforeAnySpawn(t *testing.T) {
 			ee := newJobStartEE(t)
 			setFinishingTimeout(t, ee, raw)
 			code, out, errOut := ee.start(t, ee.f.briefFile(t, jobStartBrief))
-			want := "herdr-soho: job: invalid job_finishing_timeout '" + raw + "'"
+			want := "soho: job: invalid job_finishing_timeout '" + raw + "'"
 			if code != 2 || out != "" || strings.TrimSpace(errOut) != want {
 				t.Fatalf("code=%d out=%q err=%q, want exit 2 with exactly %q", code, out, errOut, want)
 			}

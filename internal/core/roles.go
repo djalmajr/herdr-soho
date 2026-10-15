@@ -48,7 +48,7 @@ func ResolveRole(role string, env platform.Env, cwd string) string {
 	if file := RoleFile(role, env, cwd); file != "" {
 		return file
 	}
-	platform.Die(fmt.Sprintf("unknown role '%s' (run: herdr-soho roles)", role), 3)
+	platform.Die(fmt.Sprintf("unknown role '%s' (run: soho roles)", role), 3)
 	return ""
 }
 
@@ -142,7 +142,7 @@ func hasWord(list, needle string) bool {
 
 func CmdRole(argv []string, env platform.Env, cwd string) {
 	if len(argv) == 0 {
-		_, _ = platform.Stderr.Write([]byte("herdr-soho: 1: role\n"))
+		_, _ = platform.Stderr.Write([]byte("soho: 1: role\n"))
 		panic(&platform.ExitError{Code: 1})
 	}
 	f := ResolveRole(argv[0], env, cwd)

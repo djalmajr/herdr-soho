@@ -463,7 +463,7 @@ func TestJobNowriteWritingSubcommands(t *testing.T) {
 	tree := treeSnapshot(t, f.root)
 	for _, args := range cases {
 		code, out, errOut := f.runEnv(t, env, args...)
-		want := "herdr-soho: SOHO_NOWRITE=1 is read-only: job " + args[0] + " writes; only job status, wait, events, collect and list run\n"
+		want := "soho: SOHO_NOWRITE=1 is read-only: job " + args[0] + " writes; only job status, wait, events, collect and list run\n"
 		if code != 2 || out != "" || errOut != want {
 			t.Fatalf("%v code=%d out=%q err=%q", args, code, out, errOut)
 		}

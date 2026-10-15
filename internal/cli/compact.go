@@ -429,7 +429,7 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 		}
 		if inDispatch && endStatus == "nothing-to-compact" {
 			// The dispatch keeps one JSON line on stdout: its own result.
-			fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: '%s' had nothing to compact\n", agent)
+			fmt.Fprintf(platform.Stderr, "soho: dispatch: '%s' had nothing to compact\n", agent)
 			return 0
 		}
 		fmt.Fprintln(platform.Stdout, resultJSON(endStatus))
@@ -465,7 +465,7 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	compactThinkingWarning(agent, kind, role, lane, model, ctx, env, cwd)
 	if inDispatch {
 		// The dispatch keeps one JSON line on stdout: its own result.
-		fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: compacted '%s' in %d ms\n", agent, elapsed)
+		fmt.Fprintf(platform.Stderr, "soho: dispatch: compacted '%s' in %d ms\n", agent, elapsed)
 		return 0
 	}
 	fmt.Fprintln(platform.Stdout, resultJSON("compacted"))

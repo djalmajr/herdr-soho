@@ -455,7 +455,7 @@ func TestDoctorSetupGuidanceUsesTheNativeLauncher(t *testing.T) {
 			t.Fatalf("setup guidance line missing (%s):\n%s", line, got)
 		}
 	}
-	if strings.Contains(got, "scripts/herdr-soho") {
+	if strings.Contains(got, "scripts/soho") {
 		t.Fatalf("obsolete scripts path leaked into the setup guidance:\n%s", got)
 	}
 	// A hostile HERDR_SOHO_BIN override is refused by LauncherPath (code 2)

@@ -24,7 +24,7 @@ func TestRetirementNegativeContracts(t *testing.T) {
 			h := newTM3bHarness(t, "brief body")
 			prepareRunHarness(t, &h)
 			code, out, stderr := runForTest(t, h, flag)
-			want := "herdr-soho: run: " + flag + " expects a value\n"
+			want := "soho: run: " + flag + " expects a value\n"
 			if code != 2 || out != "" || stderr != want {
 				t.Fatalf("flag=%s code=%d stdout=%q stderr=%q; want code=2, empty stdout, %q", flag, code, out, stderr, want)
 			}
@@ -33,7 +33,7 @@ func TestRetirementNegativeContracts(t *testing.T) {
 		h := newTM3bHarness(t, "brief body")
 		prepareRunHarness(t, &h)
 		code, out, stderr := runForTest(t, h, "--amend")
-		if code != 2 || out != "" || stderr != "herdr-soho: run: unknown option --amend\n" {
+		if code != 2 || out != "" || stderr != "soho: run: unknown option --amend\n" {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, out, stderr)
 		}
 		assertRunStartAndPromptNever(t, h)
@@ -87,7 +87,7 @@ func TestRetirementNegativeContracts(t *testing.T) {
 					t.Fatal(err)
 				}
 				h.env["HERDR_ENV"] = "1"
-				h.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+				h.env["SOHO_WAIT_POLL_MS"] = "1"
 				paths := make(chan string, 1)
 				installDispatchReportWriter(t, logPath, tc.body, paths)
 				oldOut, oldErr := platform.Stdout, platform.Stderr
@@ -143,7 +143,7 @@ func TestRetirementNegativeContracts(t *testing.T) {
 						}
 						pos = p
 					}
-					warning := "herdr-soho: warning: report of 'build' marks 2 item(s) partial: a partial item is not a pass; read them before commit, push or release\n"
+					warning := "soho: warning: report of 'build' marks 2 item(s) partial: a partial item is not a pass; read them before commit, push or release\n"
 					if strings.Count(errStr, warning) != 1 {
 						t.Fatalf("stderr carries %d exact partial warnings; want exactly 1: %q", strings.Count(errStr, warning), errStr)
 					}

@@ -43,6 +43,17 @@ func (e Env) Clone() Env {
 	return out
 }
 
+// nowriteGate is the read-only gate read at the platform layer: when
+// SOHO_NOWRITE is defined it decides alone (even the value 0), and the
+// legacy HERDR_SOHO_NOWRITE only applies when the new name is absent —
+// the same rule as core.Nowrite, which the platform layer cannot import.
+func nowriteGate(env Env) bool {
+	if value, ok := env.Lookup("SOHO_NOWRITE"); ok {
+		return value == "1"
+	}
+	return env.Get("HERDR_SOHO_NOWRITE") == "1"
+}
+
 func (e Env) List() []string {
 	keys := make([]string, 0, len(e))
 	for k := range e {
@@ -383,7 +394,7 @@ func SkillDirSource(env Env) (string, string) {
 	if dir != "" {
 		return dir, source
 	}
-	if env.Get("SOHO_NOWRITE") != "1" && env.Get("HERDR_SOHO_NOWRITE") != "1" {
+	if !nowriteGate(env) {
 		if dir, err := skill.Materialize(bundledSkillCacheBase(env)); err == nil {
 			return dir, "bundled"
 		}
@@ -469,10 +480,10 @@ func bundledSkillCacheBase(env Env) string {
 	return ""
 }
 
-// LauncherPath is the native herdr-soho executable the worker runs from:
+// LauncherPath is the native soho executable the worker runs from:
 // the absolute SOHO_BIN override when one is configured, otherwise the
 // currently running executable. It never returns the skill scripts launcher
-// (scripts/herdr-soho or scripts/herdr-soho.cmd) and never searches or
+// (scripts/soho or scripts/soho.cmd) and never searches or
 // executes Node, Bun or Bash; the dispatch instruction's "launcher" phrase
 // names this native binary.
 //
@@ -1027,7 +1038,7 @@ func assignThenResume(assign func() error, resume func() error) (bool, error) {
 	return true, resume()
 }
 
-const treeKillForceFallbackEnv = "HERDR_SOHO_TREEKILL_TEST_FORCE_JOB_FAILURE"
+const treeKillForceFallbackEnv = "SOHO_TREEKILL_TEST_FORCE_JOB_FAILURE"
 
 func forceWindowsTreeKillFallback(env Env) bool {
 	return env.Get(treeKillForceFallbackEnv) == "1"
@@ -1044,7 +1055,7 @@ func setRunTimeoutResult(result *RunResult) {
 // resolved inside the caller's temporary directory. The callback is injected
 // so this policy can be verified on platforms without taskkill.
 func runTreeKillTestKiller(env Env, tempDir string, pid int, run func(string, []string)) bool {
-	killer := env.Get("HERDR_SOHO_TREEKILL_TEST_KILLER")
+	killer := env.Get("SOHO_TREEKILL_TEST_KILLER")
 	if killer == "" || !filepath.IsAbs(killer) {
 		return false
 	}
@@ -1090,7 +1101,7 @@ func tempDirFor(env Env) (string, string) {
 func tempFileError(result RunResult, code string) RunResult {
 	result.Status = nil
 	result.Stdout = ""
-	result.Stderr = "herdr-soho: cannot write temporary files: " + code + "\n"
+	result.Stderr = "soho: cannot write temporary files: " + code + "\n"
 	result.Error = code
 	return result
 }

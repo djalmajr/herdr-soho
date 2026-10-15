@@ -87,7 +87,11 @@ var supportedOS = map[string]bool{"darwin": true, "linux": true, "windows": true
 // before any network or filesystem mutation. Exclusive temp files are
 // created in the requested directory and removed on every failure and
 // cancellation path, and the existing destinations are preserved when the
-// verification fails.
+// verification fails. When the second publish (the compatibility copy)
+// fails, the first is undone: a fresh install removes the just-published
+// soho, and an upgrade restores the previous soho bytes captured before
+// the rename — a failure never leaves either file at the new version and
+// never touches a file that is not an install destination.
 func Run(ctx context.Context, opts Options) (Result, error) {
 	osName, err := normalizeOS(opts.OS)
 	if err != nil {
@@ -216,12 +220,33 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	// example, an executing copy of the installed binary) may make the
 	// rename fail; the error is surfaced and the old destination is left
 	// untouched, with the temp files cleaned up below. The first rename
-	// publishes the primary binary; a failure of the second leaves the
-	// primary updated and the old compatibility copy in place.
+	// publishes the primary binary; when the second (the compatibility
+	// copy) fails, the first is undone: the previous primary bytes are
+	// restored through a temp file and rename (upgrade), or the
+	// just-published file is removed when it did not exist before (fresh
+	// install). The undo never touches any other file.
+	var previousPrimary []byte
+	hadPreviousPrimary := false
+	if data, err := os.ReadFile(destination); err == nil {
+		previousPrimary = data
+		hadPreviousPrimary = true
+	} else if !os.IsNotExist(err) {
+		return Result{}, fmt.Errorf("install: reading %s: %w", destination, err)
+	}
 	if err := os.Rename(binPath, destination); err != nil {
 		return Result{}, fmt.Errorf("install: replacing %s: %w", destination, err)
 	}
 	if err := os.Rename(copyPath, legacyDestination); err != nil {
+		var undoErr error
+		if hadPreviousPrimary {
+			undoErr = restorePrimary(opts.InstallDir, destination, previousPrimary)
+		} else {
+			// Fresh install: the published file is the one this run wrote.
+			undoErr = os.Remove(destination)
+		}
+		if undoErr != nil {
+			return Result{}, fmt.Errorf("install: replacing %s: %w; undo of the first publish: %v", legacyDestination, err, undoErr)
+		}
 		return Result{}, fmt.Errorf("install: replacing %s: %w", legacyDestination, err)
 	}
 	return Result{
@@ -240,6 +265,38 @@ func installDest(dir, baseName, osName string) string {
 		return filepath.Join(dir, baseName+".exe")
 	}
 	return filepath.Join(dir, baseName)
+}
+
+// restorePrimary writes previous back over destination through an exclusive
+// temp file and a same-directory rename, so the undo of a failed second
+// publish never leaves a partial file and never removes destination before
+// the replacement is in place. The temp file is removed on every failure.
+func restorePrimary(installDir, destination string, previous []byte) error {
+	tmp, err := os.CreateTemp(installDir, "."+binaryBaseName+".*.restore.tmp")
+	if err != nil {
+		return err
+	}
+	path := tmp.Name()
+	if _, err := tmp.Write(previous); err != nil {
+		_ = tmp.Close()
+		os.Remove(path)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(path)
+		return err
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(path, 0o755); err != nil {
+			os.Remove(path)
+			return err
+		}
+	}
+	if err := os.Rename(path, destination); err != nil {
+		os.Remove(path)
+		return err
+	}
+	return nil
 }
 
 // normalizeOS applies the host default and the supported-platform rule.

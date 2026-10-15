@@ -230,8 +230,8 @@ func newProcsFixture(t *testing.T) *procsFixture {
 	rules := []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`},
 		{Argv: []string{"agent", "get", "other"}, Stdout: `{"result":{"agent":{"name":"other","agent_status":"idle"}}}`},
-		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
-		{Argv: []string{"pane", "report-metadata", "p-other", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p-other", "--source", "soho", "--clear-title"}},
 		{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
 		{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
 		{Argv: []string{"tab", "rename", "t1", "herd"}},
@@ -471,8 +471,8 @@ func TestProcsAddRefusals(t *testing.T) {
 		cause string
 	}{
 		{"pid 1", "1", "pid 1 is the system init process"},
-		{"this process", "self", "that is this herdr-soho process"},
-		{"the invoking process", "parent", "that is the process that invoked herdr-soho"},
+		{"this process", "self", "that is this soho process"},
+		{"the invoking process", "parent", "that is the process that invoked soho"},
 		{"a dead pid", "dead", "no process with that pid is running"},
 		{"not a number", "abc", "not a positive integer pid"},
 		{"a negative pid", "-5", "not a positive integer pid"},
@@ -685,7 +685,7 @@ func TestGcListAndStopOrphanProcesses(t *testing.T) {
 		}
 		want := "resource pressure: none (disk 60% free, swap 30% used)\norphan processes:\n" +
 			strconv.Itoa(orphan) + "  " + orphanName + "  ghost  0m\n" +
-			"run 'herdr-soho gc --yes' to stop them\n"
+			"run 'soho gc --yes' to stop them\n"
 		if out != want {
 			t.Fatalf("output = %q; want %q", out, want)
 		}
@@ -772,7 +772,7 @@ func TestProcsLockHeld(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("release must never fail for the lock: code=%d out=%q", code, out)
 		}
-		if !strings.Contains(errOut, "the processes of 'worker' were not stopped") || !strings.Contains(errOut, "procs: registry is locked by another herdr-soho") {
+		if !strings.Contains(errOut, "the processes of 'worker' were not stopped") || !strings.Contains(errOut, "procs: registry is locked by another soho") {
 			t.Fatalf("stderr = %q; want the lock warning", errOut)
 		}
 		if !procAlive(t, f.env, pid) {
@@ -798,7 +798,7 @@ func TestProcsLockHeld(t *testing.T) {
 		if code != 4 {
 			t.Fatalf("gc --yes: code=%d out=%q; want 4", code, out)
 		}
-		if !strings.Contains(errOut, "procs: registry is locked by another herdr-soho") {
+		if !strings.Contains(errOut, "procs: registry is locked by another soho") {
 			t.Fatalf("stderr = %q; want the lock error", errOut)
 		}
 		if strings.Contains(out, "stopped process") {
@@ -835,8 +835,8 @@ func TestProcsLockHeld(t *testing.T) {
 		rules := []fakecli.Rule{
 			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`, Delay: 2000},
 			{Argv: []string{"agent", "get", "other"}, Stdout: `{"result":{"agent":{"name":"other","agent_status":"idle"}}}`},
-			{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
-			{Argv: []string{"pane", "report-metadata", "p-other", "--source", "herdr-soho", "--clear-title"}},
+			{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
+			{Argv: []string{"pane", "report-metadata", "p-other", "--source", "soho", "--clear-title"}},
 			{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
 			{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
 			{Argv: []string{"tab", "rename", "t1", "herd"}},
@@ -855,7 +855,7 @@ func TestProcsLockHeld(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("release must never fail for the lock: code=%d out=%q", code, out)
 		}
-		if !strings.Contains(errOut, "the processes of 'worker' were not stopped") || !strings.Contains(errOut, "procs: registry is locked by another herdr-soho") {
+		if !strings.Contains(errOut, "the processes of 'worker' were not stopped") || !strings.Contains(errOut, "procs: registry is locked by another soho") {
 			t.Fatalf("stderr = %q; want the lock warning", errOut)
 		}
 		if !procAlive(t, f.env, pid) {

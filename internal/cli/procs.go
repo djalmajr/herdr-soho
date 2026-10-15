@@ -12,7 +12,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
-const procsUsage = "usage: herdr-soho procs | procs add <pid> [--agent <name>]"
+const procsUsage = "usage: soho procs | procs add <pid> [--agent <name>]"
 
 // cmdProcs lists the process registry, or registers a worker process. The
 // command line of a process is never read or stored: it may carry
@@ -97,10 +97,10 @@ func procsAdd(argv []string, ctx *core.Config, env platform.Env, cwd string) int
 		return refuse("pid 1 is the system init process")
 	}
 	if pid == os.Getpid() {
-		return refuse("that is this herdr-soho process")
+		return refuse("that is this soho process")
 	}
 	if parent := platform.ParentPID(); parent > 0 && pid == parent {
-		return refuse("that is the process that invoked herdr-soho")
+		return refuse("that is the process that invoked soho")
 	}
 	sd := core.StateDir(ctx, env, cwd)
 	if agentSeen && core.RosterLine(sd, agent) == "" {
@@ -144,7 +144,7 @@ func procsAdd(argv []string, ctx *core.Config, env platform.Env, cwd string) int
 }
 
 func procsUsageError() int {
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", procsUsage)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: %s\n", procsUsage)
 	return 2
 }
 

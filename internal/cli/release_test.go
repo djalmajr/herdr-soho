@@ -49,7 +49,7 @@ func newReleaseFixture(t *testing.T, agentStatus string, agentError string) *rel
 	}
 	rules = append(rules,
 		fakecli.Rule{Argv: []string{"pane", "close", "p-worker"}},
-		fakecli.Rule{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+		fakecli.Rule{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
 		fakecli.Rule{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
 		fakecli.Rule{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
 		fakecli.Rule{Argv: []string{"tab", "rename", "t1", "herd"}},
@@ -140,7 +140,7 @@ func TestReleaseUnavailableNeedsForce(t *testing.T) { // JS: "release: an unquer
 func TestReleaseMissingAgentDoesNotRecordFriction(t *testing.T) { // Mutation captured: routing plain die errors through friction logging records a bash usage error.
 	f := newReleaseFixture(t, "", "")
 	r := f.run(t)
-	if r.code != 1 || r.stderr != "herdr-soho: agent: Parameter not set\n" {
+	if r.code != 1 || r.stderr != "soho: agent: Parameter not set\n" {
 		t.Fatalf("release status=%d stderr=%q", r.code, r.stderr)
 	}
 	if _, err := os.Stat(filepath.Join(f.state, "friction.log")); !os.IsNotExist(err) {
@@ -247,7 +247,7 @@ func TestReleaseKeepsPlainPaneAndClearsTitle(t *testing.T) { // JS: "release kee
 		t.Fatal(err)
 	}
 	r := f.run(t, "worker")
-	if r.code != 0 || len(callsTo(r.calls, "pane", "close", "p-worker")) != 0 || len(callsTo(r.calls, "pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title")) != 1 || core.RosterLine(f.state, "worker") != "" {
+	if r.code != 0 || len(callsTo(r.calls, "pane", "close", "p-worker")) != 0 || len(callsTo(r.calls, "pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title")) != 1 || core.RosterLine(f.state, "worker") != "" {
 		t.Fatalf("release status=%d stdout=%q stderr=%q calls=%#v roster=%q", r.code, r.stdout, r.stderr, r.calls, core.RosterLine(f.state, "worker"))
 	}
 	for _, name := range []string{"last-report-worker", "task-worker", filepath.Join("wait", "worker.json")} {
@@ -262,7 +262,7 @@ func TestReleaseClosesCreatedPaneWithFlag(t *testing.T) { // JS: "release --clos
 	f := newReleaseFixture(t, "", "")
 	addReleaseReport(t, f.state, "worker", false)
 	r := f.run(t, "worker", "--close")
-	if r.code != 0 || r.stdout != "closed pane p-worker\nreleased worker\n" || len(callsTo(r.calls, "pane", "close", "p-worker")) != 1 || len(callsTo(r.calls, "pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title")) != 0 {
+	if r.code != 0 || r.stdout != "closed pane p-worker\nreleased worker\n" || len(callsTo(r.calls, "pane", "close", "p-worker")) != 1 || len(callsTo(r.calls, "pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title")) != 0 {
 		t.Fatalf("release status=%d stdout=%q stderr=%q calls=%#v", r.code, r.stdout, r.stderr, r.calls)
 	}
 }

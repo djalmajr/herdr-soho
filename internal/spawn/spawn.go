@@ -747,7 +747,7 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 			core.DieFriction(fmt.Sprintf("agent name '%s' is already live", o.name), 3, "", "")
 		}
 		if o.name != base {
-			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: spawn: the new worker is '%s' ('%s' is already live); dispatch to '%s'\n", o.name, base, o.name)
+			_, _ = fmt.Fprintf(platform.Stderr, "soho: spawn: the new worker is '%s' ('%s' is already live); dispatch to '%s'\n", o.name, base, o.name)
 		}
 	}
 	args := buildArgs(kind, o.approvals, o.model, o.effort, ctx, env)
@@ -1003,7 +1003,7 @@ func warnLaneOrphans(ctx *core.Config, env platform.Env, cwd string, live []any)
 	}
 	for _, orphan := range core.OrphansOf(ctx, env, cwd, live) {
 		if orphan.State == "idle" || orphan.State == "done" {
-			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: spawn: '%s' is idle outside the roster (%s); close it with: herdr-soho release %s --close\n", orphan.Name, orphan.Pane, orphan.Name)
+			_, _ = fmt.Fprintf(platform.Stderr, "soho: spawn: '%s' is idle outside the roster (%s); close it with: soho release %s --close\n", orphan.Name, orphan.Pane, orphan.Name)
 		}
 	}
 }
@@ -1032,7 +1032,7 @@ func warnLaneIdleOtherKind(sd, lane, kind string, env platform.Env, live []any) 
 			continue
 		}
 		if st := statusByName[name]; st == "idle" || st == "done" {
-			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: lane '%s' still holds idle '%s' (%s), not the lane's kind '%s'; release it with: herdr-soho release %s --close\n", lane, name, wk, kind, name)
+			_, _ = fmt.Fprintf(platform.Stderr, "soho: warning: lane '%s' still holds idle '%s' (%s), not the lane's kind '%s'; release it with: soho release %s --close\n", lane, name, wk, kind, name)
 		}
 	}
 }
@@ -1225,7 +1225,7 @@ func updateGoneWaitMs(raw string) float64 {
 	return n
 }
 func pollMillis(env platform.Env) time.Duration {
-	n, err := strconv.Atoi(env.Get("HERDR_SOHO_WAIT_POLL_MS"))
+	n, err := strconv.Atoi(env.Get("SOHO_WAIT_POLL_MS"))
 	if err == nil && n >= 1 && n <= 3000 {
 		return time.Duration(n) * time.Millisecond
 	}

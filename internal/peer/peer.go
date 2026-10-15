@@ -616,7 +616,7 @@ func readScreen(machine, pane, source string, lines int, env platform.Env, timeo
 // <stateDir>/wait/send-<id>.screen, next to spawn's shared-tree markers,
 // atomically: a temp file in the wait dir renamed over the target, so a crash
 // never leaves a half-written screen. It returns the path, or "" when there
-// is no screen to record, when HERDR_SOHO_NOWRITE is set (the CLI already
+// is no screen to record, when SOHO_NOWRITE is set (the CLI already
 // refuses the send under it; the guard is the helper's own defense), or
 // when the write fails. The screen goes only to that local file, which the
 // state dir's gitignore already covers — its content never reaches stderr
@@ -768,10 +768,10 @@ func checkIDInScreen(screen, id string) string {
 func CheckIDInScreen(screen, id string) string { return checkIDInScreen(screen, id) }
 
 func arrivalWindowMS(env platform.Env) int {
-	return boundedEnvNumber(env.Get("HERDR_SOHO_SEND_WINDOW_MS"), 15_000, 15_000)
+	return boundedEnvNumber(env.Get("SOHO_SEND_WINDOW_MS"), 15_000, 15_000)
 }
 func arrivalPollMS(env platform.Env) int {
-	return boundedEnvNumber(env.Get("HERDR_SOHO_SEND_POLL_MS"), 1000, 1000)
+	return boundedEnvNumber(env.Get("SOHO_SEND_POLL_MS"), 1000, 1000)
 }
 
 func boundedEnvNumber(raw string, fallback, max int) int {
@@ -915,7 +915,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// WorkspaceID, so the refusal leaves no side effect (no .gitignore append,
 	// no pane current). The path named is the state root.
 	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
-		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was sent)", core.StateRootPath(ctx, env, cwd), skill), 2)
+		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the soho skill ('%s'); run soho from the project's directory (nothing was sent)", core.StateRootPath(ctx, env, cwd), skill), 2)
 	}
 	senderRef, senderName, senderKind, senderRole, senderModel := SenderInfo(ctx, env, cwd)
 	if _, err := os.ReadFile(filepath.Join(core.StateDirPath(ctx, env, cwd), "agents.tsv")); err != nil && !os.IsNotExist(err) {
@@ -1082,7 +1082,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// saveStalledScreen writes lastVisibleScreen under the sender state
 	// dir's wait dir (next to spawn's shared-tree markers) through the
 	// package-level helper, whose NOWRITE guard keeps it writing nothing
-	// when HERDR_SOHO_NOWRITE is set — the CLI already refuses the send
+	// when SOHO_NOWRITE is set — the CLI already refuses the send
 	// with this flag; the guard is the helper's own defense.
 	saveStalledScreen := func() string {
 		return SaveStalledScreen(stateDir, id, lastVisibleScreen, env)
@@ -1929,7 +1929,7 @@ func CmdFind(argv []string, env platform.Env) int {
 	// global deadline (DiscoverTimeoutMS without --timeout).
 	result := DiscoverSessions(DiscoverOptions{Env: env, Machines: machines, All: all, TimeoutMS: timeoutMS}, func(batch SessionResult) {
 		for _, failure := range batch.Failures {
-			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: find: machine '%s' unavailable: %s\n", failure.Machine, failure.Cause)
+			_, _ = fmt.Fprintf(platform.Stderr, "soho: find: machine '%s' unavailable: %s\n", failure.Machine, failure.Cause)
 		}
 		for _, e := range MatchEntries(batch.Entries, words) {
 			if jsonOutput {
@@ -1940,7 +1940,7 @@ func CmdFind(argv []string, env platform.Env) int {
 		}
 	})
 	if result.ListCause != "" {
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: find: machine list failed: %s\n", result.ListCause)
+		_, _ = fmt.Fprintf(platform.Stderr, "soho: find: machine list failed: %s\n", result.ListCause)
 	}
 	for _, f := range result.Failures {
 		if f.Machine == sessionref.LocalMachine {

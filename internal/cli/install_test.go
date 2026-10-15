@@ -23,7 +23,7 @@ import (
 // entry (Run): an httptest release serving either static fixture bytes or
 // a real native fakecli executable, temporary roots, and
 // zero-requests/zero-effects proofs for every invalid call. Every test
-// points HERDR_SOHO_RELEASE_BASE at the httptest server; the production
+// points SOHO_RELEASE_BASE at the httptest server; the production
 // default base is a core constant that no test touches. The default
 // install never executes the installed bytes or touches the user PATH;
 // --verify-version and --add-to-path are opt-in, and their registry access
@@ -138,7 +138,7 @@ func TestInstallCommandInstallsFromHermeticRelease(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(t.TempDir(), "bin") // does not exist yet
 	env := installTestEnv(t, home)
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 
 	code, out, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 	if code != 0 {
@@ -198,7 +198,7 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 		srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, payload)
 		env := installTestEnv(t, t.TempDir())
 		env["SOHO_INSTALL_DIR"] = filepath.Join(t.TempDir(), "env-dir")
-		env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+		env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 		dir := filepath.Join(t.TempDir(), "flag-dir")
 		code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 		if code != 0 {
@@ -223,7 +223,7 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 		local := t.TempDir()
 		env := installTestEnv(t, t.TempDir())
 		env["LOCALAPPDATA"] = local
-		env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+		env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 		code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag)
 		if code != 0 {
 			t.Fatalf("code=%d err=%q", code, errOut)
@@ -244,7 +244,7 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 		env := installTestEnv(t, home)
 		dir := filepath.Join(t.TempDir(), "env-dir")
 		env["SOHO_INSTALL_DIR"] = dir
-		env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+		env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 		code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag)
 		if code != 0 {
 			t.Fatalf("code=%d err=%q", code, errOut)
@@ -271,7 +271,7 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 		srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, payload)
 		home := t.TempDir()
 		env := installTestEnv(t, home)
-		env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+		env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 		code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag)
 		if code != 0 {
 			t.Fatalf("code=%d err=%q", code, errOut)
@@ -294,7 +294,7 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 		env := installTestEnv(t, home)
 		dir := filepath.Join(t.TempDir(), "legacy-env-dir")
 		env["HERDR_SOHO_INSTALL_DIR"] = dir
-		env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+		env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 		code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag)
 		if code != 0 {
 			t.Fatalf("code=%d err=%q", code, errOut)
@@ -313,7 +313,7 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 		env := installTestEnv(t, home)
 		env["HOME"] = ""
 		env["LOCALAPPDATA"] = ""
-		env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+		env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 		code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag)
 		if code != 2 {
 			t.Fatalf("code=%d, want 2 (clear failure)", code)
@@ -355,7 +355,7 @@ func TestInstallCommandRejectsBadInvocationBeforeEffects(t *testing.T) {
 			cwd := t.TempDir()
 			dir := filepath.Join(cwd, "x")
 			env := installTestEnv(t, t.TempDir())
-			env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+			env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 			code, _, errOut := runInstallCLI(t, env, tc.argv...)
 			if code != 2 {
 				t.Fatalf("code=%d, want 2 (err=%q)", code, errOut)
@@ -373,7 +373,7 @@ func TestInstallCommandNowriteRefusedBeforeEffects(t *testing.T) {
 	srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, []byte("fixture"))
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	env["HERDR_SOHO_NOWRITE"] = "1"
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 	if code != 2 {
@@ -395,7 +395,7 @@ func TestInstallCommandVersionValidationIsTheSharedRunRule(t *testing.T) {
 			srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, []byte("fixture"))
 			dir := filepath.Join(t.TempDir(), "bin")
 			env := installTestEnv(t, t.TempDir())
-			env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+			env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 			code, _, errOut := runInstallCLI(t, env, "--version", bad, "--dir", dir)
 			if code != 1 {
 				t.Fatalf("code=%d, want 1 (err=%q)", code, errOut)
@@ -427,7 +427,7 @@ func TestInstallCommandReplacesExistingDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 	if code != 0 {
 		t.Fatalf("code=%d, want 0 (err=%q)", code, errOut)
@@ -482,7 +482,7 @@ func TestInstallCommandPreservesExistingDestinationOnBadSum(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 	if code != 1 {
 		t.Fatalf("code=%d, want 1 (err=%q)", code, errOut)
@@ -524,7 +524,7 @@ func TestInstallCommandNonWritableRootRefuses(t *testing.T) {
 	}
 	dir := filepath.Join(base, "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 	if code != 1 {
 		t.Fatalf("code=%d, want 1 (err=%q)", code, errOut)
@@ -559,7 +559,7 @@ func TestInstallCommandDestIsAFileRefusesPortably(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dest)
 	if code != 1 {
 		t.Fatalf("code=%d, want 1 (err=%q)", code, errOut)
@@ -589,7 +589,7 @@ func TestInstallCommandPATHAdviceIsConditional(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
 	env["PATH"] = dir + string(filepath.ListSeparator) + filepath.Join(t.TempDir(), "else")
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	code, out, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 	if code != 0 {
 		t.Fatalf("code=%d err=%q", code, errOut)
@@ -613,7 +613,7 @@ func TestInstallCommandPATHAdviceIsConditional(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "bin")
 		env := installTestEnv(t, t.TempDir())
 		env["PATH"] = strings.ToUpper(dir) + `\` + string(filepath.ListSeparator) + strings.ToLower(dir) + `/`
-		env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+		env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 		pathTouched := false
 		old := userPathStoreFactory
 		userPathStoreFactory = func() (install.UserPathStore, error) { pathTouched = true; return nil, nil }
@@ -777,7 +777,7 @@ func TestInstallCommandAddToPathRejectedBeforeEffectsOnNonWindows(t *testing.T) 
 	srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, []byte("fixture"))
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	code, _, errOut := runInstallCLI(t, env, "--add-to-path", "--version", installFixtureTag, "--dir", dir)
 	if code != 2 {
 		t.Fatalf("code=%d, want 2 (err=%q)", code, errOut)
@@ -804,7 +804,7 @@ func TestInstallCommandDefaultInstallDoesNotTouchUserPath(t *testing.T) {
 	srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, []byte("fixture binary\n"))
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 	if code != 0 {
 		t.Fatalf("code=%d err=%q", code, errOut)
@@ -848,7 +848,7 @@ func TestInstallCommandVerifyVersionOptIn(t *testing.T) {
 	}, []string{"SOHO_BIN"})
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	env["SOHO_FAKECLI_CONFIG"] = binDir
 	code, out, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir, "--verify-version")
 	if code != 0 {
@@ -887,7 +887,7 @@ func TestInstallCommandVerifyVersionNotRunByDefault(t *testing.T) {
 	}, nil)
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	env["SOHO_FAKECLI_CONFIG"] = binDir
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 	if code != 0 {
@@ -906,7 +906,7 @@ func TestInstallCommandVerifyVersionNonZeroExitKeepsBinary(t *testing.T) {
 	}, nil)
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	env["SOHO_FAKECLI_CONFIG"] = binDir
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir, "--verify-version")
 	if code != 1 {
@@ -930,7 +930,7 @@ func TestInstallCommandVerifyVersionTimeoutKeepsBinary(t *testing.T) {
 	}, nil)
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	env["SOHO_FAKECLI_CONFIG"] = binDir
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir, "--verify-version")
 	if code != 1 {
@@ -953,7 +953,7 @@ func TestInstallCommandVerifyVersionRefusesNonNativeHeader(t *testing.T) {
 	srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, payload)
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir, "--verify-version")
 	if code != 2 {
 		t.Fatalf("code=%d, want 2 (fail-closed header refusal, err=%q)", code, errOut)
@@ -981,7 +981,7 @@ func TestPathContainsPOSIXCaseSensitive(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
 	env["PATH"] = strings.ToUpper(dir) // distinct on a case-sensitive FS
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	code, out, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 	if code != 0 {
 		t.Fatalf("code=%d err=%q", code, errOut)
@@ -1010,7 +1010,7 @@ func TestInstallCommandAddToPathWindowsRouting(t *testing.T) {
 	t.Cleanup(func() { userPathStoreFactory = old })
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	code, out, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir, "--add-to-path")
 	if code != 0 {
 		t.Fatalf("code=%d err=%q", code, errOut)
@@ -1054,7 +1054,7 @@ func TestInstallCommandVerifyVersionLargeOutputDrains(t *testing.T) {
 	}, nil)
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
-	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+	env["SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 	env["SOHO_FAKECLI_CONFIG"] = binDir
 	code, out, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir, "--verify-version")
 	if code != 0 {

@@ -19,7 +19,7 @@ func TestWaitMirroringEmptyExitErrorRecordsFriction(t *testing.T) { // JS: "DieE
 	tmp := filepath.Join(base, "tmp")
 	bin := filepath.Join(base, "bin")
 	state := filepath.Join(stateRoot, "w0test")
-	reportDir := filepath.Join(tmp, "herdr-soho", "w0test", "reports")
+	reportDir := filepath.Join(tmp, "soho", "w0test", "reports")
 	for _, dir := range []string{cwd, filepath.Join(state, "wait"), filepath.Join(state, "reports"), reportDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -56,7 +56,7 @@ func TestWaitMirroringEmptyExitErrorRecordsFriction(t *testing.T) { // JS: "DieE
 	env["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "0"
 	env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "0"
 	env["TMPDIR"] = tmp
-	env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+	env["SOHO_WAIT_POLL_MS"] = "1"
 	delete(env, "HERDR_WORKSPACE_ID")
 	env = withFakeCLI(env, bin)
 	oldWD, err := os.Getwd()
@@ -73,7 +73,7 @@ func TestWaitMirroringEmptyExitErrorRecordsFriction(t *testing.T) { // JS: "DieE
 	t.Cleanup(func() { platform.Stdout, platform.Stderr = oldOut, oldErr })
 
 	code := Run([]string{"wait", "w0test", "--timeout", "2000"}, env)
-	if code != 1 || !strings.HasSuffix(stderr.String(), "herdr-soho: \n") {
+	if code != 1 || !strings.HasSuffix(stderr.String(), "soho: \n") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 	}
 	log, err := os.ReadFile(filepath.Join(state, "friction.log"))

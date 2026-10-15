@@ -126,7 +126,7 @@ func TestKnownCommandWithoutNativeCaseDiesNatively(t *testing.T) {
 			platform.Stdout, platform.Stderr = &out, &errOut
 			code := Run([]string{"not-ported"}, env)
 			platform.Stdout, platform.Stderr = oldOut, oldErr
-			if code != 2 || out.Len() != 0 || errOut.String() != "herdr-soho: unknown command 'not-ported'\n" {
+			if code != 2 || out.Len() != 0 || errOut.String() != "soho: unknown command 'not-ported'\n" {
 				t.Fatalf("code=%d out=%q err=%q", code, out.String(), errOut.String())
 			}
 			assertNoRuntimeCalled(t, records)
@@ -144,7 +144,7 @@ func TestUnknownCommandHostileInput(t *testing.T) {
 		platform.Stdout, platform.Stderr = &out, &errOut
 		code := Run([]string{name}, env)
 		platform.Stdout, platform.Stderr = oldOut, oldErr
-		if code != 2 || out.Len() != 0 || errOut.String() != "herdr-soho: unknown command '"+name+"'\n" {
+		if code != 2 || out.Len() != 0 || errOut.String() != "soho: unknown command '"+name+"'\n" {
 			t.Fatalf("name=%q code=%d out=%q err=%q", name, code, out.String(), errOut.String())
 		}
 		assertNoRuntimeCalled(t, records)
@@ -187,7 +187,7 @@ func TestHelpAndUnknown(t *testing.T) {
 		platform.Stderr = &errOut
 		code := Run([]string{"nope"}, platform.Env{})
 		platform.Stderr = oldErr
-		if code != 2 || errOut.String() != "herdr-soho: unknown command 'nope'\n" {
+		if code != 2 || errOut.String() != "soho: unknown command 'nope'\n" {
 			t.Fatalf("code=%d err=%q", code, errOut.String())
 		}
 	})

@@ -159,13 +159,13 @@ func TestWaitParityRemainingCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "task-worker"), []byte("implementer: porte da config\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+		f.env["SOHO_WAIT_POLL_MS"] = "1"
 		code, out, _ := f.runWait(t, "worker", "--timeout", "5000")
 		if code != 0 || !strings.Contains(out, `"status":"done"`) {
 			t.Fatalf("code=%d out=%q", code, out)
 		}
 		calls := f.calls(t)
-		if len(callsTo(calls, "pane", "report-metadata", "p0a", "--source", "herdr-soho", "--title", "implementer: porte da config ✓")) != 1 {
+		if len(callsTo(calls, "pane", "report-metadata", "p0a", "--source", "soho", "--title", "implementer: porte da config ✓")) != 1 {
 			t.Fatalf("completion did not set the report pane title: %#v", calls)
 		}
 	})
@@ -249,7 +249,7 @@ func TestWaitCommandMirrorParityCases(t *testing.T) {
 		f := newReleaseFixture(t, "idle", "")
 		addReleaseReport(t, f.state, "worker", false)
 		r := f.run(t, "worker")
-		if r.code != 0 || len(callsTo(r.calls, "pane", "close", "p-worker")) != 0 || len(callsTo(r.calls, "pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title")) != 1 {
+		if r.code != 0 || len(callsTo(r.calls, "pane", "close", "p-worker")) != 0 || len(callsTo(r.calls, "pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title")) != 1 {
 			t.Fatalf("release code=%d stdout=%q stderr=%q calls=%#v", r.code, r.stdout, r.stderr, r.calls)
 		}
 	})
@@ -544,7 +544,7 @@ func TestWaitDefaultRoleTimeoutCase(t *testing.T) {
 		f.env["HERDR_SOHO_ROLE_T1_EFFORT"] = "high"
 		f.env["HERDR_SOHO_ROLE_T2_EFFORT"] = "xhigh"
 		code, out, stderr := f.runWait(t, "w1", "w2")
-		if code != 9 || strings.Count(out, `"status":"timeout"`) != 2 || !strings.Contains(stderr, "herdr-soho wait w1 --timeout 2400") || !strings.Contains(stderr, "herdr-soho wait w2 --timeout 2400") {
+		if code != 9 || strings.Count(out, `"status":"timeout"`) != 2 || !strings.Contains(stderr, "soho wait w1 --timeout 2400") || !strings.Contains(stderr, "soho wait w2 --timeout 2400") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})
@@ -1011,7 +1011,7 @@ func waitTmpReports(t *testing.T, f *waitStatusFixture) string {
 		t.Fatal(err)
 	}
 	f.env["TMPDIR"] = tmp
-	return filepath.Join(tmp, "herdr-soho", "ws", "reports")
+	return filepath.Join(tmp, "soho", "ws", "reports")
 }
 
 func fileMtime(t *testing.T, path string) time.Time {

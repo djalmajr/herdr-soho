@@ -46,7 +46,7 @@ func TestDoctorWarnsWhenTheStateDirIsInsideTheSkill(t *testing.T) {
 	DoctorCheck(&ctx, env, skill, &out) // cwd = the skill; must finish
 	got := out.String()
 	rootPath := filepath.Join(skill, ".soho")
-	want := "warn   state dir: '" + rootPath + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory\n"
+	want := "warn   state dir: '" + rootPath + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("doctor output lacks the warn line:\n%s", got)
 	}
@@ -103,7 +103,7 @@ func TestInitRefusesBeforeDoctorCheckWhenInsideTheSkill(t *testing.T) {
 	if exitErr.Code != 2 {
 		t.Fatalf("exit=%d msg=%q", exitErr.Code, exitErr.Msg)
 	}
-	want := "the state dir '" + filepath.Join(skill, ".soho") + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"
+	want := "the state dir '" + filepath.Join(skill, ".soho") + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"
 	if exitErr.Msg != want {
 		t.Fatalf("msg=%q want %q", exitErr.Msg, want)
 	}

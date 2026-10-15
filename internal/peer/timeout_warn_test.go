@@ -33,7 +33,7 @@ func TestSendShortTimeoutWarnsOnceAndProceeds(t *testing.T) { // --timeout 45 me
 	if err := os.MkdirAll(filepath.Join(f.dir, "state", "ws-test"), 0o700); err != nil { // the state dir exists in a real workspace before the send
 		t.Fatal(err)
 	}
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello", "--timeout", "45"})
 	if code != 0 || out != "sent to local/w0test:p0a\n" {
 		t.Fatalf("code=%d out=%q stderr=%q; want the send delivered", code, out, stderr)

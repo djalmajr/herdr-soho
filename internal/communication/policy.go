@@ -26,9 +26,12 @@ const (
 	modeKey    = "worker_messages"
 	rulePrefix = "worker_messages_rules_"
 	// EnvRulePrefix is the environment prefix of the highest rule layer:
-	// HERDR_SOHO_WORKER_MESSAGES_RULES_<NAME>_{FROM,TO,TYPES,SCOPE,ENABLED}.
-	EnvRulePrefix   = "HERDR_SOHO_WORKER_MESSAGES_RULES_"
-	scopeAssignment = "assignment"
+	// SOHO_WORKER_MESSAGES_RULES_<NAME>_{FROM,TO,TYPES,SCOPE,ENABLED}.
+	// The legacy HERDR_SOHO_WORKER_MESSAGES_RULES_* names are still
+	// accepted; for the same rule name and field the SOHO_ value wins.
+	EnvRulePrefix       = "SOHO_WORKER_MESSAGES_RULES_"
+	legacyEnvRulePrefix = "HERDR_SOHO_WORKER_MESSAGES_RULES_"
+	scopeAssignment     = "assignment"
 )
 
 // MessageTypes are the message types the first version allows a rule to
@@ -114,9 +117,10 @@ var (
 
 // Load resolves the worker_messages mode and rules from the config layers
 // cfg already read (defaults < user < project < session) plus the
-// HERDR_SOHO_WORKER_MESSAGES_RULES_* environment variables, the highest
+// SOHO_WORKER_MESSAGES_RULES_* environment variables (the legacy
+// HERDR_SOHO_WORKER_MESSAGES_RULES_* names are still accepted), the highest
 // rule layer that replaces a rule as a unit. The mode env var follows Cfg
-// (HERDR_SOHO_WORKER_MESSAGES). An existing config file that cannot be
+// (SOHO_WORKER_MESSAGES). An existing config file that cannot be
 // read, an invalid mode, a strange rule field, a bad rule name or selector,
 // an unknown type or scope, and a partial rule in the defining layer are
 // visible errors. With mode off the rules are not loaded at all.
@@ -260,16 +264,29 @@ func originalRuleName(original, name string) string {
 	return name
 }
 
-// envRuleLayer reads the HERDR_SOHO_WORKER_MESSAGES_RULES_* variables into
-// the highest rule layer. The name between the prefix and the field suffix
-// is normalized and lowercased; an empty value is unset (Cfg semantics).
+// envRuleLayer reads the SOHO_WORKER_MESSAGES_RULES_* variables (with the
+// legacy HERDR_SOHO_WORKER_MESSAGES_RULES_* names still accepted) into the
+// highest rule layer. For the same rule name and field the SOHO_ value
+// wins. The name between the prefix and the field suffix is normalized and
+// lowercased; an empty value is unset (Cfg semantics).
 func envRuleLayer(env platform.Env) (ruleLayer, error) {
 	layer := ruleLayer{source: "env", fields: make(map[string]map[string]string), original: make(map[string]string)}
+	// Index 0 holds the SOHO_ values, index 1 the legacy ones: the merge
+	// below lets the SOHO_ value win field by field.
+	byPrefix := [2]map[string]map[string]string{{}, {}}
 	for name, value := range env {
-		if !strings.HasPrefix(name, EnvRulePrefix) {
+		prefix := ""
+		idx := 0
+		switch {
+		case strings.HasPrefix(name, EnvRulePrefix):
+			prefix = EnvRulePrefix
+		case strings.HasPrefix(name, legacyEnvRulePrefix):
+			prefix = legacyEnvRulePrefix
+			idx = 1
+		default:
 			continue
 		}
-		rest := strings.TrimPrefix(name, EnvRulePrefix)
+		rest := strings.TrimPrefix(name, prefix)
 		field := ""
 		for _, suffix := range fieldSuffixes {
 			if strings.HasSuffix(rest, "_"+strings.ToUpper(suffix)) {
@@ -288,12 +305,39 @@ func envRuleLayer(env platform.Env) (ruleLayer, error) {
 		if value == "" {
 			continue
 		}
-		if layer.fields[norm] == nil {
-			layer.fields[norm] = make(map[string]string)
+		if byPrefix[idx][norm] == nil {
+			byPrefix[idx][norm] = make(map[string]string)
 		}
-		layer.fields[norm][field] = value
+		byPrefix[idx][norm][field] = value
+	}
+	for _, name := range sortedRuleNames(byPrefix[0], byPrefix[1]) {
+		fields := make(map[string]string)
+		for field, value := range byPrefix[1][name] {
+			fields[field] = value
+		}
+		for field, value := range byPrefix[0][name] {
+			fields[field] = value
+		}
+		layer.fields[name] = fields
 	}
 	return layer, nil
+}
+
+// sortedRuleNames lists the rule names present in either prefix map, in
+// ascending order.
+func sortedRuleNames(pairs ...map[string]map[string]string) []string {
+	seen := make(map[string]bool)
+	for _, m := range pairs {
+		for name := range m {
+			seen[name] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // effectiveRule resolves one rule as a unit from the highest layer that

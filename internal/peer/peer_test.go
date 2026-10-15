@@ -367,7 +367,7 @@ func TestSend(t *testing.T) {
 					)
 				}
 				f := newFixture(t, rules)
-				f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+				f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 				code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 				calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
 				if err != nil {
@@ -457,7 +457,7 @@ func TestSend(t *testing.T) {
 		rules[0].Stdout = agentJSON("working", "1")
 		rules = append(rules, fakecli.Rule{Argv: []string{"agent", "wait", "w0test:p0a", "--until", "idle", "--until", "done", "--timeout", "600000"}})
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -536,7 +536,7 @@ func TestSend(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 3, Stdout: agentJSON("idle", "1")},
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 4, Stdout: agentJSON("working", "2")},
 		}))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -560,7 +560,7 @@ func TestSend(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 3, Stdout: agentJSON("idle", "1")},
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: dialog},
 		})
-		f.env["HERDR_SOHO_SEND_POLL_MS"] = "1"
+		f.env["SOHO_SEND_POLL_MS"] = "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "5", "hello"})
 		if code != 17 || !strings.Contains(stderr, "showing a dialog") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -674,7 +674,7 @@ func TestSend(t *testing.T) {
 		}
 		f.env["TMPDIR"] = badTmp
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		if code != 4 || stderr != "herdr-soho: send: local/w0test:p0a unavailable: herdr-soho: cannot write temporary files: EEXIST\n" {
+		if code != 4 || stderr != "soho: send: local/w0test:p0a unavailable: soho: cannot write temporary files: EEXIST\n" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 	})
@@ -726,10 +726,10 @@ func TestSend(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 3, Stdout: agentJSON("idle", "1")},
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 4, Stdout: agentJSON("working", "2")},
 		}))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"] = "1"
-		f.env["HERDR_SOHO_SEND_POLL_MS"] = "1"
+		f.env["SOHO_SEND_WINDOW_MS"] = "1"
+		f.env["SOHO_SEND_POLL_MS"] = "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "300", "hello"})
-		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "herdr-soho: warning: send: --timeout is in milliseconds; 300 is under a second (for 300 seconds pass 300000)\n" {
+		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "soho: warning: send: --timeout is in milliseconds; 300 is under a second (for 300 seconds pass 300000)\n" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})
@@ -954,7 +954,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		rules = append([]fakecli.Rule{{Argv: []string{"agent", "get", "sender-pane"}, Stdout: `{"result":{"agent":{"pane_id":"sender-pane","name":"soho\r-s4\u001b","agent":"pi","agent_status":"idle"}}}`}}, rules...)
 		f := newFixture(t, rules)
 		f.env["HERDR_PANE_ID"] = "sender-pane"
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hi"})
 		if code != 0 || stderr != "" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -1129,7 +1129,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		}
 		rules = append(rules, fakecli.Rule{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stdout: "history #01020304\n"})
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -1158,7 +1158,7 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 5, Stdout: agentJSON("idle", "1")},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -1198,7 +1198,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		})
 		rules[0].Stdout = agentJSON("idle", "1")
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hi"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -1226,7 +1226,7 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 5, Stdout: agentJSON("idle", "1")},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hi"})
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
 		if err != nil {
@@ -1265,7 +1265,7 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 5, Stdout: agentJSON("idle", "1")},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hi"})
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
 		if err != nil {
@@ -1298,7 +1298,7 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Stdout: steering},
 			{Argv: []string{"agent", "send-keys", "w0test:p0a", "enter"}},
 		})
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, stdout, stderr := f.run([]string{"send", "w0test:p0a", "hi", "--now"})
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
 		if err != nil {
@@ -1326,7 +1326,7 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: "no peer id in input\n"},
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 5, Stdout: agentJSON("idle", "1")},
 		})
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
 		if err != nil {
@@ -1358,7 +1358,7 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 3, Stdout: agentJSON("idle", "1")},
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 4, Stdout: agentJSON("working", "2")},
 		}))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", strings.Join(body, "\n")})
 		if code != 0 || stderr != "" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -1379,7 +1379,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		})
 		rules[0].Stdout = agentJSON("idle", "1")
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hi"})
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
 		if err != nil {
@@ -1402,7 +1402,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		lines := strings.Split(strings.TrimSpace(string(log)), "\n")
 		cols := strings.Split(lines[len(lines)-1], "\t")
 		// Mutation captured: logging a failed recent read as "lost" or sending Enter after the read failure violates this command contract.
-		if code != 15 || !strings.HasPrefix(stderr, "herdr-soho: send: could not confirm that local/w0test:p0a took the message (") || !strings.HasSuffix(stderr, "); read its pane before sending again\n") || prompts != 1 || enters != 0 || len(cols) < 4 || cols[3] != "unverified" {
+		if code != 15 || !strings.HasPrefix(stderr, "soho: send: could not confirm that local/w0test:p0a took the message (") || !strings.HasSuffix(stderr, "); read its pane before sending again\n") || prompts != 1 || enters != 0 || len(cols) < 4 || cols[3] != "unverified" {
 			t.Fatalf("code=%d stderr=%q prompts=%d enters=%d log=%q", code, stderr, prompts, enters, string(log))
 		}
 	})
@@ -1422,7 +1422,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		})
 		rules[0].Stdout = agentJSON("working", "1")
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hi"})
 		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -1452,7 +1452,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		}
 		rules[0].Stdout = agentJSON("idle", "1")
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hi"})
 		if code != 17 || !strings.Contains(stderr, "showing a dialog") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -1482,7 +1482,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		}
 		rules[0].Stdout = agentJSON("idle", "1")
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hi"})
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
 		if err != nil {
@@ -1517,7 +1517,7 @@ func TestSendAmendmentCases(t *testing.T) {
 			}
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hi"})
 		if code != 15 || !strings.Contains(stderr, "could not confirm") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -1536,9 +1536,9 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 3, Stdout: agentJSON("idle", "1")},
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 4, Stdout: agentJSON("working", "2")},
 		}))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "50", "hi"})
-		if code != 0 || stderr != "herdr-soho: warning: send: --timeout is in milliseconds; 50 is under a second (for 50 seconds pass 50000)\n" {
+		if code != 0 || stderr != "soho: warning: send: --timeout is in milliseconds; 50 is under a second (for 50 seconds pass 50000)\n" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 	})
@@ -1565,7 +1565,7 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 3, Stdout: agentJSON("idle", "1")},
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 4, Stdout: agentJSON("working", "2")},
 		}))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hi"})
 		if code != 0 || stderr != "" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -1600,9 +1600,9 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 5, Stdout: agentJSON("working", "2")},
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 3, Stdout: "Ready.\n"},
 		})
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "50", "hi"})
-		if code != 0 || stderr != "herdr-soho: warning: send: --timeout is in milliseconds; 50 is under a second (for 50 seconds pass 50000)\n" {
+		if code != 0 || stderr != "soho: warning: send: --timeout is in milliseconds; 50 is under a second (for 50 seconds pass 50000)\n" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 	})
@@ -1617,7 +1617,7 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: "Enter to submit answer\n"},
 			{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 4, Stdout: agentJSON("blocked", "2")},
 		})
-		f.env["HERDR_SOHO_SEND_POLL_MS"] = "1"
+		f.env["SOHO_SEND_POLL_MS"] = "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "1", "hi"})
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
 		if err != nil {
@@ -1637,12 +1637,12 @@ func TestSendAmendmentCases(t *testing.T) {
 		}
 	})
 
-	t.Run("HERDR_SOHO_SEND_WINDOW_MS is capped, accepts a short value, and falls back for zero", func(t *testing.T) { // JS: "HERDR_SOHO_SEND_WINDOW_MS=999999 is capped at 15000"
+	t.Run("SOHO_SEND_WINDOW_MS is capped, accepts a short value, and falls back for zero", func(t *testing.T) { // JS: "SOHO_SEND_WINDOW_MS=999999 is capped at 15000"
 		for _, tc := range []struct {
 			value string
 			want  int
 		}{{"999999", 15000}, {"200", 200}, {"0", 15000}} {
-			if got := arrivalWindowMS(platform.Env{"HERDR_SOHO_SEND_WINDOW_MS": tc.value}); got != tc.want {
+			if got := arrivalWindowMS(platform.Env{"SOHO_SEND_WINDOW_MS": tc.value}); got != tc.want {
 				t.Errorf("arrivalWindowMS(%q)=%d, want %d", tc.value, got, tc.want)
 			}
 		}
@@ -1658,7 +1658,7 @@ func assertSendDialogBlocked(t *testing.T, screen string) {
 		{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: screen},
 		{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 3, Stdout: agentJSON("idle", "1")},
 	})
-	f.env["HERDR_SOHO_SEND_POLL_MS"] = "1"
+	f.env["SOHO_SEND_POLL_MS"] = "1"
 	code, _, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "1", "hi"})
 	calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
 	if err != nil {
@@ -1737,7 +1737,7 @@ func TestFind(t *testing.T) {
 	t.Run("bad flags print the fixed usage and exit 2", func(t *testing.T) { // JS: "find: bad usage exits 2 with the usage line"
 		f := newFixture(t, nil)
 		code, out, stderr := f.run([]string{"find", "--machine"})
-		if code != 2 || out != "" || stderr != "herdr-soho: usage: find [search words] [--machine <label>]... [--all] [--json] [--timeout MS]\n" {
+		if code != 2 || out != "" || stderr != "soho: usage: find [search words] [--machine <label>]... [--all] [--json] [--timeout MS]\n" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})

@@ -80,7 +80,7 @@ func TestWaitRoutesAndValidatesTimeout(t *testing.T) { // JS: "wait: a --timeout
 	platform.Stdout, platform.Stderr = &out, &stderr
 	code := Run([]string{"wait", "worker", "--timeout", "later"}, env)
 	platform.Stdout, platform.Stderr = oldOut, oldErr
-	if code != 2 || out.Len() != 0 || stderr.String() != "herdr-soho: wait: --timeout expects milliseconds, got 'later'\n" {
+	if code != 2 || out.Len() != 0 || stderr.String() != "soho: wait: --timeout expects milliseconds, got 'later'\n" {
 		t.Fatalf("code=%d out=%q err=%q", code, out.String(), stderr.String())
 	}
 }

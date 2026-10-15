@@ -82,6 +82,6 @@ func commandSpawnEnv(t *testing.T, root, state, bin string) platform.Env {
 	env["HERDR_WORKSPACE_ID"] = "ws"
 	env["HERDR_SOHO_DIR"] = state
 	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
-	env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+	env["SOHO_WAIT_POLL_MS"] = "1"
 	return env
 }

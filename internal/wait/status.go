@@ -184,7 +184,7 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 			// the local query; the hint cites the command form that worked.
 			if known, cmd := probeNotInRoster(agent, env); known {
 				state = "not-in-roster"
-				fmt.Fprintf(platform.Stderr, "herdr-soho: status: '%s' is not a worker of this workspace's team; %s shows its state\n", agent, cmd)
+				fmt.Fprintf(platform.Stderr, "soho: status: '%s' is not a worker of this workspace's team; %s shows its state\n", agent, cmd)
 			} else {
 				state = "unknown-agent"
 			}

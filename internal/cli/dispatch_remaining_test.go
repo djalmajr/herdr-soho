@@ -54,7 +54,7 @@ func prepareRunHarness(t *testing.T, h *tm3bHarness) {
 	h.env["HERDR_SOHO_LAYOUT"] = "split"
 	h.env["HERDR_SOHO_REUSE_WORKERS"] = "off"
 	h.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
-	h.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+	h.env["SOHO_WAIT_POLL_MS"] = "1"
 	rules := []fakecli.Rule{
 		{Argv: []string{"agent", "list"}, ArgvPrefix: true, Stdout: `{"result":{"agents":[]}}`},
 		{Argv: []string{"agent", "start"}, ArgvPrefix: true, Stdout: `{"result":{"started":true}}`},
@@ -156,7 +156,7 @@ func TestDispatchRemainingParityPortedCases(t *testing.T) {
 		}
 		prompt, _ := dispatchOutputField(t, out, "composed_prompt")
 		report, _ := dispatchOutputField(t, out, "report")
-		if !strings.HasPrefix(prompt, filepath.Join(f.root, "herdr-soho", "ws", "reports")) || filepath.Dir(prompt) != filepath.Dir(report) {
+		if !strings.HasPrefix(prompt, filepath.Join(f.root, "soho", "ws", "reports")) || filepath.Dir(prompt) != filepath.Dir(report) {
 			t.Fatalf("worker-outside-root paths: prompt=%q report=%q", prompt, report)
 		}
 		if _, err := os.Stat(filepath.Join(f.state, "ws", "briefs", filepath.Base(prompt))); !os.IsNotExist(err) {
@@ -175,7 +175,7 @@ func TestDispatchRemainingParityPortedCases(t *testing.T) {
 			t.Fatalf("run stdout did not end with dispatch JSON: %q", out)
 		}
 		calls := mustRunCalls(t, h)
-		if !hasRunCallPrefix(calls, "agent", "start", "implementer") || !hasRunCallPrefix(calls, "pane", "report-metadata", "w0test:p0b", "--source", "herdr-soho", "--title", "implementer: fix the config") {
+		if !hasRunCallPrefix(calls, "agent", "start", "implementer") || !hasRunCallPrefix(calls, "pane", "report-metadata", "w0test:p0b", "--source", "soho", "--title", "implementer: fix the config") {
 			t.Fatalf("spawn/dispatch/title calls=%v", calls)
 		}
 		if countRunCallPrefix(calls, "agent", "get", "implementer") != 1 || hasRunCallPrefix(calls, "agent", "read", "implementer", "--source", "recent-unwrapped", "--lines", "120") {
@@ -259,7 +259,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		prompt, _ := dispatchOutputField(t, out, "composed_prompt")
 		report, _ := dispatchOutputField(t, out, "report")
-		if code != 0 || !strings.HasSuffix(prompt, ".brief.md") || filepath.Dir(prompt) != filepath.Dir(report) || !strings.Contains(filepath.ToSlash(prompt), "/herdr-soho/ws/reports/") {
+		if code != 0 || !strings.HasSuffix(prompt, ".brief.md") || filepath.Dir(prompt) != filepath.Dir(report) || !strings.Contains(filepath.ToSlash(prompt), "/soho/ws/reports/") {
 			t.Fatalf("code=%d prompt=%q report=%q", code, prompt, report)
 		}
 		if entries, err := os.ReadDir(filepath.Join(f.state, "ws", "briefs")); err != nil || len(entries) != 0 {
@@ -503,7 +503,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		f.env["HERDR_SOHO_PROVIDER_RETRIES"] = "1"
 		f.env["HERDR_SOHO_PROVIDER_RETRY_DELAY"] = "0"
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+		f.env["SOHO_WAIT_POLL_MS"] = "1"
 		code, out, stderr := f.run(t, "worker", f.brief, "--timeout", "5000")
 		if code != 14 || dispatchOutputStatus(t, out) != "capacity" || !strings.Contains(out, `"lane":"build"`) || !strings.Contains(out, `"model":"grok-4.7"`) || !strings.Contains(out, `"retries":1`) || !strings.Contains(out, `"cause":"Error: 529 overloaded"`) {
 			t.Fatalf("capacity code=%d out=%s stderr=%s calls=%v", code, out, stderr, mustCalls(t, f))

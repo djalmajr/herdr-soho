@@ -47,7 +47,7 @@ func TestDoctorWarnsPerOrphanPane(t *testing.T) {
 	env["HERDR_PANE_ID"] = "ws:p1"
 	writeDoctorReleasedPanes(t, root, "review-3\tws:p2\tgrok\t20261001T000000", "review\tws:p1\tgrok\t20261001T000000")
 	got := doctorCheckOutput(t, env, root)
-	want := "warn   orphan pane: 'review-3' (ws:p2, idle) is not in the roster; close it with: herdr-soho release review-3 --close\n"
+	want := "warn   orphan pane: 'review-3' (ws:p2, idle) is not in the roster; close it with: soho release review-3 --close\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("doctor lacks the orphan warn:\n%s", got)
 	}

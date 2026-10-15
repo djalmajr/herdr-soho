@@ -88,7 +88,7 @@ func TestSendStalledEnter(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 3, Stdout: piSendScreen(history+"\n"+prompt, "")},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -123,9 +123,9 @@ func TestSendStalledEnter(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Stdout: box},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message: the last read showed it in its input box after one Enter; delivery is uncertain; read its pane for #01020304 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
+		want := "soho: send: local/w0test:p0a did not confirm taking the message: the last read showed it in its input box after one Enter; delivery is uncertain; read its pane for #01020304 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -153,9 +153,9 @@ func TestSendStalledEnter(t *testing.T) {
 			{Argv: []string{"agent", "send-keys", "w0test:p0a", "enter"}, Code: 0},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		want := "herdr-soho: send: local/w0test:p0a is showing a dialog after the message was typed; press nothing and read its pane\n"
+		want := "soho: send: local/w0test:p0a is showing a dialog after the message was typed; press nothing and read its pane\n"
 		if code != 17 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -184,9 +184,9 @@ func TestSendStalledEnter(t *testing.T) {
 		// The stalled window repeats the one-shot check of the old code on
 		// every poll: shorten it like the other subtests, and the unreadable
 		// reads of the window fail fast instead of running the default 15s.
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
-		want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message (agent_prompt_stalled: stalled); delivery is uncertain: no proof within the 0.001s window; read its pane for #01020304 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
+		want := "soho: send: local/w0test:p0a did not confirm taking the message (agent_prompt_stalled: stalled); delivery is uncertain: no proof within the 0.001s window; read its pane for #01020304 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-01020304.screen") + "\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -219,7 +219,7 @@ func TestSendStalledEnter(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: box},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 15 || out != "" {
 			t.Fatalf("the unrecognized box must not press Enter and must not prove delivery: code=%d out=%q stderr=%q", code, out, stderr)

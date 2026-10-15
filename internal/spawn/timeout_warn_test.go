@@ -49,7 +49,7 @@ func TestSpawnShortTimeoutWarnsOnceAndKeepsTheValue(t *testing.T) { // --timeout
 		"HERDR_SOHO_SKILL_DIR": filepath.Join(root, "skill"), "HERDR_SOHO_ROLES": roles,
 		"HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1",
 		"HERDR_PANE_ID": "p1", "HERDR_SOHO_LANES": "off", "HERDR_SOHO_LAYOUT": "split",
-		"HERDR_SOHO_REGRID": "off", "HERDR_SOHO_WAIT_POLL_MS": "1",
+		"HERDR_SOHO_REGRID": "off", "SOHO_WAIT_POLL_MS": "1",
 	}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	oldOut, oldErr := platform.Stdout, platform.Stderr

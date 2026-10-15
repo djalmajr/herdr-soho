@@ -78,7 +78,7 @@ func EnsureOrchestratorName(ctx *core.Config, env platform.Env, cwd, command str
 		if role == "" {
 			who = "opened by another orchestrator"
 		}
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s: this pane is '%s' in the roster (%s); keeping its name\n", command, name, who)
+		_, _ = fmt.Fprintf(platform.Stderr, "soho: %s: this pane is '%s' in the roster (%s); keeping its name\n", command, name, who)
 		if cur == "" {
 			// A transient failure of the name read must not report an
 			// empty name: the roster row names the same agent.

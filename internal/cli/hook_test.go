@@ -33,7 +33,7 @@ func TestNativeHookReminderAndOutsideHerdr(t *testing.T) {
 			t.Fatalf("%s reminder: %d %q %q", nowrite, code, out, stderr)
 		}
 		code, out, stderr = runIn(t, []string{"hook", "doctor"}, env, cwd)
-		if code != 0 || !strings.Contains(out, "herdr-soho doctor: ") || stderr != "" {
+		if code != 0 || !strings.Contains(out, "soho doctor: ") || stderr != "" {
 			t.Fatalf("%s doctor: %d %q %q", nowrite, code, out, stderr)
 		}
 	}
@@ -93,7 +93,7 @@ func TestNativeDoctorHookReadOnlyWarnings(t *testing.T) {
 		t.Fatalf("doctor hook: %d %q %q", code, out, stderr)
 	}
 	for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
-		if !strings.HasPrefix(line, "herdr-soho doctor: ") {
+		if !strings.HasPrefix(line, "soho doctor: ") {
 			t.Fatalf("hook leaked non-warning doctor output: %q", line)
 		}
 	}
@@ -107,7 +107,7 @@ func TestNativeDoctorHookReadOnlyWarnings(t *testing.T) {
 func TestNativeDoctorHookMissingSkillIsAdvisory(t *testing.T) {
 	env := platform.Env{"HERDR_ENV": "1", "HERDR_SOHO_SKILL_DIR": filepath.Join(t.TempDir(), "missing"), "PATH": t.TempDir(), "HOME": t.TempDir(), "USERPROFILE": t.TempDir()}
 	code, out, stderr := runIn(t, []string{"hook", "doctor"}, env, t.TempDir())
-	if code != 0 || !strings.Contains(out, "herdr-soho doctor: ") || stderr != "" {
+	if code != 0 || !strings.Contains(out, "soho doctor: ") || stderr != "" {
 		t.Fatalf("missing skill hook: %d %q %q", code, out, stderr)
 	}
 }

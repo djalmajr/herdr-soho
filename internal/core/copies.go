@@ -41,7 +41,7 @@ type RegistryLockedError struct {
 }
 
 func (e *RegistryLockedError) Error() string {
-	return fmt.Sprintf("%s: registry is locked by another herdr-soho (%s)", e.Kind, e.Path)
+	return fmt.Sprintf("%s: registry is locked by another soho (%s)", e.Kind, e.Path)
 }
 
 // CopiesLockedError is the copies flavor of the registry lock error.
@@ -256,7 +256,7 @@ func WorkspaceIDOrError(env platform.Env) (string, error) {
 func StateDirResolved(ctx *Config, env platform.Env, cwd string) (string, error) {
 	if !Nowrite(env) {
 		if skill := StateInSkill(ctx, env, cwd); skill != "" {
-			return "", fmt.Errorf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was written)", StateRootPath(ctx, env, cwd), skill)
+			return "", fmt.Errorf("the state dir '%s' would be inside the soho skill ('%s'); run soho from the project's directory (nothing was written)", StateRootPath(ctx, env, cwd), skill)
 		}
 	}
 	workspace, err := WorkspaceIDOrError(env)

@@ -124,7 +124,7 @@ func TestSpawnRetryAndUpdateJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "worker"}, ArgvPrefix: true, Call: 2, Stdout: "ready\n"},
 			{Argv: []string{"agent", "read", "worker"}, ArgvPrefix: true, Call: 3, Stdout: "ready\n"},
 		})
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+		f.env["SOHO_WAIT_POLL_MS"] = "1"
 		o := spawnOptions{name: "worker", pane: "w0test:p0a", timeout: "1"}
 		if startAgent(o, "codex", f.env, false, nil) {
 			t.Fatal("initial start blocked")
@@ -169,7 +169,7 @@ func TestSpawnRetryAndUpdateJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "worker"}, ArgvPrefix: true, Call: 2, Stdout: "❯ codex -s workspace-write\nUpdating Codex via npm install\nPlease restart Codex\n"},
 			{Argv: []string{"agent", "read", "worker"}, ArgvPrefix: true, Call: 3, Stdout: "❯ codex -s workspace-write\nUpdating Codex via npm install\nPlease restart Codex\n"},
 		})
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+		f.env["SOHO_WAIT_POLL_MS"] = "1"
 		o := spawnOptions{name: "worker", pane: "p", timeout: "1"}
 		if startAgent(o, "codex", f.env, false, nil) {
 			t.Fatal("initial start blocked")

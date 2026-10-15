@@ -307,7 +307,7 @@ func TestFindStreamArrivalAndPartial(t *testing.T) {
 			f := newFixture(t, []fakecli.Rule{{Argv: []string{"api", "snapshot"}, Stdout: `{"result":{"snapshot":` + localSnapshot + `}}`}})
 			code, out, stderr := f.run(argv)
 			calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
-			if code != 2 || out != "" || stderr != "herdr-soho: find: --timeout expects the deadline in milliseconds (a positive integer)\n" {
+			if code != 2 || out != "" || stderr != "soho: find: --timeout expects the deadline in milliseconds (a positive integer)\n" {
 				t.Fatalf("argv=%v code=%d out=%q stderr=%q", argv, code, out, stderr)
 			}
 			if (err != nil && !os.IsNotExist(err)) || (err == nil && len(calls) != 0) {

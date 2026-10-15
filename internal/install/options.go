@@ -15,8 +15,10 @@ const (
 	// HERDR_SOHO_INSTALL_DIR is copied to this name at the start of Run by
 	// the root CLI's environment layer.
 	EnvInstallDir = "SOHO_INSTALL_DIR"
-	// EnvReleaseBase overrides the release download base URL.
-	EnvReleaseBase = "HERDR_SOHO_RELEASE_BASE"
+	// EnvReleaseBase overrides the release download base URL. The legacy
+	// HERDR_SOHO_RELEASE_BASE is copied to this name at the start of Run by
+	// the root CLI's environment layer.
+	EnvReleaseBase = "SOHO_RELEASE_BASE"
 )
 
 // DefaultInstallDir resolves the install directory when no explicit --dir is

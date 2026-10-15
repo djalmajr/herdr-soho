@@ -337,9 +337,9 @@ func CompactPhaseCheck(sd, agent, pane string, env platform.Env) {
 		}
 		switch owner := CompactPendingOwner(rec, env); owner {
 		case CompactOwnerAlive:
-			DieFriction(fmt.Sprintf("dispatch: the compact phase of '%s' (pane %s) is in progress (owner pid %d is alive); the brief was not sent; wait for it to end (herdr-soho status %s)", agent, pane, rec.PID, agent), 10, "", "")
+			DieFriction(fmt.Sprintf("dispatch: the compact phase of '%s' (pane %s) is in progress (owner pid %d is alive); the brief was not sent; wait for it to end (soho status %s)", agent, pane, rec.PID, agent), 10, "", "")
 		case CompactOwnerUnknown:
-			DieFriction(fmt.Sprintf("dispatch: the compact phase of '%s' (pane %s) has an unverifiable owner (pid %d, liveness unknown); the brief was not sent; wait for it to end (herdr-soho status %s)", agent, pane, rec.PID, agent), 10, "", "")
+			DieFriction(fmt.Sprintf("dispatch: the compact phase of '%s' (pane %s) has an unverifiable owner (pid %d, liveness unknown); the brief was not sent; wait for it to end (soho status %s)", agent, pane, rec.PID, agent), 10, "", "")
 		case CompactOwnerDead:
 			removeStale(path, agent, "dead owner")
 		}

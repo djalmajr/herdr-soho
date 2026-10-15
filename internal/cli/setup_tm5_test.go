@@ -125,7 +125,7 @@ func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 		stderrText = strings.ReplaceAll(stderrText, program, "PROG")
 		stdoutText = normalizeGoldenRootPathSeparators(stdoutText)
 		stderrText = normalizeGoldenRootPathSeparators(stderrText)
-		stderrText = strings.ReplaceAll(stderrText, "herdr-soho: ", "PROG: ")
+		stderrText = strings.ReplaceAll(stderrText, "soho: ", "PROG: ")
 		gotSteps = append(gotSteps, setupTM5GoldenStep{Args: args, RC: rc, Out: stdoutText, Err: stderrText})
 	}
 	platform.Stdout, platform.Stderr = oldOut, oldErr

@@ -337,7 +337,7 @@ type mutationCopyResult struct {
 }
 
 func mutationCopyUsageError() int {
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", mutationCopyUsage)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: %s\n", mutationCopyUsage)
 	return 2
 }
 

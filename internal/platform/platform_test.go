@@ -1152,7 +1152,7 @@ func TestRunTreeKillTestKiller(t *testing.T) {
 		gotPath = path
 		gotArgs = args
 	}
-	if !runTreeKillTestKiller(Env{"HERDR_SOHO_TREEKILL_TEST_KILLER": killer}, tempDir, 1234, run) {
+	if !runTreeKillTestKiller(Env{"SOHO_TREEKILL_TEST_KILLER": killer}, tempDir, 1234, run) {
 		t.Fatal("temporary test killer was not accepted")
 	}
 	resolvedKiller, err := filepath.EvalSymlinks(killer)
@@ -1168,7 +1168,7 @@ func TestRunTreeKillTestKiller(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			called := false
-			if runTreeKillTestKiller(Env{"HERDR_SOHO_TREEKILL_TEST_KILLER": value}, tempDir, 1234, func(string, []string) { called = true }) || called {
+			if runTreeKillTestKiller(Env{"SOHO_TREEKILL_TEST_KILLER": value}, tempDir, 1234, func(string, []string) { called = true }) || called {
 				t.Fatalf("unsafe test killer %q was accepted", value)
 			}
 		})
@@ -1903,7 +1903,7 @@ func TestRunCliTempDirMatchesJSTempDirFor(t *testing.T) { // JS: "send reports a
 		env := EnvFromOS()
 		env["TMPDIR"] = file
 		r := RunExecutable(exe, []string{"-test.run=^$"}, RunOptions{Env: env, TimeoutMs: 30000, MergeOutput: true})
-		if r.Status != nil || r.Error != "EEXIST" || r.Stdout != "" || r.Stderr != "herdr-soho: cannot write temporary files: EEXIST\n" {
+		if r.Status != nil || r.Error != "EEXIST" || r.Stdout != "" || r.Stderr != "soho: cannot write temporary files: EEXIST\n" {
 			t.Fatalf("result = %#v", r)
 		}
 	})

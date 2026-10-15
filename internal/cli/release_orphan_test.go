@@ -108,7 +108,7 @@ func TestReleaseCloseWorkingOrphanRefusesWithoutForce(t *testing.T) {
 		{Argv: []string{"pane", "close", "ws:p2"}},
 	})
 	r := f.run(t, "review-3", "--close")
-	want := "herdr-soho: agent 'review-3' is not in the roster and is working; pass --force to close its pane\n"
+	want := "soho: agent 'review-3' is not in the roster and is working; pass --force to close its pane\n"
 	if r.code != 10 || r.stderr != want || r.stdout != "" || len(callsTo(r.calls, "pane", "close", "ws:p2")) != 0 {
 		t.Fatalf("release status=%d stderr=%q calls=%#v", r.code, r.stderr, r.calls)
 	}
@@ -122,7 +122,7 @@ func TestReleaseCloseOrphanUnqueryableRefusesWithoutForce(t *testing.T) {
 		{Argv: []string{"pane", "close", "ws:p2"}},
 	})
 	r := f.run(t, "review-3", "--close")
-	want := "herdr-soho: agent 'review-3' is not in the roster and is unavailable; pass --force to close its pane\n"
+	want := "soho: agent 'review-3' is not in the roster and is unavailable; pass --force to close its pane\n"
 	if r.code != 10 || r.stderr != want || len(callsTo(r.calls, "pane", "close", "ws:p2")) != 0 {
 		t.Fatalf("release status=%d stderr=%q calls=%#v", r.code, r.stderr, r.calls)
 	}
@@ -149,7 +149,7 @@ func TestReleaseCloseOrphanFailedCloseExits4AndKeepsTheRow(t *testing.T) {
 		{Argv: []string{"pane", "get", "ws:p2"}, Stdout: `{"result":{"pane":{"pane_id":"ws:p2"}}}`},
 	})
 	r := f.run(t, "review-3", "--close")
-	want := "herdr-soho: release: could not close the pane ws:p2 of 'review-3'; close it by hand with: herdr pane close ws:p2\n"
+	want := "soho: release: could not close the pane ws:p2 of 'review-3'; close it by hand with: herdr pane close ws:p2\n"
 	if r.code != 4 || r.stderr != want || strings.Contains(r.stdout, "released") || len(callsTo(r.calls, "pane", "close", "ws:p2")) != 1 {
 		t.Fatalf("release status=%d stdout=%q stderr=%q calls=%#v", r.code, r.stdout, r.stderr, r.calls)
 	}
@@ -280,7 +280,7 @@ func TestReleaseCloseRosteredAgentKeepsTheRosterFlow(t *testing.T) {
 	f := newOrphanReleaseFixture(t, agents, `[{"pane_id":"p-worker"}]`, "", nil, []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`},
 		{Argv: []string{"pane", "close", "p-worker"}},
-		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
 		{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
 		{Argv: []string{"tab", "rename", "t1", "herd"}},
 	})
@@ -299,7 +299,7 @@ func TestReleaseWithoutCloseRecordsTheReleasedPane(t *testing.T) {
 	// (name, pane, kind, time) and keeps the stderr hint.
 	f := newOrphanReleaseFixture(t, orphanAgents, orphanPanes, "", nil, []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`},
-		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
 		{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
 		{Argv: []string{"tab", "rename", "t1", "herd"}},
 	})
@@ -308,7 +308,7 @@ func TestReleaseWithoutCloseRecordsTheReleasedPane(t *testing.T) {
 	t.Cleanup(func() { platform.Now = oldNow })
 	addReleaseReport(t, f.state, "worker", false)
 	r := f.run(t, "worker")
-	want := "herdr-soho: release: the pane p-worker stays open; close it later with: herdr-soho release worker --close\n"
+	want := "soho: release: the pane p-worker stays open; close it later with: soho release worker --close\n"
 	if r.code != 0 || r.stderr != want || strings.Contains(r.stdout, "stays open") {
 		t.Fatalf("release status=%d stdout=%q stderr=%q calls=%#v", r.code, r.stdout, r.stderr, r.calls)
 	}
@@ -330,7 +330,7 @@ func TestReleaseWithoutCloseNeverRecordsAGivenPane(t *testing.T) {
 	// case where a registry row would make it an orphan.
 	f := newOrphanReleaseFixture(t, `[{"name":"worker","pane_id":"p-worker","agent_status":"idle"}]`, `[{"pane_id":"p-worker"}]`, "", nil, []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`},
-		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
 		{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
 		{Argv: []string{"tab", "rename", "t1", "herd"}},
 		{Argv: []string{"pane", "close", "p-worker"}},
@@ -361,7 +361,7 @@ func TestReleaseWithoutClosePrunesGoneRows(t *testing.T) {
 	// The registry write prunes rows whose pane is gone from Herdr.
 	f := newOrphanReleaseFixture(t, orphanAgents, orphanPanes, "", []string{releasedRow("old", "ws:pGone")}, []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`},
-		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
 		{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
 		{Argv: []string{"tab", "rename", "t1", "herd"}},
 		{Argv: []string{"pane", "get", "ws:pGone"}, Stderr: `{"error":{"code":"pane_not_found","message":"gone"}}`, Code: 1},
@@ -397,7 +397,7 @@ func TestReleaseWithoutCloseRefusedInsideSkill(t *testing.T) {
 	platform.Stdout, platform.Stderr = &out, &stderr
 	code := Run([]string{"release", "worker"}, env)
 	platform.Stdout, platform.Stderr = oldOut, oldErr
-	if code != 2 || !strings.Contains(stderr.String(), "would be inside the herdr-soho skill") {
+	if code != 2 || !strings.Contains(stderr.String(), "would be inside the soho skill") {
 		t.Fatalf("release status=%d stderr=%q", code, stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(state, "released-panes.tsv")); !os.IsNotExist(err) {

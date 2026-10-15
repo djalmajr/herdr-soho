@@ -30,7 +30,7 @@ const nowriteRosterTail = "\n# other live agents in workspace ws (not spawned by
 
 const nowriteRosterRow = "worker               implementer        grok     p-worker -                gone      ready            /tmp/work -\n"
 
-const nowriteExplainIdle = "herdr-soho runs a small team of agents in Herdr panels. You stay in this panel and lead. Each other panel is one agent with one job: writing code (research included) or reviewing. Those agents never commit or push. You can watch a panel or close it. Each assistant spends the quota of its own account. Nothing is running yet. To start, describe the work here. The first time, you are asked how many panels to open and which assistant each job should use, and nothing opens until you agree. Four panels are recommended: two write code in parallel and one reviews; that uses more quota. Three panels are lighter: one writes and one reviews. With two panels one writes and the review happens here.\n"
+const nowriteExplainIdle = "soho runs a small team of agents in Herdr panels. You stay in this panel and lead. Each other panel is one agent with one job: writing code (research included) or reviewing. Those agents never commit or push. You can watch a panel or close it. Each assistant spends the quota of its own account. Nothing is running yet. To start, describe the work here. The first time, you are asked how many panels to open and which assistant each job should use, and nothing opens until you agree. Four panels are recommended: two write code in parallel and one reviews; that uses more quota. Three panels are lighter: one writes and one reviews. With two panels one writes and the review happens here.\n"
 
 const nowriteExplainRunning = "Panels: 4.\nbuild: implementer, grok, model grok-4.7, idle\nreview: not started\n\nRecommendation: 4 panels - two write code (research included) in parallel and one reviews. Uses more quota. 3 panels are lighter: one writes and one reviews. With 2 panels one writes and the review happens here.\n"
 
@@ -235,7 +235,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 				cases[6].wantOut = fmt.Sprintf("<!-- report: %s -->\nreport body line\n", nr.report)
 				cases[7].wantOut = fmt.Sprintf("%s  ghost  1d  orphan\n%s  worker  5h  owned\n", nr.orphan, nr.owned)
 				cases[8].wantOut = nowriteGcNoneLine +
-					fmt.Sprintf("would remove %s  2.0 KB  ghost  1d\ntotal: 2.0 KB\nrun 'herdr-soho gc --yes' to remove them\n", nr.orphan) +
+					fmt.Sprintf("would remove %s  2.0 KB  ghost  1d\ntotal: 2.0 KB\nrun 'soho gc --yes' to remove them\n", nr.orphan) +
 					"unregistered mutation copies (another project or an older version may own them):\n" +
 					fmt.Sprintf("%s  100 B  3h\n", nr.mutation)
 				cases[9].wantOut = cases[8].wantOut
@@ -247,7 +247,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 				cases[5].wantOut = fmt.Sprintf("no friction matches under %s\n", frictionLog)
 				cases[6].code = 6
 				cases[6].wantOut = "recent output line\n"
-				cases[6].wantErr = "herdr-soho: warning: no report file yet for 'worker' (expected <none dispatched>); falling back to recent terminal output\n"
+				cases[6].wantErr = "soho: warning: no report file yet for 'worker' (expected <none dispatched>); falling back to recent terminal output\n"
 				cases[7].wantOut = "no registered copies\n"
 				cases[8].wantOut = nowriteGcNoneLine + "nothing to remove\n"
 				cases[9].wantOut = cases[8].wantOut
@@ -275,7 +275,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 // command runs (nothing is written).
 func TestNowriteRejectsWritingInvocations(t *testing.T) {
 	nr := newNowriteReads(t, true)
-	const messagePrefix = "herdr-soho: herdr-soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "
+	const messagePrefix = "soho: soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "
 	const messageTail = " — unset SOHO_NOWRITE to write\n"
 	cases := []struct {
 		name     string
@@ -385,7 +385,7 @@ func TestGcShowsThePressureLine(t *testing.T) {
 	}{
 		{
 			name: "under pressure", diskFreeGB: 3, diskOK: true, swapUsedGB: 95, swapOK: true,
-			want: "resource pressure: disk " + sd + " has 3% free (3 GB of 100 GB); swap 95% used (95 GB of 100 GB); run 'herdr-soho gc' and close idle panes before opening more",
+			want: "resource pressure: disk " + sd + " has 3% free (3 GB of 100 GB); swap 95% used (95 GB of 100 GB); run 'soho gc' and close idle panes before opening more",
 		},
 		{
 			name: "none", diskFreeGB: 60, diskOK: true, swapUsedGB: 30, swapOK: true,
@@ -405,12 +405,12 @@ func TestGcShowsThePressureLine(t *testing.T) {
 		},
 		{
 			name: "pressure with swap not measured", diskFreeGB: 3, diskOK: true, swapUsedGB: 0, swapOK: false,
-			want: "resource pressure: disk " + sd + " has 3% free (3 GB of 100 GB); swap not measured; run 'herdr-soho gc' and close idle panes before opening more",
+			want: "resource pressure: disk " + sd + " has 3% free (3 GB of 100 GB); swap not measured; run 'soho gc' and close idle panes before opening more",
 		},
 		{
 			name: "the configured limit applies", diskFreeGB: 60, diskOK: true, swapUsedGB: 30, swapOK: true,
 			env:  platform.Env{"HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT": "70"},
-			want: "resource pressure: disk " + sd + " has 60% free (60 GB of 100 GB); run 'herdr-soho gc' and close idle panes before opening more",
+			want: "resource pressure: disk " + sd + " has 60% free (60 GB of 100 GB); run 'soho gc' and close idle panes before opening more",
 		},
 	}
 	for _, c := range cases {

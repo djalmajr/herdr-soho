@@ -190,7 +190,7 @@ func TestSpawnGrokGoneAfterEnterWarnsExited(t *testing.T) {
 	rules = append(rules, freshSpawnRules()...)
 	f := newSpawnFixture(t, rules)
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500" // bound the reads inside the 10s window
+	f.env["SOHO_WAIT_POLL_MS"] = "500" // bound the reads inside the 10s window
 	f.ctx.Entries["context_window_grok"] = core.ConfigEntry{Value: "500k", Source: "user"}
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
 	if code != 0 {
@@ -276,7 +276,7 @@ func TestSpawnGrokTrustR2LateDialogWithWindowBlocks(t *testing.T) {
 	f := newSpawnFixture(t, rules)
 	configureSpawnFixture(t, &f)
 	f.ctx.Entries["context_window_grok"] = core.ConfigEntry{Value: "500k", Source: "user"}
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	f.env["SOHO_WAIT_POLL_MS"] = "500"
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
 	if code != 7 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -338,7 +338,7 @@ func TestSpawnGrokTrustR2GoneAfterOneScreen(t *testing.T) {
 	rules = append(rules, freshSpawnRules()...)
 	f := newSpawnFixture(t, rules)
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500" // bound the reads inside the 10s window
+	f.env["SOHO_WAIT_POLL_MS"] = "500" // bound the reads inside the 10s window
 	f.ctx.Entries["context_window_grok"] = core.ConfigEntry{Value: "500k", Source: "user"}
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
 	if code != 0 {

@@ -105,7 +105,7 @@ func (f *skillWriteFixture) noHerdrCalls(t *testing.T) {
 
 func (f *skillWriteFixture) refusal(t *testing.T, command, path string) string {
 	t.Helper()
-	return "herdr-soho: " + command + ": the state dir '" + path + "' would be inside the herdr-soho skill ('" + f.skill + "'); run herdr-soho from the project's directory (nothing was written)\n"
+	return "soho: " + command + ": the state dir '" + path + "' would be inside the soho skill ('" + f.skill + "'); run soho from the project's directory (nothing was written)\n"
 }
 
 // stateRefusal runs the command from inside the skill and asserts the exit

@@ -86,7 +86,7 @@ func cmdFeedback(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	noticeFailed := false
 	noticeErr := ""
 	if to != "" {
-		message := fmt.Sprintf("herdr-soho feedback from %s (%s): %s — %s", project, core.WorkspaceID(ctx, env, cwd), summary, dest)
+		message := fmt.Sprintf("soho feedback from %s (%s): %s — %s", project, core.WorkspaceID(ctx, env, cwd), summary, dest)
 		result := herdr.AgentPrompt(to, message, env)
 		if !result.Ok {
 			noticeFailed = true

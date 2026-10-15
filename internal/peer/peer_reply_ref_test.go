@@ -146,7 +146,7 @@ func TestPeerReplyRefRemoteSendHeader(t *testing.T) {
 			}
 			f := newFixture(t, rules)
 			f.env["HERDR_PANE_ID"] = "w14:p1"
-			f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+			f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 			code, out, stderr := f.run([]string{"send", "windows/w3:p1", "hello"})
 			if code != 0 || out != "sent to windows/w3:p1\n" || stderr != "" {
 				t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -180,7 +180,7 @@ func TestPeerReplyRefLocalHeaderUnchanged(t *testing.T) {
 	rules = append([]fakecli.Rule{{Argv: []string{"agent", "get", "w14:p1"}, Call: 1, Stdout: replyRefSenderJSON}}, rules...)
 	f := newFixture(t, rules)
 	f.env["HERDR_PANE_ID"] = "w14:p1"
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 	code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 	if code != 0 || stderr != "" {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -211,7 +211,7 @@ func TestPeerReplyRefWaitTimeoutBlocked(t *testing.T) {
 		{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 2, Stdout: agentJSON("blocked", "1")},
 	})
 	code, _, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "1000", "hello"})
-	want := "herdr-soho: send: local/w0test:p0a is still blocked after 1s; nothing was sent (it may be showing a dialog or waiting for an approval: read its pane before sending anything)\n"
+	want := "soho: send: local/w0test:p0a is still blocked after 1s; nothing was sent (it may be showing a dialog or waiting for an approval: read its pane before sending anything)\n"
 	if code != 17 || stderr != want {
 		t.Fatalf("code=%d stderr=%q want=%q", code, stderr, want)
 	}
@@ -236,7 +236,7 @@ func TestPeerReplyRefWaitTimeoutWorking(t *testing.T) {
 		{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 2, Stdout: agentJSON("working", "1")},
 	})
 	code, _, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "1000", "hello"})
-	want := "herdr-soho: send: local/w0test:p0a is still working after 1s; nothing was sent (--now sends it without waiting; the target's CLI decides whether to queue it)\n"
+	want := "soho: send: local/w0test:p0a is still working after 1s; nothing was sent (--now sends it without waiting; the target's CLI decides whether to queue it)\n"
 	if code != 17 || stderr != want {
 		t.Fatalf("code=%d stderr=%q want=%q", code, stderr, want)
 	}

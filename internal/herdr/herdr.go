@@ -362,7 +362,7 @@ func jsString(v any) string {
 	}
 }
 func PaneTitle(pane string, title *string, env platform.Env) bool {
-	args := []string{"pane", "report-metadata", pane, "--source", "herdr-soho"}
+	args := []string{"pane", "report-metadata", pane, "--source", "soho"}
 	if title == nil {
 		args = append(args, "--clear-title")
 	} else {

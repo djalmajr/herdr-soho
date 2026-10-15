@@ -52,7 +52,7 @@ func versionText(buildVersion, revision string) string {
 	if buildVersion == "dev" && revision != "" {
 		buildVersion += "+" + revision
 	}
-	return "herdr-soho " + buildVersion + "\n"
+	return "soho " + buildVersion + "\n"
 }
 
 func vcsRevision() string {
@@ -98,7 +98,7 @@ func Run(args []string, env platform.Env) (code int) {
 			panic(value)
 		}
 		if exitErr.Msg != "" {
-			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", exitErr.Msg)
+			_, _ = fmt.Fprintf(platform.Stderr, "soho: %s\n", exitErr.Msg)
 			if exitErr.Friction && frictionLogPath != "" {
 				core.RecordFrictionError(exitErr.Msg, exitErr.Code, frictionLogPath)
 			}
@@ -178,7 +178,7 @@ func Run(args []string, env platform.Env) (code int) {
 			}
 			extra = fmt.Sprintf(" (%d extra %s not allowed)", count, noun)
 		}
-		platform.Die("herdr-soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset SOHO_NOWRITE to write", 2)
+		platform.Die("soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset SOHO_NOWRITE to write", 2)
 	}
 	if command == "help" || command == "-h" || command == "--help" || command == "" {
 		_, _ = io.WriteString(platform.Stdout, usage)
@@ -192,14 +192,14 @@ func Run(args []string, env platform.Env) (code int) {
 		if args[1] == "clipboard" {
 			data, err := io.ReadAll(os.Stdin)
 			if err != nil {
-				fmt.Fprintf(platform.Stderr, "herdr-soho plugin: cannot read clipboard input: %s\n", err)
+				fmt.Fprintf(platform.Stderr, "soho plugin: cannot read clipboard input: %s\n", err)
 				return 2
 			}
 			input = string(data)
 		}
 		executable, err := os.Executable()
 		if err != nil && (args[1] == "bridge" || args[1] == "picker" || args[1] == "board" || args[1] == "team") {
-			fmt.Fprintf(platform.Stderr, "herdr-soho plugin: cannot resolve executable: %s\n", err)
+			fmt.Fprintf(platform.Stderr, "soho plugin: cannot resolve executable: %s\n", err)
 			return 4
 		}
 		return pluginpkg.PluginCommand(args[1:], env, platform.Current(), executable, input)

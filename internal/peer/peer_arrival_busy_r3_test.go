@@ -48,7 +48,7 @@ func TestSendArrivalBusyR3GrowthUnreadableWarning(t *testing.T) {
 	}
 	f := newFixture(t, rules)
 	f.env["CLAUDE_CONFIG_DIR"] = configRoot
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "500", "50"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "500", "50"
 	done := appendAfterPromptDelayed(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, userLine, 100)
 	started := time.Now()
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1200", "hello"})

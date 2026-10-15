@@ -248,7 +248,7 @@ func TestDoctorTM6CLIAndParity(t *testing.T) {
 					t.Fatal(err)
 				}
 				env = withFakeCLI(env, bin)
-				env["HERDR_SOHO_MODELS_TIMEOUT"] = "30"
+				env["SOHO_MODELS_TIMEOUT"] = "30"
 			}
 			for i, want := range golden.Steps {
 				stepEnv := env.Clone()
@@ -297,6 +297,11 @@ func TestDoctorTM6CLIAndParity(t *testing.T) {
 				out = normalizeGoldenRootPathSeparators(out)
 				errOut = strings.ReplaceAll(errOut, program, "PROG")
 				errOut = strings.ReplaceAll(errOut, "herdr-soho:", "PROG:")
+				// The native binary now carries the soho prefix; the frozen
+				// goldens normalize it to PROG: like the legacy prefixes
+				// (after the legacy ones, so a herdr-soho: prefix is not
+				// rewritten to herdr-PROG:).
+				errOut = strings.ReplaceAll(errOut, "soho:", "PROG:")
 				errOut = normalizeGoldenRoot(errOut, root)
 				errOut = normalizeGoldenRootPathSeparators(errOut)
 				// The Go doctor measures split_max_panes against the whole team,

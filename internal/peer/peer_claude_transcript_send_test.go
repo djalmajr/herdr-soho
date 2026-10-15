@@ -154,7 +154,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, userLine)
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
@@ -182,7 +182,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -208,7 +208,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -233,7 +233,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -256,7 +256,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, assistantLine)
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "1000", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
@@ -279,10 +279,10 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = t.TempDir() // present, but no session to resolve
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		// Exactly today's message: no new warning for the absent transcript.
-		want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
+		want := "soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -304,7 +304,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		if code != 15 || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -331,7 +331,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, userLine)
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		if code != 0 || !strings.HasPrefix(out, "queued for local/w0test:p0a") || stderr != "" {
@@ -359,7 +359,7 @@ func TestSendClaudeTranscriptProof(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = t.TempDir() // present, but a pi target never resolves a transcript
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)

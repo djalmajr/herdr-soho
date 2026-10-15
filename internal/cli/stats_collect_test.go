@@ -30,7 +30,7 @@ func newCommandFixture(t *testing.T) *statsFixture {
 	if _, err := fakecli.Install(t, f.fakebin, "herdr", nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, dir := range []string{f.reports, f.briefs, filepath.Join(f.tmp, "herdr-soho", "ws", "reports")} {
+	for _, dir := range []string{f.reports, f.briefs, filepath.Join(f.tmp, "soho", "ws", "reports")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -147,8 +147,8 @@ func TestStatsPortedCases(t *testing.T) {
 	t.Run("the TMPDIR routing is counted alongside the state dir", func(t *testing.T) { // JS: "stats: the $TMPDIR routing is counted alongside the state dir"
 		f := newCommandFixture(t)
 		f.pair("state", "20260928T120000", "tasker", "done\n", time.Minute, "")
-		tmpBrief := filepath.Join(f.tmp, "herdr-soho", f.workspace, "reports", "tmp-20260928T120001.brief.md")
-		tmpReport := filepath.Join(f.tmp, "herdr-soho", f.workspace, "reports", "tmp-20260928T120001.md")
+		tmpBrief := filepath.Join(f.tmp, "soho", f.workspace, "reports", "tmp-20260928T120001.brief.md")
+		tmpReport := filepath.Join(f.tmp, "soho", f.workspace, "reports", "tmp-20260928T120001.md")
 		if err := os.WriteFile(tmpBrief, []byte("You are running as the `tasker` role\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -163,8 +163,8 @@ func TestStatsPortedCases(t *testing.T) {
 	t.Run("a mirrored TMPDIR pair is counted once and the state copy wins", func(t *testing.T) { // JS: "stats: a mirrored $TMPDIR pair is counted once (the state-dir copy wins)"
 		f := newCommandFixture(t)
 		f.pair("mirror", "20260928T120000", "tasker", "done\n", time.Minute, f.accepted("claude", "state-model", "high"))
-		tmpBrief := filepath.Join(f.tmp, "herdr-soho", f.workspace, "reports", "mirror-20260928T120000.brief.md")
-		tmpReport := filepath.Join(f.tmp, "herdr-soho", f.workspace, "reports", "mirror-20260928T120000.md")
+		tmpBrief := filepath.Join(f.tmp, "soho", f.workspace, "reports", "mirror-20260928T120000.brief.md")
+		tmpReport := filepath.Join(f.tmp, "soho", f.workspace, "reports", "mirror-20260928T120000.md")
 		if err := os.WriteFile(tmpBrief, []byte("You are running as the `tasker` role\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -267,7 +267,7 @@ func TestStatsPortedCases(t *testing.T) {
 	t.Run("sidecar is read from the winning TMPDIR mirror pair", func(t *testing.T) { // JS: "stats: the sidecar is read from the winning side of the pair (tmp routing and mirror)"
 		f := newCommandFixture(t)
 		f.pair("mirror", "20260928T120000", "tasker", "done\n", time.Minute, f.accepted("state-kind", "state-model", "high"))
-		tmpBase := filepath.Join(f.tmp, "herdr-soho", f.workspace, "reports")
+		tmpBase := filepath.Join(f.tmp, "soho", f.workspace, "reports")
 		if err := os.WriteFile(filepath.Join(tmpBase, "mirror-20260928T120000.brief.md"), []byte("You are running as the `tasker` role\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -779,7 +779,7 @@ func TestCollectPortedCases(t *testing.T) {
 		platform.Stdout, platform.Stderr = &out, &errOut
 		code := Run([]string{"collect", "alice"}, env)
 		platform.Stdout, platform.Stderr = oldOut, oldErr
-		if code != 4 || out.Len() != 0 || !strings.Contains(errOut.String(), "'alice' is working") || !strings.Contains(errOut.String(), "herdr-soho wait alice") {
+		if code != 4 || out.Len() != 0 || !strings.Contains(errOut.String(), "'alice' is working") || !strings.Contains(errOut.String(), "soho wait alice") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out.String(), errOut.String())
 		}
 	})
@@ -998,7 +998,7 @@ func TestCollectPortedCases(t *testing.T) {
 	t.Run("missing temporary original is read from the state directory copy", func(t *testing.T) { // JS: "collect: a gone $TMPDIR original is read from the state-dir copy"
 		f := newCommandFixture(t)
 		name := "alice-20260928T120000.md"
-		original := filepath.Join(f.tmp, "herdr-soho", "ws", "reports", name)
+		original := filepath.Join(f.tmp, "soho", "ws", "reports", name)
 		copyPath := filepath.Join(f.state, "ws", "reports", name)
 		if err := os.WriteFile(copyPath, []byte("state copy\n"), 0o600); err != nil {
 			t.Fatal(err)

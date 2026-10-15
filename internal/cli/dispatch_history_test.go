@@ -113,7 +113,7 @@ func TestDispatchHistorySidecarFields(t *testing.T) {
 func TestDispatchHistoryOneSendOnce(t *testing.T) {
 	t.Run("dispatch: the same open brief is not sent again; the wait returns the original's report", func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+		f.env["SOHO_WAIT_POLL_MS"] = "50"
 		original, firstReport := firstDispatch(t, f)
 		// The worker settles while the second dispatch waits.
 		go func() {
@@ -126,7 +126,7 @@ func TestDispatchHistoryOneSendOnce(t *testing.T) {
 		if code != 0 || dispatchOutputStatus(t, out) != "done" {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
 		}
-		want := "herdr-soho: dispatch: worker already has this brief (" + original + "); waiting on it without sending again (--resend sends it again)"
+		want := "soho: dispatch: worker already has this brief (" + original + "); waiting on it without sending again (--resend sends it again)"
 		if !strings.Contains(errText, want) {
 			t.Fatalf("stderr missing %q: %s", want, errText)
 		}
@@ -268,7 +268,7 @@ func TestDispatchHistoryOneSendOnce(t *testing.T) {
 	})
 	t.Run("dispatch: an open amendment with the same content is not sent again", func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+		f.env["SOHO_WAIT_POLL_MS"] = "50"
 		firstDispatch(t, f)
 		amend := filepath.Join(f.root, "amend.md")
 		if err := os.WriteFile(amend, []byte("# Amendment to your current brief\n\nChange it.\n"), 0o600); err != nil {
@@ -300,7 +300,7 @@ func TestDispatchHistoryOneSendOnce(t *testing.T) {
 	})
 	t.Run("dispatch: a duplicate waits on the task's current report (the amendment's), not the matched member's", func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+		f.env["SOHO_WAIT_POLL_MS"] = "50"
 		original, _ := firstDispatch(t, f)
 		amendFile := filepath.Join(f.root, "amend.md")
 		if err := os.WriteFile(amendFile, []byte("# Amendment to your current brief\n\nChange it.\n"), 0o600); err != nil {

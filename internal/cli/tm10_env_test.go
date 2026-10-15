@@ -70,7 +70,7 @@ func TestTM10EnvMirrors(t *testing.T) {
 	})
 	t.Run(`without git the first line is the binary's version (the JS prints unversioned)`, func(t *testing.T) {
 		out, stderr, code := runTM10Env(t, "git", nil)
-		want := "herdr-soho: " + strings.TrimPrefix(strings.TrimSpace(versionText(version, vcsRevision())), "herdr-soho ") + "\n"
+		want := "soho: " + strings.TrimPrefix(strings.TrimSpace(versionText(version, vcsRevision())), "soho ") + "\n"
 		if code != 0 || stderr != "" || !strings.HasPrefix(out, want) || strings.Contains(out, "unversioned") {
 			t.Fatalf("code=%d out=%q err=%q", code, out, stderr)
 		}

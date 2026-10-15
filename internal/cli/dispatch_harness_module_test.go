@@ -40,7 +40,7 @@ func TestDispatchDoneHarnessModuleEndsProviderError(t *testing.T) { // JS: "disp
 		authScreen: true,
 	}
 	f := newR11Fixture(t, tc)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+	f.env["SOHO_WAIT_POLL_MS"] = "1"
 	code, stdout, stderr := f.run(t, "worker", f.brief, "--timeout", tc.timeout)
 	var got map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &got); err != nil {

@@ -240,7 +240,13 @@ func firstGoldenLineDifference(got, want string) string {
 func normalizeParityError(value string) string {
 	lines := strings.Split(value, "\n")
 	for i, line := range lines {
-		if strings.HasPrefix(line, "herdr-soho:") {
+		// The frozen goldens normalize the legacy program prefixes to
+		// PROG:; the native binary now carries the soho prefix (and the
+		// frozen double-prefix form soho: soho: in the NOWRITE refusal),
+		// so the first prefix maps to PROG: exactly like the legacy ones.
+		if strings.HasPrefix(line, "soho:") {
+			lines[i] = "PROG:" + strings.TrimPrefix(line, "soho:")
+		} else if strings.HasPrefix(line, "herdr-soho:") {
 			lines[i] = "PROG:" + strings.TrimPrefix(line, "herdr-soho:")
 		} else if strings.HasPrefix(line, "herdr-soho.mjs:") {
 			lines[i] = "PROG:" + strings.TrimPrefix(line, "herdr-soho.mjs:")
@@ -300,7 +306,7 @@ func TestConfigCommandRoutesToGo(t *testing.T) {
 		}
 	}
 	code, out, errOut = runIn(t, []string{"config", "set", "nope", "1"}, env, cwd)
-	if code != 2 || out != "" || errOut != "herdr-soho: config set: unknown key 'nope'\n" {
+	if code != 2 || out != "" || errOut != "soho: config set: unknown key 'nope'\n" {
 		t.Fatalf("invalid config set code=%d out=%q err=%q", code, out, errOut)
 	}
 }
@@ -364,7 +370,7 @@ func TestConfigSetArgumentForms(t *testing.T) {
 	t.Run("empty assignment value requests a missing value", func(t *testing.T) {
 		env, cwd := commandFixture(t)
 		code, out, errOut := runIn(t, []string{"config", "set", "layout="}, env, cwd)
-		if code != 2 || out != "" || errOut != "herdr-soho: usage: config set <key> <value> | <key>=<value> [--project|--user]\n" {
+		if code != 2 || out != "" || errOut != "soho: usage: config set <key> <value> | <key>=<value> [--project|--user]\n" {
 			t.Fatalf("empty assignment code=%d out=%q err=%q", code, out, errOut)
 		}
 		if _, err := os.Stat(filepath.Join(cwd, ".agents", "soho.conf")); !os.IsNotExist(err) {
@@ -374,7 +380,7 @@ func TestConfigSetArgumentForms(t *testing.T) {
 	t.Run("explicit empty value is rejected", func(t *testing.T) {
 		env, cwd := commandFixture(t)
 		code, out, errOut := runIn(t, []string{"config", "set", "layout", ""}, env, cwd)
-		if code != 2 || out != "" || errOut != "herdr-soho: config set: empty value\n" {
+		if code != 2 || out != "" || errOut != "soho: config set: empty value\n" {
 			t.Fatalf("explicit empty value code=%d out=%q err=%q", code, out, errOut)
 		}
 	})
@@ -441,7 +447,7 @@ func TestNowriteRejectsConfigSetWithTheNewMessage(t *testing.T) {
 	env, cwd := commandFixture(t)
 	env["HERDR_SOHO_NOWRITE"] = "1"
 	code, out, errOut := runIn(t, []string{"config", "set", "panes", "3"}, env, cwd)
-	wantErr := "herdr-soho: herdr-soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: config (3 extra arguments not allowed) — unset SOHO_NOWRITE to write\n"
+	wantErr := "soho: soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: config (3 extra arguments not allowed) — unset SOHO_NOWRITE to write\n"
 	if code != 2 || out != "" || errOut != wantErr {
 		t.Fatalf("config set under NOWRITE code=%d out=%q err=%q", code, out, errOut)
 	}

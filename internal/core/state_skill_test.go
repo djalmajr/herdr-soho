@@ -89,7 +89,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
 		code, msg := stateDirExit(t, ctx, env, skill)
 		wantDir := filepath.Join(skill, ".soho")
-		want := "the state dir '" + wantDir + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"
+		want := "the state dir '" + wantDir + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"
 		if code != 2 || msg != want {
 			t.Fatalf("exit=%d msg=%q want %q", code, msg, want)
 		}
@@ -115,7 +115,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		if code != 2 {
 			t.Fatalf("exit=%d msg=%q", code, msg)
 		}
-		if want := "the state dir '" + filepath.Join(sub, ".soho") + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"; msg != want {
+		if want := "the state dir '" + filepath.Join(sub, ".soho") + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"; msg != want {
 			t.Fatalf("msg=%q want %q", msg, want)
 		}
 		if _, err := os.Stat(filepath.Join(skill, ".soho")); !os.IsNotExist(err) {
@@ -148,7 +148,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		if code != 2 {
 			t.Fatalf("exit=%d msg=%q", code, msg)
 		}
-		if want := "the state dir '" + filepath.Join(real, ".soho") + "' would be inside the herdr-soho skill ('" + link + "'); run herdr-soho from the project's directory (nothing was written)"; msg != want {
+		if want := "the state dir '" + filepath.Join(real, ".soho") + "' would be inside the soho skill ('" + link + "'); run soho from the project's directory (nothing was written)"; msg != want {
 			t.Fatalf("msg=%q want %q", msg, want)
 		}
 		// Neither the symlink path nor its target gained a state tree.
@@ -178,7 +178,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 			env[key] = value
 		}
 		code, msg := stateDirExit(t, ctx, env, skill)
-		want := "the state dir '" + filepath.Join(skill, ".soho") + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"
+		want := "the state dir '" + filepath.Join(skill, ".soho") + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"
 		if code != 2 || msg != want {
 			t.Fatalf("exit=%d msg=%q want %q", code, msg, want)
 		}
@@ -198,7 +198,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 			env[key] = value
 		}
 		code, msg := stateDirExit(t, ctx, env, skill)
-		want := "the state dir '" + filepath.Join(skill, ".soho") + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"
+		want := "the state dir '" + filepath.Join(skill, ".soho") + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"
 		if code != 2 || msg != want {
 			t.Fatalf("exit=%d msg=%q want %q", code, msg, want)
 		}

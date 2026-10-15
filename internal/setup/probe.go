@@ -23,7 +23,7 @@ const ProbePrompt = "Reply with exactly ok"
 const timeoutRetryHint = " (a timeout does not prove the assistant is unavailable; retry with --timeout 90)"
 
 // probeKindDefaultTimeout is the window a kind probes with when neither
-// --timeout nor HERDR_SOHO_PROBE_TIMEOUT is set: codex gets 60 s (its
+// --timeout nor SOHO_PROBE_TIMEOUT is set: codex gets 60 s (its
 // Windows cold start timed out at the 20 s window, a false negative), every
 // other kind stays at 20 s.
 func probeKindDefaultTimeout(kind string) int {
@@ -136,11 +136,11 @@ func CmdProbe(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	if model != "" && kind == "" {
 		platform.DieFriction("setup --probe: --model needs --kind (probe one kind/model: --kind K --model M)", 2)
 	}
-	// HERDR_SOHO_PROBE_TIMEOUT and --timeout win over the kind defaults; an
+	// SOHO_PROBE_TIMEOUT and --timeout win over the kind defaults; an
 	// invalid value dies 2 before any probe CLI runs (the variable is checked
 	// first, as before).
 	envTimeout := 0
-	if v := env.Get("HERDR_SOHO_PROBE_TIMEOUT"); v != "" {
+	if v := env.Get("SOHO_PROBE_TIMEOUT"); v != "" {
 		n, e := strconv.Atoi(v)
 		if e != nil || n < 1 || strconv.Itoa(n) != v {
 			platform.DieFriction("setup --probe: timeout must be a whole number of seconds ≥ 1", 2)

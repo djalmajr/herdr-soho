@@ -260,7 +260,7 @@ func TestSetupDetectTM5PolicyCases(t *testing.T) {
 			}
 		}
 	})
-	t.Run(`// JS: "detectTopModels: HERDR_SOHO_MODELS_TIMEOUT is honored when set, else the 5 s default"`, func(t *testing.T) {
+	t.Run(`// JS: "detectTopModels: SOHO_MODELS_TIMEOUT is honored when set, else the 5 s default"`, func(t *testing.T) {
 		root, _, env, ctx := tm5DetectFixture(t)
 		bin := t.TempDir()
 		if _, err := fakecli.Install(t, bin, "grok", []fakecli.Rule{{Argv: []string{"models"}, Stdout: "grok-4.7 - latest\n", Delay: 5200}}); err != nil {
@@ -276,7 +276,7 @@ func TestSetupDetectTM5PolicyCases(t *testing.T) {
 		home := t.TempDir()
 		env["HOME"], env["USERPROFILE"], env["XDG_CONFIG_HOME"], env["TMPDIR"] = home, home, filepath.Join(home, ".config"), t.TempDir()
 		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
-		delete(env, "HERDR_SOHO_MODELS_TIMEOUT")
+		delete(env, "SOHO_MODELS_TIMEOUT")
 		started := time.Now()
 		row := tm5DetectKind(t, tm5DetectDoc(t, ctx, env, root), "grok")
 		models := row["models"].([]any)
@@ -407,7 +407,7 @@ func runDetectTM5Golden(t *testing.T, name string) {
 	env["HOME"], env["USERPROFILE"], env["XDG_CONFIG_HOME"], env["TMPDIR"] = home, home, conf, tmp
 	env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = filepath.Join(fixture, "state"), "ws"
 	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
-	env["HERDR_SOHO_MODELS_TIMEOUT"], env["OPENCODE_CONFIG"] = "30", ""
+	env["SOHO_MODELS_TIMEOUT"], env["OPENCODE_CONFIG"] = "30", ""
 	write := func(path, body string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

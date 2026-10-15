@@ -41,7 +41,7 @@ func TestSetupReadCommands(t *testing.T) {
 	t.Run("// JS: \"probeTimeout: invalid values fail before a CLI runs\"", func(t *testing.T) {
 		env := fakeEnv(t, t.TempDir())
 		for _, v := range []string{"0", "-1", "1.5", "abc"} {
-			env["HERDR_SOHO_PROBE_TIMEOUT"] = v
+			env["SOHO_PROBE_TIMEOUT"] = v
 			func() {
 				defer func() {
 					if recover() == nil {
@@ -291,7 +291,7 @@ func TestDetectRespectsConfiguredModelTimeout(t *testing.T) { // Mutation captur
 		t.Fatal(err)
 	}
 	env := fakeEnv(t, bin)
-	env["HERDR_SOHO_MODELS_TIMEOUT"] = "0.01"
+	env["SOHO_MODELS_TIMEOUT"] = "0.01"
 	env["TMPDIR"] = t.TempDir()
 	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}

@@ -46,7 +46,7 @@ func skillDir(t *testing.T) string {
 	if policyPackageDirErr != nil {
 		t.Fatal(policyPackageDirErr)
 	}
-	skill := filepath.Join(policyPackageDir, "..", "..", "skills", "herdr-soho")
+	skill := filepath.Join(policyPackageDir, "..", "..", "skills", "soho")
 	if _, err := os.Stat(filepath.Join(skill, "SKILL.md")); err != nil {
 		t.Fatalf("skill directory %q not found: %v", skill, err)
 	}
@@ -372,6 +372,63 @@ func TestEnvRuleLayer(t *testing.T) {
 	// A partial env rule replaces the file rule and fails visibly.
 	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_FROM"] = "role:env"
 	loadExpectErr(t, env, cwd, "partial (missing to, types, scope)")
+}
+
+func TestSohoEnvRuleNames(t *testing.T) {
+	// DJA-318 C2b: the rule layer reads the SOHO_ names. With the mode and
+	// the rules only in SOHO_* the review.question is authorized; with only
+	// the legacy HERDR_SOHO_* names it is authorized too (the legacy bridge
+	// still serves); with both, the new value wins field by field.
+	t.Run("soho names authorize", func(t *testing.T) {
+		env, cwd := policyFixture(t)
+		env["SOHO_WORKER_MESSAGES"] = "policy"
+		env["SOHO_WORKER_MESSAGES_RULES_Q_FROM"] = "role:implementer"
+		env["SOHO_WORKER_MESSAGES_RULES_Q_TO"] = "role:reviewer"
+		env["SOHO_WORKER_MESSAGES_RULES_Q_TYPES"] = "review.question"
+		env["SOHO_WORKER_MESSAGES_RULES_Q_SCOPE"] = "assignment"
+		pol := mustLoad(t, env, cwd)
+		if rule := ruleOf(t, pol, "q"); rule.Source != "env" || rule.Types != "review.question" {
+			t.Fatalf("rule = %+v, want the SOHO_ env rule", rule)
+		}
+		req := reqFromTo(Participant{Role: "implementer"}, Participant{Role: "reviewer"}, "review.question")
+		if err := pol.Authorize(req); err != nil {
+			t.Fatalf("SOHO_ rules: got %v, want allowed", err)
+		}
+	})
+	t.Run("legacy names authorize", func(t *testing.T) {
+		env, cwd := policyFixture(t)
+		env["HERDR_SOHO_WORKER_MESSAGES"] = "policy"
+		env["HERDR_SOHO_WORKER_MESSAGES_RULES_Q_FROM"] = "role:implementer"
+		env["HERDR_SOHO_WORKER_MESSAGES_RULES_Q_TO"] = "role:reviewer"
+		env["HERDR_SOHO_WORKER_MESSAGES_RULES_Q_TYPES"] = "review.question"
+		env["HERDR_SOHO_WORKER_MESSAGES_RULES_Q_SCOPE"] = "assignment"
+		pol := mustLoad(t, env, cwd)
+		req := reqFromTo(Participant{Role: "implementer"}, Participant{Role: "reviewer"}, "review.question")
+		if err := pol.Authorize(req); err != nil {
+			t.Fatalf("legacy rules: got %v, want allowed", err)
+		}
+	})
+	t.Run("the new rule wins field by field", func(t *testing.T) {
+		env, cwd := policyFixture(t)
+		env["SOHO_WORKER_MESSAGES"] = "policy"
+		for _, prefix := range []string{"SOHO_", "HERDR_SOHO_"} {
+			env[prefix+"WORKER_MESSAGES_RULES_Q_FROM"] = "role:implementer"
+			env[prefix+"WORKER_MESSAGES_RULES_Q_TO"] = "role:reviewer"
+			env[prefix+"WORKER_MESSAGES_RULES_Q_SCOPE"] = "assignment"
+		}
+		env["SOHO_WORKER_MESSAGES_RULES_Q_TYPES"] = "review.question"
+		env["HERDR_SOHO_WORKER_MESSAGES_RULES_Q_TYPES"] = "review.finding"
+		pol := mustLoad(t, env, cwd)
+		if rule := ruleOf(t, pol, "q"); rule.Types != "review.question" {
+			t.Fatalf("rule types = %q, want the SOHO_ value over the legacy one", rule.Types)
+		}
+		if err := pol.Authorize(reqFromTo(Participant{Role: "implementer"}, Participant{Role: "reviewer"}, "review.question")); err != nil {
+			t.Fatalf("new type: got %v, want allowed", err)
+		}
+		if err := pol.Authorize(reqFromTo(Participant{Role: "implementer"}, Participant{Role: "reviewer"}, "review.finding")); err == nil {
+			t.Fatalf("legacy type authorized: the SOHO_ types list must win whole")
+		}
+	})
 }
 
 func TestEnvRuleFailures(t *testing.T) {

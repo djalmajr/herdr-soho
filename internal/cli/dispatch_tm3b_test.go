@@ -261,7 +261,7 @@ func TestDispatchTM3bAuthScreenCases(t *testing.T) {
 	})
 	t.Run("dispatch --no-wait: a prompt that never arrives ends not-received despite the auth screen (R11/D58)", func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "working", 1, 1, auth, "0")
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+		f.env["SOHO_WAIT_POLL_MS"] = "1"
 		code, out, stderr := f.run(t, "worker", f.brief, "--no-wait")
 		value, err := jsonjs.Parse([]byte(strings.TrimSpace(out)))
 		if err != nil {
@@ -708,7 +708,7 @@ func TestDispatchTM3bStrictLintOverlapAndMarkerCases(t *testing.T) {
 		briefText := strings.Replace(tm3bFullBrief(), "internal/a.go", "- scripts/x.mjs", 1)
 		h := newTM3bHarness(t, briefText)
 		h.env["TMPDIR"] = tmp
-		reports := filepath.Join(tmp, "herdr-soho", "ws", "reports")
+		reports := filepath.Join(tmp, "soho", "ws", "reports")
 		pending := filepath.Join(reports, "other.brief.md")
 		if err := os.MkdirAll(reports, 0o700); err != nil {
 			t.Fatal(err)
@@ -737,7 +737,7 @@ func TestDispatchTM3bStrictLintOverlapAndMarkerCases(t *testing.T) {
 		briefText := strings.Replace(tm3bFullBrief(), "internal/a.go", "- scripts/x.mjs", 1)
 		h := newTM3bHarness(t, briefText)
 		h.env["TMPDIR"] = tmp
-		reports := filepath.Join(tmp, "herdr-soho", "ws", "reports")
+		reports := filepath.Join(tmp, "soho", "ws", "reports")
 		if err := os.MkdirAll(reports, 0o700); err != nil {
 			t.Fatal(err)
 		}

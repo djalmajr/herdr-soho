@@ -69,7 +69,7 @@ func TestSendPiWorkingBorder(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 4, Stdout: inBox},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		if code != 15 || strings.Contains(out, "sent to") || !strings.Contains(stderr, "did not confirm taking the message (no sign of it in its state or screen)") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -97,7 +97,7 @@ func TestSendPiWorkingBorder(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 4, Stdout: taken},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)

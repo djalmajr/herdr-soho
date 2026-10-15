@@ -58,7 +58,7 @@ func pressureCheck(ctx *Config, env platform.Env, cwd string, throttle bool) {
 	if throttle && recentlyWarned(stateDir, platform.Now()) {
 		return
 	}
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: resource pressure: %s; run 'herdr-soho gc' and close idle panes before opening more\n", strings.Join(parts, "; "))
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: resource pressure: %s; run 'soho gc' and close idle panes before opening more\n", strings.Join(parts, "; "))
 	if throttle {
 		stampPressure(stateDir)
 	}
@@ -114,7 +114,7 @@ func pressureThreshold(ctx *Config, key string, limit int, env platform.Env) int
 			return value
 		}
 	}
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: invalid value '%s' for %s; using the default %d\n", raw, key, limit)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: warning: invalid value '%s' for %s; using the default %d\n", raw, key, limit)
 	return limit
 }
 

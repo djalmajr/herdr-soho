@@ -58,7 +58,7 @@ func skillDir(t *testing.T) string {
 	if policyPackageDirErr != nil {
 		t.Fatal(policyPackageDirErr)
 	}
-	skill := filepath.Join(policyPackageDir, "..", "..", "skills", "herdr-soho")
+	skill := filepath.Join(policyPackageDir, "..", "..", "skills", "soho")
 	if _, err := os.Stat(filepath.Join(skill, "SKILL.md")); err != nil {
 		t.Fatalf("skill directory %q not found: %v", skill, err)
 	}

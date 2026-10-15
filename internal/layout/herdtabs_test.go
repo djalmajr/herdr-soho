@@ -159,7 +159,7 @@ func TestParityTabLabelGoldenScenarios(t *testing.T) {
 
 func labelContext(t *testing.T, env platform.Env) *core.Config {
 	t.Helper()
-	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/herdr-soho"
+	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/soho"
 	ctx := core.LoadConfig(env, ".")
 	return &ctx
 }

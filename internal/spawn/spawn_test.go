@@ -51,7 +51,7 @@ func TestSpawnMapsConfiguredArgumentsAndWritesRoster(t *testing.T) {
 		"HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1",
 		"HERDR_PANE_ID": "p1", "HERDR_SOHO_LANES": "off", "HERDR_SOHO_LAYOUT": "split",
 		"HERDR_SOHO_REGRID": "off", "HERDR_SOHO_ARGS_GROK": "--config-arg value",
-		"HERDR_SOHO_ROLE_WORKER_ARGS": "--role-arg", "HERDR_SOHO_WAIT_POLL_MS": "1",
+		"HERDR_SOHO_ROLE_WORKER_ARGS": "--role-arg", "SOHO_WAIT_POLL_MS": "1",
 	}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	oldOut, oldErr := platform.Stdout, platform.Stderr

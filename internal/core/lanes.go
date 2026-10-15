@@ -811,7 +811,7 @@ func MigrateLaneAttr(file, lane, rolesCSV, attr string, acc *laneMigration, env 
 	}
 	if !agree {
 		msg := fmt.Sprintf("lane '%s' %ss differ (%s). Left the role.*.%s keys in place. Orchestrator: ask the user which %s this lane should use, then run 'setup --lane %s=<kind>[:<model>[:<effort>]]'.", lane, attr, strings.Join(vals, " "), attr, attr, lane)
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: %s\n", msg)
+		_, _ = fmt.Fprintf(platform.Stderr, "soho: warning: %s\n", msg)
 	}
 }
 
@@ -929,7 +929,7 @@ func ApplyLaneFile(file, panes string, env platform.Env, cwd string) []string {
 	mode := PaneMode(&ctx, env)
 	lines := []string{}
 	if !isPreset {
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: lane roles in %s are custom; left in place. Remove them to restore the panes=%s preset.\n", file, panes)
+		_, _ = fmt.Fprintf(platform.Stderr, "soho: warning: lane roles in %s are custom; left in place. Remove them to restore the panes=%s preset.\n", file, panes)
 	} else {
 		dropPresetFileExtras(file, panes, &lines, mode)
 	}

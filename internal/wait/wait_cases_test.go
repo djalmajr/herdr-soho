@@ -31,7 +31,7 @@ func TestWaitJavaScriptPureCases(t *testing.T) {
 			raw  string
 			want int
 		}{{"1", 1}, {"3000", 3000}, {"0", 3000}, {"3001", 3000}, {"1.5", 3000}, {" 10", 3000}, {"-1", 3000}} {
-			if got := PollIntervalMs(platform.Env{"HERDR_SOHO_WAIT_POLL_MS": tc.raw}); got != tc.want {
+			if got := PollIntervalMs(platform.Env{"SOHO_WAIT_POLL_MS": tc.raw}); got != tc.want {
 				t.Errorf("PollIntervalMs(%q) = %d, want %d", tc.raw, got, tc.want)
 			}
 		}
@@ -562,11 +562,11 @@ func TestWaitTM4CheckpointRemainingCases(t *testing.T) {
 			return stdout.String(), stderr.String(), code
 		}
 		out, stderr, code := run(t, true)
-		if code != 9 || !strings.Contains(out, `"checkpoint":true`) || !strings.Contains(stderr, "wait again: herdr-soho wait worker\n") || strings.Contains(stderr, "--timeout") {
+		if code != 9 || !strings.Contains(out, `"checkpoint":true`) || !strings.Contains(stderr, "wait again: soho wait worker\n") || strings.Contains(stderr, "--timeout") {
 			t.Fatalf("active timeout: code=%d out=%q stderr=%q", code, out, stderr)
 		}
 		out, stderr, code = run(t, false)
-		if code != 9 || !strings.Contains(out, `"checkpoint":false`) || strings.Contains(stderr, "herdr-soho wait worker") || strings.Contains(stderr, "--timeout") {
+		if code != 9 || !strings.Contains(out, `"checkpoint":false`) || strings.Contains(stderr, "soho wait worker") || strings.Contains(stderr, "--timeout") {
 			t.Fatalf("inactive timeout: code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})

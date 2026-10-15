@@ -76,7 +76,7 @@ func newClaudeDispatchFixture(t *testing.T, mode string, seq int, sessionKind, s
 	}
 	base.env["CLAUDE_CONFIG_DIR"] = t.TempDir()
 	base.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "2"
-	base.env["HERDR_SOHO_WAIT_POLL_MS"] = "100"
+	base.env["SOHO_WAIT_POLL_MS"] = "100"
 	f := &claudeDispatchFixture{
 		dispatchArrivalFixture: base,
 		composed:               filepath.Join(base.state, "ws", "briefs", "worker-"+claudeTranscriptStamp+".md"),

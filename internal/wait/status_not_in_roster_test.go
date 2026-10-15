@@ -115,11 +115,11 @@ func TestStatusNotInRosterWhenHerdrKnowsTheAgent(t *testing.T) {
 	if out != want {
 		t.Fatalf("out=%q, want one not-in-roster line per agent\nwant %q", out, want)
 	}
-	wantErr := "herdr-soho: status: 'outsider' is not a worker of this workspace's team; herdr agent get outsider shows its state\n" +
-		"herdr-soho: status: 'box1/w2:p42' is not a worker of this workspace's team; herdr --machine box1 agent get w2:p42 shows its state\n" +
-		"herdr-soho: status: 'local/w3:p7' is not a worker of this workspace's team; herdr agent get w3:p7 shows its state\n" +
-		"herdr-soho: status: 'w4:p9' is not a worker of this workspace's team; herdr agent get w4:p9 shows its state\n" +
-		"herdr-soho: status: '[box1/p42]' is not a worker of this workspace's team; herdr agent get [box1/p42] shows its state\n"
+	wantErr := "soho: status: 'outsider' is not a worker of this workspace's team; herdr agent get outsider shows its state\n" +
+		"soho: status: 'box1/w2:p42' is not a worker of this workspace's team; herdr --machine box1 agent get w2:p42 shows its state\n" +
+		"soho: status: 'local/w3:p7' is not a worker of this workspace's team; herdr agent get w3:p7 shows its state\n" +
+		"soho: status: 'w4:p9' is not a worker of this workspace's team; herdr agent get w4:p9 shows its state\n" +
+		"soho: status: '[box1/p42]' is not a worker of this workspace's team; herdr agent get [box1/p42] shows its state\n"
 	if err != wantErr {
 		t.Fatalf("stderr=%q, want the not-in-roster hints quoting the command form that worked\nwant %q", err, wantErr)
 	}
@@ -210,7 +210,7 @@ func TestStatusMixedBatchKeepsStatesAndCallBudget(t *testing.T) {
 	if out != "worker\tworking\t\t-\t-\noutsider\tnot-in-roster\t\t-\t-\nghost\tunknown-agent\t\t-\t-\n" {
 		t.Fatalf("out=%q, want the three states in the argv order", out)
 	}
-	if !strings.Contains(err, "herdr-soho: status: 'outsider' is not a worker of this workspace's team") || strings.Contains(err, "'ghost'") {
+	if !strings.Contains(err, "soho: status: 'outsider' is not a worker of this workspace's team") || strings.Contains(err, "'ghost'") {
 		t.Fatalf("stderr=%q, want the hint for the outsider only", err)
 	}
 	wantLog(t, f.callLog(t),

@@ -133,8 +133,8 @@ func TestHerdrCallsAndResults(t *testing.T) {
 		{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[{"pane_id":"p1"}]}}`},
 		{Argv: []string{"tab", "list", "--workspace", "ws"}, Stdout: `{"result":{"tabs":[{"tab_id":"t1"}]}}`},
 		{Argv: []string{"agent", "read", "a", "--source", "visible", "--lines", "20"}, Stdout: "screen\n"},
-		{Argv: []string{"pane", "report-metadata", "p9", "--source", "herdr-soho", "--title", "task title"}},
-		{Argv: []string{"pane", "report-metadata", "p9", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p9", "--source", "soho", "--title", "task title"}},
+		{Argv: []string{"pane", "report-metadata", "p9", "--source", "soho", "--clear-title"}},
 		{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"label"},"root_pane":{"pane_id":"p1"}}}`},
 		{Argv: []string{"tab", "create", "--workspace", "ws", "--cwd", "/tmp/a b", "--label", "new", "--no-focus"}, Stdout: `{"result":{"tab":{"tab_id":"t2"},"root_pane":{"pane_id":"p2"}}}`},
 		{Argv: []string{"pane", "split", "p1", "--direction", "right", "--cwd", "/tmp", "--no-focus", "--ratio", "0.70"}, Stdout: `{"result":{"pane":{"pane_id":"p3"}}}`},
@@ -405,7 +405,7 @@ func TestAgentStateJSONErrorValuesMatchJavaScript(t *testing.T) {
 // Mutation captured: a failed pane metadata request remains best effort and does not throw.
 func TestPaneTitleFailureIsBestEffort(t *testing.T) {
 	t.Run("JS: paneTitle: a failing herdr changes nothing (best effort, no throw)", func(t *testing.T) {
-		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"pane", "report-metadata", "p9", "--source", "herdr-soho", "--title", "t"}, Code: 1}})
+		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"pane", "report-metadata", "p9", "--source", "soho", "--title", "t"}, Code: 1}})
 		title := "t"
 		if PaneTitle("p9", &title, env) {
 			t.Fatal("failure reported success")

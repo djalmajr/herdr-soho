@@ -36,7 +36,7 @@ func TestDispatchIdlePiPromptSittingInTheInputBox(t *testing.T) {
 	// The region rules are kind-aware: the target's row is pi, so the box
 	// (and only the box) is the recognized composer.
 	arrivalRosterKind(t, f, "pi")
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "100"
+	f.env["SOHO_WAIT_POLL_MS"] = "100"
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	if code != 15 || dispatchOutputStatus(t, out) != "not-received" {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)

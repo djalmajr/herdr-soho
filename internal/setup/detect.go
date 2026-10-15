@@ -19,8 +19,8 @@ func Detect(ctx *core.Config, env platform.Env, cwd string) *jsonjs.Object {
 		exe := kinds.KindExe(k)
 		_, installed := platform.FindExecutable(exe, env, platform.Current())
 		idsEnv := env.Clone()
-		if idsEnv.Get("HERDR_SOHO_MODELS_TIMEOUT") == "" {
-			idsEnv["HERDR_SOHO_MODELS_TIMEOUT"] = "5"
+		if idsEnv.Get("SOHO_MODELS_TIMEOUT") == "" {
+			idsEnv["SOHO_MODELS_TIMEOUT"] = "5"
 		}
 		models := kinds.VersionSortDesc(kinds.ModelIDs(k, idsEnv))
 		if len(models) > 3 {

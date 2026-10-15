@@ -92,7 +92,7 @@ func testSkillDir(t *testing.T) string {
 	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	skillDir := filepath.Join(root, "skills", "herdr-soho")
+	skillDir := filepath.Join(root, "skills", "soho")
 	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err == nil {
 		return skillDir
 	}
@@ -100,7 +100,7 @@ func testSkillDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	skillDir = filepath.Clean(filepath.Join(cwd, "..", "..", "skills", "herdr-soho"))
+	skillDir = filepath.Clean(filepath.Join(cwd, "..", "..", "skills", "soho"))
 	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
 		t.Fatalf("skill directory %q: %v", skillDir, err)
 	}

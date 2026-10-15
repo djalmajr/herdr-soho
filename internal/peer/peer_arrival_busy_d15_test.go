@@ -128,7 +128,7 @@ func TestSendArrivalBusyCodexStalled(t *testing.T) {
 			{Argv: []string{"--machine", "windows", "agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: screen},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", d15Pane, "hello"})
 		if code != 0 || out != "sent to windows/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("the taken message must be sent: code=%d out=%q stderr=%q", code, out, stderr)
@@ -166,7 +166,7 @@ func TestSendArrivalBusyCodexStalled(t *testing.T) {
 			{Argv: []string{"--machine", "windows", "agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: screen},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", d15Pane, "hello"})
 		if code != 0 || out != "sent to windows/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("the Enter of the stalled path reaches the taken screen and is sent: code=%d out=%q stderr=%q", code, out, stderr)
@@ -199,12 +199,12 @@ func TestSendArrivalBusyCodexStalled(t *testing.T) {
 			{Argv: []string{"--machine", "windows", "agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: boxScreen},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", d15Pane, "hello"})
 		if code != 15 || out != "" {
 			t.Fatalf("a message still in the composer is not sent: code=%d out=%q", code, out)
 		}
-		want := "herdr-soho: send: windows/w0test:p0a did not confirm taking the message: the last read showed it in its input box after one Enter; delivery is uncertain; read its pane for #29a25864 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-29a25864.screen") + "\n"
+		want := "soho: send: windows/w0test:p0a did not confirm taking the message: the last read showed it in its input box after one Enter; delivery is uncertain; read its pane for #29a25864 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-29a25864.screen") + "\n"
 		if stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}

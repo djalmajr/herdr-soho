@@ -29,20 +29,20 @@ import (
 var cliBinary string
 
 func TestMain(m *testing.M) {
-	stage, err := os.MkdirTemp("", "herdr-soho-eval-cli-")
+	stage, err := os.MkdirTemp("", "soho-eval-cli-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cli stage:", err)
 		os.Exit(1)
 	}
-	name := "herdr-soho-eval"
+	name := "soho-eval"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
 	cliBinary = filepath.Join(stage, name)
-	build := exec.Command("go", "build", "-o", cliBinary, filepath.Join("..", "..", "cmd", "herdr-soho-eval"))
+	build := exec.Command("go", "build", "-o", cliBinary, filepath.Join("..", "..", "cmd", "soho-eval"))
 	build.Env = hermeticEnv(stage)
 	if out, err := build.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "herdr-soho-eval build failed: %v\n%s\n", err, out)
+		fmt.Fprintf(os.Stderr, "soho-eval build failed: %v\n%s\n", err, out)
 		if cerr := os.RemoveAll(stage); cerr != nil {
 			fmt.Fprintf(os.Stderr, "cli stage cleanup failed: %v\n", cerr)
 		}
@@ -941,7 +941,7 @@ func TestProbesRejectsInvalidUsage(t *testing.T) {
 			if res.stdout != "" {
 				t.Fatalf("stdout = %q, want empty", res.stdout)
 			}
-			if !strings.Contains(res.stderr, "usage: herdr-soho-eval") {
+			if !strings.Contains(res.stderr, "usage: soho-eval") {
 				t.Fatalf("stderr = %q, want a usage line", res.stderr)
 			}
 		})

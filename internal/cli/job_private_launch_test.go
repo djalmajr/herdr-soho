@@ -89,7 +89,7 @@ func TestJobSupervisePrivateLaunchContext(t *testing.T) {
 			withEnv(herdr, testLaunchBaseVar, base, testLaunchHomeVar, "relative/home"),
 		} {
 			code, out, errOut := f.runEnv(t, bad, "supervise", "--id", "job-1")
-			if code != 2 || out != "" || errOut != "herdr-soho: job supervise: the private launch context is unusable\n" {
+			if code != 2 || out != "" || errOut != "soho: job supervise: the private launch context is unusable\n" {
 				t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 			}
 		}
@@ -116,7 +116,7 @@ func TestJobSupervisePrivateLaunchContext(t *testing.T) {
 	})
 	t.Run("a usable selection without a launch binding does not run", func(t *testing.T) {
 		code, out, errOut := f.runEnv(t, withEnv(herdr, testLaunchBaseVar, base), "supervise", "--id", "job-1")
-		if code != 4 || !strings.Contains(out, `"status":"running"`) || errOut != "herdr-soho: warning: job: the supervisor is not bound to its launch: the job has no launch record\n" {
+		if code != 4 || !strings.Contains(out, `"status":"running"`) || errOut != "soho: warning: job: the supervisor is not bound to its launch: the job has no launch record\n" {
 			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 		}
 		friction, err := os.ReadFile(filepath.Join(jobDir, "friction.log"))
@@ -141,7 +141,7 @@ func TestJobSupervisePrivateLaunchContext(t *testing.T) {
 			t.Fatal(err)
 		}
 		code, _, errOut := f.runEnv(t, withEnv(herdr, testLaunchBaseVar, base, "HERDR_SOHO_BIN", other), "supervise", "--id", "job-1")
-		if code != 4 || errOut != "herdr-soho: warning: job: the supervisor is not bound to its launch: the team command executable is not this supervisor's\n" {
+		if code != 4 || errOut != "soho: warning: job: the supervisor is not bound to its launch: the team command executable is not this supervisor's\n" {
 			t.Fatalf("code=%d err=%q", code, errOut)
 		}
 		friction, err := os.ReadFile(filepath.Join(jobDir, "friction.log"))
@@ -242,7 +242,7 @@ func TestManagedCommandRefusedBeforeSideEffects(t *testing.T) {
 			t.Fatal("the managed parent did not finish within 60s")
 		}
 		command := strings.Fields(c.args)[0]
-		want := fmt.Sprintf("code=2\nstdout=\"\"\nstderr=%q\n", "herdr-soho: "+command+": the job supervisor's launch binding does not hold\n")
+		want := fmt.Sprintf("code=2\nstdout=\"\"\nstderr=%q\n", "soho: "+command+": the job supervisor's launch binding does not hold\n")
 		if string(out) != want {
 			t.Fatalf("%s: output %q, want %q", c.args, out, want)
 		}

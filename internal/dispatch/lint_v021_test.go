@@ -14,7 +14,7 @@ import (
 // config.defaults, so the tests pin the same values both runtimes load.
 func shippedBriefLintDefaults(t *testing.T) map[string]string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "config.defaults"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "soho", "config.defaults"))
 	if err != nil {
 		t.Fatal(err)
 	}

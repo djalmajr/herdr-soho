@@ -19,7 +19,7 @@ func TestSetupReadFlagRouting(t *testing.T) {
 	t.Cleanup(func() { platform.Stdout, platform.Stderr = oldOut, oldErr })
 	env := platform.Env{"PATH": t.TempDir(), "HOME": t.TempDir(), "HERDR_SOHO_SKILL_DIR": t.TempDir()}
 	code := Run([]string{"setup", "--probe", "--invalid"}, env)
-	if code != 2 || out.Len() != 0 || errOut.String() != "herdr-soho: setup --probe: unknown option '--invalid'\n" {
+	if code != 2 || out.Len() != 0 || errOut.String() != "soho: setup --probe: unknown option '--invalid'\n" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
@@ -28,8 +28,8 @@ func TestSetupDetectValidatesFullArgv(t *testing.T) {
 	for _, tc := range []struct {
 		name, arg, want string
 	}{
-		{name: "unknown option", arg: "--bogus", want: "herdr-soho: setup: unknown option '--bogus'\n"},
-		{name: "missing value", arg: "--panes", want: "herdr-soho: setup: --panes expects a value\n"},
+		{name: "unknown option", arg: "--bogus", want: "soho: setup: unknown option '--bogus'\n"},
+		{name: "missing value", arg: "--panes", want: "soho: setup: --panes expects a value\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			oldOut, oldErr := platform.Stdout, platform.Stderr
@@ -88,7 +88,7 @@ func TestSetupWriteRejectsSetBeforeAnyWrites(t *testing.T) {
 	platform.Stdout, platform.Stderr = &out, &errOut
 	t.Cleanup(func() { platform.Stdout, platform.Stderr = oldOut, oldErr })
 	code := Run([]string{"setup", "--target", "GUIDE.md", "--no-hooks", "--panes", "3", "--lane", "build=pi", "--set", "max_workers", "5"}, env)
-	if code != 2 || out.Len() != 0 || errOut.String() != "herdr-soho: setup: unknown option '--set'\n" {
+	if code != 2 || out.Len() != 0 || errOut.String() != "soho: setup: unknown option '--set'\n" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	for _, file := range []string{"GUIDE.md", ".agents/herdr-soho.conf", ".gitignore", ".claude/settings.json"} {

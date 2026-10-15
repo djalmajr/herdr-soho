@@ -89,7 +89,7 @@ var ConfigScalarKeys = []string{
 }
 
 // jobMachineKeys are known to ConfigKeyOk. They stay out of ConfigScalarKeys
-// so `herdr-soho config` keeps the row order pinned by the frozen parity oracle.
+// so `soho config` keeps the row order pinned by the frozen parity oracle.
 var jobMachineKeys = []string{
 	"machine_label", "job_orgs", "job_repos_root", "job_timeout",
 	"job_blocked_timeout", "job_finishing_timeout", "job_auto_cleanup",
@@ -559,11 +559,14 @@ func StateDirSetting(ctx *Config, env platform.Env, cwd string) string {
 	return DefaultStateDirName(platform.StateProjectRoot(env, cwd))
 }
 
-// Nowrite reads the read-only gate by both names: the current SOHO_NOWRITE
-// and the legacy HERDR_SOHO_NOWRITE (run copies the legacy name to the
-// current one before the commands, so the CLI surface sees one value).
+// Nowrite reads the read-only gate by the current name first: when
+// SOHO_NOWRITE is defined it decides alone (even the value 0), and the
+// legacy HERDR_SOHO_NOWRITE only applies when the new name is absent.
 func Nowrite(env platform.Env) bool {
-	return env.Get("SOHO_NOWRITE") == "1" || env.Get("HERDR_SOHO_NOWRITE") == "1"
+	if value, ok := env.Lookup("SOHO_NOWRITE"); ok {
+		return value == "1"
+	}
+	return env.Get("HERDR_SOHO_NOWRITE") == "1"
 }
 
 func RelativeStatePath(root, statePath string) string {

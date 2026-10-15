@@ -29,7 +29,7 @@ func TestWarnShortTimeoutCases(t *testing.T) {
 	t.Run("45: the warning carries the exact sentence with 45000", func(t *testing.T) {
 		logFile := filepath.Join(t.TempDir(), "friction.log")
 		stderr, log := run(t, "wait", 45, logFile)
-		if want := "herdr-soho: warning: wait: --timeout is in milliseconds; 45 is under a second (for 45 seconds pass 45000)\n"; stderr != want {
+		if want := "soho: warning: wait: --timeout is in milliseconds; 45 is under a second (for 45 seconds pass 45000)\n"; stderr != want {
 			t.Fatalf("stderr=%q, want %q", stderr, want)
 		}
 		if n := strings.Count(log, "warning\twait\twait: --timeout is in milliseconds; 45 is under a second (for 45 seconds pass 45000)"); n != 1 {

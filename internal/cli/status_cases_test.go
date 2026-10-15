@@ -50,7 +50,7 @@ func TestParityWaitQuotaGolden(t *testing.T) { // JS: "parity wait: quota (test-
 		{Argv: []string{"agent", "read", "build", "--source", "visible", "--lines", "20"}, Stdout: "hit your usage limit\ntry again in 2 hours\n"},
 	})
 	code, out, stderr := f.runCommand(t, golden.Steps[0].Args...)
-	if code != golden.Steps[0].RC || out != golden.Steps[0].Out || strings.ReplaceAll(stderr, "herdr-soho:", "PROG:") != golden.Steps[0].Err {
+	if code != golden.Steps[0].RC || out != golden.Steps[0].Out || strings.ReplaceAll(strings.ReplaceAll(stderr, "herdr-soho:", "PROG:"), "soho:", "PROG:") != golden.Steps[0].Err {
 		t.Fatalf("wait-quota differs from golden: code=%d stdout=%q stderr=%q; want rc=%d stdout=%q stderr=%q", code, out, stderr, golden.Steps[0].RC, golden.Steps[0].Out, golden.Steps[0].Err)
 	}
 	friction, err := os.ReadFile(filepath.Join(f.state, "friction.log"))
@@ -97,7 +97,7 @@ func newWaitStatusFixture(t *testing.T, rows string, rules []fakecli.Rule) *wait
 	clean["HERDR_SOHO_DIR"] = state
 	clean["HERDR_WORKSPACE_ID"] = "ws"
 	clean["HERDR_SOCKET_PATH"] = filepath.Join(base, "missing.sock")
-	clean["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+	clean["SOHO_WAIT_POLL_MS"] = "1"
 	clean = withFakeCLI(clean, bin)
 	return &waitStatusFixture{env: clean, state: filepath.Join(state, "ws"), bin: bin, root: cwd}
 }

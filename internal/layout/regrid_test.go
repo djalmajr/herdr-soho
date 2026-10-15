@@ -32,7 +32,7 @@ func layoutFake(t *testing.T, rules []fakecli.Rule) (platform.Env, *core.Config,
 		}
 	}
 	env["HERDR_ENV"], env["HERDR_WORKSPACE_ID"], env["HERDR_SOHO_DIR"] = "1", "ws", filepath.Join(root, "state")
-	env["HERDR_SOHO_SKILL_DIR"], env["TMPDIR"] = "../../skills/herdr-soho", filepath.Join(root, "tmp")
+	env["HERDR_SOHO_SKILL_DIR"], env["TMPDIR"] = "../../skills/soho", filepath.Join(root, "tmp")
 	cwd := root
 	ctx := core.LoadConfig(env, cwd)
 	dir := filepath.Join(env["HERDR_SOHO_DIR"], "ws")

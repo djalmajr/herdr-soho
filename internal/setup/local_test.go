@@ -61,7 +61,7 @@ func localPlanFixture(t *testing.T) (string, platform.Env, *core.Config) {
 	env["HOME"] = home
 	env["XDG_CONFIG_HOME"] = filepath.Join(home, ".config")
 	env["TMPDIR"] = tmp
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
+	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	ctx := core.LoadConfig(env, root)
 	return root, env, &ctx
 }

@@ -72,7 +72,7 @@ func TestSendCodexHistory(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: screen},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -114,12 +114,12 @@ func TestSendCodexHistory(t *testing.T) {
 			{Argv: []string{"agent", "send-keys", "w0test:p0a", "enter"}},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		if code != 15 || out != "" {
 			t.Fatalf("a message still in the composer is not sent: code=%d out=%q", code, out)
 		}
-		want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #b8ba14bf or a reply before sending again\n"
+		want := "soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #b8ba14bf or a reply before sending again\n"
 		if stderr != want {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
@@ -150,7 +150,7 @@ func TestSendCodexHistory(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Stdout: queue},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "hello"})
 		if code != 0 || !strings.HasPrefix(out, "queued for local/w0test:p0a") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)

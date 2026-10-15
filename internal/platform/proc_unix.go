@@ -166,7 +166,7 @@ func basePath(value string) string {
 	return trimmed
 }
 
-// ParentPID is the pid of the process that invoked this herdr-soho (the
+// ParentPID is the pid of the process that invoked this soho (the
 // caller's shell), for the procs add refusal.
 func ParentPID() int { return os.Getppid() }
 

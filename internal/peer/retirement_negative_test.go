@@ -29,10 +29,10 @@ func TestRetirementNegativeContracts(t *testing.T) {
 			args []string
 			want string
 		}{
-			{[]string{"send", "w0test:p0a"}, "herdr-soho: send: empty message (pass the message words or --file <path>)\n"},
-			{[]string{"send", "w0test:p0a", ""}, "herdr-soho: send: empty message (pass the message words or --file <path>)\n"},
-			{[]string{"send", "w0test:p0a", "--file", msgFile, "extra"}, "herdr-soho: send: use either the message words or --file, not both\n"},
-			{[]string{"send", "w0test:p0a", "--file", emptyFile}, "herdr-soho: send: empty message (pass the message words or --file <path>)\n"},
+			{[]string{"send", "w0test:p0a"}, "soho: send: empty message (pass the message words or --file <path>)\n"},
+			{[]string{"send", "w0test:p0a", ""}, "soho: send: empty message (pass the message words or --file <path>)\n"},
+			{[]string{"send", "w0test:p0a", "--file", msgFile, "extra"}, "soho: send: use either the message words or --file, not both\n"},
+			{[]string{"send", "w0test:p0a", "--file", emptyFile}, "soho: send: empty message (pass the message words or --file <path>)\n"},
 		}
 		for _, tc := range cases {
 			f := newFixture(t, nil)
@@ -62,7 +62,7 @@ func TestRetirementNegativeContracts(t *testing.T) {
 		// frozen contract keeps; the refusal happens after it.
 		f := newFixtureAt(t, dir, []fakecli.Rule{{Argv: []string{"agent", "get", "w0test:p0a"}, Stdout: fmt.Sprintf(`{"result":{"agent":{"pane_id":"w0test:p0a","agent_status":"idle","cwd":%q,"workspace_id":""}}}`, project)}})
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "secret body"})
-		if code != 18 || stderr != "herdr-soho: send: local/w0test:p0a does not accept peer messages (inbound=off)\n" {
+		if code != 18 || stderr != "soho: send: local/w0test:p0a does not accept peer messages (inbound=off)\n" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))

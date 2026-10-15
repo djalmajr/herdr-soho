@@ -179,7 +179,7 @@ func (r mutationGuardReport) failingLines() []string {
 }
 
 func mutationGuardUsageError() int {
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", mutationGuardUsage)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: %s\n", mutationGuardUsage)
 	return 2
 }
 

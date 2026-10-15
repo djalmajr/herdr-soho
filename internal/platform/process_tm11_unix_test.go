@@ -67,7 +67,7 @@ func TestTM11TreeKillHelperContractCases(t *testing.T) {
 		}
 		var gotPath string
 		var gotArgs []string
-		if !runTreeKillTestKiller(Env{"HERDR_SOHO_TREEKILL_TEST_KILLER": killer}, tempDir, 4321, func(path string, args []string) {
+		if !runTreeKillTestKiller(Env{"SOHO_TREEKILL_TEST_KILLER": killer}, tempDir, 4321, func(path string, args []string) {
 			gotPath = path
 			gotArgs = args
 		}) {
@@ -93,7 +93,7 @@ func TestTM11TreeKillHelperContractCases(t *testing.T) {
 		} {
 			t.Run(name, func(t *testing.T) {
 				called := false
-				if runTreeKillTestKiller(Env{"HERDR_SOHO_TREEKILL_TEST_KILLER": value}, tempDir, 4321, func(string, []string) { called = true }) || called {
+				if runTreeKillTestKiller(Env{"SOHO_TREEKILL_TEST_KILLER": value}, tempDir, 4321, func(string, []string) { called = true }) || called {
 					t.Fatalf("unsafe test killer %q was accepted", value)
 				}
 			})

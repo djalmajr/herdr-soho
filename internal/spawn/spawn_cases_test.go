@@ -121,7 +121,7 @@ func configureSpawnFixture(t *testing.T, f *spawnFixture) {
 	}
 	// Read repository role fixtures relative to the package directory so the
 	// cross-compiled tests do not retain a developer-machine path.
-	sourceRoles := filepath.Join("..", "..", "skills", "herdr-soho", "roles")
+	sourceRoles := filepath.Join("..", "..", "skills", "soho", "roles")
 	entries, err := os.ReadDir(sourceRoles)
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func configureSpawnFixture(t *testing.T, f *spawnFixture) {
 	f.env["HERDR_SOHO_LANES"] = "off"
 	f.env["HERDR_SOHO_LAYOUT"] = "split"
 	f.env["HERDR_SOHO_REGRID"] = "off"
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+	f.env["SOHO_WAIT_POLL_MS"] = "1"
 	f.env["HERDR_ENV"] = "1"
 }
 
@@ -837,7 +837,7 @@ func containsArgPair(args []string, key, value string) bool {
 }
 
 func TestSpawnNameDiffersFromBase(t *testing.T) {
-	const line = "herdr-soho: spawn: the new worker is 'build-2' ('build' is already live); dispatch to 'build-2'"
+	const line = "soho: spawn: the new worker is 'build-2' ('build' is already live); dispatch to 'build-2'"
 
 	newBuildFixture := func(t *testing.T, liveBuild bool) spawnFixture {
 		t.Helper()
@@ -921,7 +921,7 @@ func Test_init_sub_orchestrator_spawn_lazy_rename_keeps_name(t *testing.T) {
 	if !strings.Contains(stdout, `"created_pane": true`) {
 		t.Fatalf("the spawn did not open the worker:\n%s", stdout)
 	}
-	want := "herdr-soho: spawn: this pane is 'sub-orch' in the roster (a sub-orchestrator opened by another orchestrator); keeping its name\n"
+	want := "soho: spawn: this pane is 'sub-orch' in the roster (a sub-orchestrator opened by another orchestrator); keeping its name\n"
 	if !strings.Contains(stderr, want) {
 		t.Fatalf("missing the roster line:\n%s", stderr)
 	}

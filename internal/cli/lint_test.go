@@ -144,13 +144,13 @@ func TestLintCommandUsageAndErrors(t *testing.T) {
 		for _, args := range [][]string{{"lint", brief, "--role"}, {"lint", brief, "--role", "--bogus"}, {"lint", brief, "--bogus"}} {
 			stdout.Reset()
 			stderr.Reset()
-			if got := Run(args, env); got != 2 || stdout.Len() != 0 || stderr.String() != "herdr-soho: usage: lint <brief.md> [--role <role>]\n" {
+			if got := Run(args, env); got != 2 || stdout.Len() != 0 || stderr.String() != "soho: usage: lint <brief.md> [--role <role>]\n" {
 				t.Errorf("invalid args %v: code=%d stdout=%q stderr=%q", args, got, stdout.String(), stderr.String())
 			}
 		}
 		stdout.Reset()
 		stderr.Reset()
-		if got := Run([]string{"lint", brief, "--role", "unknown-role"}, env); got != 3 || stderr.String() != "herdr-soho: lint: unknown role 'unknown-role'\n" {
+		if got := Run([]string{"lint", brief, "--role", "unknown-role"}, env); got != 3 || stderr.String() != "soho: lint: unknown role 'unknown-role'\n" {
 			t.Fatalf("unknown role: code=%d stderr=%q", got, stderr.String())
 		}
 	})

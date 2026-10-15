@@ -18,7 +18,7 @@ import (
 )
 
 func cmdCollaborate(argv []string, cfg *core.Config, env platform.Env, cwd string) int {
-	fail := func(err error) int { fmt.Fprintf(platform.Stderr, "herdr-soho: collaborate: %s\n", err); return 2 }
+	fail := func(err error) int { fmt.Fprintf(platform.Stderr, "soho: collaborate: %s\n", err); return 2 }
 	if len(argv) == 0 {
 		return fail(errors.New("expected start, status, event, stop or finalize"))
 	}
@@ -91,7 +91,7 @@ func cmdCollaborate(argv []string, cfg *core.Config, env platform.Env, cwd strin
 			return fail(errors.New("start requires an edit author and a review worker"))
 		}
 		if author.Family == reviewer.Family {
-			fmt.Fprintln(platform.Stderr, "herdr-soho: collaborate: reviewer must use another model family")
+			fmt.Fprintln(platform.Stderr, "soho: collaborate: reviewer must use another model family")
 			return 5
 		}
 		root := platform.StateProjectRoot(env, cwd)
@@ -199,7 +199,7 @@ func cmdCollaborate(argv []string, cfg *core.Config, env platform.Env, cwd strin
 			return err
 		}
 		if sendErr != nil {
-			fmt.Fprintf(platform.Stderr, "herdr-soho: collaborate: delivery %s: %s; inspect before any new attempt\n", result.Status, result.Cause)
+			fmt.Fprintf(platform.Stderr, "soho: collaborate: delivery %s: %s; inspect before any new attempt\n", result.Status, result.Cause)
 			return 15
 		}
 		return 0

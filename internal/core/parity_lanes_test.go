@@ -172,6 +172,9 @@ func TestApplyLaneFileGolden(t *testing.T) {
 			errText := strings.ReplaceAll(stderr.String(), root, "<ROOT>")
 			errText = normalizeGoldenRootPathSeparators(errText)
 			errText = strings.ReplaceAll(errText, "herdr-soho:", "PROG:")
+			// The native binary now carries the soho prefix; the frozen
+			// goldens normalize it to PROG: after the legacy prefixes.
+			errText = strings.ReplaceAll(errText, "soho:", "PROG:")
 			if out != want.Out || errText != want.Err {
 				t.Fatalf("out=%q want=%q\nstderr=%q want=%q", out, want.Out, errText, want.Err)
 			}

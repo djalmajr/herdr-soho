@@ -40,7 +40,7 @@ func reviewReceiptFixture(t *testing.T, kind, screen string) *dispatchArrivalFix
 		fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, ArgvPrefix: true},
 	)
 	arrivalRosterKind(t, f, kind)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+	f.env["SOHO_WAIT_POLL_MS"] = "50"
 	return f
 }
 

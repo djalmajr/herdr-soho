@@ -130,7 +130,7 @@ func TestTM10InitGoldenMirrors(t *testing.T) {
 		}
 		count := 0
 		for _, call := range calls {
-			if strings.Join(call.Argv, " ") == "pane report-metadata p1 --source herdr-soho --title orchestrator: repo" {
+			if strings.Join(call.Argv, " ") == "pane report-metadata p1 --source soho --title orchestrator: repo" {
 				count++
 			}
 		}
@@ -180,7 +180,7 @@ func runTM10Init(t *testing.T, agent, pane string, paneGetCode, metadataCode int
 		{Argv: []string{"agent", "list"}, Stdout: `{"result":{"agents":[]}}`},
 		{Argv: []string{"agent", "rename", "p1", "orchestrator"}},
 		{Argv: []string{"pane", "get", "p1"}, Stdout: pane, Code: paneGetCode},
-		{Argv: []string{"pane", "report-metadata", "p1", "--source", "herdr-soho", "--title", "orchestrator: repo"}, Code: metadataCode},
+		{Argv: []string{"pane", "report-metadata", "p1", "--source", "soho", "--title", "orchestrator: repo"}, Code: metadataCode},
 		{AnyArgs: true},
 	}
 	_, err := fakecli.Install(t, fakeDir, "herdr", rules)

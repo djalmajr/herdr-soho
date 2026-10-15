@@ -163,7 +163,7 @@ func TestTM10FeedbackCases(t *testing.T) {
 		}
 		saved, saveErr := os.ReadFile(result.File)
 		logText, logErr := os.ReadFile(filepath.Join(stateDir, "ws", "friction.log"))
-		wantWarn := "herdr-soho: warning: feedback send: the report is saved at " + result.File + ", but the notice to w9:p2 failed: prompt refused"
+		wantWarn := "soho: warning: feedback send: the report is saved at " + result.File + ", but the notice to w9:p2 failed: prompt refused"
 		if code != 0 || saveErr != nil || string(saved) != "report bytes\r\n" || result.Status != "filed" || result.Notified != nil || result.Error != "prompt refused" || !strings.Contains(stderr.String(), wantWarn) || logErr != nil || !strings.Contains(string(logText), "feedback sent: "+result.File) {
 			t.Fatalf("code=%d result=%#v saved=%q stderr=%q log=%q", code, result, saved, stderr.String(), logText)
 		}

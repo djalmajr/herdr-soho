@@ -115,7 +115,7 @@ func TestSpawnCursorWindowsTrustDialogBlocksAtStartup(t *testing.T) {
 	setStartupPlatform(t, "win32")
 	f := newSpawnFixture(t, append(cursorFreshRules(cursorNativeTrustScreen(t), false), freshSpawnRules()...))
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+	f.env["SOHO_WAIT_POLL_MS"] = "50"
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
 	if code != 7 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -146,7 +146,7 @@ func TestSpawnCursorWindowsLaunchOnlyBlocksAtStartup(t *testing.T) {
 	setStartupPlatform(t, "win32")
 	f := newSpawnFixture(t, append(cursorFreshRules(cursorHistoricalLaunchScreen, false), freshSpawnRules()...))
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+	f.env["SOHO_WAIT_POLL_MS"] = "50"
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
 	if code != 7 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -171,7 +171,7 @@ func TestSpawnCursorWindowsEmptyScreenBlocksAtStartup(t *testing.T) {
 	setStartupPlatform(t, "win32")
 	f := newSpawnFixture(t, append(cursorFreshRules("", false), freshSpawnRules()...))
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+	f.env["SOHO_WAIT_POLL_MS"] = "50"
 	code, stdout, stderr, _ := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
 	if code != 7 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -186,7 +186,7 @@ func TestSpawnCursorWindowsReadFailedBlocksAtStartup(t *testing.T) {
 	setStartupPlatform(t, "win32")
 	f := newSpawnFixture(t, append(cursorFreshRules("", true), freshSpawnRules()...))
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+	f.env["SOHO_WAIT_POLL_MS"] = "50"
 	code, stdout, stderr, _ := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
 	if code != 7 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -208,7 +208,7 @@ func TestSpawnCursorWindowsDelayedDrawBecomesReady(t *testing.T) {
 	}
 	f := newSpawnFixture(t, append(rules, freshSpawnRules()...))
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+	f.env["SOHO_WAIT_POLL_MS"] = "50"
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
 	if code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -231,7 +231,7 @@ func TestSpawnCursorWindowsNormalVisibleUIReady(t *testing.T) {
 	setStartupPlatform(t, "win32")
 	f := newSpawnFixture(t, append(cursorFreshRules("cursor ready\n❯ idle\n", false), freshSpawnRules()...))
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+	f.env["SOHO_WAIT_POLL_MS"] = "50"
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
 	if code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -253,7 +253,7 @@ func TestSpawnCursorNonWindowsTrustDialogBlocksAtStartup(t *testing.T) {
 	setStartupPlatform(t, "darwin")
 	f := newSpawnFixture(t, append(cursorFreshRules(cursorNativeTrustScreen(t), false), freshSpawnRules()...))
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+	f.env["SOHO_WAIT_POLL_MS"] = "50"
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
 	if code != 7 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -309,7 +309,7 @@ func cursorReuseFixture(t *testing.T, screen string, failedRead bool) (spawnFixt
 	rules = append(rules, freshSpawnRules()...)
 	f := newSpawnFixture(t, rules)
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+	f.env["SOHO_WAIT_POLL_MS"] = "50"
 	f.roster(t, cursorReuseRow("implementer", f.cwd))
 	return f, rules
 }
@@ -403,7 +403,7 @@ func TestSpawnCursorWindowsWrappedLaunchAndNarrowTrust(t *testing.T) {
 			setStartupPlatform(t, "win32")
 			f := newSpawnFixture(t, append(cursorFreshRules(tc.screen, false), freshSpawnRules()...))
 			configureSpawnFixture(t, &f)
-			f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+			f.env["SOHO_WAIT_POLL_MS"] = "50"
 			code, out, errText, calls := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
 			if code != 7 || !strings.Contains(out, `"status": "blocked_at_startup"`) {
 				t.Fatalf("code=%d out=%s err=%s", code, out, errText)

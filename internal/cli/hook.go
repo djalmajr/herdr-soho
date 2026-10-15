@@ -10,7 +10,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
-const hookReminder = "herdr-soho: this project routes non-trivial work through /herdr-soho — surveys go to a scouter, slices to workers; the orchestrator keeps only one-or-two-file changes."
+const hookReminder = "soho: this project routes non-trivial work through /soho — surveys go to a scouter, slices to workers; the orchestrator keeps only one-or-two-file changes."
 
 // cmdHook is native, advisory hook handling. A hook outside Herdr is silent;
 // doctor warnings never block the host agent's session startup.
@@ -49,7 +49,7 @@ func cmdHook(args []string, env platform.Env, cwd string) int {
 	}()
 	for _, line := range strings.Split(captured.String(), "\n") {
 		if rest, ok := strings.CutPrefix(line, "warn"); ok && strings.HasPrefix(rest, " ") {
-			fmt.Fprintf(out, "herdr-soho doctor: %s\n", strings.TrimLeft(rest, " \t"))
+			fmt.Fprintf(out, "soho doctor: %s\n", strings.TrimLeft(rest, " \t"))
 		}
 	}
 	return 0

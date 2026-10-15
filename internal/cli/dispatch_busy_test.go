@@ -89,7 +89,7 @@ func newBusyDispatchFixture(t *testing.T) *busyDispatchFixture {
 			"HERDR_SOHO_PROMPT_CHECK_SECONDS":  "1",
 			"HERDR_SOHO_PROMPT_SETTLE_SECONDS": "0",
 			"HERDR_SOHO_BRIEF_LINT":            "off",
-			"HERDR_SOHO_WAIT_POLL_MS":          "50",
+			"SOHO_WAIT_POLL_MS":                "50",
 			"TMPDIR":                           root,
 			"HOME":                             filepath.Join(root, "home"),
 			"HERDR_SOCKET_PATH":                filepath.Join(root, "missing.sock"),
@@ -192,7 +192,7 @@ func TestDispatchBusyRefusesANewBrief(t *testing.T) {
 		if code != 10 {
 			t.Fatalf("code=%d out=%q err=%q", code, out, errText)
 		}
-		want := "herdr-soho: dispatch: 'worker' is still working on its open task (no report at " + f.openReport + "); wait for it (herdr-soho wait worker), send an amendment (--amend), or pass --queue to type this brief now (its CLI may read it mid-turn and drop the open task)\n"
+		want := "soho: dispatch: 'worker' is still working on its open task (no report at " + f.openReport + "); wait for it (soho wait worker), send an amendment (--amend), or pass --queue to type this brief now (its CLI may read it mid-turn and drop the open task)\n"
 		if errText != want {
 			t.Fatalf("stderr=%q; want %q", errText, want)
 		}
@@ -234,7 +234,7 @@ func TestDispatchBusyRefusesANewBrief(t *testing.T) {
 		if code != 10 {
 			t.Fatalf("code=%d err=%q", code, errText)
 		}
-		want := "herdr-soho: dispatch: 'worker' is still working on its open task (no report at " + f.openReport + "); wait for it (herdr-soho wait worker), send an amendment (--amend), or pass --queue to type this brief now (its CLI may read it mid-turn and drop the open task)\n"
+		want := "soho: dispatch: 'worker' is still working on its open task (no report at " + f.openReport + "); wait for it (soho wait worker), send an amendment (--amend), or pass --queue to type this brief now (its CLI may read it mid-turn and drop the open task)\n"
 		if errText != want {
 			t.Fatalf("stderr=%q; want %q", errText, want)
 		}
@@ -291,7 +291,7 @@ func TestDispatchBusyQueueKeepsTodayBehavior(t *testing.T) {
 	if status := dispatchOutputStatus(t, out); status != "queued" {
 		t.Fatalf("wait_status=%s out=%s", status, out)
 	}
-	want := "herdr-soho: prompt queued: 'worker' is working; it takes the prompt when its turn ends\n"
+	want := "soho: prompt queued: 'worker' is working; it takes the prompt when its turn ends\n"
 	if errText != want {
 		t.Fatalf("stderr=%q; want %q", errText, want)
 	}
@@ -329,7 +329,7 @@ func TestDispatchBusyAmendKeepsTodayBehavior(t *testing.T) {
 	if !strings.Contains(out, `"amend":true`) {
 		t.Fatalf("the amendment flag is missing: %s", out)
 	}
-	want := "herdr-soho: prompt queued: 'worker' is working; it takes the prompt when its turn ends\n"
+	want := "soho: prompt queued: 'worker' is working; it takes the prompt when its turn ends\n"
 	if errText != want {
 		t.Fatalf("stderr=%q; want %q", errText, want)
 	}

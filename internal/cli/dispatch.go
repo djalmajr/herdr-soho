@@ -32,11 +32,11 @@ var writeDispatchSidecar = dispatch.WriteSidecar
 
 func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	if len(argv) < 1 || argv[0] == "" {
-		fmt.Fprintln(platform.Stderr, "herdr-soho: 1: agent")
+		fmt.Fprintln(platform.Stderr, "soho: 1: agent")
 		return 1
 	}
 	if len(argv) < 2 || argv[1] == "" {
-		fmt.Fprintln(platform.Stderr, "herdr-soho: 2: brief.md")
+		fmt.Fprintln(platform.Stderr, "soho: 2: brief.md")
 		return 1
 	}
 	agent, brief := argv[0], argv[1]
@@ -131,7 +131,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	kind, family := at(2), at(4)
 	roleFile := core.RoleFile(role, env, cwd)
 	if roleFile == "" {
-		core.DieFriction(fmt.Sprintf("unknown role '%s' (run: herdr-soho roles)", role), 3, frictionLogPath, "dispatch")
+		core.DieFriction(fmt.Sprintf("unknown role '%s' (run: soho roles)", role), 3, frictionLogPath, "dispatch")
 	}
 	// F11: before any state change or send, the recorded compact phase decides
 	// the dispatch: a live or unverifiable owner for this pane refuses the
@@ -244,7 +244,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		if tmp == "" {
 			tmp = os.TempDir()
 		}
-		reportsDir = filepath.Join(tmp, "herdr-soho", core.WorkspaceID(ctx, env, cwd), "reports")
+		reportsDir = filepath.Join(tmp, "soho", core.WorkspaceID(ctx, env, cwd), "reports")
 		reportDir = reportsDir
 	}
 	composedAt := func(s string) string {
@@ -295,7 +295,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 		}); code != 0 {
 			// The compaction phase did not finish: say so, and that this brief was
 			// not sent, so the orchestrator does not look for it on the screen.
-			fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: the compact step of '%s' did not finish (exit %d); the brief was not sent\n", agent, code)
+			fmt.Fprintf(platform.Stderr, "soho: dispatch: the compact step of '%s' did not finish (exit %d); the brief was not sent\n", agent, code)
 			return code
 		}
 	}
@@ -354,7 +354,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 			if ptr := taskreport.ReadTaskReportPointer(sd, agent); ptr != nil {
 				if cur, ok := ptr.Get("current"); ok {
 					if s, isStr := cur.(string); isStr && s != "" && !nonEmpty(s) {
-						core.DieFriction(fmt.Sprintf("dispatch: '%s' is still working on its open task (no report at %s); wait for it (herdr-soho wait %s), send an amendment (--amend), or pass --queue to type this brief now (its CLI may read it mid-turn and drop the open task)", agent, s, agent), 10, frictionLogPath, "dispatch")
+						core.DieFriction(fmt.Sprintf("dispatch: '%s' is still working on its open task (no report at %s); wait for it (soho wait %s), send an amendment (--amend), or pass --queue to type this brief now (its CLI may read it mid-turn and drop the open task)", agent, s, agent), 10, frictionLogPath, "dispatch")
 					}
 				}
 			}
@@ -682,7 +682,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 					seq = "-"
 				}
 				_ = os.WriteFile(filepath.Join(sd, "wait", agent+".queued"), []byte(fmt.Sprintf("%d %s %s\n", platform.Now().Unix(), seq, composed)), 0o666)
-				fmt.Fprintf(platform.Stderr, "herdr-soho: prompt queued: '%s' is working; it takes the prompt when its turn ends\n", agent)
+				fmt.Fprintf(platform.Stderr, "soho: prompt queued: '%s' is working; it takes the prompt when its turn ends\n", agent)
 			}
 		}
 	}
@@ -721,7 +721,7 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 				if exitErr, ok := value.(*platform.ExitError); ok && !exitErr.Friction {
 					if exitErr.Msg == "" {
 						core.RecordFrictionError("", exitErr.Code, frictionLogPath, "dispatch")
-						_, _ = fmt.Fprint(platform.Stderr, "herdr-soho: \n")
+						_, _ = fmt.Fprint(platform.Stderr, "soho: \n")
 					} else {
 						exitErr.Friction = true
 					}
@@ -768,7 +768,7 @@ func compactDispatchStep(agent, pane, kind, role, lane, model string, timeoutMS 
 		if !ok {
 			panic(value)
 		}
-		fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: the compact step of '%s' did not finish (exit %d); the brief was not sent\n", agent, exitErr.Code)
+		fmt.Fprintf(platform.Stderr, "soho: dispatch: the compact step of '%s' did not finish (exit %d); the brief was not sent\n", agent, exitErr.Code)
 		panic(value)
 	}()
 	return compactRun(agent, pane, kind, role, lane, model, timeoutMS, ctx, env, cwd, true)
@@ -806,7 +806,7 @@ func compactPhaseDispatch(opts compactPhaseDispatchOptions) int {
 		absBrief = p
 	}
 	token := core.CompactPhaseClaim(core.CompactPhaseClaimOptions{SD: opts.SD, Agent: opts.Agent, Pane: opts.Pane, Brief: absBrief, Env: opts.Env})
-	fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: compacting '%s' before sending the brief; status shows this phase\n", opts.Agent)
+	fmt.Fprintf(platform.Stderr, "soho: dispatch: compacting '%s' before sending the brief; status shows this phase\n", opts.Agent)
 	// removeMarker captures the cleanup's outcome, a lock panic included
 	// (recorded, never allowed to replace the phase's own error on the panic
 	// path).
@@ -1221,7 +1221,7 @@ func emitDispatchResult(agent, role, kind, composed, report, taskReport, status 
 		core.Warn(fmt.Sprintf("agent '%s' is blocked on an approval or question; run: herdr agent read %s --source recent-unwrapped --lines 80", agent, agent), frictionLogPath, "dispatch")
 		return 7
 	case "timeout":
-		core.Warn(fmt.Sprintf("timeout waiting for the report of '%s'; it may still be working. Run: herdr-soho wait %s", agent, agent), frictionLogPath, "dispatch")
+		core.Warn(fmt.Sprintf("timeout waiting for the report of '%s'; it may still be working. Run: soho wait %s", agent, agent), frictionLogPath, "dispatch")
 		return 9
 	case "settled-no-report", "gone":
 		if status == "settled-no-report" {
@@ -2016,11 +2016,11 @@ func noWaitObservation(agent, role, kind, lane, model, report string, env platfo
 
 func cmdRun(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	if len(argv) < 1 || argv[0] == "" {
-		fmt.Fprintln(platform.Stderr, "herdr-soho: 1: role")
+		fmt.Fprintln(platform.Stderr, "soho: 1: role")
 		return 1
 	}
 	if len(argv) < 2 || argv[1] == "" {
-		fmt.Fprintln(platform.Stderr, "herdr-soho: 2: brief.md")
+		fmt.Fprintln(platform.Stderr, "soho: 2: brief.md")
 		return 1
 	}
 	role, brief := argv[0], argv[1]

@@ -666,6 +666,64 @@ func TestInstallReplacesExistingDestination(t *testing.T) {
 	assertNoTempFiles(t, dir)
 }
 
+// DJA-318 C2b (review finding C1): when the second publish (the herdr-soho
+// compatibility copy) fails, the install undoes the first. A fresh install
+// ends without the soho binary; an upgrade ends with the previous soho
+// bytes restored. The blocking file (a directory at the copy destination)
+// is never deleted: a failure never touches a file that is not an install
+// destination.
+func TestInstallSecondPublishFailureRollsBackFirst(t *testing.T) {
+	hostOS := runtime.GOOS
+	for _, tc := range []struct {
+		name string
+		seed func(t *testing.T, dir string) []byte // the previous soho bytes, if any
+	}{
+		{name: "fresh install", seed: func(t *testing.T, dir string) []byte { return nil }},
+		{name: "upgrade", seed: func(t *testing.T, dir string) []byte {
+			old := []byte("previous soho bytes")
+			if err := os.WriteFile(filepath.Join(dir, destinationName(hostOS)), old, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			return old
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "bin")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			previous := tc.seed(t, dir)
+			// A directory where the compatibility copy must land: the second
+			// rename cannot replace it.
+			legacyDestination := filepath.Join(dir, legacyDestinationName(hostOS))
+			if err := os.MkdirAll(legacyDestination, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			got := runCore(t, fixtureOptions{installDir: dir})
+			if got.err == nil || !strings.Contains(got.err.Error(), "replacing "+legacyDestination) {
+				t.Fatalf("install err=%v, want the second-publish failure", got.err)
+			}
+			destination := filepath.Join(dir, destinationName(hostOS))
+			if previous == nil {
+				if _, err := os.Stat(destination); !os.IsNotExist(err) {
+					t.Fatalf("fresh install left the published soho: %v", err)
+				}
+			} else {
+				restored, err := os.ReadFile(destination)
+				if err != nil || string(restored) != string(previous) {
+					t.Fatalf("upgrade did not restore the previous bytes: %q err=%v, want %q", restored, err, previous)
+				}
+			}
+			// The blocking directory is untouched.
+			fi, err := os.Stat(legacyDestination)
+			if err != nil || !fi.IsDir() {
+				t.Fatalf("the blocking directory was touched: %v %v", fi, err)
+			}
+			assertNoTempFiles(t, dir)
+		})
+	}
+}
+
 // A cancelled context aborts the download and every temp file is removed;
 // an already-cancelled context fails before any filesystem or network
 // mutation.

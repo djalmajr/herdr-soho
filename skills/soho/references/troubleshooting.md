@@ -314,7 +314,7 @@ Use a verified native release binary, or build an explicitly selected checkout w
 
 ## `collaborate start` exits 5 (same model family)
 
-- **Symptom:** `herdr-soho: collaborate: reviewer must use another model family` (exit 5) and the assignment is not published.
+- **Symptom:** `soho: collaborate: reviewer must use another model family` (exit 5) and the assignment is not published.
 - **Cause:** the author and the reviewer resolve to the same model family — the same rule the `dispatch` reviewer check enforces (it exists so the review is independent of the implementation).
 - **Do:** spawn the reviewer with another kind/model family (`--kind`/`--model` at spawn, or the lane/role model config) and start again. A cycle that already runs cannot swap participants: `stop` it and start a new assignment.
 

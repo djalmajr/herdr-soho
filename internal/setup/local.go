@@ -261,7 +261,7 @@ func localRels(root string, ctx *core.Config, env platform.Env, cwd string) []st
 func refuseUnignorableStateDir(root string, ctx *core.Config, env platform.Env, cwd, cmdName string) {
 	c := classifyLocalState(root, ctx, env, cwd)
 	if c.kind == "root" {
-		platform.DieFriction(fmt.Sprintf("%s: refusing to use state path '%s' because it is the root of a git work tree; a work tree root cannot be named in the git exclude file (no files were changed; point HERDR_SOHO_DIR or state_dir at a directory inside — or outside — the work tree)", cmdName, c.shown), 4)
+		platform.DieFriction(fmt.Sprintf("%s: refusing to use state path '%s' because it is the root of a git work tree; a work tree root cannot be named in the git exclude file (no files were changed; point SOHO_DIR or state_dir at a directory inside — or outside — the work tree)", cmdName, c.shown), 4)
 	}
 	if c.kind == "symlink" {
 		reason := "it is a symlink to a directory inside the work tree and ignoring the symlink entry would not cover the path its target occupies"
@@ -270,7 +270,7 @@ func refuseUnignorableStateDir(root string, ctx *core.Config, env platform.Env, 
 		} else if c.link != "" {
 			reason = fmt.Sprintf("the path traverses the symlink '%s' below the work tree root and git cannot ignore a path through a symlink", c.link)
 		}
-		platform.DieFriction(fmt.Sprintf("%s: refusing to use state path '%s' because %s (no files were changed; point HERDR_SOHO_DIR or state_dir at a directory that does not pass through an in-repo symlink)", cmdName, c.shown, reason), 4)
+		platform.DieFriction(fmt.Sprintf("%s: refusing to use state path '%s' because %s (no files were changed; point SOHO_DIR or state_dir at a directory that does not pass through an in-repo symlink)", cmdName, c.shown, reason), 4)
 	}
 }
 

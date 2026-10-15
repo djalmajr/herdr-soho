@@ -486,7 +486,7 @@ func TestCopiesShowsTheThreeStates(t *testing.T) {
 func TestReleaseRemovesTheAgentsCopies(t *testing.T) {
 	releaseRules := []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON},
-		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
 		{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
 	}
 	now := core.FrictionISO(platform.Now())
@@ -677,7 +677,7 @@ func TestGc(t *testing.T) {
 			"would remove " + l.oldOrphan + "  25 B  ghost  3h",
 			"would remove " + l.missing + "  0 B  worker  3h",
 			"total: 25 B",
-			"run 'herdr-soho gc --yes' to remove them",
+			"run 'soho gc --yes' to remove them",
 			gcUnregisteredHeader,
 			l.unreg + "  40 B  3h",
 		}, "\n") + "\n"
@@ -848,7 +848,7 @@ func TestGc(t *testing.T) {
 		want := "resource pressure: none (disk 60% free, swap 30% used)\n" +
 			gcUnregisteredHeader + "\n" +
 			unreg + "  40 B  3h\n" +
-			"run 'herdr-soho gc --yes --include-unregistered' to remove the unregistered ones\n"
+			"run 'soho gc --yes --include-unregistered' to remove the unregistered ones\n"
 		if out != want {
 			t.Fatalf("stdout=%q; want\n%s", out, want)
 		}
@@ -963,7 +963,7 @@ func TestCopiesCommandsGiveUpOnALiveRegistryLock(t *testing.T) {
 		if code != 4 {
 			t.Fatalf("code=%d out=%q stderr=%q; want 4", code, out, stderr)
 		}
-		want := "herdr-soho: copies: registry is locked by another herdr-soho (" + lock + ")\n"
+		want := "soho: copies: registry is locked by another soho (" + lock + ")\n"
 		if stderr != want {
 			t.Fatalf("stderr=%q; want %q", stderr, want)
 		}
@@ -974,7 +974,7 @@ func TestCopiesCommandsGiveUpOnALiveRegistryLock(t *testing.T) {
 	t.Run("release still releases, keeps the copies and warns", func(t *testing.T) {
 		f := newCopiesFixture(t, []fakecli.Rule{
 			{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON},
-			{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+			{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
 			{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
 		})
 		f.writeRoster(t, copiesRosterRow("worker", "p-worker"))
@@ -1014,7 +1014,7 @@ func TestCopiesCommandsGiveUpOnALiveRegistryLock(t *testing.T) {
 		if code != 4 {
 			t.Fatalf("code=%d out=%q stderr=%q; want 4", code, out, stderr)
 		}
-		want := "herdr-soho: copies: registry is locked by another herdr-soho (" + lock + ")\n"
+		want := "soho: copies: registry is locked by another soho (" + lock + ")\n"
 		if stderr != want {
 			t.Fatalf("stderr=%q; want %q", stderr, want)
 		}
@@ -1099,7 +1099,7 @@ func TestGcRemovalStaysBoundToTheValidatedParent(t *testing.T) {
 func TestReleaseDropsTheAgentsMissingCopyLines(t *testing.T) {
 	f := newCopiesFixture(t, []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Stdout: agentIdleJSON},
-		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
 		{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
 	})
 	f.writeRoster(t, copiesRosterRow("worker", "p-worker"), copiesRosterRow("worker2", "p-worker2"))

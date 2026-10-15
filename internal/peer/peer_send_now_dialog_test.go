@@ -32,7 +32,7 @@ func TestSendNowDialogExits17WithoutWaiting(t *testing.T) {
 	if code != 17 || out != "" {
 		t.Fatalf("a --now dialog exits 17 at once: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	if want := "herdr-soho: send: local/w0test:p0a is showing a dialog; nothing was sent\n"; stderr != want {
+	if want := "soho: send: local/w0test:p0a is showing a dialog; nothing was sent\n"; stderr != want {
 		t.Fatalf("the --now dialog keeps today's message: %q", stderr)
 	}
 	if elapsed > 5*time.Second {
@@ -67,7 +67,7 @@ func TestSendDialogWithoutNowKeepsTodayWaits(t *testing.T) {
 	if code != 17 || out != "" {
 		t.Fatalf("without --now the blocked wait keeps today's 17: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	want := "herdr-soho: send: local/w0test:p0a is still blocked after 3s; nothing was sent (it may be showing a dialog or waiting for an approval: read its pane before sending anything)\n"
+	want := "soho: send: local/w0test:p0a is still blocked after 3s; nothing was sent (it may be showing a dialog or waiting for an approval: read its pane before sending anything)\n"
 	if stderr != want {
 		t.Fatalf("without --now the wait timeout keeps today's message: %q", stderr)
 	}
@@ -96,12 +96,12 @@ func TestSendDialogWithoutNowWaitsTheDialogLoop(t *testing.T) {
 		{Argv: []string{"agent", "get", "w0test:p0a"}, ArgvPrefix: true, Stdout: agentJSON("idle", "1")},
 		{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: sendNowDialogScreen},
 	})
-	f.env["HERDR_SOHO_SEND_POLL_MS"] = "50"
+	f.env["SOHO_SEND_POLL_MS"] = "50"
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "--timeout", "1000", "hello"})
 	if code != 17 || out != "" {
 		t.Fatalf("the dialog loop without --now keeps today's 17: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	if want := "herdr-soho: send: local/w0test:p0a is showing a dialog; nothing was sent\n"; stderr != want {
+	if want := "soho: send: local/w0test:p0a is showing a dialog; nothing was sent\n"; stderr != want {
 		t.Fatalf("the dialog loop without --now keeps today's message: %q", stderr)
 	}
 	calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
