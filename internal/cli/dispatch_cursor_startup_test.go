@@ -1,15 +1,15 @@
 package cli
 
-// The cursor/Windows startup preflight and the no-input rechecks of the
-// dispatch (issue #59): a blocked (the verified workspace trust dialog) or
-// unverified (blank, unreadable or launch-only screen) cursor start on
-// Windows refuses the dispatch with the existing blocked result (exit 7,
+// The cursor startup preflight and the no-input rechecks of the dispatch
+// (issue #59), on every platform: a blocked (the verified workspace trust
+// dialog) or unverified (blank, unreadable or launch-only screen) cursor
+// start refuses the dispatch with the existing blocked result (exit 7,
 // the cause naming the reason) before any prompt, compaction or
 // report/sidecar mutation, and nothing is typed. The fixtures run the real
 // CLI with a fake herdr; the platform seam (startup.CurrentPlatform)
-// simulates Windows on portable hosts. The dialog screen is the verified
-// native text of cursor-agent 2026.10.01 and the launch-only screen is the
-// historical one from the issue.
+// simulates the host platform on portable hosts. The dialog screen is the
+// verified native text of cursor-agent 2026.10.01 and the launch-only
+// screen is the historical one from the issue.
 
 import (
 	"os"
@@ -223,18 +223,14 @@ func TestDispatchCursorWindowsNonTargetKindSkipsCheck(t *testing.T) {
 	}
 }
 
-func TestDispatchCursorWindowsOffWindowsSkipsCheck(t *testing.T) {
-	// Control: the same cursor dialog off-Windows (linux) skips the gate —
-	// submitted, no evidence.
+func TestDispatchCursorNonWindowsTrustDialogRefuses(t *testing.T) {
+	// The gate applies on every platform: the same cursor dialog off-Windows
+	// (linux) is refused at the preflight with the shared evidence — no
+	// prompt, no task artifact.
 	setDispatchPlatform(t, "linux")
-	f := newCursorDispatchFixture(t, "cursor", cursorTrustScreen(t), "0", false, workingArrivalRules()...)
-	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
-	if code != 0 {
-		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, errText)
-	}
-	if !strings.Contains(out, `"wait_status":"submitted"`) {
-		t.Fatalf("dispatch JSON=%q", out)
-	}
+	f := newCursorDispatchFixture(t, "cursor", cursorTrustScreen(t), "0", false)
+	dispatchAssertRefusal(t, f, "workspace-trust", "idle", "cursor workspace trust dialog", "")
+	dispatchAssertNoTaskArtifacts(t, f, false)
 }
 
 // workingArrivalRules is the post-send state of a normal agent: idle (seq
