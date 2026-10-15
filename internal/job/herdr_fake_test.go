@@ -66,7 +66,19 @@ func (f *fakeHerdr) Create(cwd, label string, env map[string]string) (string, st
 
 func (f *fakeHerdr) Close(workspaceID string) error {
 	f.CloseIDs = append(f.CloseIDs, workspaceID)
-	return f.CloseErr
+	if f.CloseErr != nil {
+		return f.CloseErr
+	}
+	// A successful close takes the workspace out of the list, as Herdr's
+	// own list does.
+	kept := f.Workspaces[:0]
+	for _, ws := range f.Workspaces {
+		if ws.ID != workspaceID {
+			kept = append(kept, ws)
+		}
+	}
+	f.Workspaces = kept
+	return nil
 }
 
 // Panes lists the workspace's panes: the finalize close watch

@@ -844,7 +844,8 @@ func TestSuperviseCollabCrashSnapshotSurvives(t *testing.T) {
 	// workspace, and does no work: no re-ask, no wait.
 	var friction3 []string
 	clock3 := &nsClock{now: clock2.now}
-	herdr3 := &fakeHerdr{}
+	// The failed close of process two left the workspace listed.
+	herdr3 := &fakeHerdr{Workspaces: []herdrWorkspace{{ID: "w1", Label: "job-job-1", PaneCount: 1}}}
 	team3 := &fakeTeam{spawnName: "orch-1", rosterRows: team.rosterRows}
 	sup3 := &Supervisor{Store: store, ID: "job-1", Ops: team3, Clock: clock3, Poll: 10 * time.Second, Herdr: herdr3, ProjectRoot: collabJobDir(t, store)}
 	sup3.Friction = func(message string) { friction3 = append(friction3, message) }

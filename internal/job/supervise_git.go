@@ -547,9 +547,16 @@ func (s *Supervisor) finalize(status string) {
 		}
 	}
 	if !cleanupDone && released {
+		// With the automatic cleanup on, a job worktree is removed or
+		// kept right after this event, and limpeza.worktree and
+		// needs_attention say which; the summary does not anticipate it.
+		resumo := "processes released; worktree kept"
+		if snap.State.AutoCleanupOn() && snap.State.Modo == "worktree" {
+			resumo = "processes released"
+		}
 		if _, err := s.Store.Append(s.ID, EventIn{
 			Tipo:   "cleanup",
-			Resumo: "processes released; worktree kept",
+			Resumo: resumo,
 		}); err != nil {
 			s.frictionf("job: finalize: " + err.Error())
 			return
@@ -583,12 +590,7 @@ func (s *Supervisor) finalize(status string) {
 				return
 			}
 		} else if motivo != "" && !needsAttentionLogged(events, motivo) {
-			if _, err := s.Store.Append(s.ID, EventIn{
-				Tipo:   "needs_attention",
-				Resumo: "worktree kept: " + motivo,
-				Refs:   map[string]string{"motivo": motivo},
-			}); err != nil {
-				s.frictionf("job: finalize: " + err.Error())
+			if !s.appendNeedsAttention("worktree kept: "+motivo, motivo) {
 				return
 			}
 		}
@@ -606,10 +608,31 @@ func (s *Supervisor) finalize(status string) {
 		}
 		return
 	}
-	// The close decision: the automatic close watch over the workspace's
-	// panes (the job's own panes ignored). The watch keeps the workspace
-	// open when it asks for human input.
-	if !s.closeWatchMayClose(snap.State, events) {
+	// A close issued by an earlier pass: the supervisor runs in the job
+	// workspace's root pane and ends with the workspace, so the
+	// workspace_closed event is appended before the close and the
+	// WorkspaceClosed record after it may never land. This pass converges
+	// on the workspace list: a workspace no longer listed is recorded
+	// closed; one still listed is closed again without a second event,
+	// and without a second close watch (the earlier pass already
+	// decided); an unreadable list leaves it to a later pass.
+	closeIssued := hasTipo(events, "workspace_closed")
+	if closeIssued {
+		listed, err := s.workspaceListed(snap.State.WorkspaceID)
+		if err != nil {
+			s.frictionf(err.Error())
+			return
+		}
+		if !listed {
+			if _, err := s.Store.Record(s.ID, func(st *State) { st.WorkspaceClosed = true }); err != nil {
+				s.frictionf("job: finalize: " + err.Error())
+			}
+			return
+		}
+	} else if !s.closeWatchMayClose(snap.State, events) {
+		// The close decision: the automatic close watch over the
+		// workspace's panes (the job's own panes ignored). The watch
+		// keeps the workspace open when it asks for human input.
 		facts.Workspace = "open"
 		if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
 			s.frictionf("job: finalize: " + err.Error())
@@ -629,33 +652,91 @@ func (s *Supervisor) finalize(status string) {
 		}
 		return
 	}
-	if err := s.Herdr.Close(snap.State.WorkspaceID); err == nil {
-		// The workspace_closed event: once per job, right after the
-		// successful close and before the WorkspaceClosed record — a
-		// crash in between converges on the log, and a later supervisor
-		// never closes the workspace twice.
-		if !hasTipo(events, "workspace_closed") {
-			if _, err := s.Store.Append(s.ID, EventIn{
-				Tipo:   "workspace_closed",
-				Resumo: "workspace closed",
-			}); err != nil {
-				s.frictionf("job: finalize: " + err.Error())
-			}
+	// The workspace_closed event: once per job, right before the close,
+	// the last moment this process is sure to be alive — the close ends
+	// the root pane this supervisor runs in. A close that then fails
+	// appends needs_attention (motivo close_failed, once per job).
+	if !closeIssued {
+		if _, err := s.Store.Append(s.ID, EventIn{
+			Tipo:   "workspace_closed",
+			Resumo: "workspace closed",
+		}); err != nil {
+			s.frictionf("job: finalize: " + err.Error())
+			return
 		}
+	}
+	if err := s.Herdr.Close(snap.State.WorkspaceID); err == nil {
 		// Recorded so a later supervisor never closes the workspace twice;
-		// the process may end with the workspace right after this.
+		// the process may end with the workspace before this lands, and a
+		// later pass then converges on the workspace list (above).
 		if _, err := s.Store.Record(s.ID, func(st *State) { st.WorkspaceClosed = true }); err != nil {
 			s.frictionf("job: finalize: " + err.Error())
 		}
 	} else {
 		// The close did not happen: the report says the workspace stayed
-		// open, and the retry closes it.
+		// open, a needs_attention names it, and the retry closes it.
 		s.frictionf(err.Error())
+		if !needsAttentionLogged(events, closeFailedMotivo) {
+			s.appendNeedsAttention("workspace close failed", closeFailedMotivo)
+		}
 		facts.Workspace = "open"
 		if _, err := s.Store.WriteReport(s.ID, facts); err != nil {
 			s.frictionf("job: finalize: " + err.Error())
 		}
 	}
+}
+
+// appendNeedsAttention appends one needs_attention event with its motivo
+// and wakes the dispatcher for it right away: the terminal path stopped
+// the wake worker before finalize (finishWakes), so an event appended
+// here would otherwise reach the hook only through a later supervisor.
+// ok is false when the append failed (the friction line names it).
+func (s *Supervisor) appendNeedsAttention(resumo, motivo string) (ok bool) {
+	ev, err := s.Store.Append(s.ID, EventIn{
+		Tipo:   "needs_attention",
+		Resumo: resumo,
+		Refs:   map[string]string{"motivo": motivo},
+	})
+	if err != nil {
+		s.frictionf("job: finalize: " + err.Error())
+		return false
+	}
+	s.finalWake(ev)
+	return true
+}
+
+// finalWake runs the wake hook once, synchronously, for an event the
+// terminal path appends after the wake worker was drained and stopped:
+// one attempt and no retry schedule, so the workspace close is not held
+// for minutes by a failing hook. The persisted cursor is not advanced: a
+// later supervisor re-runs the event (at-least-once; the idempotency key
+// lets the receiver deduplicate). A disabled hook runs nothing.
+func (s *Supervisor) finalWake(ev Event) {
+	if s.Wake == nil || strings.TrimSpace(s.Wake.Cmd) == "" {
+		return
+	}
+	hook := *s.Wake
+	hook.Delays = []time.Duration{}
+	hook.Run(ev)
+}
+
+// closeFailedMotivo names the needs_attention of a workspace close that
+// failed after the workspace_closed event was appended.
+const closeFailedMotivo = "close_failed"
+
+// workspaceListed reports whether the job workspace is still in
+// `herdr workspace list`; an unreadable list is an error.
+func (s *Supervisor) workspaceListed(workspaceID string) (bool, error) {
+	rows, err := s.Herdr.List()
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if row.ID == workspaceID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // closeWatchMayClose runs the automatic close watch over the job
@@ -698,13 +779,7 @@ func (s *Supervisor) closeWatchMayClose(st State, events []Event) bool {
 			s.clockSleep(s.poll())
 		case CloseWatchNeedsAttention:
 			if !needsAttentionLogged(events, outcome.Motivo) {
-				if _, err := s.Store.Append(s.ID, EventIn{
-					Tipo:   "needs_attention",
-					Resumo: "human input needed",
-					Refs:   map[string]string{"motivo": outcome.Motivo},
-				}); err != nil {
-					s.frictionf("job: finalize: " + err.Error())
-				}
+				s.appendNeedsAttention("human input needed", outcome.Motivo)
 			}
 			return false
 		default:

@@ -140,6 +140,9 @@ func TestWakeClassification(t *testing.T) {
 		{"note", "note", nil, false},
 		{"terminal", "terminal", nil, true},
 		{"cleanup", "cleanup", nil, false},
+		{"needs_attention", "needs_attention", map[string]string{"motivo": "dirty"}, true},
+		{"workspace_closed", "workspace_closed", nil, false},
+		{"folder_retained", "folder_retained", map[string]string{"path": "/x", "bytes": "1"}, false},
 		{"unknown_type", "elsewhere", nil, false},
 	} {
 		t.Run(row.name, func(t *testing.T) {

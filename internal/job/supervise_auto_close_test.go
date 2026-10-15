@@ -23,6 +23,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
 // noPanesHerdr is a minimal Herdr client without the Panes method: it
@@ -49,14 +52,16 @@ func (h *noPanesHerdr) List() ([]herdrWorkspace, error) { return nil, nil }
 
 // orderingHerdr records, at the moment of the workspace close, the
 // folder_retained and workspace_closed events already in the job log:
-// folder_retained must be there (it precedes the close) and
-// workspace_closed must not be (it lands only after the successful
-// close).
+// both must be there — the supervisor runs in the workspace's root pane
+// and ends with the close, so workspace_closed lands right before it.
+// crash, when set, panics with it after the close is recorded: the
+// supervisor process killed by its own workspace close.
 type orderingHerdr struct {
 	*fakeHerdr
 	jobDir        string
 	folderAtClose int
 	closedAtClose int
+	crash         error
 }
 
 func (h *orderingHerdr) Close(workspaceID string) error {
@@ -72,8 +77,16 @@ func (h *orderingHerdr) Close(workspaceID string) error {
 			}
 		}
 	}
-	return h.fakeHerdr.Close(workspaceID)
+	err := h.fakeHerdr.Close(workspaceID)
+	if h.crash != nil {
+		panic(h.crash)
+	}
+	return err
 }
+
+// closeKill is the sentinel panic of a supervisor killed by its own
+// workspace close.
+var closeKill = errors.New("the supervisor ended with its workspace")
 
 // midWaitCrash is the sentinel panic of a crash in the middle of the
 // close watch wait.
@@ -220,9 +233,9 @@ func TestSuperviseAutoClose(t *testing.T) {
 					t.Fatalf("state = %+v, want the removed worktree and the closed workspace", st)
 				}
 				// The events land once each, in the contract order, with
-				// the folder_retained before the close and the
-				// workspace_closed only after it (the ordering Herdr saw
-				// the log at the close moment).
+				// the folder_retained and the workspace_closed both before
+				// the close (the ordering Herdr saw the log at the close
+				// moment).
 				events := f.events(t)
 				if n := countTipes(events, "needs_attention"); n != 0 {
 					t.Fatalf("needs_attention events = %d, want none (%v)", n, eventTipes(events))
@@ -233,8 +246,8 @@ func TestSuperviseAutoClose(t *testing.T) {
 				}
 				if oh, ok := f.sup.Herdr.(*orderingHerdr); !ok {
 					t.Fatal("the supervisor ran without the ordering Herdr: the close-moment proof is missing")
-				} else if oh.folderAtClose != 1 || oh.closedAtClose != 0 {
-					t.Fatalf("at the close moment folder_retained = %d workspace_closed = %d, want 1 and 0", oh.folderAtClose, oh.closedAtClose)
+				} else if oh.folderAtClose != 1 || oh.closedAtClose != 1 {
+					t.Fatalf("at the close moment folder_retained = %d workspace_closed = %d, want 1 and 1", oh.folderAtClose, oh.closedAtClose)
 				}
 				folder := events[indexOfType(events, "folder_retained")]
 				if folder.Refs["path"] != f.jobDir {
@@ -308,6 +321,113 @@ func TestSuperviseAutoClose(t *testing.T) {
 			t.Fatalf("herdr close = %v, want still exactly one", f.herdr.CloseIDs)
 		}
 		assertWorktreeRemoved(t, f)
+	})
+
+	t.Run("a supervisor that ends with its workspace converges on the next pass", func(t *testing.T) {
+		for _, tc := range []struct {
+			name      string
+			listed    bool
+			wantClose int
+		}{
+			{name: "the workspace is gone: recorded closed, no second close", listed: false, wantClose: 1},
+			{name: "the workspace is still listed: closed again, no second event", listed: true, wantClose: 2},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				f := newSupGitFixture(t, supGitGhRules)
+				herdr := acFixture(t, f)
+				f.sup.Herdr = &orderingHerdr{fakeHerdr: herdr, jobDir: f.jobDir, crash: closeKill}
+				f.job.commitIn(t, "feat: first")
+				if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+					t.Fatal(err)
+				}
+				func() {
+					defer func() {
+						r := recover()
+						if r == nil {
+							t.Fatal("the close did not end the supervisor: the test proves nothing")
+							return
+						}
+						if !errors.Is(r.(error), closeKill) {
+							t.Fatalf("crash = %v, want the scripted end with the workspace", r)
+						}
+					}()
+					_, _, _ = f.sup.finishOutcome(StatusDone, "", 0)
+				}()
+				// The event landed before the close; the record did not.
+				if n := countTipes(f.events(t), "workspace_closed"); n != 1 {
+					t.Fatalf("workspace_closed events = %d, want 1 (written before the close)", n)
+				}
+				if st := f.state(t); st.WorkspaceClosed {
+					t.Fatalf("state = %+v, want no WorkspaceClosed record (the process ended first)", st)
+				}
+				if tc.listed {
+					herdr.Workspaces = []herdrWorkspace{{ID: "ws-1", Label: "job-" + supGitID, PaneCount: 1}}
+				}
+				panesBefore := herdr.PanesCalls
+				sup2 := f.supRestarted(t)
+				sup2.Herdr = herdr
+				sup2.Poll = f.sup.Poll
+				if exit, err := sup2.Run(); err != nil || exit != 0 {
+					t.Fatalf("restarted Run = %d %v, want 0", exit, err)
+				}
+				events := f.events(t)
+				if n := countTipes(events, "workspace_closed"); n != 1 {
+					t.Fatalf("workspace_closed events = %d, want still 1", n)
+				}
+				if n := countTipes(events, "needs_attention"); n != 0 {
+					t.Fatalf("needs_attention events = %d, want none (%v)", n, eventTipes(events))
+				}
+				if len(herdr.CloseIDs) != tc.wantClose {
+					t.Fatalf("herdr close = %v, want %d", herdr.CloseIDs, tc.wantClose)
+				}
+				if herdr.PanesCalls != panesBefore {
+					t.Fatalf("panes calls = %d, want %d (the close was decided before: no second watch)", herdr.PanesCalls, panesBefore)
+				}
+				if st := f.state(t); !st.WorkspaceClosed {
+					t.Fatalf("state = %+v, want the WorkspaceClosed record after the converging pass", st)
+				}
+				assertWorktreeRemoved(t, f)
+			})
+		}
+	})
+
+	t.Run("a failed close with the event written appends close_failed and an unreadable list waits", func(t *testing.T) {
+		f := newSupGitFixture(t, supGitGhRules)
+		herdr := acFixture(t, f)
+		herdr.CloseErr = errors.New("the close failed")
+		f.job.commitIn(t, "feat: first")
+		if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := f.sup.finishOutcome(StatusDone, "", 0); err != nil {
+			t.Fatal(err)
+		}
+		events := f.events(t)
+		if got := needsAttentionMotivos(events); !reflect.DeepEqual(got, []string{"close_failed"}) {
+			t.Fatalf("needs_attention motivos = %v, want [close_failed]", got)
+		}
+		if i, j := indexOfType(events, "workspace_closed"), indexOfType(events, "needs_attention"); i < 0 || j < i {
+			t.Fatalf("events = %v, want workspace_closed before the close_failed needs_attention", eventTipes(events))
+		}
+		if limpeza := f.report(t)["limpeza"].(map[string]any); limpeza["workspace"] != "open" {
+			t.Fatalf("report limpeza = %v, want the open workspace", limpeza)
+		}
+		if st := f.state(t); st.WorkspaceClosed {
+			t.Fatalf("state = %+v, want the workspace left open", st)
+		}
+		// A later pass that cannot read the workspace list closes
+		// nothing and records nothing: a later pass decides.
+		herdr.ListErr = errors.New("list down")
+		sup2 := f.supRestarted(t)
+		sup2.Herdr = herdr
+		sup2.Poll = f.sup.Poll
+		sup2.finalize(StatusDone)
+		if len(herdr.CloseIDs) != 1 {
+			t.Fatalf("herdr close = %v, want still one (the list was unreadable)", herdr.CloseIDs)
+		}
+		if st := f.state(t); st.WorkspaceClosed {
+			t.Fatalf("state = %+v, want the workspace left open", st)
+		}
 	})
 
 	t.Run("the opt-out removes nothing and closes nothing, and only the folder_retained lands", func(t *testing.T) {
@@ -425,6 +545,8 @@ func TestSuperviseAutoClose(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.herdr.CloseErr = errors.New("the close failed")
+		// The failed close leaves the workspace listed.
+		f.herdr.Workspaces = []herdrWorkspace{{ID: "ws-1", Label: "job-" + supGitID, PaneCount: 1}}
 		if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
 			t.Fatal(err)
 		}
@@ -432,10 +554,11 @@ func TestSuperviseAutoClose(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Pass one: the worktree is kept (the dirty tree), and the close
-		// fails (the workspace stays open).
+		// fails (the workspace stays open): one needs_attention per
+		// motivo, dirty and close_failed.
 		f.sup.finalize(StatusDone)
-		if n := countTipes(f.events(t), "needs_attention"); n != 1 {
-			t.Fatalf("needs_attention events = %d, want 1", n)
+		if got := needsAttentionMotivos(f.events(t)); !reflect.DeepEqual(got, []string{"dirty", "close_failed"}) {
+			t.Fatalf("needs_attention motivos = %v, want [dirty close_failed]", got)
 		}
 		// Pass two, a restarted supervisor over the same terminal job:
 		// the removal is refused again with the same motivo — the log
@@ -446,8 +569,11 @@ func TestSuperviseAutoClose(t *testing.T) {
 		sup2.Poll = f.sup.Poll
 		sup2.finalize(StatusDone)
 		events := f.events(t)
-		if n := countTipes(events, "needs_attention"); n != 1 {
-			t.Fatalf("needs_attention events after pass two = %d, want still 1 (the log deduplicates it)", n)
+		if got := needsAttentionMotivos(events); !reflect.DeepEqual(got, []string{"dirty", "close_failed"}) {
+			t.Fatalf("needs_attention motivos after pass two = %v, want still [dirty close_failed] (the log deduplicates them)", got)
+		}
+		if n := countTipes(events, "workspace_closed"); n != 1 {
+			t.Fatalf("workspace_closed events after pass two = %d, want 1 (written once, before the first close)", n)
 		}
 		if n := countTipes(events, "folder_retained"); n != 1 {
 			t.Fatalf("folder_retained events after pass two = %d, want still 1", n)
@@ -459,6 +585,53 @@ func TestSuperviseAutoClose(t *testing.T) {
 			t.Fatalf("state = %+v, want the workspace left open (the close failed)", st)
 		}
 		assertWorktreeKept(t, f)
+	})
+
+	t.Run("a needs_attention wakes the dispatcher right away after the wake worker stopped", func(t *testing.T) {
+		f := newSupGitFixture(t, supGitGhRules)
+		acFixture(t, f)
+		fakeDir := t.TempDir()
+		if _, err := fakecli.InstallWithOptions(t, fakeDir, "wakehook", []fakecli.Rule{{AnyArgs: true}},
+			fakecli.InstallOptions{CaptureStdin: true, CaptureEnv: wakeEnvKeys}); err != nil {
+			t.Fatalf("install the fake wake hook: %v", err)
+		}
+		env := platform.Env{}
+		for _, item := range fakecli.Env(nil, fakeDir) {
+			if key, value, ok := strings.Cut(item, "="); ok && key != "" {
+				env[key] = value
+			}
+		}
+		f.sup.Wake = &WakeHook{Cmd: "wakehook", JobID: supGitID, Env: env}
+		f.job.commitIn(t, "feat: first")
+		if err := os.WriteFile(filepath.Join(f.job.dir, "leftover.txt"), []byte("wip\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := f.sup.finishOutcome(StatusDone, "", 0); err != nil {
+			t.Fatal(err)
+		}
+		events := f.events(t)
+		na := indexOfType(events, "needs_attention")
+		if na < 0 {
+			t.Fatalf("events = %v, want a needs_attention for the dirty tree", eventTipes(events))
+		}
+		var woke []fakecli.Call
+		for _, call := range wakeHookCalls(t, fakeDir) {
+			if call.Env["HERDR_SOHO_JOB_EVENT"] == "needs_attention" {
+				woke = append(woke, call)
+			}
+		}
+		if len(woke) != 1 {
+			t.Fatalf("needs_attention hook runs = %d, want exactly one", len(woke))
+		}
+		if woke[0].Env["HERDR_SOHO_JOB_SEQ"] != strconv.Itoa(events[na].Seq) {
+			t.Fatalf("hook seq = %q, want %d", woke[0].Env["HERDR_SOHO_JOB_SEQ"], events[na].Seq)
+		}
+		if !strings.Contains(woke[0].Stdin, `"motivo":"dirty"`) {
+			t.Fatalf("hook stdin = %q, want the dirty motivo", woke[0].Stdin)
+		}
 	})
 
 	t.Run("an unpushed head keeps the worktree (not_pushed)", func(t *testing.T) {
@@ -861,4 +1034,16 @@ func TestSuperviseAutoClose(t *testing.T) {
 			t.Fatalf("the folder_retained path %q is gone: %v", folder.Refs["path"], err)
 		}
 	})
+}
+
+// needsAttentionMotivos lists the refs.motivo of the needs_attention
+// events, in log order.
+func needsAttentionMotivos(events []Event) []string {
+	var out []string
+	for _, event := range events {
+		if event.Tipo == "needs_attention" {
+			out = append(out, event.Refs["motivo"])
+		}
+	}
+	return out
 }

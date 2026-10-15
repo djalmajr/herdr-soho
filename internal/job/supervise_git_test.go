@@ -919,6 +919,8 @@ func TestSuperviseRelease(t *testing.T) {
 		f := newSupGitFixture(t, supGitGhRules)
 		f.job.commitIn(t, "feat: first")
 		f.sup.Herdr = crashingHerdr{inner: f.herdr, once: true}
+		// The crash comes before the close: the workspace stays listed.
+		f.herdr.Workspaces = []herdrWorkspace{{ID: "ws-1", Label: "job-" + supGitID, PaneCount: 1}}
 		if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
 			t.Fatal(err)
 		}
@@ -1077,6 +1079,8 @@ func TestCleanupGateReevaluatedOnRestart(t *testing.T) {
 	f := newSupGitFixture(t, supGitGhRules)
 	f.team.gcErr = errors.New("the gc failed")
 	f.herdr.CloseErr = errors.New("job: herdr workspace close failed")
+	// The failed close of pass one leaves the workspace listed.
+	f.herdr.Workspaces = []herdrWorkspace{{ID: "ws-1", Label: "job-" + supGitID, PaneCount: 1}}
 	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
 		t.Fatal(err)
 	}
