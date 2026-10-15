@@ -56,7 +56,11 @@ func TestSetupTextCases(t *testing.T) {
 		var want *string
 		for _, file := range goldens["setup-fresh"].Files {
 			if file.Rel == "repo/AGENTS.md" && file.Content != nil {
+				// The frozen golden keeps the pre-DJA-330 "Peer messages"
+				// bullet; the testutil oracle rewrites only that exact
+				// sentence to the approved replacement.
 				content := strings.TrimPrefix(*file.Content, "# Agent instructions\n\n")
+				content = testutil.ApplyPeerBlockOracle(content).(string)
 				want = &content
 			}
 		}
@@ -355,12 +359,14 @@ func TestSetupTextDifferential(t *testing.T) {
 	}
 	// The frozen parity oracle keeps the exact pre-native hook commands as
 	// the expected hook outputs (raw for reminder/doctor rows and
-	// JSON-quoted inside the hooks-result documents). The testutil oracle
-	// adapter rewrites only those exact strings to the approved native
-	// literals. The seed inputs and every other expectation are untouched.
+	// JSON-quoted inside the hooks-result documents), and the pre-DJA-330
+	// "Peer messages" bullet inside the expected block texts. The testutil
+	// oracle adapters rewrite only those exact strings to the approved
+	// native literals and the DJA-330 replacement. The seed inputs and
+	// every other expectation are untouched.
 	for i := range rows {
 		if rows[i].Expected != nil {
-			adapted := testutil.ApplyHookOracle(*rows[i].Expected).(string)
+			adapted := testutil.ApplyPeerBlockOracle(testutil.ApplyHookOracle(*rows[i].Expected)).(string)
 			rows[i].Expected = &adapted
 		}
 	}
