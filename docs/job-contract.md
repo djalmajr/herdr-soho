@@ -188,6 +188,7 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 - `partial` is always present: `true` when at least one of the job's collaborations ended `partial` or `unavailable`, otherwise `false`.
 - `partial_collaborations` is always present: the IDs of those collaborations, sorted and without duplicates; `[]` when there are none. A job whose state predates these fields reads as `false` and `[]`, and the read changes nothing.
 - The two fields are published before the terminal status, so a reader that sees `done` (or any terminal status) already sees the final partial facts, and they are never removed later. `report.json` carries the same two values and is written before the terminal status is saved in `state.json`; a crash between the two writes leaves the job `finishing` with its recorded outcome, and the restarted supervisor writes both again.
+- `report_missing` is `true` only when the status is one that carries a stored report (`done`, `failed`, `timeout`, `canceled`, `collected` or `closed`) and no report is stored; in every other case the field is absent from the line. A legacy terminal job without a report reads as missing, never as complete; the exit code is unchanged, and the read writes nothing.
 
 ## Report
 
@@ -236,6 +237,7 @@ State lives in `<checkout>/.herdr-soho/jobs/<id>/`: `state.json` (atomic write: 
 - `limpeza.removivel` is informational: true when the job worktree is clean and in sync with `origin/job/<id>`, so the user can remove it safely. Nothing is removed automatically.
 - `partial` and `partial_collaborations`: as in Status; `colaboracoes` (present only when the job had collaborations) holds the per-collaboration evidence and outcome. `parciais` keeps counting the `[partial]` items of the orchestrator's report; partial items with no pending decision still end the job `failed`.
 - `publico` is built from an allowlist of fields. It is the only part of a report that may appear on a public forge.
+- When `report.json` is absent, `job collect` prints the missing line with `"report":null`, and that line carries `"report_missing":true` only when the status is one that carries a stored report (as in Status); the exit code stays 0, and `--md` without a `report.md` still exits 4 as before.
 
 ## Events
 
