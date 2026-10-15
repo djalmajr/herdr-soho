@@ -638,6 +638,12 @@ func TestCancelCutsTheStalledPeriodicPush(t *testing.T) {
 	if len(f.team.bounds) != 1 || f.team.bounds[0] != 10*time.Second {
 		t.Fatalf("bounds = %v, want the full grace on the stop amendment", f.team.bounds)
 	}
+	// The cut tick ended at the sync: the only unbounded orchestrator reads
+	// are the five ticks before it, and every later read is the stop's,
+	// limited to the grace (a read after the cut could end the job done).
+	if unbounded := f.team.statusCalls - len(f.team.statusBounds); unbounded != 5 {
+		t.Fatalf("unbounded status reads = %d, want 5 (none in the tick the cancel cut)", unbounded)
+	}
 	// The terminal record is exactly at the deadline and within the hard
 	// bound.
 	if !f.clock.now.Equal(t0.Add(10 * time.Second)) {

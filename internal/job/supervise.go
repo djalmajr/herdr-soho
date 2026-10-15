@@ -903,6 +903,11 @@ func (s *Supervisor) tick() (int, bool, error) {
 	if code, done, err := s.syncGit(); err != nil || done {
 		return code, done, err
 	}
+	if s.tickCutByCancel {
+		// The cancel cut the sync: the tick ends here, before any status
+		// read or transition, and the next tick starts the stop.
+		return 0, false, nil
+	}
 	if s.stopping != "" {
 		// A stop is already running: the stop path owns the job (a fresh
 		// orchestrator read for the done check, no crossing).

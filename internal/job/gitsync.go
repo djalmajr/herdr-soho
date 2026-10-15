@@ -248,13 +248,14 @@ func (g *GitSync) Push() (PushResult, error) {
 	// of it kills this push and reports the cut, not a refusal.
 	result := platform.RunCli("git", []string{"-C", g.Dir, "push", "--porcelain", "origin", "HEAD:refs/heads/" + g.Branch}, platform.RunOptions{Context: g.Context, Env: gitEnv, TimeoutMs: timeoutMs(g.netTimeout())})
 	switch {
-	case result.NotFound || result.TimedOut || result.Status == nil:
-		if g.cancelled() {
-			return PushResult{}, errCancelled
-		}
-		return PushResult{Head: head}, gitSyncError("push")
-	case *result.Status == 0:
+	case !result.NotFound && !result.TimedOut && result.Status != nil && *result.Status == 0:
 		return PushResult{Pushed: true, Head: head}, nil
+	case g.cancelled():
+		// The cancel cut this push: whatever the exit (a git killed on
+		// Windows exits 1), it is the cut, never a refusal.
+		return PushResult{}, errCancelled
+	case result.NotFound || result.TimedOut || result.Status == nil:
+		return PushResult{Head: head}, gitSyncError("push")
 	default:
 		return PushResult{Rejected: true, Head: head}, nil
 	}
