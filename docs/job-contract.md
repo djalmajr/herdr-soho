@@ -140,9 +140,14 @@ When the checkout is missing, the job clones it into `<job_repos_root>/<org>/<re
 ## Lifecycle
 
 ```text
-accepted -> preparing -> running <-> blocked -> finishing -> {done | failed | timeout | canceled} -> closed
-                                                finishing -> blocked
+accepted -> preparing -> running <-> blocked
+                         running -> finishing
+                         blocked -> finishing
+finishing -> {done | failed | timeout | canceled} -> closed
+finishing -> blocked
 ```
+
+The graph shows every edge the job store allows, except the legacy `collected` edges described below; a start or preparation failure reaches `failed` along these same edges.
 
 The `closed` edge is the owner's `job close`, accepted only from a terminal outcome, from `collected` or from `closed` itself (a no-op retry): a live `blocked` job is never closed, and the blocked ceiling ends the job `timeout` through the stop path (see Blocked jobs below). `collected` is a legacy state no current command records: `job collect` is a read that leaves the status at the terminal outcome, and `job close` moves a terminal job straight to `closed`, so `collected` can only appear in a `state.json` written by an older binary. The read commands treat it as a report-carrying state, and `job close` from it finishes the close as from a terminal outcome.
 
