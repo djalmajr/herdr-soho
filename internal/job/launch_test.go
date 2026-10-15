@@ -41,6 +41,12 @@ func (c *launchTestClock) Sleep(d time.Duration) {
 const (
 	launchTestWorkspace = "w1"
 	launchTestPane      = "p1"
+	// launchHangGuard is the wall-clock hang guard of
+	// TestLaunchLockBusyBounded: it fails only when a launch step blocks
+	// far beyond the bounded launch-lock retries, whatever the node load.
+	// It is not the performance bound: that is the exact test-clock window
+	// the test asserts.
+	launchHangGuard = 30 * time.Second
 )
 
 // launchFixture creates a store holding job-1 (supTestBrief) with the test
@@ -491,7 +497,7 @@ func TestLaunchLockBusyBounded(t *testing.T) {
 	mono0 := clock.Monotonic()
 	started := time.Now()
 	accepted, err := awaitLaunch(store, clock, rec, wait, poll)
-	if wall := time.Since(started); wall >= 2*time.Second {
+	if wall := time.Since(started); wall >= launchHangGuard {
 		t.Fatalf("awaitLaunch blocked %v", wall)
 	}
 	if accepted || err == nil {
@@ -505,7 +511,7 @@ func TestLaunchLockBusyBounded(t *testing.T) {
 	}
 	started = time.Now()
 	confirmed, reason := ConfirmLaunch(store, "job-1", launchEnv(launchTestWorkspace, launchTestPane))
-	if wall := time.Since(started); wall >= 2*time.Second {
+	if wall := time.Since(started); wall >= launchHangGuard {
 		t.Fatalf("ConfirmLaunch blocked %v", wall)
 	}
 	if confirmed || !strings.Contains(reason, "busy") {
@@ -513,7 +519,7 @@ func TestLaunchLockBusyBounded(t *testing.T) {
 	}
 	started = time.Now()
 	fence := fenceLaunch(store, "job-1")
-	if wall := time.Since(started); wall >= 2*time.Second {
+	if wall := time.Since(started); wall >= launchHangGuard {
 		t.Fatalf("fenceLaunch blocked %v", wall)
 	}
 	if fence != launchUncertain {

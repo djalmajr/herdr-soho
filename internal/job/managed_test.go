@@ -26,6 +26,23 @@ type managedFixture struct {
 }
 
 func newManagedFixture(t *testing.T) managedFixture {
+	return newManagedFixtureStartLock(t, true)
+}
+
+// newManagedFixtureStartLock is newManagedFixture with the start lock held
+// by the test process for the whole run when lockHeld is true, as a live
+// starter does.
+//
+// The jobdir-symlink and jobs-symlink scenarios of
+// TestManagedSelectionRefused set lockHeld false: an open handle inside
+// the job directory stops Windows from renaming that directory or the
+// jobs directory ("Access is denied", errno 5), so the test process
+// cannot hold the lock through the post-bind swap. There the helper takes
+// the start lock for the bind and releases it before the swap
+// (managedHelperLockVar, managedHelperParent). The property under test is
+// the post-bind refusal of the symlinked directory, not the swap with
+// the lock held.
+func newManagedFixtureStartLock(t *testing.T, lockHeld bool) managedFixture {
 	t.Helper()
 	root := t.TempDir()
 	store := Open(root)
@@ -45,7 +62,9 @@ func newManagedFixture(t *testing.T) managedFixture {
 	if _, err := issueLaunch(store, store.clock(), "job-1", launchTestWorkspace, launchTestPane); err != nil {
 		t.Fatal(err)
 	}
-	holdStartLock(t, dir)
+	if lockHeld {
+		holdStartLock(t, dir)
+	}
 	base := filepath.Join(t.TempDir(), "config-base")
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		t.Fatal(err)
@@ -55,13 +74,14 @@ func newManagedFixture(t *testing.T) managedFixture {
 
 // managedRun is one parent run.
 type managedRun struct {
-	parentArgs []string // after the binary; default job supervise --id job-1
-	bind       bool
-	mutate     string
-	childArgs  string // default "status"
-	childEnv   string // k=v;k=<unset>
-	childDir   string // default the fixture's cwd
-	parentExe  string // default this test binary
+	parentArgs  []string // after the binary; default job supervise --id job-1
+	bind        bool
+	mutate      string
+	childArgs   string // default "status"
+	childEnv    string // k=v;k=<unset>
+	childDir    string // default the fixture's cwd
+	parentExe   string // default this test binary
+	noStartLock bool   // the test process does not hold the start lock (the helper does)
 }
 
 // run starts the parent and returns its output lines.
@@ -96,6 +116,9 @@ func (f managedFixture) run(t *testing.T, r managedRun) string {
 	env[managedMutateVar] = r.mutate
 	if r.bind {
 		env[managedBindVar] = "1"
+	}
+	if r.noStartLock {
+		env[managedHelperLockVar] = "1"
 	}
 	env[launchConfigBaseVar] = f.base
 	exe := self
@@ -204,8 +227,8 @@ func TestManagedSelectionRefused(t *testing.T) {
 		{bind: true, mutate: "state-dir"},
 		{bind: true, mutate: "state-pane"},
 		{bind: true, mutate: "state-symlink"},
-		{bind: true, mutate: "jobdir-symlink"},
-		{bind: true, mutate: "jobs-symlink"},
+		{bind: true, mutate: "jobdir-symlink", noStartLock: true},
+		{bind: true, mutate: "jobs-symlink", noStartLock: true},
 		{bind: true, childEnv: launchConfigBaseVar + "=relative/base"},
 		{bind: true, childEnv: launchHomeVar + "=/home-without-a-base;" + launchConfigBaseVar + "=<unset>"},
 		{bind: true, childEnv: "HERDR_WORKSPACE_ID=w-other"},
@@ -222,7 +245,7 @@ func TestManagedSelectionRefused(t *testing.T) {
 	for _, c := range cases {
 		name := fmt.Sprintf("args=%v bind=%v mutate=%s env=%s", c.parentArgs, c.bind, c.mutate, c.childEnv)
 		t.Run(name, func(t *testing.T) {
-			f := newManagedFixture(t)
+			f := newManagedFixtureStartLock(t, !c.noStartLock)
 			out := f.run(t, c)
 			if c.bind && !strings.HasPrefix(out, "bind=true reason=\n") {
 				t.Fatalf("bind: %q", out)

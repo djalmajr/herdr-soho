@@ -19,14 +19,15 @@ import (
 // managedHelperVar and exit before any test runs.
 
 const (
-	managedHelperVar   = "JOB_MANAGED_HELPER"
-	managedRootVar     = "JOB_MANAGED_ROOT"
-	managedBindVar     = "JOB_MANAGED_BIND"
-	managedMutateVar   = "JOB_MANAGED_MUTATE"
-	managedArgsVar     = "JOB_MANAGED_ARGS"
-	managedChildEnvVar = "JOB_MANAGED_CHILD_ENV"
-	managedChildDirVar = "JOB_MANAGED_CHILD_DIR"
-	managedChildExeVar = "JOB_MANAGED_CHILD_EXE"
+	managedHelperVar     = "JOB_MANAGED_HELPER"
+	managedHelperLockVar = "JOB_MANAGED_HELPER_LOCK"
+	managedRootVar       = "JOB_MANAGED_ROOT"
+	managedBindVar       = "JOB_MANAGED_BIND"
+	managedMutateVar     = "JOB_MANAGED_MUTATE"
+	managedArgsVar       = "JOB_MANAGED_ARGS"
+	managedChildEnvVar   = "JOB_MANAGED_CHILD_ENV"
+	managedChildDirVar   = "JOB_MANAGED_CHILD_DIR"
+	managedChildExeVar   = "JOB_MANAGED_CHILD_EXE"
 )
 
 func managedHelperMain() {
@@ -68,8 +69,35 @@ func managedHelperParent() int {
 	}
 	if env.Get(managedBindVar) == "1" {
 		store := Open(root)
+		// The jobdir-symlink and jobs-symlink scenarios (managed_test.go)
+		// leave the start lock free in the test process: an open handle
+		// inside the job directory stops Windows from renaming the job
+		// or the jobs directory. The bind needs the lock held, so the
+		// helper takes it just before BindLaunch and releases it before
+		// the post-bind swap (managedMutate).
+		var startLock *os.File
+		if env.Get(managedHelperLockVar) == "1" {
+			lockDir, err := Dir(root, id)
+			if err != nil {
+				fmt.Printf("start lock dir: %v\n", err)
+				return 1
+			}
+			if startLock, err = tryStartLock(lockDir); err != nil {
+				fmt.Printf("start lock: %v\n", err)
+				return 1
+			}
+		}
+		defer func() {
+			if startLock != nil {
+				closeStartLock(startLock)
+			}
+		}()
 		bound, reason := BindLaunch(store, id, env, launch.Selection)
 		fmt.Printf("bind=%v reason=%s\n", bound, reason)
+		if startLock != nil {
+			closeStartLock(startLock)
+			startLock = nil
+		}
 		if err := managedMutate(root, id, env.Get(managedMutateVar)); err != nil {
 			fmt.Printf("mutate error: %v\n", err)
 			return 1
