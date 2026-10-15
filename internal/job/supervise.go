@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/reportscan"
 )
@@ -62,6 +63,19 @@ type Supervisor struct {
 	// Wake: the machine's job wake hook; nil or an empty Cmd disables it
 	// (no worker, no cursor).
 	Wake *WakeHook
+
+	// PrivateLaunch: this supervisor was started by job start with the
+	// private launch context (set by the CLI); only then does waitRunning
+	// refuse a running or blocked state written inside a failure
+	// (Store.Fail's walk).
+	PrivateLaunch bool
+	// actorEnv is the supervisor's own environment, without the private
+	// names: the environment of every agent pane of the job workspace
+	// (actor_session.go). Set with PrivateLaunch.
+	actorEnv platform.Env
+	// launchSel is the starter's user configuration selection of the
+	// private launch (set with PrivateLaunch).
+	launchSel core.UserSelection
 
 	// Git sync and release: the git sync of the job branch — nil in
 	// workspace mode, which runs no git at all — and the Herdr adapter
@@ -424,6 +438,16 @@ func (s *Supervisor) Run() (int, error) {
 			return ExitHerdr, nil
 		}
 	}
+	// The workspace's own session file carries the job team and state
+	// root for the agents (actor_session.go): after the job lane, before
+	// the orchestrator, again on every restart. A pin the job needs and
+	// cannot make fails the job before any agent runs without it.
+	if err := s.pinActorSession(); err != nil {
+		if err := s.fail("job: cannot pin the job workspace session", ExitUsage); err != nil {
+			return ExitFailed, err
+		}
+		return ExitUsage, nil
+	}
 	name, done, err := s.ensureOrchestrator()
 	if err != nil {
 		return ExitFailed, err
@@ -457,7 +481,13 @@ func (s *Supervisor) Run() (int, error) {
 // blocked ceiling while it stays blocked), a terminal state returns its
 // outcome code at once, and a job still not running after the bound fails
 // with exit 19. The bound counts sleep iterations, not wall-clock
-// differences, so a moving clock cannot end the wait early.
+// differences, so a moving clock cannot end the wait early. Only a
+// privately scoped supervisor (PrivateLaunch) refuses a running or
+// blocked snapshot written inside a failure: the store's failure walk
+// appends the failure event and saves running and finishing before
+// failed, so a snapshot read in that window is a failure in flight, not
+// the start's running, and the wait keeps polling; every other
+// supervisor accepts the snapshot at once, exactly as before.
 func (s *Supervisor) waitRunning() (int, bool, error) {
 	poll := s.poll()
 	maxSleeps := int(startWait / poll)
@@ -468,7 +498,29 @@ func (s *Supervisor) waitRunning() (int, bool, error) {
 		snap, err := s.Store.Snapshot(s.ID)
 		if err == nil {
 			if snap.State.Status == StatusRunning || snap.State.Status == StatusBlocked {
-				return 0, false, nil
+				// A failure in flight is not the start's running: the store's
+				// failure walk appends the failure event and saves running and
+				// finishing before failed, so a snapshot read in that window is
+				// refused below and the wait keeps polling. The refusal applies
+				// only to this supervisor's own private scoped execution
+				// (PrivateLaunch): a supervisor without the private context
+				// accepts exactly as before.
+				if !s.PrivateLaunch {
+					return 0, false, nil
+				}
+				dir, dirErr := s.Store.readDir(s.ID)
+				accepted := dirErr == nil
+				if dirErr == nil {
+					// A failed directory or events read, or a log that already
+					// holds a failure event, is refused: keep polling like a
+					// not-yet-running state.
+					events, eventsErr := readEvents(dir)
+					accepted = eventsErr == nil && !hasTipo(events, "failure")
+				}
+				if accepted {
+					return 0, false, nil
+				}
+				// Refused: fall through to the sleep and keep polling.
 			}
 			if isTerminalOutcome(snap.State.Status) {
 				return supervisorExit(snap.State.Status), true, nil

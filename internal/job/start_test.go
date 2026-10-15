@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/dispatch"
+	"github.com/djalmajr/herdr-soho/internal/platform"
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
@@ -387,6 +388,9 @@ func exitCode(t *testing.T, err error) int {
 // fixture's git clone seam.
 func startStarter(t *testing.T, f *prepareFixture, fake *fakeHerdr, stateRoot string, friction *[]string) Starter {
 	t.Helper()
+	if fake.OnRun == nil {
+		fake.OnRun = fakeSupervisorConfirms(stateRoot, fake)
+	}
 	return Starter{
 		Env:       f.env,
 		Machine:   f.machine,
@@ -396,6 +400,20 @@ func startStarter(t *testing.T, f *prepareFixture, fake *fakeHerdr, stateRoot st
 		SelfExe:   "/opt/bin/herdr-soho",
 		StateRoot: func(checkout string) string { return stateRoot },
 		Friction:  func(message string) { *friction = append(*friction, message) },
+	}
+}
+
+// fakeSupervisorConfirms stands in for the supervisor the fake pane run
+// launches: it confirms the launch from the created workspace's root pane,
+// as `job supervise` does before it runs. It is an implementation-generated
+// confirmation, never evidence of a real Herdr launch.
+func fakeSupervisorConfirms(stateRoot string, fake *fakeHerdr) func(string, []string) {
+	return func(paneID string, argv []string) {
+		if len(argv) == 0 || fake.RunErr != nil {
+			return
+		}
+		env := platform.Env{"HERDR_WORKSPACE_ID": fake.CreateWorkspaceID, "HERDR_PANE_ID": paneID}
+		_, _ = ConfirmLaunch(Open(stateRoot), argv[len(argv)-1], env)
 	}
 }
 
@@ -498,8 +516,16 @@ func TestStartSuccess(t *testing.T) {
 	if len(fake.CreateCalls) != 1 {
 		t.Fatalf("CreateCalls = %+v", fake.CreateCalls)
 	}
-	if create := fake.CreateCalls[0]; create.Cwd != worktree || create.Label != "job-job-1" || create.Env != nil {
-		t.Fatalf("Create = %+v", create)
+	// The root pane gets exactly the user-configuration locator of this
+	// start: the base of the selected user configuration, absolute.
+	wantEnv := map[string]string{launchConfigBaseVar: filepath.Dir(filepath.Dir(platform.UserConfigPath(platform.Current(), f.env)))}
+	if create := fake.CreateCalls[0]; create.Cwd != worktree || create.Label != "job-job-1" || !reflect.DeepEqual(create.Env, wantEnv) {
+		t.Fatalf("Create = %+v, want env %v", create, wantEnv)
+	}
+	for _, key := range []string{"XDG_CONFIG_HOME", "HOME", "USERPROFILE"} {
+		if _, ok := fake.CreateCalls[0].Env[key]; ok {
+			t.Fatalf("create env carries the generic selector %q: %v", key, fake.CreateCalls[0].Env)
+		}
 	}
 	// Events: accepted then preparing.
 	events, err := readEvents(filepath.Join(stateRoot, "jobs", "job-1"))

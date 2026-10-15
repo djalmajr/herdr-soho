@@ -7,5 +7,6 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	managedHelperMain()
 	fakecli.RunTests(m)
 }

@@ -39,6 +39,9 @@ type Config struct {
 	Order   []string
 	Sources []string
 	Layers  []ConfigLayer
+	// User is the explicit user configuration selection the config was
+	// loaded with (LoadConfigFor); zero for LoadConfig.
+	User UserSelection
 }
 
 // ConfigLayerPath names one file LoadConfig reads, with its source label.
@@ -60,10 +63,10 @@ func ConfigLayerPaths(ctx *Config, env platform.Env, cwd string) []ConfigLayerPa
 	return paths
 }
 
-func baseConfigLayerPaths(env platform.Env, cwd string) []ConfigLayerPath {
+func baseConfigLayerPaths(env platform.Env, cwd string, sel UserSelection) []ConfigLayerPath {
 	paths := []ConfigLayerPath{
 		{Source: "defaults", File: filepath.Join(platform.SkillDir(env), "config.defaults")},
-		{Source: "user", File: EffectiveConfigFile(platform.UserConfigPath(platform.Current(), env), LegacyUserConfigPath(platform.Current(), env))},
+		{Source: "user", File: EffectiveUserConfigFile(platform.Current(), env, sel)},
 	}
 	if file := ProjectConfigFileUsed(env, cwd); file != "" {
 		paths = append(paths, ConfigLayerPath{Source: "project", File: file})
@@ -121,11 +124,19 @@ func isJSWhitespace(r rune) bool {
 }
 
 func LoadConfig(env platform.Env, cwd string) Config {
+	return LoadConfigFor(env, cwd, UserSelection{})
+}
+
+// LoadConfigFor is LoadConfig with an explicit user configuration
+// selection: only the user layer's file comes from sel (UserConfigFiles);
+// every other layer, and every git or herdr call the load makes, uses env
+// unchanged.
+func LoadConfigFor(env platform.Env, cwd string, sel UserSelection) Config {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0, 4)}
-	for _, layer := range baseConfigLayerPaths(env, cwd) {
+	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0, 4), User: sel}
+	for _, layer := range baseConfigLayerPaths(env, cwd, sel) {
 		loadConfigFile(layer.File, layer.Source, &ctx)
 	}
 	if problem := projectConfigProblem(env, cwd); problem != nil {
@@ -184,6 +195,14 @@ func loadConfigFile(file, label string, ctx *Config) {
 		return
 	}
 	ctx.Sources = append(ctx.Sources, label)
+	applyConfigText(raw, &record, ctx)
+	ctx.Layers = append(ctx.Layers, record)
+}
+
+// applyConfigText parses one file's decoded text into ctx and the file's
+// layer record, as loadConfigFile reads every layer.
+func applyConfigText(raw string, record *ConfigLayer, ctx *Config) {
+	layer := record.Entries
 	for _, rawLine := range splitLines(raw) {
 		if hash := strings.IndexByte(rawLine, '#'); hash >= 0 {
 			rawLine = rawLine[:hash]
@@ -209,10 +228,9 @@ func loadConfigFile(file, label string, ctx *Config) {
 		if _, exists := ctx.Entries[key]; !exists {
 			ctx.Order = append(ctx.Order, key)
 		}
-		ctx.Entries[key] = ConfigEntry{Value: value, Source: label, Original: rawKey}
+		ctx.Entries[key] = ConfigEntry{Value: value, Source: record.Source, Original: rawKey}
 		layer[key] = ctx.Entries[key]
 	}
-	ctx.Layers = append(ctx.Layers, record)
 }
 
 // ConfigPair is one key/value read from a config file: the normalized key,
@@ -222,6 +240,21 @@ type ConfigPair struct {
 	Key      string
 	Original string
 	Value    string
+}
+
+// ConfigTextPairs parses bytes already read from one config file with the
+// shared parser (DecodeText, then applyConfigText): one pair per key in
+// first-occurrence order, the last occurrence of a key winning.
+func ConfigTextPairs(data []byte) []ConfigPair {
+	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0)}
+	record := ConfigLayer{Source: "file", Entries: make(map[string]ConfigEntry)}
+	applyConfigText(platform.DecodeText(data), &record, &ctx)
+	pairs := make([]ConfigPair, 0, len(ctx.Order))
+	for _, key := range ctx.Order {
+		entry := ctx.Entries[key]
+		pairs = append(pairs, ConfigPair{Key: key, Original: entry.Original, Value: entry.Value})
+	}
+	return pairs
 }
 
 // ReadConfigFilePairs reads one file with the shared single-file config
@@ -463,6 +496,19 @@ func StateRootPath(ctx *Config, env platform.Env, cwd string) string {
 		dir = filepath.Join(root, dir)
 	}
 	return filepath.Clean(dir)
+}
+
+// SessionStateRootPath is the state root under which a command run from
+// cwd with env looks up its session file: StateRootPath over the layers
+// LoadConfig reads before the session (defaults, the environment's user
+// file and the project file), exactly the root SessionConfPath joins the
+// workspace to.
+func SessionStateRootPath(env platform.Env, cwd string) string {
+	ctx := Config{Entries: make(map[string]ConfigEntry), Order: make([]string, 0), Sources: make([]string, 0, 3)}
+	for _, layer := range baseConfigLayerPaths(env, cwd, UserSelection{}) {
+		loadConfigFile(layer.File, layer.Source, &ctx)
+	}
+	return StateRootPath(&ctx, env, cwd)
 }
 
 func StateDirSetting(ctx *Config, env platform.Env, cwd string) string {
@@ -791,8 +837,11 @@ func CmdConfig(ctx *Config, env platform.Env, cwd string) {
 		layers = " " + strings.Join(ctx.Sources, " ")
 	}
 	lines = append(lines, "\nlayers read:"+layers)
-	newUser := platform.UserConfigPath(platform.Current(), env)
-	oldUser := LegacyUserConfigPath(platform.Current(), env)
+	var userSel UserSelection
+	if ctx != nil {
+		userSel = ctx.User
+	}
+	newUser, oldUser := UserConfigFiles(platform.Current(), env, userSel)
 	userFile := EffectiveConfigFile(newUser, oldUser)
 	legacy := ""
 	if userFile == oldUser {

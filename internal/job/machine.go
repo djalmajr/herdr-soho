@@ -22,6 +22,11 @@ type Machine struct {
 	TimeoutMin        int
 	BlockedTimeoutMin int
 	WakeCmd           string
+
+	// reposRootHome records that ReposRoot was expanded from the home
+	// directory (a leading ~ or %USERPROFILE%): the job start then hands
+	// the home variable to the supervisor so it resolves the same root.
+	reposRootHome bool
 }
 
 // Machine defaults: the user configuration file's values win, and a missing
@@ -46,7 +51,16 @@ const (
 // with code 2. An unresolvable ~ panics with the same exit platform.HomeDir
 // uses.
 func LoadMachine(osName string, env platform.Env) (Machine, error) {
-	file := core.EffectiveConfigFile(platform.UserConfigPath(osName, env), core.LegacyUserConfigPath(osName, env))
+	return LoadMachineFor(osName, env, core.UserSelection{})
+}
+
+// LoadMachineFor is LoadMachine with an explicit user configuration
+// selection: the user file comes from sel.Base and a home-relative
+// job_repos_root expands from sel.Home when they are set (the job
+// supervisor's view of its starter's selection); the zero selection is
+// LoadMachine.
+func LoadMachineFor(osName string, env platform.Env, sel core.UserSelection) (Machine, error) {
+	file := core.EffectiveUserConfigFile(osName, env, sel)
 	pairs, err := core.ReadConfigFilePairs(file)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -81,10 +95,11 @@ func LoadMachine(osName string, env platform.Env) (Machine, error) {
 	return Machine{
 		Label:             values["machine_label"],
 		Orgs:              orgs,
-		ReposRoot:         expandReposRoot(osName, env, values["job_repos_root"]),
+		ReposRoot:         expandReposRoot(osName, env, sel, values["job_repos_root"]),
 		TimeoutMin:        timeout,
 		BlockedTimeoutMin: blockedTimeout,
 		WakeCmd:           values["job_wake_cmd"],
+		reposRootHome:     reposRootFromHome(values["job_repos_root"]),
 	}, nil
 }
 
@@ -169,23 +184,33 @@ func parseBlockedTimeout(raw string) (int, error) {
 	return n, nil
 }
 
-func expandReposRoot(osName string, env platform.Env, raw string) string {
+func expandReposRoot(osName string, env platform.Env, sel core.UserSelection, raw string) string {
 	if raw == "" {
 		raw = "~/repo.git"
 	}
 	if raw == "~" {
-		return platform.HomeDir(osName, env)
+		return core.SelectedHomeDir(osName, env, sel)
 	}
 	if rest, ok := strings.CutPrefix(raw, "~/"); ok {
-		return joinHome(osName, env, rest)
+		return joinHome(osName, env, sel, rest)
 	}
 	if rest, ok := strings.CutPrefix(raw, `~\`); ok {
-		return joinHome(osName, env, rest)
+		return joinHome(osName, env, sel, rest)
 	}
 	if rest, ok := cutUserProfile(raw); ok {
-		return joinHome(osName, env, rest)
+		return joinHome(osName, env, sel, rest)
 	}
 	return raw
+}
+
+// reposRootFromHome reports whether expandReposRoot expands raw from the
+// home directory: the same prefixes it handles, empty being the ~ default.
+func reposRootFromHome(raw string) bool {
+	if raw == "" || raw == "~" || strings.HasPrefix(raw, "~/") || strings.HasPrefix(raw, `~\`) {
+		return true
+	}
+	_, ok := cutUserProfile(raw)
+	return ok
 }
 
 func cutUserProfile(raw string) (string, bool) {
@@ -196,8 +221,8 @@ func cutUserProfile(raw string) (string, bool) {
 	return raw[len(prefix):], true
 }
 
-func joinHome(osName string, env platform.Env, rest string) string {
-	home := platform.HomeDir(osName, env)
+func joinHome(osName string, env platform.Env, sel core.UserSelection, rest string) string {
+	home := core.SelectedHomeDir(osName, env, sel)
 	rest = strings.TrimLeft(rest, `/\`)
 	if rest == "" {
 		return home

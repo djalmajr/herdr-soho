@@ -11,6 +11,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/core"
 	"github.com/djalmajr/herdr-soho/internal/doctor"
 	"github.com/djalmajr/herdr-soho/internal/herdr"
+	"github.com/djalmajr/herdr-soho/internal/job"
 	"github.com/djalmajr/herdr-soho/internal/kinds"
 	"github.com/djalmajr/herdr-soho/internal/metrics"
 	"github.com/djalmajr/herdr-soho/internal/peer"
@@ -113,6 +114,13 @@ func Run(args []string, env platform.Env) (code int) {
 		return 0
 	}
 
+	// The job start's private launch locators are read once here and
+	// dropped from the environment every command uses and hands to its
+	// external processes; only the job supervisor and the team commands it
+	// runs and binds use them, explicitly (internal/job/locator.go,
+	// internal/job/managed.go).
+	launch := job.ReadLaunchLocators(env)
+	env = job.WithoutLaunchLocators(env)
 	decisionEnv := env.Clone()
 	applyLegacyEnv(decisionEnv)
 	command := ""
@@ -122,18 +130,34 @@ func Run(args []string, env platform.Env) (code int) {
 	core.SetFrictionCommand(command)
 	var configCtx *core.Config
 	commandCwd, _ := os.Getwd()
+	// A team command the bound job supervisor runs reads its user
+	// configuration from the supervisor's explicit selection, and only
+	// when the private launch binding proves it (internal/job/managed.go);
+	// every other command selects from its environment as always. A team
+	// command whose parent is a job supervisor (or could not be told
+	// apart from one) without a binding that holds stops here, before any
+	// read or write of its own, instead of acting with the environment's
+	// configuration.
+	var userSel core.UserSelection
+	if launch.Present {
+		sel, outcome := job.ManagedSelection(args, launch, decisionEnv, commandCwd)
+		if outcome == job.ManagedRefused {
+			platform.Die(command+": the job supervisor's launch binding does not hold", 2)
+		}
+		userSel = sel
+	}
 	var commandConfig *core.Config
 	readOnlyRejectedDoctor := command == "doctor" && decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && len(args) > 1
 	if !readOnlyRejectedDoctor && (command == "config" || command == "session" || command == "roles" || command == "role" || command == "explain" || command == "layout-plan" || command == "regrid" || command == "promote" || command == "tab-label" || command == "stats" || command == "metrics" || command == "collect" || command == "setup" || command == "release" || command == "doctor" || command == "init" || command == "spawn" || command == "dispatch" || command == "run" || command == "lint" || command == "wait" || command == "status") {
-		ctx := core.LoadConfig(decisionEnv, commandCwd)
+		ctx := core.LoadConfigFor(decisionEnv, commandCwd, userSel)
 		configCtx = &ctx
 	}
 	if command == "env" {
-		ctx := core.LoadConfig(decisionEnv, commandCwd)
+		ctx := core.LoadConfigFor(decisionEnv, commandCwd, userSel)
 		configCtx = &ctx
 	}
 	if command == "send" || command == "find" || command == "collaborate" {
-		ctx := core.LoadConfig(decisionEnv, commandCwd)
+		ctx := core.LoadConfigFor(decisionEnv, commandCwd, userSel)
 		commandConfig = &ctx
 	}
 	// A writing job subcommand under NOWRITE dies with the job-specific
@@ -194,7 +218,7 @@ func Run(args []string, env platform.Env) (code int) {
 		return cmdHook(args[1:], decisionEnv, commandCwd)
 	}
 	if command == "roster" || command == "friction" || command == "title" || command == "clean" || command == "feedback" || command == "regrid" || command == "promote" || command == "tab-label" || command == "release" || command == "reopen" || command == "spawn" || command == "dispatch" || command == "run" || command == "collect" || command == "init" || command == "wait" || command == "status" || command == "compact" || command == "copies" || command == "gc" || command == "procs" {
-		ctx := core.LoadConfig(decisionEnv, commandCwd)
+		ctx := core.LoadConfigFor(decisionEnv, commandCwd, userSel)
 		commandConfig = &ctx
 		herdr.RequireEnv(decisionEnv, platform.Current(), os.Getpid(), nil)
 		frictionLogPath = ""
@@ -260,7 +284,7 @@ func Run(args []string, env platform.Env) (code int) {
 	case "job":
 		// The job family loads no Herdr environment, never calls Herdr and
 		// leaves frictionLogPath empty (it runs outside Herdr).
-		return cmdJob(args[1:], decisionEnv, commandCwd)
+		return cmdJob(args[1:], decisionEnv, commandCwd, launch)
 	case "kinds":
 		kinds.CmdKinds(decisionEnv, platform.Current())
 		return 0
