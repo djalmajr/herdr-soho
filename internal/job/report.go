@@ -576,6 +576,14 @@ func reportSetState(status string) bool {
 	return status == StatusCollected || status == StatusClosed || isTerminalOutcome(status)
 }
 
+// ReportExpected reports whether the status is expected to carry a stored
+// report (reportSetState): a terminal outcome, or collected or closed. In
+// those states a missing report means the report is missing (the CLI marks
+// it report_missing), not that the job is still working.
+func ReportExpected(status string) bool {
+	return reportSetState(status)
+}
+
 // refreshIfWrote refreshes the stored report when the caller just wrote to a
 // job in a report-carrying state.
 func (s *Store) refreshIfWrote(dir string, st State, wrote bool) error {

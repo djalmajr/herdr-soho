@@ -378,6 +378,12 @@ type jobStatusLine struct {
 	Partial               bool     `json:"partial"`
 	PartialCollaborations []string `json:"partial_collaborations"`
 	DuplicateOf           string   `json:"duplicate_of,omitempty"`
+	// ReportMissing stands only when the status carries a stored report
+	// (job.ReportExpected) and the job has none: a legacy terminal job,
+	// collected or closed without its report, reads as missing, never as
+	// complete. It is out of the line in every other case, and the read
+	// writes nothing.
+	ReportMissing bool `json:"report_missing,omitempty"`
 }
 
 func printJobStatusLine(snap job.Snapshot) {
@@ -391,6 +397,7 @@ func printJobStatusLine(snap job.Snapshot) {
 		Partial:               len(partial) > 0,
 		PartialCollaborations: partial,
 		DuplicateOf:           snap.State.DuplicateOf,
+		ReportMissing:         snap.Report == nil && job.ReportExpected(snap.State.Status),
 	}
 	line.Eventos.Total = snap.EventTotal
 	line.Eventos.UltimoSeq = snap.LastSeq
@@ -610,7 +617,12 @@ func printJobCollectMissing(snap job.Snapshot) {
 		ID     string `json:"id"`
 		Status string `json:"status"`
 		Report any    `json:"report"`
-	}{ID: snap.State.ID, Status: snap.State.Status}
+		// ReportMissing stands only when the status carries a stored
+		// report (job.ReportExpected) and the report.json the collect
+		// could not find is the one the state is expected to keep; the
+		// read writes nothing.
+		ReportMissing bool `json:"report_missing,omitempty"`
+	}{ID: snap.State.ID, Status: snap.State.Status, ReportMissing: job.ReportExpected(snap.State.Status)}
 	raw, err := json.Marshal(line)
 	if err != nil {
 		platform.Die("job collect: cannot render status: "+err.Error(), 2)

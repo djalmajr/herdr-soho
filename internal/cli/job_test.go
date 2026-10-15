@@ -1684,3 +1684,136 @@ func TestJobCollectLegacyPartialView(t *testing.T) {
 		t.Fatalf("report.json changed by the read: %s", after)
 	}
 }
+
+// A legacy terminal state without a stored report reads as missing, not as
+// complete: the wait/status line and the collect missing line print
+// "report_missing":true only when the status carries a report (the
+// reportSetState set) and the report is absent, with the partial facts
+// still false and []; with a stored report, or in accepted and running,
+// the field stays out and the line is exactly today's. The repeated reads
+// write nothing: the state.json bytes, the job dir listing and the
+// events.jsonl bytes stand after three waits and three collects.
+//
+// Catches the mutation "the report_missing marker dropped from the status
+// or the collect-missing line": a legacy done job would then read as
+// complete (report: null, exit 0).
+func TestJobReportMissingLegacyTerminal(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	f.startJob(t, co)
+	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+
+	// The legacy terminal states without a report: the marker stands in
+	// the wait and status lines and in the collect missing line, the
+	// partial facts stay false and [], and both reads exit 0.
+	for _, status := range []string{"done", "collected", "closed"} {
+		f.setStatus(t, co, "job-1", status)
+		wantWait := `{"id":"job-1","status":"` + status + `","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[],"report_missing":true}`
+		code, out, errOut := f.run(t, "wait", "--id", "job-1")
+		if code != 0 || errOut != "" || out != wantWait+"\n" {
+			t.Fatalf("%s wait code=%d out=%q err=%q", status, code, out, errOut)
+		}
+		// The status shares the line.
+		code, out, errOut = f.run(t, "status", "--id", "job-1")
+		if code != 0 || errOut != "" || out != wantWait+"\n" {
+			t.Fatalf("%s status code=%d out=%q err=%q", status, code, out, errOut)
+		}
+		wantCollect := `{"id":"job-1","status":"` + status + `","report":null,"report_missing":true}`
+		code, out, errOut = f.run(t, "collect", "--id", "job-1")
+		if code != 0 || errOut != "" || out != wantCollect+"\n" {
+			t.Fatalf("%s collect code=%d out=%q err=%q", status, code, out, errOut)
+		}
+	}
+
+	// Control with a stored report: the marker is out and the wait line is
+	// exactly today's; the collect prints the report body without the
+	// marker.
+	if err := os.WriteFile(filepath.Join(jobDir, "report.json"), []byte(`{"schema":1,"id":"job-1","status":"done","resumo":"ok"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.setStatus(t, co, "job-1", "done")
+	code, out, errOut := f.run(t, "wait", "--id", "job-1")
+	want := `{"id":"job-1","status":"done","motivo":null,"eventos":{"total":1,"ultimo_seq":1},"decisions_acked_seq":0,"decisions_pendentes":[],"partial":false,"partial_collaborations":[]}`
+	if code != 0 || errOut != "" || out != want+"\n" {
+		t.Fatalf("wait with report code=%d out=%q err=%q", code, out, errOut)
+	}
+	code, out, errOut = f.run(t, "collect", "--id", "job-1")
+	if code != 0 || errOut != "" || strings.Contains(out, "report_missing") {
+		t.Fatalf("collect with report code=%d out=%q err=%q", code, out, errOut)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(out, "\n")), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["status"] != "done" || got["resumo"] != "ok" {
+		t.Fatalf("collect = %#v", got)
+	}
+
+	// Controls in the non-report states without a report: the marker is
+	// out and the rest of the lines stands (wait exits 9 on the bound,
+	// collect exits 0 with the missing line).
+	if err := os.Remove(filepath.Join(jobDir, "report.json")); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{"accepted", "running"} {
+		f.setStatus(t, co, "job-1", status)
+		code, out, errOut := f.run(t, "wait", "--id", "job-1", "--timeout", "100")
+		if code != 9 || errOut != "" || !strings.Contains(out, `"status":"`+status+`"`) || strings.Contains(out, "report_missing") {
+			t.Fatalf("%s wait code=%d out=%q err=%q", status, code, out, errOut)
+		}
+		wantCollect := `{"id":"job-1","status":"` + status + `","report":null}`
+		code, out, errOut = f.run(t, "collect", "--id", "job-1")
+		if code != 0 || errOut != "" || out != wantCollect+"\n" {
+			t.Fatalf("%s collect code=%d out=%q err=%q", status, code, out, errOut)
+		}
+	}
+
+	// The repeated reads write nothing: the state.json bytes, the job dir
+	// listing and the events.jsonl bytes stand after three waits and
+	// three collects.
+	f.setStatus(t, co, "job-1", "done")
+	stateFile := filepath.Join(jobDir, "state.json")
+	eventsFile := filepath.Join(jobDir, "events.jsonl")
+	listDir := func(t *testing.T, dir string) []string {
+		t.Helper()
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names := []string{}
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		return names
+	}
+	hash := func(t *testing.T, path string) [32]byte {
+		t.Helper()
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sha256.Sum256(raw)
+	}
+	stateSum := hash(t, stateFile)
+	eventsSum := hash(t, eventsFile)
+	namesBefore := listDir(t, jobDir)
+	treeBefore := treeSnapshot(t, jobDir)
+	for i := 0; i < 3; i++ {
+		if code, _, errOut := f.run(t, "wait", "--id", "job-1"); code != 0 || errOut != "" {
+			t.Fatalf("wait %d code=%d err=%q", i, code, errOut)
+		}
+		if code, _, errOut := f.run(t, "collect", "--id", "job-1"); code != 0 || errOut != "" {
+			t.Fatalf("collect %d code=%d err=%q", i, code, errOut)
+		}
+	}
+	if got := hash(t, stateFile); got != stateSum {
+		t.Fatalf("state.json changed by the repeated reads")
+	}
+	if got := hash(t, eventsFile); got != eventsSum {
+		t.Fatalf("events.jsonl changed by the repeated reads")
+	}
+	if got := listDir(t, jobDir); !reflect.DeepEqual(namesBefore, got) {
+		t.Fatalf("job dir listing changed by the repeated reads: %v -> %v", namesBefore, got)
+	}
+	assertJobTreeUnchanged(t, treeBefore, treeSnapshot(t, jobDir), "the repeated reads moved the job dir")
+}
