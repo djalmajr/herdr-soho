@@ -1125,11 +1125,15 @@ func (s *Supervisor) enterFinishing(intent *TerminalIntent, motivo *string) erro
 	return err
 }
 
-// enterFinishingWrite is the state write of enterFinishing.
+// enterFinishingWrite is the state write of enterFinishing. The finishing
+// anchor (the wall ts the terminal procedure's budget counts from) lands
+// only with the terminal intent: the provisional entry of the pending
+// decision path (no intent, straight back to blocked) must not start the
+// budget while the job waits for the decision.
 func (s *Supervisor) enterFinishingWrite(intent *TerminalIntent, motivo *string) error {
 	update := func(st *State) {
-		s.anchorFinishing(st)
 		if intent != nil {
+			s.anchorFinishing(st)
 			st.TerminalIntent = intent
 		}
 		if motivo != nil {
@@ -1190,13 +1194,31 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 		s.frictionf("job: the supervisor could not record the terminal intent: " + err.Error())
 		return 0, true, err
 	}
+	// A terminal event an earlier pass already published is final: its
+	// outcome (the recorded intent's) stands even when the deadline is
+	// already spent and the sync below is cut. The read is the job's own
+	// events, before the finalSync, with the same readDir/readEvents the
+	// append below uses, and its error goes to friction and back, like the
+	// append's read.
+	terminalDir, err := s.Store.readDir(s.ID)
+	if err != nil {
+		s.frictionf("job: the supervisor could not read the job directory for the terminal event: " + err.Error())
+		return 0, true, err
+	}
+	terminalEvents, err := readEvents(terminalDir)
+	if err != nil {
+		s.frictionf("job: the supervisor could not read the events for the terminal event: " + err.Error())
+		return 0, true, err
+	}
+	announced := hasTipo(terminalEvents, "terminal")
 	// The final push happens while the job is still finishing, so its events
 	// precede the terminal event. It runs inside the terminal procedure's
 	// budget: a done job whose final push or pull request was cut by it is
 	// not done, and the rewritten failed outcome is durable before anything
-	// else, so a restart converges on it.
+	// else, so a restart converges on it — unless the terminal event
+	// already announced the outcome, which the rewrite may not undo.
 	s.ensureFinishingBase()
-	if cut := s.finalSync(status); cut && status == StatusDone {
+	if cut := s.finalSync(status); cut && status == StatusDone && !announced {
 		status, motivo, exit = StatusFailed, finishingBudgetMotivo, ExitFailed
 		intent = &TerminalIntent{Status: status, Motivo: motivo, Exit: exit}
 		stored := motivo

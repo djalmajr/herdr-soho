@@ -864,3 +864,167 @@ func TestSelfCLIBoundedLowersTheCommandTimeout(t *testing.T) {
 		t.Fatalf("zero-timeout bounded(7s) = %+v, want 7s", zero)
 	}
 }
+
+// The finishing budget starts only with the terminal intent: a partial
+// report with an open decision enters finishing provisionally and straight
+// back to blocked without anchoring the budget, so the eleven minutes the
+// job waits for the decision charge the blocked clock only; the amendment
+// unblocks and the next report, without partials, ends done on the full
+// budget counted from the terminal intent. An anchor at the provisional
+// entry would leave the deadline spent by the terminal crossing and cut
+// the final sync, rewriting the success to failed.
+func TestSuperviseFinishingBudgetStartsAtTheTerminalIntent(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	start := f.clock.Now()
+	if _, err := f.store.Note(supGitID, EventIn{Tipo: "decision", Escopo: "global", Resumo: "keep the queue"}); err != nil {
+		t.Fatal(err)
+	}
+	partialReport := writeOrchestratorReport(t, "# Report — job\n\n- [partial] Item 1 — the gate was not run\n")
+	fullReport := writeOrchestratorReport(t, "# Report — job\n\n- [done] Item 1\n")
+	script := []fakeStatus{{State: "working"}, {State: "working"}, {State: "question"}}
+	script = append(script, fakeStatus{State: "done", Report: partialReport})
+	for i := 0; i < 132; i++ { // 11 min of blocked wait at the 5 s poll
+		script = append(script, fakeStatus{State: "done", Report: partialReport})
+	}
+	script = append(script, fakeStatus{State: "done", Report: fullReport})
+	f.team.statusScript = script
+	var provisionalAnchor string
+	f.clock.onSleep = func() {
+		if f.clock.sleeps == 4 { // after the partial report crossed to finishing and back to blocked
+			if st := f.state(t); st.FinishingStartedAt != "" {
+				provisionalAnchor = st.FinishingStartedAt
+			}
+		}
+		if f.clock.sleeps == 136 { // the decision is answered and the amendment lands
+			if _, err := f.store.Ack(supGitID, 100); err != nil {
+				t.Errorf("ack the decision: %v", err)
+			}
+			if _, err := f.store.RequestAmend(supGitID, []byte("the decision is in: continue\n")); err != nil {
+				t.Errorf("queue the amendment: %v", err)
+			}
+		}
+	}
+	exit, err := f.sup.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if waited := f.clock.Now().Sub(start); waited < 11*time.Minute {
+		t.Fatalf("the clock advanced %v, want the 11 min of blocked wait to run", waited)
+	}
+	if provisionalAnchor != "" {
+		t.Errorf("the provisional entry anchored the finishing budget at %q, want no anchor before the terminal intent", provisionalAnchor)
+	}
+	if exit != 0 {
+		t.Errorf("exit = %d, want 0 (the budget counts from the terminal intent, not the provisional entry)", exit)
+	}
+	st := f.state(t)
+	if st.Status != StatusDone || st.Motivo != nil {
+		t.Errorf("state = %s motivo=%v, want done without a motivo", st.Status, st.Motivo)
+	}
+	if st.FinishingStartedAt == "" {
+		t.Fatal("finishing_started_at is empty, want the terminal intent's anchor")
+	}
+	anchor, err := time.Parse(time.RFC3339Nano, st.FinishingStartedAt)
+	if err != nil {
+		t.Fatalf("finishing_started_at %q does not parse: %v", st.FinishingStartedAt, err)
+	}
+	if elapsed := f.clock.Now().Sub(anchor); elapsed < 0 || elapsed > 5*time.Second {
+		t.Errorf("the budget ran %v from the anchor, want at most one poll (the anchor is the terminal intent, not the provisional entry)", elapsed)
+	}
+	if !st.FinishingSynced {
+		t.Errorf("finishing_synced = false, want the final sync run on the full budget")
+	}
+	if rep := f.report(t); rep["status"] != "done" {
+		t.Errorf("report.json status = %v, want done", rep["status"])
+	}
+	events := f.events(t)
+	if n := countTipes(events, "terminal"); n != 1 {
+		t.Errorf("terminal events = %d, want 1", n)
+	}
+	if n := countTipes(events, "unblocked"); n != 1 {
+		t.Errorf("unblocked events = %d, want the amendment's one", n)
+	}
+	for _, line := range *f.friction {
+		if strings.Contains(line, "finishing budget exhausted") {
+			t.Errorf("friction = %q, want no cut line: the blocked wait must not spend the finishing budget", line)
+		}
+	}
+}
+
+// A terminal event an earlier pass already published is final: pass one
+// pushes (the remote refuses it at once — not a cut), records the terminal
+// event with exit 0, and then fails to persist the done state; the restart
+// over the spent budget still runs the final sync and gets cut, but must
+// not rewrite the announced outcome, so the state, report.json and the
+// single terminal event agree on done with exit 0.
+func TestSuperviseFinishingRestartKeepsTheAnnouncedOutcome(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.job.commitIn(t, "feat: first")
+	rejectFirstRemotePush(t, f)
+	// Pass one: the push is refused and the done state write fails after
+	// the terminal event landed, so the job stays finishing with its done
+	// intent and the announced outcome.
+	f.sup.FinishingLimits = finishingLimits{Budget: time.Second}
+	fired := failStateWrite(t, errors.New("injected terminal write error"), func(p State) bool { return p.Status == StatusDone })
+	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	if _, done, err := f.sup.finishOutcome(StatusDone, "", 0); err == nil || !done {
+		t.Fatalf("pass one finishOutcome = done %v err %v, want the terminal write error", done, err)
+	}
+	if !*fired {
+		t.Fatal("the terminal write error was never injected")
+	}
+	if n := countTipes(f.events(t), "terminal"); n != 1 {
+		t.Fatalf("terminal events = %d after pass one, want the one announced", n)
+	}
+	if st := f.state(t); st.Status != StatusFinishing || st.TerminalIntent == nil || st.TerminalIntent.Status != StatusDone {
+		t.Fatalf("state after pass one = %s intent=%+v, want finishing with the done intent", st.Status, st.TerminalIntent)
+	}
+	// Pass two: the clock is past the default budget, so the sync is cut —
+	// and the announced outcome stands over the cut.
+	f.clock.now = f.clock.now.Add(11 * time.Minute)
+	exit, err := f.supRestarted(t).Run()
+	if err != nil {
+		t.Fatalf("restart Run: %v", err)
+	}
+	if exit != 0 {
+		t.Errorf("restart exit = %d, want 0 (the announced done stands over the cut sync)", exit)
+	}
+	st := f.state(t)
+	if st.Status != StatusDone || st.Motivo != nil || st.TerminalIntent == nil || st.TerminalIntent.Status != StatusDone {
+		t.Errorf("state = %s motivo=%v intent=%+v, want done without a rewrite to the budget failure", st.Status, st.Motivo, st.TerminalIntent)
+	}
+	if st.FinishingSynced {
+		t.Errorf("finishing_synced = true after a cut sync, want false")
+	}
+	if remoteHasBranch(f) {
+		t.Errorf("the job branch reached the remote, want no push over the spent budget")
+	}
+	if n := len(remoteHookCalls(t, f)); n != 1 {
+		t.Errorf("hook calls = %d, want the one refused push of pass one", n)
+	}
+	rep := f.report(t)
+	if rep["status"] != "done" || rep["motivo"] != nil {
+		t.Errorf("report.json status=%v motivo=%v, want done without a motivo", rep["status"], rep["motivo"])
+	}
+	events := f.events(t)
+	if n := countTipes(events, "terminal"); n != 1 {
+		t.Errorf("terminal events = %d, want the one announced (no second)", n)
+	}
+	for _, ev := range events {
+		if ev.Tipo == "terminal" && (ev.Refs["exit"] != "0" || ev.Refs["motivo"] != "") {
+			t.Errorf("terminal event refs = %v, want exit 0 and no motivo", ev.Refs)
+		}
+	}
+	found := false
+	for _, line := range *f.friction {
+		if strings.Contains(line, "finishing budget exhausted") && strings.Contains(line, "the final push") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("friction = %q, want the cut line: the sync ran and was cut, only the rewrite is skipped", *f.friction)
+	}
+}
