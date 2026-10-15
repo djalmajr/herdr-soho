@@ -1,13 +1,13 @@
 package spawn
 
-// The cursor/Windows startup gate (issue #59): the spawn never claims
-// ready while the verified workspace trust dialog is on the visible
+// The cursor startup gate on every platform (issue #59): the spawn never
+// claims ready while the verified workspace trust dialog is on the visible
 // screen, and a blank, unreadable or launch-only final screen is refused
 // as unverified — both take the existing blocked path (blocked_at_startup,
 // the screen printed, exit 7) with the shared startup_evidence. The
 // fixtures run the real CmdSpawn entry point with a fake herdr; the
-// platform seam (startup.CurrentPlatform) simulates Windows on portable
-// hosts. The screen texts are the verified native dialog and the
+// platform seam (startup.CurrentPlatform) simulates the host platform on
+// portable hosts. The screen texts are the verified native dialog and the
 // historical launch-only screen of the issue.
 
 import (
@@ -245,27 +245,30 @@ func TestSpawnCursorWindowsNormalVisibleUIReady(t *testing.T) {
 	}
 }
 
-func TestSpawnCursorNonWindowsTrustDialogKeepsReady(t *testing.T) {
-	// Control: the gate applies only on Windows. The same cursor dialog on
-	// a non-Windows platform stays ready with no evidence field and no
-	// precise warning — the public behavior and JSON are unchanged.
-	setStartupPlatform(t, "linux")
+func TestSpawnCursorNonWindowsTrustDialogBlocksAtStartup(t *testing.T) {
+	// The gate applies on every platform, not only Windows: the same cursor
+	// dialog on macOS (darwin, the platform of the original report) is
+	// refused with the same result — blocked_at_startup, the screen
+	// printed, exit 7, no input — with the shared evidence.
+	setStartupPlatform(t, "darwin")
 	f := newSpawnFixture(t, append(cursorFreshRules(cursorNativeTrustScreen(t), false), freshSpawnRules()...))
 	configureSpawnFixture(t, &f)
 	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
-	code, stdout, stderr, _ := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
-	if code != 0 {
+	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
+	if code != 7 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stdout, `"status": "ready"`) {
+	if !strings.Contains(stdout, `"status": "blocked_at_startup"`) {
 		t.Fatalf("spawn JSON=%q", stdout)
 	}
-	if strings.Contains(stdout, "startup_evidence") {
-		t.Fatalf("the evidence field must stay absent off-Windows: %q", stdout)
+	assertCursorSpawnEvidence(t, stdout, "idle", "workspace-trust")
+	if !strings.Contains(stdout, "Do you trust the contents of this directory?") {
+		t.Fatalf("the dialog screen was not printed: %q", stdout)
 	}
-	if strings.Contains(stderr, "startup is not ready") {
-		t.Fatalf("the off-Windows spawn was refused: %q", stderr)
+	if !strings.Contains(stderr, "workspace trust dialog") {
+		t.Fatalf("the precise warning is missing: %q", stderr)
 	}
+	assertNoInputIntoTheDialog(t, calls)
 }
 
 func TestSpawnNonCursorWindowsGateOff(t *testing.T) {
@@ -366,18 +369,29 @@ func TestSpawnCursorWindowsReuseNormalScreenReady(t *testing.T) {
 	assertNoStart(t, calls)
 }
 
-func TestSpawnCursorNonWindowsReuseDialogKeepsReady(t *testing.T) {
-	// Control: the same dialog on a reused cursor session off-Windows
-	// keeps the reuse result (ready) — the gate is Windows-only.
+func TestSpawnCursorNonWindowsReuseDialogBlocksAtStartup(t *testing.T) {
+	// The gate applies on every platform: the same dialog on a reused cursor
+	// session off-Windows is refused with the same evidence and result as a
+	// fresh start — blocked_at_startup, the screen printed, exit 7, no new
+	// pane.
 	setStartupPlatform(t, "linux")
 	f, _ := cursorReuseFixture(t, cursorNativeTrustScreen(t), false)
-	code, stdout, stderr, _ := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
-	if code != 0 {
+	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"implementer", "--kind", "cursor"})
+	if code != 7 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if !strings.Contains(stdout, `"reused": true`) || !strings.Contains(stdout, `"status": "ready"`) {
+	if !strings.Contains(stdout, `"reused": true`) || !strings.Contains(stdout, `"status": "blocked_at_startup"`) {
 		t.Fatalf("spawn JSON=%q", stdout)
 	}
+	assertCursorSpawnEvidence(t, stdout, "idle", "workspace-trust")
+	if !strings.Contains(stdout, "Do you trust the contents of this directory?") {
+		t.Fatalf("the dialog screen was not printed: %q", stdout)
+	}
+	if !strings.Contains(stderr, "workspace trust dialog") {
+		t.Fatalf("the precise warning is missing: %q", stderr)
+	}
+	assertNoStart(t, calls)
+	assertNoInputIntoTheDialog(t, calls)
 }
 
 func TestSpawnCursorWindowsWrappedLaunchAndNarrowTrust(t *testing.T) {

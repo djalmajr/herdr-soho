@@ -29,15 +29,43 @@ const grokTrustScreen = "Do you trust the contents of this directory?\n" +
 	"  1. Yes, proceed (y)\n" +
 	"  2. No, quit (n)\n"
 
-func TestStartupGateAppliesOnlyToCursorOnWindows(t *testing.T) {
+// darwinTrustMcpScreen is the real cursor-agent trust/MCP dialog captured
+// on macOS (2026-10-14): it announces the workspace MCP servers, shows a
+// POSIX path, and adds the [w] option between the trust choice and the
+// Quit choice.
+func darwinTrustMcpScreen(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("testdata/cursor-trust-mcp-darwin.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestCursorTrustMcpDarwinFixtureBlocks(t *testing.T) {
+	// The real macOS screen is the verified trust dialog on every
+	// platform: Evaluate with goos "darwin" gives the same workspace-trust
+	// reason the Windows screen gives, and the [w] "don't enable all MCP
+	// servers" option does not prevent recognition.
+	ev := Evaluate("cursor", "darwin", "idle", darwinTrustMcpScreen(t), true)
+	if ev.Verdict != VerdictBlocked || ev.Reason != ReasonWorkspaceTrust || ev.Source != SourceVisible {
+		t.Fatalf("Evaluate(cursor, darwin, fixture)=%+v, want blocked/workspace-trust/visible", ev)
+	}
+	if !ev.Refuses() {
+		t.Fatal("the darwin fixture must refuse the start")
+	}
+}
+
+func TestStartupGateAppliesToCursorOnEveryPlatform(t *testing.T) {
 	for _, tc := range []struct {
 		kind, goos string
 		want       bool
 	}{
 		{"cursor", "win32", true},
-		{"cursor", "linux", false},
-		{"cursor", "darwin", false},
+		{"cursor", "darwin", true},
+		{"cursor", "linux", true},
 		{"grok", "win32", false},
+		{"grok", "darwin", false},
 		{"claude", "win32", false},
 		{"codex", "win32", false},
 		{"", "win32", false},
@@ -65,6 +93,10 @@ func TestActiveTrustDialog(t *testing.T) {
 		{"question only (a transcript quoting the question)", "The cursor CLI asked: Do you trust the contents of this directory?\n", false},
 		{"choices only, no question", "[A] Trust this workspace\n[Q] Quit\n", false},
 		{"grok trust dialog (shared question, different choices)", grokTrustScreen, false},
+		{"macos trust/MCP dialog (posix path, [w] option between trust and quit)", "Do you trust the contents of this directory?\n/private/tmp/cursor-cap-309\n▶ [a] Trust this workspace\n[w] Trust this workspace, but don't enable all MCP servers\n[q] Quit\n", true},
+		{"three choice lines between trust and quit is not the dialog", "Do you trust the contents of this directory?\nC:\\dev\\project\n▶ [a] Trust this workspace\n[w] Trust this workspace, but don't enable all MCP servers\n[x] Trust this workspace for this run only\n[y] Trust this workspace for 30 days\n[q] Quit\n", false},
+		{"a non-choice line between trust and quit is not the dialog", "Do you trust the contents of this directory?\nC:\\dev\\project\n▶ [a] Trust this workspace\nSome other visible text\n[q] Quit\n", false},
+		{"a lone slash line is not a workspace path", "Do you trust the contents of this directory?\n/\n▶ [a] Trust this workspace\n[q] Quit\n", false},
 		{"normal cursor TUI with a quit hint", "cursor-2026.10 ready\n❯ /help\n(q) quit\n", false},
 		{"empty screen", "", false},
 		{"blank screen", "   \n\n", false},
@@ -108,10 +140,12 @@ func TestEvaluate(t *testing.T) {
 		screenOK                  bool
 		wantVerdict, wantReason   string
 	}{
-		// The gate is off for every non-target kind/platform pair.
-		{"cursor", "linux", "idle", nativeTrustScreen(t), true, VerdictObserved, ReasonVisibleOutput},
+		// The gate is off for every non-cursor kind, whatever the platform.
 		{"grok", "win32", "idle", nativeTrustScreen(t), true, VerdictObserved, ReasonVisibleOutput},
-		{"cursor", "darwin", "idle", "", false, VerdictObserved, ReasonVisibleOutput},
+		// The gate is on for the cursor kind on every platform: the same
+		// verified dialog on darwin and linux blocks with the same reason.
+		{"cursor", "linux", "idle", nativeTrustScreen(t), true, VerdictBlocked, ReasonWorkspaceTrust},
+		{"cursor", "darwin", "idle", "", false, VerdictUnverified, ReasonScreenUnavailable},
 		// A state read that failed is unverified before anything else.
 		{"cursor", "win32", "", nativeTrustScreen(t), true, VerdictUnverified, ReasonStateUnavailable},
 		{"cursor", "win32", "unavailable", nativeTrustScreen(t), true, VerdictUnverified, ReasonStateUnavailable},

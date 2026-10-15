@@ -1,14 +1,14 @@
 package wait
 
-// The cursor/Windows startup guard of the wait (issue #59): the verified
-// workspace trust dialog returns the existing blocked result (the wait
-// prints the dialog and exits 7) with no approval key — not the
+// The cursor startup guard of the wait on every platform (issue #59): the
+// verified workspace trust dialog returns the existing blocked result (the
+// wait prints the dialog and exits 7) with no approval key — not the
 // auto-approve default and not the not-received Enter retry — whatever
 // herdr classifies the state (native idle or blocked). A launch-only or
 // blank screen does not block the wait: the guard acts only on the active
 // dialog. The fixtures run the real ProbeAgent with a fake herdr; the
-// platform seam (startup.CurrentPlatform) simulates Windows on portable
-// hosts. The dialog screen is the verified native text of
+// platform seam (startup.CurrentPlatform) simulates the host platform on
+// portable hosts. The dialog screen is the verified native text of
 // cursor-agent 2026.10.01.
 
 import (
@@ -119,19 +119,18 @@ func TestWaitCursorWindowsEmptyScreenDoesNotBlockWait(t *testing.T) {
 	assertNoSendKeys(t, f)
 }
 
-func TestWaitCursorNonWindowsDialogKeepsFlow(t *testing.T) {
-	// Control: the same dialog on a cursor session off-Windows keeps the
-	// existing blocked flow — the first probe is deferred (working, the
-	// blocked marker written) exactly as before the guard.
+func TestWaitCursorNonWindowsDialogBlocksNoInput(t *testing.T) {
+	// The guard applies on every platform, not only Windows: the same
+	// dialog on a cursor session off-Windows takes the guard's blocked
+	// result on the first probe and sends no approval key.
 	setWaitPlatform(t, "linux")
 	f := newQueuedProbeFixture(t, "blocked", "5", waitTrustScreen(t), nil)
 	f.cursorRoster(t, "cursor")
-	if got := f.probe(""); got != "working" {
-		t.Fatalf("first blocked probe=%q", got)
+	f.env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+	if got := f.probe(""); got != "blocked" {
+		t.Fatalf("probe=%q", got)
 	}
-	if _, err := os.Stat(f.marker("blocked")); err != nil {
-		t.Fatalf("the blocked marker was not written: %v", err)
-	}
+	assertNoSendKeys(t, f)
 }
 
 func TestWaitNonCursorWindowsDialogKeepsFlow(t *testing.T) {

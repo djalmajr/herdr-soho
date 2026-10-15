@@ -1,9 +1,9 @@
-// Package startup is the shared cursor-on-Windows startup assessment
-// (issue #59). Herdr reports a cursor agent ready (agent_status idle,
-// interactive_ready true) while its TUI has not drawn: the verified case is
-// the Workspace Trust Required dialog on the visible screen, and the
-// historical case from the issue is a screen holding only the shell launch
-// line. The spawn, dispatch and wait consumers all take their verdict from
+// Package startup is the shared cursor startup assessment on every
+// platform (issue #59). Herdr reports a cursor agent ready (agent_status
+// idle, interactive_ready true) while its TUI has not drawn: the verified
+// case is the Workspace Trust Required dialog on the visible screen, and
+// the historical case from the issue is a screen holding only the shell
+// launch line. The spawn, dispatch and wait consumers all take their verdict from
 // this one assessment; it never grants trust, never answers a dialog and
 // never changes a public status or exit code — the consumers map a
 // refusing verdict onto their existing blocked paths.
@@ -23,8 +23,9 @@ import (
 // No production environment override exists.
 var CurrentPlatform = platform.Current
 
-// The gate's fixed inputs: the assessment applies only to the cursor kind
-// on the Windows platform string.
+// The gate's fixed inputs: the assessment applies only to the cursor kind,
+// on every platform string (the dialog and the launch-only case were
+// verified on macOS and Windows).
 const (
 	KindCursor     = "cursor"
 	PlatformWin32  = "win32"
@@ -70,14 +71,15 @@ func (e Evaluation) Refuses() bool {
 }
 
 // EnabledFor reports whether the assessment applies: the cursor kind on
-// the Windows platform. Every other kind or platform keeps its existing
-// public behavior and JSON unchanged.
+// any platform. The goos argument is retained for the signature and the
+// shared assessment inputs; it no longer gates the assessment. Every other
+// kind keeps its existing public behavior and JSON unchanged.
 func EnabledFor(kind, goos string) bool {
-	return kind == KindCursor && goos == PlatformWin32
+	return kind == KindCursor
 }
 
 // Enabled is EnabledFor against the current platform (the production
-// gate; tests set CurrentPlatform to simulate Windows).
+// gate; tests set CurrentPlatform to simulate the host platform).
 func Enabled(kind string) bool {
 	return EnabledFor(kind, CurrentPlatform())
 }
@@ -94,10 +96,21 @@ func dialogLine(line string) string {
 	return strings.Join(strings.Fields(text.ASCIILower(line)), " ")
 }
 
-var workspacePathLine = regexp.MustCompile(`(?i)^(?:[a-z]:[\\/]|\\\\)`)
+// workspacePathLine matches the workspace path Cursor shows between the
+// question and the choices: a Windows path (drive letter or UNC) or a
+// POSIX-style path starting with "/" followed by at least one non-space
+// character. Choice lines and the navigation hint cannot start with "/",
+// so they are excluded by construction; a lone "/" line is not a path.
+var workspacePathLine = regexp.MustCompile(`(?i)^(?:[a-z]:[\\/]|\\\\|/\S)`)
 
 var trustChoiceLine = regexp.MustCompile(`^(?:▶\s*)?(?:\[a\]\s*)?trust this workspace$`)
 var quitChoiceLine = regexp.MustCompile(`^(?:▶\s*)?(?:\[q\]\s*)?quit$`)
+
+// extraChoiceLine matches an additional choice line, with or without the
+// cursor marker, in the "[key] text" shape (for example the [w] "don't
+// enable all MCP servers" option the macOS dialog shows between the trust
+// choice and the Quit choice).
+var extraChoiceLine = regexp.MustCompile(`^(?:▶\s*)?\[[a-z0-9]+\]\s+\S`)
 
 // ActiveTrustDialog recognizes the current question and ordered choices,
 // including wrapped questions in narrow terminal boxes. The last content
@@ -127,10 +140,25 @@ func ActiveTrustDialog(screen string) bool {
 				}
 			}
 		}
-		if !question || trust+1 >= len(lines) || !quitChoiceLine.MatchString(lines[trust+1]) {
+		if !question {
 			continue
 		}
-		tail := strings.TrimSuffix(strings.Join(lines[trust+2:], " "), ".")
+		// Between the trust choice and the Quit choice Cursor may show up to
+		// two extra choice lines (the macOS dialog shows the [w] "don't
+		// enable all MCP servers" option there); any other line in between,
+		// or a third choice line, is not this dialog.
+		quit := trust + 1
+		for gap := 0; quit < len(lines) && !quitChoiceLine.MatchString(lines[quit]); quit++ {
+			if gap >= 2 || !extraChoiceLine.MatchString(lines[quit]) {
+				quit = -1
+				break
+			}
+			gap++
+		}
+		if quit < 0 || quit >= len(lines) {
+			continue
+		}
+		tail := strings.TrimSuffix(strings.Join(lines[quit+1:], " "), ".")
 		if tail == "" || tail == "use arrow keys to navigate, enter to select, or press the key shown" {
 			return true
 		}
@@ -200,8 +228,8 @@ func LaunchOnly(screen string) bool {
 // caller passes platform.Current in production and a simulated platform in
 // tests); state is the agent_status the last probe read ("" or
 // "unavailable" when the state read failed); screen is the visible screen
-// text and screenOK whether that read succeeded. Non-target kind/platform
-// pairs come back observed with no further meaning — the gate is off.
+// text and screenOK whether that read succeeded. Non-cursor kinds come back
+// observed with no further meaning — the gate is off for them.
 func Evaluate(kind, goos, state, screen string, screenOK bool) Evaluation {
 	if !EnabledFor(kind, goos) {
 		return Evaluation{Verdict: VerdictObserved, Reason: ReasonVisibleOutput, Source: SourceVisible}
