@@ -234,3 +234,34 @@ func TestStartupClippedTrustRemainsUnverified(t *testing.T) {
 		t.Fatal("quoted fragment is not current dialog evidence")
 	}
 }
+
+// TestStartupClippedMacOSTrustWithMCPChoice: a short pane clips the
+// question of the macOS dialog while its [a], [w] and [q] choices and the
+// navigation hint stay visible. The [w] "don't enable all MCP servers"
+// choice between trust and Quit must not hide the clipped dialog.
+func TestStartupClippedMacOSTrustWithMCPChoice(t *testing.T) {
+	screen := strings.Join([]string{
+		"  │  ▶ [a] Trust this workspace                                       │",
+		"  │    [w] Trust this workspace, but don't enable all MCP servers     │",
+		"  │    [q] Quit                                                       │",
+		"  │                                                                   │",
+		"  │  Use arrow keys to navigate, Enter to select, or press the key shown │",
+		"  ╰───────────────────────────────────────────────────────────────────╯",
+	}, "\n")
+	if ActiveTrustDialog(screen) {
+		t.Fatal("the missing question cannot establish an active dialog")
+	}
+	if !PartialTrustDialog(screen) {
+		t.Fatal("the clipped dialog with the [w] choice must be partial trust evidence")
+	}
+	for _, goos := range []string{"darwin", "linux", "win32"} {
+		ev := Evaluate("cursor", goos, "idle", screen, true)
+		if ev.Verdict != VerdictUnverified || ev.Reason != ReasonScreenIncomplete || !ev.Refuses() {
+			t.Fatalf("%s clipped assessment=%+v", goos, ev)
+		}
+	}
+	threeExtra := strings.Replace(screen, "    [q] Quit", "    [x] one\n  │    [y] two\n  │    [q] Quit", 1)
+	if PartialTrustDialog(threeExtra) {
+		t.Fatal("three extra choice lines between trust and Quit are not this dialog")
+	}
+}

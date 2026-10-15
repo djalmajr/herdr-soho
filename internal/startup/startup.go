@@ -143,19 +143,8 @@ func ActiveTrustDialog(screen string) bool {
 		if !question {
 			continue
 		}
-		// Between the trust choice and the Quit choice Cursor may show up to
-		// two extra choice lines (the macOS dialog shows the [w] "don't
-		// enable all MCP servers" option there); any other line in between,
-		// or a third choice line, is not this dialog.
-		quit := trust + 1
-		for gap := 0; quit < len(lines) && !quitChoiceLine.MatchString(lines[quit]); quit++ {
-			if gap >= 2 || !extraChoiceLine.MatchString(lines[quit]) {
-				quit = -1
-				break
-			}
-			gap++
-		}
-		if quit < 0 || quit >= len(lines) {
+		quit := quitAfterTrust(lines, trust)
+		if quit < 0 {
 			continue
 		}
 		tail := strings.TrimSuffix(strings.Join(lines[quit+1:], " "), ".")
@@ -164,6 +153,25 @@ func ActiveTrustDialog(screen string) bool {
 		}
 	}
 	return false
+}
+
+// quitAfterTrust returns the index of the Quit choice that follows the
+// trust choice at lines[trust], or -1. Between the two Cursor may show up to
+// two extra choice lines (the macOS dialog shows the [w] "don't enable all
+// MCP servers" option there); any other line in between, or a third choice
+// line, is not this dialog.
+func quitAfterTrust(lines []string, trust int) int {
+	quit := trust + 1
+	for gap := 0; quit < len(lines) && !quitChoiceLine.MatchString(lines[quit]); quit++ {
+		if gap >= 2 || !extraChoiceLine.MatchString(lines[quit]) {
+			return -1
+		}
+		gap++
+	}
+	if quit >= len(lines) {
+		return -1
+	}
+	return quit
 }
 
 // PartialTrustDialog recognizes the visible choices and navigation hint
@@ -176,11 +184,15 @@ func PartialTrustDialog(screen string) bool {
 			lines = append(lines, norm)
 		}
 	}
-	for i := 0; i+2 < len(lines); i++ {
-		if !trustChoiceLine.MatchString(lines[i]) || !quitChoiceLine.MatchString(lines[i+1]) {
+	for i := 0; i < len(lines); i++ {
+		if !trustChoiceLine.MatchString(lines[i]) {
 			continue
 		}
-		tail := strings.TrimSuffix(strings.Join(lines[i+2:], " "), ".")
+		quit := quitAfterTrust(lines, i)
+		if quit < 0 || quit+1 >= len(lines) {
+			continue
+		}
+		tail := strings.TrimSuffix(strings.Join(lines[quit+1:], " "), ".")
 		if tail == "use arrow keys to navigate, enter to select, or press the key shown" {
 			return true
 		}
