@@ -558,7 +558,9 @@ func appendExclude(checkout, line string) bool {
 	if pre == nil {
 		// Another job in the same checkout may create the file first: that
 		// is not a failure, the line then goes through the append below.
-		f, err := top.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		// The creator appends too: another job can add its line between
+		// this creation and this first write.
+		f, err := top.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_APPEND, 0o644)
 		switch {
 		case err == nil:
 			_, werr := f.WriteString(line + "\n")
