@@ -1349,6 +1349,65 @@ func dispatchContextPercent(screen string) int {
 var ownershipStopwords = map[string]bool{"nenhum": true, "none": true}
 var ownershipExclusions = map[string]bool{"nenhum": true, "nenhuma": true, "nao": true, "nunca": true, "exceto": true, "not": true, "never": true, "none": true, "except": true, "excluding": true, "outside": true}
 
+// ownedSpanRE matches a backtick-quoted span with its contents; ownedAssignRE
+// matches a bare ASCII identifier right before "=" with optional whitespace
+// in between. The character before the identifier must not be a letter,
+// digit or underscore in any script, so the ASCII tail of a longer token
+// ("ÁB", "BÁC") is never taken for an identifier. Callers blank the
+// backtick spans first, so an "=" inside a backtick-quoted filename (for
+// example `a=b.go`) is never seen as assignment syntax.
+var ownedSpanRE = regexp.MustCompile("`([^`]+)`")
+var ownedAssignRE = regexp.MustCompile(`(?:^|[^\p{L}\p{N}_])([A-Za-z_][A-Za-z0-9_]*)[ \t\r]*=`)
+
+// ownedAssignmentValues reports, for each backtick span on the line, whether
+// it is the value of an explicit bare ASCII identifier assignment, and
+// whether the line ends on such an assignment still waiting for its
+// backtick-quoted value on the next line. Only whitespace may sit between
+// "=" and the value: a backtick span on the same line ("B = `/base`") or
+// nothing at all ("B =" at end of line, value on the next line). "B == x",
+// "B = /base" (unquoted text) and any "=" inside backticks are not
+// assignments.
+func ownedAssignmentValues(line string) (values []bool, pending bool) {
+	spans := ownedSpanRE.FindAllStringSubmatchIndex(line, -1)
+	values = make([]bool, len(spans))
+	blanked := make([]byte, len(line))
+	copy(blanked, line)
+	for _, sp := range spans {
+		for i := sp[0]; i < sp[1]; i++ {
+			blanked[i] = 0
+		}
+	}
+	spanAt := func(i int) (int, bool) {
+		for k, sp := range spans {
+			if sp[0] == i {
+				return k, true
+			}
+		}
+		return -1, false
+	}
+	for _, m := range ownedAssignRE.FindAllIndex(blanked, -1) {
+		eq := m[1] - 1
+		if eq+1 < len(line) && line[eq+1] == '=' {
+			continue // "==" compares, it does not assign
+		}
+		gap := line[eq+1:]
+		j := 0
+		for j < len(gap) && (gap[j] == ' ' || gap[j] == '\t' || gap[j] == '\r') {
+			j++
+		}
+		if j == len(gap) {
+			pending = true
+			continue
+		}
+		if gap[j] == '`' {
+			if k, ok := spanAt(eq + 1 + j); ok {
+				values[k] = true
+			}
+		}
+	}
+	return values, pending
+}
+
 func ownedPaths(body string, aliases map[string][]string) []string {
 	lines := strings.Split(body, "\n")
 	start, level := -1, 0
@@ -1381,6 +1440,7 @@ func ownedPaths(body string, aliases map[string][]string) []string {
 		seen[strings.TrimRight(trimmed, "/")] = true
 		out = append(out, trimmed)
 	}
+	pendingValue := false
 	for _, line := range lines[start+1:] {
 		if m := regexp.MustCompile(`^(#{1,6}) `).FindStringSubmatch(line); len(m) > 0 && len(m[1]) <= level {
 			break
@@ -1388,10 +1448,27 @@ func ownedPaths(body string, aliases map[string][]string) []string {
 		item := strings.TrimSpace(regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+`).ReplaceAllString(line, ""))
 		words := strings.Fields(item)
 		if len(words) > 0 && ownershipExclusions[strings.ToLower(words[0])] {
+			pendingValue = false
 			continue
 		}
-		for _, m := range regexp.MustCompile("`([^`]+)`").FindAllStringSubmatch(line, -1) {
-			push(m[1])
+		spans := ownedSpanRE.FindAllStringSubmatchIndex(line, -1)
+		skip := make([]bool, len(spans))
+		lineValues, nextPending := ownedAssignmentValues(line)
+		copy(skip, lineValues)
+		if pendingValue {
+			// The pending value must open the very next line: a list item or a
+			// heading line does not take it, so the pending assignment can
+			// neither swallow a real list item nor cross a section heading.
+			if t := strings.TrimLeft(line, " \t\r"); len(t) > 0 && t[0] == '`' && len(spans) > 0 && spans[0][0] == len(line)-len(t) {
+				skip[0] = true
+			}
+		}
+		pendingValue = nextPending
+		for i, m := range spans {
+			if skip[i] {
+				continue
+			}
+			push(line[m[0]+1 : m[1]-1])
 		}
 		if regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+[^` + "`" + `].*$`).MatchString(line) {
 			push(item)
