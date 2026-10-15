@@ -275,7 +275,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 // command runs (nothing is written).
 func TestNowriteRejectsWritingInvocations(t *testing.T) {
 	nr := newNowriteReads(t, true)
-	const messagePrefix = "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "
+	const messagePrefix = "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "
 	const messageTail = " — unset HERDR_SOHO_NOWRITE to write\n"
 	cases := []struct {
 		name     string
@@ -287,6 +287,9 @@ func TestNowriteRejectsWritingInvocations(t *testing.T) {
 		{name: "gc --yes", argv: []string{"gc", "--yes"}, rejected: "gc (1 extra argument not allowed)"},
 		{name: "release", argv: []string{"release", "worker"}, rejected: "release (1 extra argument not allowed)"},
 		{name: "explain extra", argv: []string{"explain", "extra"}, rejected: "explain (1 extra argument not allowed)"},
+		{name: "config set panes 3", argv: []string{"config", "set", "panes", "3"}, rejected: "config (3 extra arguments not allowed)"},
+		{name: "config --project", argv: []string{"config", "--project"}, rejected: "config (1 extra argument not allowed)"},
+		{name: "role reviewer", argv: []string{"role", "reviewer"}, rejected: "role (1 extra argument not allowed)"},
 		{name: "collect without agent", argv: []string{"collect"}, rejected: "collect"},
 		{name: "friction without value", argv: []string{"friction", "--since"}, rejected: "friction (1 extra argument not allowed)"},
 		{name: "gc without hours", argv: []string{"gc", "--older-than"}, rejected: "gc (1 extra argument not allowed)"},
@@ -305,6 +308,60 @@ func TestNowriteRejectsWritingInvocations(t *testing.T) {
 			want := messagePrefix + c.rejected + messageTail
 			if errOut != want {
 				t.Fatalf("stderr:\n got:  %q\nwant: %q", errOut, want)
+			}
+		})
+	}
+}
+
+// TestNowriteAcceptsExactConfigAndRoles proves the exact config and the exact
+// roles run under HERDR_SOHO_NOWRITE=1 (exit 0, non-empty output) and write
+// nothing: the whole fixture tree — project and user config tree included —
+// keeps the same paths, sizes and mtimes, starting from a project without a
+// state dir and without a .gitignore line; a project that has only the legacy
+// config file is read but never migrated.
+func TestNowriteAcceptsExactConfigAndRoles(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		flavor := "without a legacy config"
+		if legacy {
+			flavor = "with only the legacy config"
+		}
+		t.Run(flavor, func(t *testing.T) {
+			nr := newNowriteReads(t, false)
+			if legacy {
+				legacyConf := filepath.Join(nr.f.repo, ".agents", "herdr-agents.conf")
+				if err := os.MkdirAll(filepath.Dir(legacyConf), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(legacyConf, []byte("panes=4\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, name := range []string{"config", "roles"} {
+				t.Run(name, func(t *testing.T) {
+					code, out, errOut := nr.runNowrite(t, name)
+					if code != 0 {
+						t.Fatalf("code=%d want 0; out=%q err=%q", code, out, errOut)
+					}
+					if out == "" {
+						t.Fatalf("empty stdout; err=%q", errOut)
+					}
+					if _, err := os.Stat(filepath.Join(nr.f.repo, ".herdr-soho")); !os.IsNotExist(err) {
+						t.Fatalf(".herdr-soho/ appeared in the project: %v", err)
+					}
+					if _, err := os.Stat(filepath.Join(nr.f.repo, ".gitignore")); !os.IsNotExist(err) {
+						t.Fatalf(".gitignore appeared in the project: %v", err)
+					}
+					if _, err := os.Stat(filepath.Join(nr.f.repo, ".agents", "herdr-soho.conf")); !os.IsNotExist(err) {
+						t.Fatalf("the legacy config was migrated: %v", err)
+					}
+					if legacy {
+						legacyConf := filepath.Join(nr.f.repo, ".agents", "herdr-agents.conf")
+						data, err := os.ReadFile(legacyConf)
+						if err != nil || string(data) != "panes=4\n" {
+							t.Fatalf("legacy config changed: %q err=%v", data, err)
+						}
+					}
+				})
 			}
 		})
 	}
