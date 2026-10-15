@@ -39,11 +39,13 @@ var eventTypes = map[string]bool{
 	"amend_received": true, "decision": true, "decision_acked": true,
 	"timeout_warning": true, "blocked_warning": true, "failure": true, "note": true, "terminal": true,
 	"cleanup": true, "delivery_uncertain": true, "control_held": true,
+	"workspace_closed": true, "folder_retained": true, "needs_attention": true,
 }
 
 var refKeys = map[string]bool{
 	"agente": true, "papel": true, "pane": true, "sha": true, "pr": true,
 	"report": true, "brief": true, "motivo": true, "exit": true, "seq_ref": true,
+	"path": true, "bytes": true,
 }
 
 func formatTS(t time.Time) string {

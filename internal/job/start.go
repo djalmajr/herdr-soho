@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -190,7 +191,15 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 	// supervisor slice. IntervalStart seeds the budget interval anchor
 	// (the active interval); BlockedTimeoutMin and FinishingTimeoutMin
 	// record the machine's blocked and finishing budgets for the job's
-	// life, like TimeoutMin, in this same atomic write.
+	// life, like TimeoutMin, and AutoCleanup and HumanInputMin record the
+	// job's automatic close settings (autoCloseSettings, resolved from the
+	// job checkout's configuration now that the checkout exists), in this
+	// same atomic write, once and never rewritten.
+	autoCleanup, humanInputMin, err := autoCloseSettings(s.Env, checkout)
+	if err != nil {
+		_, _ = store.Fail(req.ID, err.Error(), ExitUsage)
+		return State{}, store, err
+	}
 	startedAt := store.clock().Now()
 	if _, err = store.Record(req.ID, func(st *State) {
 		st.Checkout = prepared.Checkout
@@ -207,6 +216,8 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 		st.IntervalStart = startedAt.Format(time.RFC3339Nano)
 		st.BlockedTimeoutMin = s.Machine.BlockedTimeoutMin
 		st.FinishingTimeoutMin = s.Machine.FinishingTimeoutMin
+		st.AutoCleanup = autoCleanup
+		st.HumanInputMin = humanInputMin
 		st.Equipe = &Equipe{Fonte: req.Team.Source, OverrideBrief: overrideBrief(req.Team.OverrideKeys)}
 	}); err != nil {
 		return State{}, store, s.failStored(store, req.ID, "", err)
@@ -376,6 +387,29 @@ func runMode(mode string) string {
 		return "workspace"
 	}
 	return "worktree"
+}
+
+// autoCloseSettings resolves the job's automatic close settings from the
+// layered configuration of the job's checkout (core.LoadConfig over the
+// checkout: defaults, user, project) plus the HERDR_SOHO_* environment
+// through core.Cfg. The project file of the job's repository wins over
+// the user file, which wins over the defaults. An invalid value is exit
+// 2 naming the key, the same failure job_finishing_timeout uses.
+func autoCloseSettings(env platform.Env, checkout string) (string, int, error) {
+	ctx := core.LoadConfig(env, checkout)
+	autoCleanup := core.Cfg(&ctx, "job_auto_cleanup", "on", env)
+	if !core.ConfigValueOk("job_auto_cleanup", autoCleanup, env, "") {
+		return "", 0, exitErr(2, "job: invalid job_auto_cleanup '"+autoCleanup+"'")
+	}
+	raw := core.Cfg(&ctx, "job_human_input_minutes", "5", env)
+	if !core.ConfigValueOk("job_human_input_minutes", raw, env, "") {
+		return "", 0, exitErr(2, "job: invalid job_human_input_minutes '"+raw+"'")
+	}
+	humanInputMin, err := strconv.Atoi(raw)
+	if err != nil {
+		return "", 0, exitErr(2, "job: invalid job_human_input_minutes '"+raw+"'")
+	}
+	return autoCleanup, humanInputMin, nil
 }
 
 // overrideBrief maps the team's brief override keys to the report form: an

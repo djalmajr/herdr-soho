@@ -92,7 +92,8 @@ var ConfigScalarKeys = []string{
 // so `herdr-soho config` keeps the row order pinned by the frozen parity oracle.
 var jobMachineKeys = []string{
 	"machine_label", "job_orgs", "job_repos_root", "job_timeout",
-	"job_blocked_timeout", "job_finishing_timeout", "job_wake_cmd",
+	"job_blocked_timeout", "job_finishing_timeout", "job_auto_cleanup",
+	"job_human_input_minutes", "job_wake_cmd",
 }
 
 var KnownKinds = []string{"claude", "codex", "grok", "agy", "gemini", "cursor", "pi", "opencode"}
@@ -379,6 +380,10 @@ func ConfigValueOk(key, value string, env platform.Env, cwd string) bool {
 		return jobBlockedTimeoutValueOk(value)
 	case key == "job_finishing_timeout":
 		return jobFinishingTimeoutValueOk(value)
+	case key == "job_auto_cleanup":
+		return value == "on" || value == "off"
+	case key == "job_human_input_minutes":
+		return jobHumanInputMinutesValueOk(value)
 	default:
 		return true
 	}
@@ -396,6 +401,16 @@ func jobTimeoutValueOk(value string) bool {
 // jobFinishingTimeoutValueOk is the contract range for the terminal
 // procedure's (finishing) budget: 1..1440 minutes.
 func jobFinishingTimeoutValueOk(value string) bool {
+	if !decimalRE.MatchString(value) {
+		return false
+	}
+	n, err := strconv.Atoi(value)
+	return err == nil && n >= 1 && n <= 1440
+}
+
+// jobHumanInputMinutesValueOk is the contract range for the human input
+// wait: 1..1440 minutes.
+func jobHumanInputMinutesValueOk(value string) bool {
 	if !decimalRE.MatchString(value) {
 		return false
 	}

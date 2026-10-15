@@ -36,7 +36,7 @@ func init() {
 	if os.Getenv("HERDR_FAKE") != "1" {
 		return
 	}
-	if len(os.Args) > 1 && os.Args[1] == "workspace" {
+	if len(os.Args) > 1 && (os.Args[1] == "workspace" || os.Args[1] == "pane") {
 		os.Exit(partialPublicFakeHerdr(os.Args[1:]))
 	}
 	os.Exit(partialPublicFakeHerdrSoho(os.Args[1:]))
@@ -88,6 +88,11 @@ func partialPublicFakeHerdrSoho(args []string) int {
 // over the workspace: the close and the list.
 func partialPublicFakeHerdr(args []string) int {
 	if len(args) >= 2 && args[0] == "workspace" && (args[1] == "close" || args[1] == "list") {
+		return 0
+	}
+	if len(args) >= 2 && args[0] == "pane" && args[1] == "list" {
+		// The close watch's pane list: no pane outside the job.
+		fmt.Println(`{"result":{"panes":[]}}`)
 		return 0
 	}
 	return 1

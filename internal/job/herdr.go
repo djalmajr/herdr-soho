@@ -36,6 +36,14 @@ type herdrWorkspace struct {
 	PaneCount int
 }
 
+// herdrPane is one row of `herdr pane list`: the pane id and the pane's
+// revision, which the server advances as the pane changes. The automatic
+// close watch (auto_close.go) reads both.
+type herdrPane struct {
+	PaneID   string
+	Revision int
+}
+
 // herdrPanes is the job's view of Herdr panes.
 type herdrPanes interface {
 	Run(paneID string, argv []string) error
@@ -237,6 +245,55 @@ func parseWorkspaceList(out string) ([]herdrWorkspace, bool) {
 			return nil, false
 		}
 		rows = append(rows, herdrWorkspace{ID: id, Label: label, PaneCount: int(count)})
+	}
+	return rows, true
+}
+
+// Panes lists a workspace's panes:
+// `herdr pane list --workspace <workspaceID>`, reading result.panes[],
+// each with a string pane_id and a non-negative integer revision. An id
+// that is not one safe path segment — in particular the empty id —
+// refuses with exit 2 before anything runs, like Close. A non-zero exit,
+// a timeout, invalid JSON, a missing panes array, or a row without a
+// string pane_id or a non-negative integer revision is exit 4: a row the
+// job cannot read makes the whole list unreadable, so the watch never
+// decides from a partial list.
+func (c *herdrCLI) Panes(workspaceID string) ([]herdrPane, error) {
+	if !validWorkspaceID(workspaceID) {
+		return nil, errUsage("job: invalid workspace id")
+	}
+	out, err := runStep("herdr", []string{"pane", "list", "--workspace", workspaceID}, c.timeout(), c.Env)
+	if err != nil {
+		return nil, herdrExit("job: herdr pane list failed")
+	}
+	rows, ok := parsePanes(out)
+	if !ok {
+		return nil, herdrExit("job: herdr pane list returned an unknown result")
+	}
+	return rows, nil
+}
+
+// parsePanes reads result.panes[]: a string pane_id and a non-negative
+// integer revision per row, every other field ignored. Anything else —
+// invalid JSON, a missing result or panes, or a row missing either field
+// or with a bad type — makes the whole list unreadable.
+func parsePanes(out string) ([]herdrPane, bool) {
+	var doc struct {
+		Result *struct {
+			Panes *[]map[string]any `json:"panes"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || doc.Result == nil || doc.Result.Panes == nil {
+		return nil, false
+	}
+	rows := make([]herdrPane, 0, len(*doc.Result.Panes))
+	for _, item := range *doc.Result.Panes {
+		id, idOK := item["pane_id"].(string)
+		revision, revisionOK := item["revision"].(float64)
+		if !idOK || id == "" || !revisionOK || revision < 0 || revision != float64(int(revision)) {
+			return nil, false
+		}
+		rows = append(rows, herdrPane{PaneID: id, Revision: int(revision)})
 	}
 	return rows, true
 }

@@ -192,8 +192,16 @@ func TestReportCollabKeptAcrossCollectAndClose(t *testing.T) {
 	if mid.Status != StatusDone || last.Status != StatusDone {
 		t.Fatalf("report status = %s / %s, want the terminal outcome standing", mid.Status, last.Status)
 	}
-	if mid.Eventos != first.Eventos || last.Eventos != first.Eventos {
-		t.Fatalf("event counters moved across the rewrites: %+v -> %+v -> %+v", first.Eventos, mid.Eventos, last.Eventos)
+	if mid.Eventos != first.Eventos {
+		t.Fatalf("event counters moved across the collected rewrite: %+v -> %+v", first.Eventos, mid.Eventos)
+	}
+	// The closed transition appends its own cleanup audit event: the
+	// supervisor's close landed the workspace_closed after the
+	// finalize's cleanup, so the log no longer ends in a cleanup and
+	// the close appends its own. The counters move by exactly that one
+	// event.
+	if last.Eventos.Total != first.Eventos.Total+1 || last.Eventos.UltimoSeq != first.Eventos.UltimoSeq+1 {
+		t.Fatalf("event counters moved across the closed rewrite: %+v -> %+v, want the one added cleanup audit event", first.Eventos, last.Eventos)
 	}
 	if st := supState(t, store); st.Status != StatusClosed || !st.WorkspaceClosed {
 		t.Fatalf("state = %s/closed=%v, want closed", st.Status, st.WorkspaceClosed)

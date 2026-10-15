@@ -469,12 +469,13 @@ func TestSuperviseCancelStopBoundsCollaborationAsk(t *testing.T) {
 			t.Fatalf("status = %s, want canceled", st.Status)
 		}
 		// The ask started no command: no bounded command of the ask ran
-		// (the roster read and the dispatches would record their bounds),
-		// and no plain roster read either: the release gate reads the
-		// roster only to classify a failure over a closed workspace, and
-		// the release here succeeds.
-		if team.rosterCalls != 0 {
-			t.Fatalf("roster calls = %d, want 0 (the ask started none, the release gate read nothing)", team.rosterCalls)
+		// (the roster read and the dispatches would record their bounds).
+		// The one plain roster read is the close watch's: it reads the
+		// rostered workers to classify the job's own panes before the
+		// close. The release gate reads the roster only to classify a
+		// failure over a closed workspace, and the release here succeeds.
+		if team.rosterCalls != 1 {
+			t.Fatalf("roster calls = %d, want 1 (the close watch's pane classification; the ask and the release gate read nothing)", team.rosterCalls)
 		}
 		if len(bteam.collabBounds) != 0 {
 			t.Fatalf("collab bounds = %v, want none (no bounded command started)", bteam.collabBounds)

@@ -356,4 +356,8 @@ job_timeout=120
 job_blocked_timeout=1440
 # job_finishing_timeout is the budget in minutes of the terminal procedure (the final push, the draft pull request and the collaboration wait), from 1 to 1440; the value in effect at job start is recorded with the job and a restart keeps it.
 job_finishing_timeout=10
+# job_auto_cleanup turns the job's automatic close on or off: on (default) | off; the value in effect at job start is recorded with the job and a restart keeps it.
+job_auto_cleanup=on
+# job_human_input_minutes is the minutes a job waits for human input before its automatic close, from 1 to 1440; the value in effect at job start is recorded with the job and a restart keeps it.
+job_human_input_minutes=5
 job_wake_cmd=

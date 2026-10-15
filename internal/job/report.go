@@ -172,13 +172,25 @@ type Eventos struct {
 	Arquivo   string `json:"arquivo"`
 }
 
-// Limpeza records process release. The worktree is always kept.
-// Removivel is informational and never causes removal.
+// Limpeza records process release and the end-of-job worktree removal:
+// Worktree is "removed" when the state records the removal, "kept"
+// otherwise. Removivel is informational and never causes removal.
 type Limpeza struct {
 	Workspace     string `json:"workspace,omitempty"`
 	Worktree      string `json:"worktree"`
 	PanesFechados int    `json:"panes_fechados,omitempty"`
 	Removivel     bool   `json:"removivel"`
+}
+
+// worktreeLimpeza is the report's limpeza.worktree value: "removed" when
+// the state records the end-of-job removal of the job's own worktree,
+// "kept" otherwise (every state that never removed it, including states
+// that predate the field).
+func worktreeLimpeza(st State) string {
+	if st.WorktreeRemoved {
+		return "removed"
+	}
+	return "kept"
 }
 
 // Publico is the allowlisted block that may appear on a public forge.
@@ -324,7 +336,7 @@ func buildReport(dir string, st State, events []Event, facts ReportFacts) (Repor
 		Logs:  facts.Logs,
 		Limpeza: Limpeza{
 			Workspace:     facts.Workspace,
-			Worktree:      "kept",
+			Worktree:      worktreeLimpeza(st),
 			PanesFechados: facts.PanesFechados,
 			Removivel:     facts.Clean && inSync,
 		},
@@ -555,7 +567,7 @@ func refreshReport(dir string, st State) error {
 	rep.Memoria.Projeto = projeto
 	rep.Memoria.DecisionsTotal = total
 	rep.Memoria.DecisionsAckedSeq = effectiveWatermark(st.DecisionsAckedSeq, events)
-	rep.Limpeza.Worktree = "kept"
+	rep.Limpeza.Worktree = worktreeLimpeza(st)
 	return saveReport(dir, rep)
 }
 
@@ -619,7 +631,6 @@ func readReport(dir string) (Report, error) {
 
 func saveReport(dir string, rep Report) error {
 	rep.Schema = 1
-	rep.Limpeza.Worktree = "kept"
 	// The contract fields are always present with empty values: a report
 	// written before they existed unmarshals them as nil, and the rewrite
 	// stores them empty rather than null.
