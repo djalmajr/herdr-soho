@@ -23,7 +23,14 @@ func ApplyLegacyEnv(env platform.Env) []string {
 			continue
 		}
 		fresh := "SOHO_" + strings.TrimPrefix(name, "HERDR_SOHO_")
-		if env.Get(fresh) == "" {
+		// An empty new value is replaced, as in the former bridge, except
+		// SOHO_NOWRITE: set at all, even to the empty string, it decides
+		// alone, so the former value is copied only while it is absent.
+		value, present := env.Lookup(fresh)
+		if fresh == "SOHO_NOWRITE" && present {
+			continue
+		}
+		if value == "" {
 			env[fresh] = old
 			copied = append(copied, name)
 		}
