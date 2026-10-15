@@ -409,11 +409,12 @@ func startStarter(t *testing.T, f *prepareFixture, fake *fakeHerdr, stateRoot st
 // confirmation, never evidence of a real Herdr launch.
 func fakeSupervisorConfirms(stateRoot string, fake *fakeHerdr) func(string, []string) {
 	return func(paneID string, argv []string) {
-		if len(argv) == 0 || fake.RunErr != nil {
+		if len(argv) < 5 || fake.RunErr != nil {
 			return
 		}
 		env := platform.Env{"HERDR_WORKSPACE_ID": fake.CreateWorkspaceID, "HERDR_PANE_ID": paneID}
-		_, _ = ConfirmLaunch(Open(stateRoot), argv[len(argv)-1], env)
+		// argv is [exe, job, supervise, --id, <id>, --repo, <org>/<repo>].
+		_, _ = ConfirmLaunch(Open(stateRoot), argv[4], env)
 	}
 }
 
@@ -509,7 +510,7 @@ func TestStartSuccess(t *testing.T) {
 	if fake.RunCalls[0].PaneID != "w9:p1" {
 		t.Fatalf("Run pane = %q", fake.RunCalls[0].PaneID)
 	}
-	if want := []string{"/opt/bin/herdr-soho", "job", "supervise", "--id", "job-1"}; !reflect.DeepEqual(fake.RunCalls[0].Argv, want) {
+	if want := []string{"/opt/bin/herdr-soho", "job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo"}; !reflect.DeepEqual(fake.RunCalls[0].Argv, want) {
 		t.Fatalf("Run argv = %v", fake.RunCalls[0].Argv)
 	}
 	// The workspace: exactly one create, cwd = worktree, label job-<id>.

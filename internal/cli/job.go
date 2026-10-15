@@ -43,7 +43,7 @@ var jobFlagSpec = map[string]struct {
 	"send":       {valued: []string{"--id"}},
 	"cancel":     {valued: []string{"--id", "--grace"}},
 	"checkpoint": {valued: []string{"--id"}},
-	"supervise":  {valued: []string{"--id"}},
+	"supervise":  {valued: []string{"--id", "--repo"}},
 }
 
 var jobNoteTypes = map[string]bool{
@@ -277,6 +277,31 @@ func locateJob(env platform.Env, id string, sel core.UserSelection) (*job.Store,
 		}
 	}
 	return hit, nil
+}
+
+// locateJobInRepo is the --repo lookup of job supervise: it reads only
+// the single checkout <ReposRoot>/<org>/<repo> of the same selection the
+// scan would use (LoadMachineFor, LoadConfigFor and StateRootPath on that
+// checkout), and the job exists when jobs/<id>/state.json is there. No
+// other checkout is read, so an id that exists in more than one checkout
+// is not a conflict here: a hit is this checkout's job, and none is nil
+// (the caller prints the not_found line and exits 3).
+func locateJobInRepo(env platform.Env, id, repo string, sel core.UserSelection) (*job.Store, error) {
+	if _, err := job.Dir("", id); err != nil {
+		return nil, err
+	}
+	org, repoName, _ := strings.Cut(repo, "/")
+	machine, err := job.LoadMachineFor(platform.Current(), env, sel)
+	if err != nil {
+		return nil, err
+	}
+	checkout := filepath.Join(machine.ReposRoot, org, repoName)
+	cfg := core.LoadConfigFor(env, checkout, sel)
+	store := job.Open(core.StateRootPath(&cfg, env, checkout))
+	if _, err := os.Stat(filepath.Join(store.Root, "jobs", id, "state.json")); err != nil {
+		return nil, nil
+	}
+	return store, nil
 }
 
 // locateOwnJob is the lookup of the job subcommands that take --id (all
@@ -849,16 +874,21 @@ func jobNote(args []string, env platform.Env, cwd string) int {
 }
 
 // jobSupervise runs the job supervisor: it requires the job's Herdr
-// workspace (HERDR_ENV=1), locates the job, builds the supervisor with this
-// executable as the team command runner and the job friction file as its
-// friction log, prints the job's status line and exits with the outcome
-// code.
+// workspace (HERDR_ENV=1), locates the job — in every checkout, or only
+// in the named one with --repo, which is how job start launches it —
+// builds the supervisor with this executable as the team command runner
+// and the job friction file as its friction log, prints the job's status
+// line and exits with the outcome code.
 func jobSupervise(args []string, env platform.Env, launch job.LaunchLocators) int {
 	vals, _, pos := parseJobFlags("supervise", args)
 	if len(pos) > 1 {
 		platform.Die("job supervise: unexpected argument '"+pos[1]+"'", 2)
 	}
 	id := jobRequiredID("supervise", vals)
+	repo, hasRepo := vals["--repo"]
+	if hasRepo && !jobRepoPattern.MatchString(repo) {
+		platform.Die("job supervise: invalid --repo '"+repo+"'", 2)
+	}
 	if env.Get("HERDR_ENV") != "1" {
 		platform.Die("job supervise: run it inside the job's Herdr workspace", 2)
 	}
@@ -871,7 +901,16 @@ func jobSupervise(args []string, env platform.Env, launch job.LaunchLocators) in
 		platform.Die("job supervise: the private launch context is unusable", 2)
 	}
 	sel := launch.Selection
-	store, err := locateJob(env, id, sel)
+	var store *job.Store
+	var err error
+	if hasRepo {
+		// With --repo the lookup reads only the named checkout, never the
+		// rest of job_repos_root: the scan's per-checkout cost is off the
+		// startup confirmation path (DJA-348).
+		store, err = locateJobInRepo(env, id, repo, sel)
+	} else {
+		store, err = locateJob(env, id, sel)
+	}
 	if err != nil {
 		dieJob("supervise", err)
 	}

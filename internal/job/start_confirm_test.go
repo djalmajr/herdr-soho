@@ -39,15 +39,6 @@ func readReportWorkspace(t *testing.T, stateRoot string) string {
 	return rep.Limpeza.Workspace
 }
 
-func hasFriction(friction []string, part string) bool {
-	for _, line := range friction {
-		if strings.Contains(line, part) {
-			return true
-		}
-	}
-	return false
-}
-
 // TestStartConfirmedLaunchBothModes: in worktree and workspace mode the
 // start publishes running only with the supervisor's confirmation of this
 // launch, and the confirmed record names this job, store, workspace and
@@ -150,7 +141,7 @@ func TestStartRefusesAnUnusableLocator(t *testing.T) {
 }
 
 // TestStartWithoutConfirmationFailsAndRetains: no supervisor confirms (the
-// pane run is acknowledged, nothing confirms within the 30 s production
+// pane run is acknowledged, nothing confirms within the 60 s production
 // wait): the launch is revoked, the job fails with exit 4, and the
 // workspace is left open — nothing in the root pane is proven inert.
 func TestStartWithoutConfirmationFailsAndRetains(t *testing.T) {
@@ -178,7 +169,7 @@ func TestStartWithoutConfirmationFailsAndRetains(t *testing.T) {
 	if got := readReportWorkspace(t, stateRoot); got != "open" {
 		t.Fatalf("limpeza.workspace = %q, want open", got)
 	}
-	if !hasFriction(friction, "left open") {
+	if len(friction) != 1 || friction[0] != "job: the Herdr workspace w9 (job-job-1) was left open: the supervisor did not confirm its start" {
 		t.Fatalf("friction = %v", friction)
 	}
 	// A late supervisor cannot confirm the revoked launch.
@@ -195,7 +186,10 @@ func TestStartWrongPaneConfirmationIsNotAccepted(t *testing.T) {
 	stateRoot := t.TempDir()
 	fake := startFake()
 	fake.OnRun = func(_ string, argv []string) {
-		_, _ = ConfirmLaunch(Open(stateRoot), argv[len(argv)-1], platform.Env{"HERDR_WORKSPACE_ID": "w9", "HERDR_PANE_ID": "w9:p2"})
+		// argv is [exe, job, supervise, --id, <id>, --repo, <org>/<repo>].
+		if len(argv) >= 5 {
+			_, _ = ConfirmLaunch(Open(stateRoot), argv[4], platform.Env{"HERDR_WORKSPACE_ID": "w9", "HERDR_PANE_ID": "w9:p2"})
+		}
 	}
 	var friction []string
 	s := startStarter(t, f, fake, stateRoot, &friction)
@@ -235,7 +229,11 @@ func TestStartRunFailureFencesTheLaunch(t *testing.T) {
 		fake := startFake()
 		fake.RunErr = herdrExit("job: herdr pane run failed")
 		fake.OnRun = func(paneID string, argv []string) {
-			_, _ = ConfirmLaunch(Open(stateRoot), argv[len(argv)-1], platform.Env{"HERDR_WORKSPACE_ID": "w9", "HERDR_PANE_ID": paneID})
+			// argv is [exe, job, supervise, --id, <id>, --repo,
+			// <org>/<repo>].
+			if len(argv) >= 5 {
+				_, _ = ConfirmLaunch(Open(stateRoot), argv[4], platform.Env{"HERDR_WORKSPACE_ID": "w9", "HERDR_PANE_ID": paneID})
+			}
 		}
 		var friction []string
 		s := startStarter(t, f, fake, stateRoot, &friction)
@@ -247,6 +245,9 @@ func TestStartRunFailureFencesTheLaunch(t *testing.T) {
 		}
 		if got := readReportWorkspace(t, stateRoot); got != "open" {
 			t.Fatalf("limpeza.workspace = %q", got)
+		}
+		if len(friction) != 1 || friction[0] != "job: the Herdr workspace w9 (job-job-1) was left open: the job supervisor confirmed its start" {
+			t.Fatalf("friction = %v", friction)
 		}
 	})
 }
@@ -304,7 +305,7 @@ func TestRecoverStartFencesTheLaunch(t *testing.T) {
 			if got := readReportWorkspace(t, root); got != "open" {
 				t.Fatalf("limpeza.workspace = %q", got)
 			}
-			if !hasFriction(friction, "left open") {
+			if len(friction) != 1 || friction[0] != "job: the Herdr workspace w9 (job-job-1) was left open: the job supervisor may have started" {
 				t.Fatalf("friction = %v", friction)
 			}
 			rec := readLaunchFile(t, root)

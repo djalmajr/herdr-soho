@@ -273,7 +273,9 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 			s.RawFriction("job: herdr workspace create returned an invalid workspace id: " + cutFriction(core.FrictionSafe(workspaceID)))
 		}
 		if s.Friction != nil {
-			s.Friction("job: the Herdr workspace was left open: its id is invalid")
+			// The id is invalid, so the line names the workspace by the
+			// job's label only (leftOpenFriction).
+			s.Friction(leftOpenFriction(workspaceID, label, "its id is invalid"))
 		}
 		_, _ = store.Fail(req.ID, "job: herdr workspace create returned an invalid workspace id", ExitHerdr)
 		// The workspace is left open on purpose; the report says so.
@@ -309,23 +311,25 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 	}
 
 	// 11. Launch the supervisor in the workspace's first pane, after
-	// issuing the private launch record it must confirm (launch.go). A
-	// failed pane run closes the workspace as before only once the launch
-	// is fenced: a supervisor that confirmed anyway, or a launch that
-	// could not be revoked, leaves the workspace open.
+	// issuing the private launch record it must confirm (launch.go). The
+	// supervisor gets --repo so it locates the job in this checkout only,
+	// without scanning the other checkouts under job_repos_root
+	// (DJA-348). A failed pane run closes the workspace as before only
+	// once the launch is fenced: a supervisor that confirmed anyway, or a
+	// launch that could not be revoked, leaves the workspace open.
 	clock := store.clock()
 	launch, err := issueLaunch(store, clock, req.ID, workspaceID, rootPaneID)
 	if err != nil {
 		return State{}, store, s.failStored(store, req.ID, workspaceID, err)
 	}
-	if err = s.Panes.Run(rootPaneID, []string{s.SelfExe, "job", "supervise", "--id", req.ID}); err != nil {
+	if err = s.Panes.Run(rootPaneID, []string{s.SelfExe, "job", "supervise", "--id", req.ID, "--repo", req.Org + "/" + req.Repo}); err != nil {
 		workspace := "open"
 		confirmed, revokeErr := revokeLaunch(store, clock, launch)
 		switch {
 		case revokeErr != nil:
-			s.frictionLaunchOpen("the supervisor launch could not be revoked")
+			s.frictionLaunchOpen(workspaceID, label, "the supervisor launch could not be revoked")
 		case confirmed:
-			s.frictionLaunchOpen("the job supervisor confirmed its start")
+			s.frictionLaunchOpen(workspaceID, label, "the job supervisor confirmed its start")
 		case s.closeWorkspace(store, req.ID, workspaceID):
 			workspace = "closed"
 		}
@@ -348,9 +352,9 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 	if !accepted {
 		const motivo = "job: the supervisor did not confirm its start"
 		if err != nil {
-			s.frictionLaunchOpen("the supervisor launch could not be revoked")
+			s.frictionLaunchOpen(workspaceID, label, "the supervisor launch could not be revoked")
 		} else {
-			s.frictionLaunchOpen("the supervisor did not confirm its start")
+			s.frictionLaunchOpen(workspaceID, label, "the supervisor did not confirm its start")
 		}
 		_, _ = store.Fail(req.ID, motivo, ExitHerdr)
 		finishStartFailure(store, req.ID, "open", s.Friction)
@@ -363,7 +367,7 @@ func (s Starter) Start(req StartRequest) (State, *Store, error) {
 	// supervisor sees the failed job and closes the workspace itself.
 	st, err = store.Transition(req.ID, StatusRunning)
 	if err != nil {
-		s.frictionLaunchOpen("the job supervisor confirmed its start")
+		s.frictionLaunchOpen(workspaceID, label, "the job supervisor confirmed its start")
 		if _, failErr := store.Fail(req.ID, "job: cannot record the job state", ExitUsage); failErr != nil && s.Friction != nil {
 			s.Friction("job: cannot record the job failure: " + failErr.Error())
 		}
@@ -442,11 +446,23 @@ func exitCodeOr(err error, def int) int {
 	return def
 }
 
+// leftOpenFriction is the friction line of a start failure that left the
+// job workspace open: it names the workspace by its id and the job's
+// label when the id is one the job can name (validWorkspaceID), and by
+// the label alone when it is not — an invalid or unrecorded id never
+// reaches the line.
+func leftOpenFriction(workspaceID, label, motivo string) string {
+	if !validWorkspaceID(workspaceID) {
+		return "job: the Herdr workspace " + label + " was left open: " + motivo
+	}
+	return "job: the Herdr workspace " + workspaceID + " (" + label + ") was left open: " + motivo
+}
+
 // frictionLaunchOpen records why a start failure left the job workspace
-// open around its supervisor launch.
-func (s Starter) frictionLaunchOpen(why string) {
+// open around its supervisor launch (leftOpenFriction).
+func (s Starter) frictionLaunchOpen(workspaceID, label, why string) {
 	if s.Friction != nil {
-		s.Friction("job: the Herdr workspace was left open: " + why)
+		s.Friction(leftOpenFriction(workspaceID, label, why))
 	}
 }
 
@@ -640,7 +656,7 @@ func recoverStartLocked(store *Store, id string, herdr herdrWorkspaces, friction
 	if launched {
 		outcome = "open"
 		if friction != nil {
-			friction("job: the Herdr workspace was left open: the job supervisor may have started")
+			friction(leftOpenFriction(st.WorkspaceID, st.WorkspaceLabel, "the job supervisor may have started"))
 		}
 	} else if st.WorkspaceID != "" {
 		// Proven by the record.

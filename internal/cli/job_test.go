@@ -1217,7 +1217,7 @@ func TestJobStartStartsTheJob(t *testing.T) {
 	if want := []string{"workspace", "create", "--cwd", worktree, "--label", "job-job-1", "--env", "_SOHO_LAUNCH_CONFIG_BASE=" + jobStartXDGBase(ee.f.env), "--no-focus"}; !reflect.DeepEqual(calls[2].Argv, want) {
 		t.Fatalf("call 2 = %v", calls[2].Argv)
 	}
-	if want := []string{"pane", "run", "w9:p1", ee.selfExe, "job", "supervise", "--id", "job-1"}; !reflect.DeepEqual(calls[3].Argv, want) {
+	if want := []string{"pane", "run", "w9:p1", ee.selfExe, "job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo"}; !reflect.DeepEqual(calls[3].Argv, want) {
 		t.Fatalf("call 3 = %v", calls[3].Argv)
 	}
 	// gh ran exactly once: auth status.
@@ -1453,6 +1453,64 @@ func TestJobSuperviseCLIRefusals(t *testing.T) {
 	code, out, errOut = f.runEnv(t, nowrite, "supervise", "--id", "job-1")
 	if code != 2 || out != "" || !strings.Contains(errOut, "HERDR_SOHO_NOWRITE=1 is read-only: job supervise writes") {
 		t.Fatalf("NOWRITE code=%d out=%q err=%q", code, out, errOut)
+	}
+}
+
+// TestJobSuperviseRepoLookup: --repo makes supervise read only the named
+// checkout of the same selection the scan would use. With the same id in
+// a second checkout, the scan exits 2 (the id exists in more than one
+// checkout) while --repo finds the job in the named checkout and only it:
+// the supervisor is built from that store and stops unbound before it
+// runs, and the other checkout's job directory stays untouched. A --repo
+// checkout without the job is not_found, and an invalid --repo is exit 2.
+func TestJobSuperviseRepoLookup(t *testing.T) {
+	f := newJobFix(t)
+	co := f.checkout(t, "example-org", "example-repo")
+	co2 := f.checkout(t, "example-org", "example-repo-2")
+	f.startJob(t, co)
+	f.startJob(t, co2)
+	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	body := fmt.Sprintf(`{"schema":1,"id":"job-1","status":"running","brief_sha256":"x","decisions_acked_seq":0,"motivo":null,"dir":%q}`+"\n", co)
+	if err := os.WriteFile(filepath.Join(jobDir, "state.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	herdr := withEnv(f.env, "HERDR_ENV", "1", "HERDR_WORKSPACE_ID", "w9", "HERDR_PANE_ID", "w9:p1")
+
+	// The scan sees the id in both checkouts and exits 2.
+	code, out, errOut := f.runEnv(t, herdr, "supervise", "--id", "job-1")
+	if code != 2 || out != "" || !strings.Contains(errOut, "exists in more than one checkout") {
+		t.Fatalf("scan code=%d out=%q err=%q", code, out, errOut)
+	}
+
+	// An invalid --repo is exit 2 before any lookup.
+	code, out, errOut = f.runEnv(t, herdr, "supervise", "--id", "job-1", "--repo", "a/b/c")
+	if code != 2 || out != "" || !strings.Contains(errOut, "invalid --repo") {
+		t.Fatalf("invalid repo code=%d out=%q err=%q", code, out, errOut)
+	}
+
+	// A --repo checkout without the job is not_found, exit 3.
+	code, out, errOut = f.runEnv(t, herdr, "supervise", "--id", "job-1", "--repo", "example-org/absent")
+	if code != 3 || out != `{"status":"not_found"}`+"\n" || errOut != "" {
+		t.Fatalf("absent code=%d out=%q err=%q", code, out, errOut)
+	}
+
+	// With --repo the lookup reads only the named checkout: the job is
+	// found there, the supervisor is built from it, and it stops unbound
+	// (no launch record) before it runs, exactly as a scoped supervisor
+	// does.
+	base := filepath.Clean(filepath.Join(f.root, "xdg"))
+	code, out, errOut = f.runEnv(t, withEnv(herdr, testLaunchBaseVar, base), "supervise", "--id", "job-1", "--repo", "example-org/example-repo")
+	if code != 4 || !strings.Contains(out, `"status":"running"`) || errOut != "herdr-soho: warning: job: the supervisor is not bound to its launch: the job has no launch record\n" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	// The friction line went to the named checkout's job only: the other
+	// checkout's job directory was never written.
+	friction, err := os.ReadFile(filepath.Join(jobDir, "friction.log"))
+	if err != nil || !strings.Contains(string(friction), "the supervisor is not bound to its launch") {
+		t.Fatalf("friction = %q err=%v", friction, err)
+	}
+	if _, err := os.Lstat(filepath.Join(co2, ".herdr-soho", "jobs", "job-1", "friction.log")); !os.IsNotExist(err) {
+		t.Fatalf("the other checkout's job was touched: %v", err)
 	}
 }
 

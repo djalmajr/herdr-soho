@@ -89,8 +89,10 @@ const launchVersion = 1
 
 const (
 	// defaultLaunchWait bounds the starter's wait for the confirmation,
-	// measured on the monotonic clock from the pane-run acknowledgement.
-	defaultLaunchWait = 30 * time.Second
+	// measured on the monotonic clock from the pane-run acknowledgement;
+	// 60 s since the measured Windows start under Defender and OneDrive
+	// load took 2.5–4 min, outlasting the former 30 s bound (DJA-348).
+	defaultLaunchWait = 60 * time.Second
 	// defaultLaunchPoll is the pause between two reads of the record.
 	defaultLaunchPoll = 100 * time.Millisecond
 	// launchLockRetry is the pause between two tries of launch.lock.

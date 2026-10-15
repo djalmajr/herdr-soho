@@ -254,8 +254,9 @@ const (
 //     arguments read and not `job supervise --id ...`, ManagedIgnored;
 //     unreadable, ambiguous or not this executable, ManagedRefused;
 //     otherwise the parent runs the file this process runs as
-//     `job supervise --id <ID>` for a valid job id, with one start
-//     identity before and after the read;
+//     `job supervise --id <ID>` or `job supervise --id <ID> --repo
+//     <ORG/REPO>` (in that order, the repo valid by the same pattern) for
+//     a valid job id, with one start identity before and after the read;
 //  3. launch carries a usable selection and HERDR_ENV is 1 with the
 //     workspace and pane ids set;
 //  4. the selection's configuration resolves, for cwd, the store whose
@@ -340,14 +341,16 @@ const (
 // managedParent classifies this process's direct parent from the process
 // table alone. It is parentSupervisor only when the parent pid is running
 // with a start identity, its arguments are exactly
-// `<exe> job supervise --id <ID>` (the command job start runs) with a valid
-// job id, its kernel executable path is the file this process runs
+// `<exe> job supervise --id <ID>` or
+// `<exe> job supervise --id <ID> --repo <ORG/REPO>` (the two commands job
+// start runs, in that order, the repo valid by the same pattern) with a
+// valid job id, its kernel executable path is the file this process runs
 // (SameExecutable), and a second read shows the same parent pid with the
 // same start identity. Arguments that were read and do not have the
 // supervise shape are parentNotSupervisor. Everything else — no parent (an
 // orphan reparented to pid 1 included), an exited parent, an unreadable
 // identity or argument read, a supervise-shaped command with an invalid id
-// or another executable, a pid reused between the reads — is
+// or repo, or another executable, a pid reused between the reads — is
 // parentUnknown. The arguments are compared and never kept, printed or
 // logged.
 func managedParent(env platform.Env) (managedParentInfo, parentKind) {
@@ -366,11 +369,22 @@ func managedParent(env platform.Env) (managedParentInfo, parentKind) {
 	if len(argv) < 3 || argv[1] != "job" || argv[2] != "supervise" {
 		return managedParentInfo{}, parentNotSupervisor
 	}
-	if len(argv) != 5 || argv[3] != "--id" {
+	// Exactly the two forms job start runs, in that order: `--id <ID>` and
+	// `--id <ID> --repo <ORG/REPO>`; any other variation is the invalid
+	// shape.
+	var id, repo string
+	switch {
+	case len(argv) == 5 && argv[3] == "--id":
+		id = argv[4]
+	case len(argv) == 7 && argv[3] == "--id" && argv[5] == "--repo":
+		id, repo = argv[4], argv[6]
+	default:
 		return managedParentInfo{}, parentUnknown
 	}
-	id := argv[4]
-	if _, err := Dir("", id); err != nil || !SameExecutable(exe) {
+	// The id and the repo, when present, are valid by the same rules
+	// (job.Dir's regex; the repo's org/name pattern): an invalid value is
+	// the invalid shape.
+	if _, err := Dir("", id); err != nil || (repo != "" && !repoPattern.MatchString(repo)) || !SameExecutable(exe) {
 		return managedParentInfo{}, parentUnknown
 	}
 	after, _, live := platform.ProcStartIdentity(ppid, env)

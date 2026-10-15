@@ -64,7 +64,7 @@ func managedHelperParent() int {
 	env := WithoutLaunchLocators(full)
 	root := env.Get(managedRootVar)
 	id := "job-1"
-	if len(os.Args) == 5 {
+	if len(os.Args) == 5 || (len(os.Args) == 7 && os.Args[5] == "--repo") {
 		id = os.Args[4]
 	}
 	if env.Get(managedBindVar) == "1" {
@@ -146,7 +146,12 @@ func managedHelperChild() int {
 	env := WithoutLaunchLocators(full)
 	cwd, _ := os.Getwd()
 	args := strings.Fields(env.Get(managedArgsVar))
+	// The direct parent's classification (managedParent) before the
+	// outcome: the supervise-shape table (managed_test.go) reads the kind
+	// from this line; the outcome line stays the last line of the output.
+	_, kind := managedParent(env)
 	sel, outcome := ManagedSelection(args, launch, env, cwd)
+	fmt.Printf("parentkind=%d\n", kind)
 	fmt.Printf("outcome=%d base=%s\n", outcome, sel.Base)
 	return 0
 }
