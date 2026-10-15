@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 const noAgentNotRef = `{"error":{"code":"agent_not_found","message":"no such pane"}}`

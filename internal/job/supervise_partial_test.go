@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/collaboration"
 )
 
 // The persisted partial facts of the job's own collaborations: the state

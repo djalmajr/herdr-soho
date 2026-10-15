@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // StateInSkill returns the skill directory when the state root — the path

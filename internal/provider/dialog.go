@@ -6,7 +6,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/text"
 )
 
 var (

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/text"
 )
 
 const jsWhitespace = `[\x{0009}-\x{000d}\x{0020}\x{00a0}\x{1680}\x{2000}-\x{200a}\x{2028}-\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]`

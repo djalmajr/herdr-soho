@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/setuptext"
+	"github.com/djalmajr/soho/internal/setuptext"
 )
 
 func mustJSONQuote(t *testing.T, value string) string {

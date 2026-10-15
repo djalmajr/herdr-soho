@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/soho/internal/core"
 )
 
 // launch_budget_test.go: the launch record's bounded read is sized for

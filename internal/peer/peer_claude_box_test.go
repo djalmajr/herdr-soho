@@ -9,8 +9,8 @@ import (
 	"testing"
 	_ "unsafe"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // The rc.14 false negative (Windows, local claude): the send to a working
@@ -29,13 +29,13 @@ import (
 //
 // The stalled 15 of the unproved path now says the proof window ran.
 
-//go:linkname claudeInputRegion github.com/djalmajr/herdr-soho/internal/peer.claudeInputRegion
+//go:linkname claudeInputRegion github.com/djalmajr/soho/internal/peer.claudeInputRegion
 func claudeInputRegion(visible string) ([]string, bool)
 
-//go:linkname idInInputBox github.com/djalmajr/herdr-soho/internal/peer.idInInputBox
+//go:linkname idInInputBox github.com/djalmajr/soho/internal/peer.idInInputBox
 func idInInputBox(kind, visible, id string) bool
 
-//go:linkname messageStillInScreen github.com/djalmajr/herdr-soho/internal/peer.messageStillInScreen
+//go:linkname messageStillInScreen github.com/djalmajr/soho/internal/peer.messageStillInScreen
 func messageStillInScreen(kind, visible, endLine, id string) bool
 
 // rc14ClaudeScreen is the real rc.14 screen (the end), verbatim: the taken

@@ -5,8 +5,8 @@ import (
 
 	contextpkg "context"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/sessionref"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/sessionref"
 )
 
 // pickerTeamView is the session popup's read-only team view: the soho

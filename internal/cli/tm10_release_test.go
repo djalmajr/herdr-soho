@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/soho/internal/core"
 )
 
 func TestTM10ReleaseTitleMirrors(t *testing.T) {

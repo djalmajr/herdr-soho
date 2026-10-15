@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/startup"
+	"github.com/djalmajr/soho/internal/startup"
 )
 
 // waitTrustScreen is the verified cursor Workspace Trust Required dialog.

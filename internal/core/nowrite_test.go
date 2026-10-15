@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // DJA-318 C2b: when SOHO_NOWRITE is defined it decides alone — even the

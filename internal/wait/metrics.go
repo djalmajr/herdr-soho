@@ -17,11 +17,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/reportscan"
-	"github.com/djalmajr/herdr-soho/internal/taskreport"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/reportscan"
+	"github.com/djalmajr/soho/internal/taskreport"
 )
 
 // metricsTypeValues are the accepted values of a brief's `Type:` line. Any

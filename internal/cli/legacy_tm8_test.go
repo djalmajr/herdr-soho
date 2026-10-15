@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/soho/internal/core"
 )
 
 func TestTM8LegacyCLI(t *testing.T) {

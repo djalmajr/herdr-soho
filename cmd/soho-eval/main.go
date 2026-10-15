@@ -12,7 +12,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/eval"
+	"github.com/djalmajr/soho/internal/eval"
 )
 
 const usage = "usage: soho-eval [--repo <path>] prepare <fixture> <destination>\n" +

@@ -12,12 +12,12 @@ import (
 	"testing"
 	_ "unsafe"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
 )
 
-//go:linkname platformRenameFile github.com/djalmajr/herdr-soho/internal/platform.renameFile
+//go:linkname platformRenameFile github.com/djalmajr/soho/internal/platform.renameFile
 var platformRenameFile func(string, string) error
 
 func localPlanFixture(t *testing.T) (string, platform.Env, *core.Config) {

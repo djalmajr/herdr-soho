@@ -10,15 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/provider"
-	"github.com/djalmajr/herdr-soho/internal/reportscan"
-	"github.com/djalmajr/herdr-soho/internal/startup"
-	"github.com/djalmajr/herdr-soho/internal/taskreport"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/provider"
+	"github.com/djalmajr/soho/internal/reportscan"
+	"github.com/djalmajr/soho/internal/startup"
+	"github.com/djalmajr/soho/internal/taskreport"
 )
 
 const enterRetryLimit = 3

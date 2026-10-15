@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // own_checkout_query_test.go: ownCheckoutGitQuery runs a real child

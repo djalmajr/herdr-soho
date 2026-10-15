@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // JS: "pi and opencode warn on approvals edits; FULL dies 2" — the exit-2 half,

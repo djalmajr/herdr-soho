@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	textutil "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/platform"
+	textutil "github.com/djalmajr/soho/internal/text"
 )
 
 const mutationGuardUsage = "usage: mutation-guard <copy-dir> [--source <dir>] [--env NAME]..."

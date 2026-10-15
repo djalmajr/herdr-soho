@@ -9,11 +9,11 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	herdrtext "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	herdrtext "github.com/djalmajr/soho/internal/text"
 )
 
 func valueString(v any, fallback string) string {

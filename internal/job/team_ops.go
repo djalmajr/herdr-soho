@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // team_ops.go composes the CLI's own team commands for the job supervisor:

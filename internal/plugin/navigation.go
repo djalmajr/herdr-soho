@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/sessionref"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/sessionref"
 )
 
 // navigationTimeoutMS caps one whole navigation: the fresh snapshot, the

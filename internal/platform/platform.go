@@ -22,7 +22,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/skills/soho"
+	"github.com/djalmajr/soho/skills/soho"
 )
 
 // Env is an explicit environment passed to platform helpers and commands.

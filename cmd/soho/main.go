@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/djalmajr/herdr-soho/internal/cli"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/cli"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func main() {

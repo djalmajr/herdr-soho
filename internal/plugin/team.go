@@ -14,7 +14,7 @@ import (
 
 	contextpkg "context"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // teamCallTimeoutMs is the deadline for every CLI call the panel makes.

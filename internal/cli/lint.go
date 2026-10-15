@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/dispatch"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/dispatch"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 const lintUsage = "usage: lint <brief.md> [--role <role>]"

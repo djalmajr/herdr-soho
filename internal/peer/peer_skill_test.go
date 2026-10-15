@@ -7,12 +7,12 @@ import (
 	"testing"
 	_ "unsafe"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
-//go:linkname appendPeerLog github.com/djalmajr/herdr-soho/internal/peer.appendPeerLog
+//go:linkname appendPeerLog github.com/djalmajr/soho/internal/peer.appendPeerLog
 func appendPeerLog(stateDir, from, to, result string, chars int, id string, env platform.Env)
 
 func TestSendRefusesTheSkillDir(t *testing.T) {

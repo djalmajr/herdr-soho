@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func TestConfigAtomicWriteFailure(t *testing.T) {

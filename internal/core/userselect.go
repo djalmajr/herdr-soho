@@ -3,7 +3,7 @@ package core
 import (
 	"path/filepath"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // UserSelection is an explicit choice of the user configuration, handed

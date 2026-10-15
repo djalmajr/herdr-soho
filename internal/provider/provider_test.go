@@ -2,7 +2,7 @@ package provider
 
 import (
 	"encoding/json"
-	herdrtext "github.com/djalmajr/herdr-soho/internal/text"
+	herdrtext "github.com/djalmajr/soho/internal/text"
 	"os"
 	"reflect"
 	"regexp"

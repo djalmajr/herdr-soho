@@ -7,9 +7,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/setuptext"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/setuptext"
 )
 
 var inlineConfigComment = regexp.MustCompile(`[ \t]#.*$`)

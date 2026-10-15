@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // crashedStartState leaves a job exactly where a crashed start left it:

@@ -11,11 +11,11 @@ import (
 	"time"
 	_ "unsafe"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
-//go:linkname senderHostname github.com/djalmajr/herdr-soho/internal/peer.senderHostname
+//go:linkname senderHostname github.com/djalmajr/soho/internal/peer.senderHostname
 var senderHostname func() string
 
 func setSenderHostname(t *testing.T, host string) {
@@ -25,7 +25,7 @@ func setSenderHostname(t *testing.T, host string) {
 	t.Cleanup(func() { senderHostname = old })
 }
 
-//go:linkname peerNow github.com/djalmajr/herdr-soho/internal/peer.peerNow
+//go:linkname peerNow github.com/djalmajr/soho/internal/peer.peerNow
 var peerNow func() time.Time
 
 // peerTestNow pins the header clock for the whole peer_test package

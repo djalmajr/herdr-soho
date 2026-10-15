@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/sessionref"
+	"github.com/djalmajr/soho/internal/sessionref"
 )
 
 // Theme-neutral SGR styles for the session popups: bold marks the machine

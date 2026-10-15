@@ -13,8 +13,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/text"
 )
 
 // CurrentPlatform is the platform the gate is evaluated against. It is a

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/dispatch"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/dispatch"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 const briefFull = `{"schema":1,"id":"job-1","origem":{"tipo":"card","ref":"CARD-1"},"repo":"example-org/example-repo","objetivo":"Ship the change.","contexto":"The layout is frozen.","aceite":[{"criterio":"tests pass","prova":"go test ./internal/job"}],"decisoes":["keep the flag named --yes","a hash conflict exits 20"],"restricoes":["do not touch internal/plugin/**"],"nao_objetivos":["no push wiring"],"idioma":"en"}`

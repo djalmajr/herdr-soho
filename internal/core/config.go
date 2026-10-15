@@ -9,8 +9,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	textutil "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/platform"
+	textutil "github.com/djalmajr/soho/internal/text"
 )
 
 var writeConfigAtomic = platform.AtomicWrite

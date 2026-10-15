@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func TestMain(m *testing.M) {

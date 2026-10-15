@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/collaboration"
 )
 
 // Mutation guard: saving the terminal state.json before report.json (the

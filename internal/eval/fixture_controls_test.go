@@ -36,7 +36,7 @@ func moduleRootForTest(t *testing.T) string {
 	}
 	module, err := os.ReadFile(filepath.Join(abs, "go.mod"))
 	fields := strings.Fields(string(module))
-	if err != nil || len(fields) < 2 || fields[0] != "module" || fields[1] != "github.com/djalmajr/herdr-soho" {
+	if err != nil || len(fields) < 2 || fields[0] != "module" || fields[1] != "github.com/djalmajr/soho" {
 		t.Fatalf("run this test binary from its repository internal/eval directory: %v", err)
 	}
 	return abs

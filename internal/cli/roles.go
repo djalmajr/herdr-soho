@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func cmdRoles(env platform.Env, cwd string)               { core.CmdRoles(env, cwd) }

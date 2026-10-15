@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/djalmajr/herdr-soho/internal/reportscan"
+	"github.com/djalmajr/soho/internal/reportscan"
 )
 
 type EventRequest struct {

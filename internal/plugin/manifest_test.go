@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/plugin"
+	"github.com/djalmajr/soho/internal/plugin"
 )
 
 const (

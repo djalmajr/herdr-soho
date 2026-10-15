@@ -24,7 +24,7 @@ const (
 	mainPackage = "./cmd/soho"
 	// versionLdflags is the exact ldflags format the release binaries get:
 	// size stripping plus the version injected into the CLI.
-	versionLdflags = "-s -w -X github.com/djalmajr/herdr-soho/internal/cli.version=%s"
+	versionLdflags = "-s -w -X github.com/djalmajr/soho/internal/cli.version=%s"
 	// sumsFileName is the checksum manifest name, matching the installer.
 	sumsFileName = "SHA256SUMS"
 	// stagingPattern prefixes the fresh sibling staging directory.

@@ -3,8 +3,8 @@ package job
 import (
 	"path/filepath"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // locator.go builds the private environment the job start hands to the

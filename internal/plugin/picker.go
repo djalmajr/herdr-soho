@@ -13,8 +13,8 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 var pickerProcessStarted func(int)

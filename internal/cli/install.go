@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/install"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/install"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // installTimeout bounds the whole install command (both downloads and the

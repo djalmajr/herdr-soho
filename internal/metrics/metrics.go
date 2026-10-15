@@ -7,8 +7,8 @@
 package metrics
 
 import (
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // CommandContext carries what every metrics subcommand needs.

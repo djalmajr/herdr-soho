@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/dispatch"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/stats"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/dispatch"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/stats"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // s72: the durable task link of the dispatch sidecars (task_report +

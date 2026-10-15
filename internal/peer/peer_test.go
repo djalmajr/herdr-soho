@@ -14,13 +14,13 @@ import (
 	"time"
 	_ "unsafe"
 
-	"github.com/djalmajr/herdr-soho/internal/cli"
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/cli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
-//go:linkname arrivalWindowMS github.com/djalmajr/herdr-soho/internal/peer.arrivalWindowMS
+//go:linkname arrivalWindowMS github.com/djalmajr/soho/internal/peer.arrivalWindowMS
 func arrivalWindowMS(env platform.Env) int
 
 func TestMain(m *testing.M) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // linkedWorktreeRepo builds a git repository with an initial commit and a

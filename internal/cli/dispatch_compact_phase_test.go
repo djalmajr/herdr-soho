@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/taskreport"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
-	waitpkg "github.com/djalmajr/herdr-soho/internal/wait"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/taskreport"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
+	waitpkg "github.com/djalmajr/soho/internal/wait"
 )
 
 const (

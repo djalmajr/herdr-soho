@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/doctor"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/doctor"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 const hookReminder = "soho: this project routes non-trivial work through /soho — surveys go to a scouter, slices to workers; the orchestrator keeps only one-or-two-file changes."

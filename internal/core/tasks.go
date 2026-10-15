@@ -5,9 +5,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	herdrtext "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/platform"
+	herdrtext "github.com/djalmajr/soho/internal/text"
 )
 
 var taskContractHeading = regexp.MustCompile(`^(goal|owned files|owned|scope|forbidden|non-goals|constraints|report|expected result|acceptance criteria|acceptance|decisions already made|context|sources)[ \t]*$`)

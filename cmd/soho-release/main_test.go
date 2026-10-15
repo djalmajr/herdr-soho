@@ -30,7 +30,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // TestMain doubles as the re-executed fake `go`: the release CLI runs

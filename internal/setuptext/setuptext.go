@@ -3,7 +3,7 @@ package setuptext
 import (
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/jsonjs"
 )
 
 const (

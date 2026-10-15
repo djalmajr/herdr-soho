@@ -10,11 +10,11 @@ import (
 	"testing"
 	_ "unsafe"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
-//go:linkname receiptLineIn github.com/djalmajr/herdr-soho/internal/peer.receiptLineIn
+//go:linkname receiptLineIn github.com/djalmajr/soho/internal/peer.receiptLineIn
 func receiptLineIn(line, id string) bool
 
 // bannedHeaderWords are the substrings the metadata-only peer header must

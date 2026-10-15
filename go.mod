@@ -1,3 +1,3 @@
-module github.com/djalmajr/herdr-soho
+module github.com/djalmajr/soho
 
 go 1.25

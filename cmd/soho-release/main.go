@@ -13,7 +13,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/djalmajr/herdr-soho/internal/release"
+	"github.com/djalmajr/soho/internal/release"
 )
 
 // main returns before os.Exit so the deferred signal-context stop and the

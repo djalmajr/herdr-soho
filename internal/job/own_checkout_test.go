@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // ownEnv builds the hermetic environment OwnCheckoutStore receives: a PATH

@@ -15,15 +15,15 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/reportscan"
-	"github.com/djalmajr/herdr-soho/internal/taskreport"
-	textutil "github.com/djalmajr/herdr-soho/internal/text"
-	"github.com/djalmajr/herdr-soho/internal/wait"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/reportscan"
+	"github.com/djalmajr/soho/internal/taskreport"
+	textutil "github.com/djalmajr/soho/internal/text"
+	"github.com/djalmajr/soho/internal/wait"
 )
 
 var pairRE = regexp.MustCompile(`^(.+)-(\d{8}T\d{6})(-\d+)?$`)

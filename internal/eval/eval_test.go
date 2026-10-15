@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil"
 )
 
 // The tests exercise the real package API and the real CLI binary against

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // setFinishingTimeout appends job_finishing_timeout to the user file the
