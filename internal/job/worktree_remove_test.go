@@ -401,6 +401,61 @@ func TestWorktreeRemoveConverges(t *testing.T) {
 	})
 }
 
+// TestWorktreeRemoveHeldDirectory: git removes the job's work and its
+// registration but cannot delete a directory still held (on Windows, the
+// job's root pane has it as its current directory). The unregistered
+// empty directory is the removal done, and a later call deletes it.
+func TestWorktreeRemoveHeldDirectory(t *testing.T) {
+	t.Run("an unregistered empty directory left by git counts as removed", func(t *testing.T) {
+		f := newWorktreeRemoveFixture(t)
+		facts := f.facts(true)
+		release := holdWorktreeDir(t, f.dir)
+		removed, motivo := removeOwnedWorktree(f.checkout, f.dir, worktreeRemovalID, facts)
+		if !removed || motivo != "" {
+			t.Fatalf("removeOwnedWorktree = %v %q, want removed with the empty motivo", removed, motivo)
+		}
+		if f.registrations() != 0 {
+			t.Fatalf("worktree registrations = %d, want 0 (git removed it)", f.registrations())
+		}
+		if entries, err := os.ReadDir(f.dir); err == nil && len(entries) != 0 {
+			t.Fatalf("the held directory keeps %d entries, want none", len(entries))
+		}
+		if !f.branchExists() {
+			t.Fatalf("the branch job/%s was deleted (it must stay)", worktreeRemovalID)
+		}
+		release()
+		removed, motivo = removeOwnedWorktree(f.checkout, f.dir, worktreeRemovalID, ReportFacts{})
+		if !removed || motivo != "" {
+			t.Fatalf("second call = %v %q, want removed with the empty motivo", removed, motivo)
+		}
+		if _, err := os.Lstat(f.dir); !os.IsNotExist(err) {
+			t.Fatalf("the leftover directory still exists after the hold ended (lstat err %v)", err)
+		}
+	})
+	t.Run("an unregistered directory that is not empty stays not_owned", func(t *testing.T) {
+		f := newWorktreeRemoveFixture(t)
+		if err := os.RemoveAll(f.dir); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := f.git(f.checkout, "worktree", "prune"); err != nil {
+			t.Fatalf("git worktree prune: %s: %v", out, err)
+		}
+		if err := os.MkdirAll(f.dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(f.dir, "keep.txt"), []byte("mine\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		removed, motivo := removeOwnedWorktree(f.checkout, f.dir, worktreeRemovalID, f.facts(true))
+		if removed || motivo != WorktreeRemoveNotOwned {
+			t.Fatalf("removeOwnedWorktree = %v %q, want false %q", removed, motivo, WorktreeRemoveNotOwned)
+		}
+		if _, err := os.Stat(filepath.Join(f.dir, "keep.txt")); err != nil {
+			t.Fatalf("the file in the directory was touched: %v", err)
+		}
+	})
+}
+
 // TestHerdrPanes pins the herdrCLI.Panes contract against the package's
 // fake herdr: the exact argv `pane list --workspace <id>`, the rows read
 // from result.panes by pane_id and revision alone, the List-like error
@@ -478,6 +533,41 @@ func TestHerdrPanes(t *testing.T) {
 					t.Fatalf("herdr calls = %v, want none", calls)
 				}
 			})
+		}
+	})
+}
+
+// TestWorktreeRemoveRechecksTheLiveTree: the facts are read before the
+// job's agents are released, so the removal reads the live tree again —
+// a commit made after the facts keeps the worktree as not_pushed, and a
+// file left after them keeps it as dirty.
+func TestWorktreeRemoveRechecksTheLiveTree(t *testing.T) {
+	t.Run("a commit after the facts is not_pushed", func(t *testing.T) {
+		f := newWorktreeRemoveFixture(t)
+		facts := f.facts(true)
+		if out, err := f.git(f.dir, "commit", "-q", "--allow-empty", "-m", "late"); err != nil {
+			t.Fatalf("late commit: %s: %v", out, err)
+		}
+		removed, motivo := removeOwnedWorktree(f.checkout, f.dir, worktreeRemovalID, facts)
+		if removed || motivo != WorktreeRemoveNotPushed {
+			t.Fatalf("removeOwnedWorktree = %v %q, want false %q", removed, motivo, WorktreeRemoveNotPushed)
+		}
+		if _, err := os.Stat(f.dir); err != nil {
+			t.Fatalf("the worktree was touched: %v", err)
+		}
+	})
+	t.Run("a file left after the facts is dirty", func(t *testing.T) {
+		f := newWorktreeRemoveFixture(t)
+		facts := f.facts(true)
+		if err := os.WriteFile(filepath.Join(f.dir, "late.txt"), []byte("late\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		removed, motivo := removeOwnedWorktree(f.checkout, f.dir, worktreeRemovalID, facts)
+		if removed || motivo != WorktreeRemoveDirty {
+			t.Fatalf("removeOwnedWorktree = %v %q, want false %q", removed, motivo, WorktreeRemoveDirty)
+		}
+		if _, err := os.Stat(filepath.Join(f.dir, "late.txt")); err != nil {
+			t.Fatalf("the late file was touched: %v", err)
 		}
 	})
 }

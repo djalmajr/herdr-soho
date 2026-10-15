@@ -41,9 +41,18 @@ const (
 //     the checkout's .git common dir, which is the checkout's own toplevel;
 //  4. the facts gate: the head fact is present (a missing head is a read
 //     error and check_failed), the tree is clean (else dirty), and the
-//     head equals the remote head (else not_pushed);
+//     head equals the remote head (else not_pushed); then the live tree
+//     is read again, because the facts were read before the job's agents
+//     were released: a head that moved since the facts is not_pushed (the
+//     new head was never proven pushed), a tree no longer clean is dirty,
+//     and a failed read is check_failed;
 //  5. the removal: `git -C <checkout> worktree remove <dir>` without
-//     --force under the local timeout; a git refusal is remove_refused.
+//     --force under the local timeout; a git refusal is remove_refused,
+//     except when git removed the work and its registration but could
+//     not delete the directory itself (on Windows, the job's root pane
+//     still has it as its current directory): an empty directory the
+//     checkout no longer lists as a worktree is the removal done
+//     (emptyLeftover), and its deletion is tried once more.
 //
 // Any doubt — a failed shape, a non-directory entry, a subprocess
 // failure, a wrong branch — returns removed=false with not_owned. The
@@ -63,6 +72,11 @@ func removeOwnedWorktree(checkout, dir, id string, facts ReportFacts) (removed b
 	}
 	env := platform.EnvFromOS()
 	env["GIT_TERMINAL_PROMPT"] = "0"
+	if emptyLeftover(checkout, dir, env) {
+		// What an earlier removal left behind: the directory alone.
+		_ = os.Remove(dir)
+		return true, ""
+	}
 	if !jobWorktreeOwned(checkout, dir, "job/"+id, env) {
 		return false, WorktreeRemoveNotOwned
 	}
@@ -75,10 +89,55 @@ func removeOwnedWorktree(checkout, dir, id string, facts ReportFacts) (removed b
 	if facts.Head != facts.HeadRemoto {
 		return false, WorktreeRemoveNotPushed
 	}
+	head, err := runStep("git", []string{"-C", dir, "rev-parse", "HEAD"}, defaultLocalSyncTimeout, env)
+	if err != nil {
+		return false, WorktreeRemoveCheckFailed
+	}
+	if strings.TrimSpace(head) != facts.Head {
+		return false, WorktreeRemoveNotPushed
+	}
+	status, err := runStep("git", []string{"-C", dir, "status", "--porcelain"}, defaultLocalSyncTimeout, env)
+	if err != nil {
+		return false, WorktreeRemoveCheckFailed
+	}
+	if strings.TrimSpace(status) != "" {
+		return false, WorktreeRemoveDirty
+	}
 	if _, err := runStep("git", []string{"-C", checkout, "worktree", "remove", dir}, defaultLocalSyncTimeout, env); err != nil {
+		if emptyLeftover(checkout, dir, env) {
+			_ = os.Remove(dir)
+			return true, ""
+		}
 		return false, WorktreeRemoveRefused
 	}
 	return true, ""
+}
+
+// emptyLeftover reports whether dir is an empty real directory that the
+// checkout no longer lists as a worktree (`git worktree list
+// --porcelain`): git removes a worktree's files and its registration
+// even when it cannot delete the directory itself, and nothing of the
+// job's work is left in such a directory. A read failure, a non-empty
+// directory, a listed path, or a failed list reports false.
+func emptyLeftover(checkout, dir string, env platform.Env) bool {
+	if !exactDirectory(dir) {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		return false
+	}
+	out, err := runStep("git", []string{"-C", checkout, "worktree", "list", "--porcelain"}, defaultLocalSyncTimeout, env)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		path, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), "worktree ")
+		if ok && samePath(filepath.FromSlash(path), dir) {
+			return false
+		}
+	}
+	return true
 }
 
 // jobWorktreeOwned applies the prepare.go worktree-reuse checks to dir: it
