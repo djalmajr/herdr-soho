@@ -131,10 +131,12 @@ const winCaptureShareMode = syscall.FILE_SHARE_READ | syscall.FILE_SHARE_WRITE |
 // create-and-truncate for these flags. The handle is created the way the
 // stdlib open creates it (os.OpenFile passes O_CLOEXEC on Windows, a nil
 // security attributes); the caller marks it inheritable only across the
-// locked CreateProcess window.
+// locked CreateProcess window. The path given to CreateFile goes through
+// extendedCapturePath, as os.OpenFile's fixLongPath would; the returned
+// file keeps the plain path as its name.
 func openOwnedCapture(dir, name string) (*os.File, error) {
 	path := filepath.Join(dir, name)
-	path16, err := syscall.UTF16PtrFromString(path)
+	path16, err := syscall.UTF16PtrFromString(extendedCapturePath(path))
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +146,30 @@ func openOwnedCapture(dir, name string) (*os.File, error) {
 		return nil, err
 	}
 	return os.NewFile(uintptr(h), path), nil
+}
+
+// winShortPathLimit is the length below which the stdlib leaves a path
+// alone (MAX_PATH minus 12, the room for an 8.3 name).
+const winShortPathLimit = 248
+
+// extendedCapturePath keeps a capture path under MAX_PATH working when the
+// process has no long-path support, mirroring the stdlib's
+// addExtendedPrefix: a path whose absolute form reaches winShortPathLimit
+// gets the \\?\ prefix (\\?\UNC\ for a UNC share) on its absolute, cleaned
+// form. Short paths, already extended paths and device paths are returned
+// unchanged, and so is a path whose absolute form cannot be resolved.
+func extendedCapturePath(path string) string {
+	if strings.HasPrefix(path, `\\?\`) || strings.HasPrefix(path, `\??\`) || strings.HasPrefix(path, `\\.\`) {
+		return path
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil || len(abs) < winShortPathLimit {
+		return path
+	}
+	if strings.HasPrefix(abs, `\\`) {
+		return `\\?\UNC\` + abs[2:]
+	}
+	return `\\?\` + abs
 }
 
 // runOwnedGoProcess runs the go test command under a native job object that
