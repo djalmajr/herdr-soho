@@ -731,13 +731,38 @@ func TestBoardRefreshDuringLoadWaitsAndRunsOnce(t *testing.T) {
 	if snapshotCalls() != 2 {
 		t.Fatalf("local snapshots after a refresh during a load=%d want 2 (one coalesced, no duplicate)", snapshotCalls())
 	}
-	time.Sleep(300 * time.Millisecond) // the single r is consumed: nothing more follows
-	if snapshotCalls() != 2 {
-		t.Fatalf("local snapshots settled at %d want 2 (the queued refresh must not stack)", snapshotCalls())
+	// The single r is consumed: before the counts are judged again, the
+	// coalesced refresh must have drawn the fresh data. A fixed sleep is
+	// not enough on a slow Windows CI, so wait for the content with the
+	// same generous deadline as the snapshot wait above.
+	fresh := func() bool {
+		data, err := os.ReadFile(output.Name())
+		if err != nil {
+			return false
+		}
+		return strings.Contains(string(data), "3 agents · 2 working · 1 idle · 09:45:30") &&
+			strings.Contains(string(data), "m/pinar/-") &&
+			strings.Contains(string(data), "researcher")
+	}
+	freshDeadline := time.Now().Add(30 * time.Second) // generous: Windows process starts can be slow
+	for time.Now().Before(freshDeadline) && !fresh() {
+		select {
+		case code := <-finished:
+			t.Fatalf("board exited while refreshing, code=%d", code)
+		default:
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	data, _ := os.ReadFile(output.Name())
 	if !strings.Contains(string(data), "3 agents · 2 working · 1 idle · 09:45:30") || !strings.Contains(string(data), "m/pinar/-") || !strings.Contains(string(data), "researcher") {
 		t.Fatalf("board after the coalesced refresh missing the fresh data in:\n%s", data)
+	}
+	if snapshotCalls() != 2 {
+		t.Fatalf("local snapshots after the fresh data drew=%d want 2 (the queued refresh must not stack)", snapshotCalls())
+	}
+	time.Sleep(300 * time.Millisecond) // the single r is consumed: nothing more follows
+	if snapshotCalls() != 2 {
+		t.Fatalf("local snapshots settled at %d want 2 (the queued refresh must not stack)", snapshotCalls())
 	}
 	if _, err := writer.Write([]byte("\x1b")); err != nil {
 		t.Fatal(err)
