@@ -76,8 +76,10 @@ const awsDocsExample = "AKIA" + "IOSFODNN7EXAMPLE"
 
 // forbiddenComponents is the exact component table of the
 // forbidden-name rule; every comparison is case-insensitive.
+// .soho and .herdr-soho are the state directories, the new name and the
+// legacy name of the compatibility window.
 var forbiddenComponents = []string{
-	".git", ".herdr-soho", ".herdr-agents", ".agents", ".worktrees",
+	".git", ".soho", ".herdr-soho", ".agents", ".worktrees",
 	".claude", ".codex", ".grok", ".pi", ".ssh", ".aws", ".gnupg",
 	".docker", ".npmrc", ".netrc", ".env", "auth.json",
 	".credentials.json", "credentials.json", "credentials",

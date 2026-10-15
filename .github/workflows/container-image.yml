@@ -6,9 +6,9 @@ on:
       - Dockerfile
       - Dockerfile.dockerignore
       - go.mod
-      - cmd/herdr-soho/**
+      - cmd/soho/**
       - internal/**
-      - skills/herdr-soho/**
+      - skills/soho/**
       - container/**
       - .github/workflows/container-image.yml
   push:
@@ -17,9 +17,9 @@ on:
       - Dockerfile
       - Dockerfile.dockerignore
       - go.mod
-      - cmd/herdr-soho/**
+      - cmd/soho/**
       - internal/**
-      - skills/herdr-soho/**
+      - skills/soho/**
       - container/**
       - .github/workflows/container-image.yml
 
@@ -47,7 +47,7 @@ jobs:
       TARGET_ARCH: ${{ matrix.arch }}
       EXPECTED_UNAME: ${{ matrix.uname }}
       BUILDKIT_IMAGE: moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
-      IMAGE_NAME: herdr-soho-base:0.1.0
+      IMAGE_NAME: soho-base:0.1.0
       GOTOOLCHAIN: auto
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
     steps:
@@ -80,12 +80,12 @@ jobs:
           set -euo pipefail
           SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')
           SOURCE_DATE_EPOCH=$(git log -1 --format=%ct HEAD)
-          HERDR_SOHO_VERSION=$(git describe --tags --always)
+          SOHO_VERSION=$(git describe --tags --always)
           VCS_REF="$EXPECTED_SHA"
-          ARCHIVE="$RUNNER_TEMP/herdr-soho-base-linux-${TARGET_ARCH}.tar"
+          ARCHIVE="$RUNNER_TEMP/soho-base-linux-${TARGET_ARCH}.tar"
           ACCEPT_FILE="container/image-scan-accept.linux-${TARGET_ARCH}.txt"
-          if [[ -z "$HERDR_SOHO_VERSION" || "$HERDR_SOHO_VERSION" =~ [^A-Za-z0-9._+-] ]]; then
-            echo "HERDR_SOHO_VERSION is empty or contains characters outside [A-Za-z0-9._+-]: ${HERDR_SOHO_VERSION}" >&2
+          if [[ -z "$SOHO_VERSION" || "$SOHO_VERSION" =~ [^A-Za-z0-9._+-] ]]; then
+            echo "SOHO_VERSION is empty or contains characters outside [A-Za-z0-9._+-]: ${SOHO_VERSION}" >&2
             exit 1
           fi
           if [[ ! -f "$ACCEPT_FILE" ]]; then
@@ -95,7 +95,7 @@ jobs:
           {
             echo "SOURCE_TREE=$SOURCE_TREE"
             echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
-            echo "HERDR_SOHO_VERSION=$HERDR_SOHO_VERSION"
+            echo "SOHO_VERSION=$SOHO_VERSION"
             echo "VCS_REF=$VCS_REF"
             echo "ARCHIVE=$ARCHIVE"
             echo "ACCEPT_FILE=$ACCEPT_FILE"
@@ -103,11 +103,11 @@ jobs:
           {
             echo "SOURCE_TREE=$SOURCE_TREE"
             echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
-            echo "HERDR_SOHO_VERSION=$HERDR_SOHO_VERSION"
+            echo "SOHO_VERSION=$SOHO_VERSION"
             echo "VCS_REF=$VCS_REF"
             echo "ARCHIVE=$ARCHIVE"
             echo "ACCEPT_FILE=$ACCEPT_FILE"
-            echo "blob Dockerfile: $(git rev-parse HEAD:Dockerfile)"
+            echo "blob Dockerfile: $(git rev-parse HEAD:Dockerfile)" 
             echo "blob Dockerfile.dockerignore: $(git rev-parse HEAD:Dockerfile.dockerignore)"
             echo "blob container/smoke.json: $(git rev-parse HEAD:container/smoke.json)"
             echo "blob $ACCEPT_FILE: $(git rev-parse "HEAD:$ACCEPT_FILE")"
@@ -164,7 +164,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BUILDER="herdr-soho-ci-${TARGET_ARCH}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          BUILDER="soho-ci-${TARGET_ARCH}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           echo "BUILDER=$BUILDER" >> "$GITHUB_ENV"
           docker buildx create --name "$BUILDER" --driver docker-container --driver-opt "image=${BUILDKIT_IMAGE}" --bootstrap
           docker buildx inspect "$BUILDER"
@@ -175,7 +175,7 @@ jobs:
           set -euo pipefail
           docker buildx build --builder "$BUILDER" --no-cache --platform "linux/${TARGET_ARCH}" \
             --build-arg "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" \
-            --build-arg "HERDR_SOHO_VERSION=${HERDR_SOHO_VERSION}" \
+            --build-arg "SOHO_VERSION=${SOHO_VERSION}" \
             --build-arg "VCS_REF=${VCS_REF}" \
             --provenance=false --sbom=false \
             --output "type=docker,name=${IMAGE_NAME},dest=${ARCHIVE},rewrite-timestamp=true" \
@@ -193,7 +193,7 @@ jobs:
           image_os=$(docker image inspect --format '{{.Os}}' "$IMAGE_NAME")
           IMAGE_ARCH=$(docker image inspect --format '{{.Architecture}}' "$IMAGE_NAME")
           IMAGE_REVISION=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE_NAME")
-          image_cli_version=$(docker image inspect --format '{{ index .Config.Labels "io.github.herdr-soho.cli.version" }}' "$IMAGE_NAME")
+          image_cli_version=$(docker image inspect --format '{{ index .Config.Labels "io.github.soho.cli.version" }}' "$IMAGE_NAME")
           if [[ "$image_os" != "linux" ]]; then
             echo "image OS mismatch: expected linux, got $image_os" >&2
             exit 1
@@ -206,8 +206,8 @@ jobs:
             echo "image revision label mismatch: expected $EXPECTED_SHA, got $IMAGE_REVISION" >&2
             exit 1
           fi
-          if [[ "$image_cli_version" != "$HERDR_SOHO_VERSION" ]]; then
-            echo "image CLI version label mismatch: expected $HERDR_SOHO_VERSION, got $image_cli_version" >&2
+          if [[ "$image_cli_version" != "$SOHO_VERSION" ]]; then
+            echo "image CLI version label mismatch: expected $SOHO_VERSION, got $image_cli_version" >&2
             exit 1
           fi
           echo "IMAGE_ARCH=$IMAGE_ARCH" >> "$GITHUB_ENV"
@@ -219,7 +219,7 @@ jobs:
           set -euo pipefail
           set +e
           go run ./container/imagecheck smoke --image "$IMAGE_ID" --spec container/smoke.json \
-            --build-arg "HERDR_SOHO_VERSION=${HERDR_SOHO_VERSION}" 2>&1 | tee "$RUNNER_TEMP/smoke.log"
+            --build-arg "SOHO_VERSION=${SOHO_VERSION}" 2>&1 | tee "$RUNNER_TEMP/smoke.log"
           statuses=("${PIPESTATUS[@]}")
           set -e
           smoke_exit=${statuses[0]}
@@ -282,7 +282,7 @@ jobs:
             --output "type=local,dest=${RUNNER_TEMP}/context" .
           set +e
           go run ./container/imagecheck context "$RUNNER_TEMP/context" \
-            --allow go.mod --allow cmd/herdr-soho --allow internal --allow skills/herdr-soho \
+            --allow go.mod --allow cmd/soho --allow internal --allow skills/soho \
             --allow container/runners/package.json --allow container/runners/package-lock.json \
             2>&1 | tee "$RUNNER_TEMP/context-scan.log"
           statuses=("${PIPESTATUS[@]}")
@@ -319,7 +319,7 @@ jobs:
             echo "| Event | ${GITHUB_EVENT_NAME:-not reached} |"
             echo "| Source SHA | ${EXPECTED_SHA:-not reached} |"
             echo "| Source tree | ${SOURCE_TREE:-not reached} |"
-            echo "| herdr-soho version | ${HERDR_SOHO_VERSION:-not reached} |"
+            echo "| soho version | ${SOHO_VERSION:-not reached} |"
             echo "| SOURCE_DATE_EPOCH | ${SOURCE_DATE_EPOCH:-not reached} |"
             echo "| Runner uname -m | $(uname -m) |"
             echo "| Docker server arch | ${DOCKER_SERVER_ARCH:-not reached} |"

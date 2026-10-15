@@ -1,4 +1,4 @@
-# Reviewed matches of `imagecheck image` for herdr-soho-base 0.1.0, linux-arm64.
+# Reviewed matches of `imagecheck image` for soho-base 0.1.0, linux-arm64.
 # Format: <rule> <offset> <length> sha256:<file sha256> <path>. Each entry
 # accepts one match of one exact file at one path (in each layer holding
 # those same bytes there); any other match, any changed byte
@@ -56,6 +56,6 @@ aws-access-key 44171058 20 sha256:0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509
 # lower-case words, and (amd64 only) the compiled-in prefix constant
 # (verified upstream marker), also in the arm64 binary, run together with a
 # 19-letter word and UPPER_SNAKE constant names.
-github-token 199063400 40 sha256:071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5 opt/herdr-soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex
-openai-key 202520125 55 sha256:071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5 opt/herdr-soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex
-github-token 202562441 72 sha256:071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5 opt/herdr-soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex
+github-token 199063400 40 sha256:071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5 opt/soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex
+openai-key 202520125 55 sha256:071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5 opt/soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex
+github-token 202562441 72 sha256:071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5 opt/soho/runners/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex

@@ -4,9 +4,9 @@
 # context. `imagecheck context` verifies the result (docs/container-image.md).
 *
 !go.mod
-!cmd/herdr-soho
+!cmd/soho
 !internal
-!skills/herdr-soho
+!skills/soho
 !container/runners/package.json
 !container/runners/package-lock.json
 
@@ -14,5 +14,5 @@
 **/*_test.go
 **/testdata
 internal/testutil
-skills/herdr-soho/scripts
+skills/soho/scripts
 **/.*
