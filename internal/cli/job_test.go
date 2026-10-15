@@ -750,6 +750,20 @@ func TestJobControlCancelCheckpoint(t *testing.T) {
 		t.Fatalf("cancel grace file: %q err=%v", data, err)
 	}
 
+	// While the cancel is pending, a checkpoint is refused with
+	// cancel_pending (exit 2) and nothing is queued.
+	code, out, errOut = f.run(t, "checkpoint", "--id", "job-1")
+	if code != 2 || out != "" || !strings.Contains(errOut, "cancel_pending") {
+		t.Fatalf("checkpoint while canceling code=%d out=%q err=%q", code, out, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(ctl, "checkpoint")); !os.IsNotExist(err) {
+		t.Fatalf("checkpoint queued while canceling: %v", err)
+	}
+
+	// Once the cancel is retired, a checkpoint is queued again.
+	if err := os.Remove(filepath.Join(ctl, "cancel.json")); err != nil {
+		t.Fatal(err)
+	}
 	code, out, errOut = f.run(t, "checkpoint", "--id", "job-1")
 	if code != 0 || out != jobRunningStatusLine || errOut != "" {
 		t.Fatalf("checkpoint code=%d out=%q err=%q", code, out, errOut)
