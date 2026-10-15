@@ -1,6 +1,7 @@
 package job
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -48,12 +49,20 @@ type rosterRow struct {
 
 // selfCLI is the production teamOps: one herdr-soho executable, the job
 // worktree as working directory, one bounded timeout per command (a zero
-// Timeout is 120 s).
+// Timeout is 120 s) and, when set, one platform context every command runs
+// under (a cancelled context ends the command the adapter started, and
+// only that one).
 type selfCLI struct {
 	Exe     string
 	Dir     string
 	Env     platform.Env
 	Timeout time.Duration
+	// Ctx, when non-nil, is the platform context of every command the
+	// adapter runs: a cancel of it ends only the subprocesses this adapter
+	// opened (the platform cancels the command it started, never another
+	// process tree). The supervisor sets it on the in-flight delivery the
+	// pending cancel interrupts.
+	Ctx context.Context
 }
 
 func (c selfCLI) timeout() time.Duration {
@@ -66,7 +75,9 @@ func (c selfCLI) timeout() time.Duration {
 // bounded is the same adapter with every command timeout lowered to at most
 // d (never raised above its own bound): the terminal procedure's collaboration
 // step runs its dispatches and roster reads through it, so one command
-// cannot outlast the step's remaining time.
+// cannot outlast the step's remaining time. A zero or negative d keeps the
+// adapter's own bound: the stop path uses it for the spent-remainder case,
+// where the command still has its own deadline.
 func (c selfCLI) bounded(d time.Duration) teamOps {
 	if d > 0 && d < c.timeout() {
 		c.Timeout = d
@@ -74,14 +85,42 @@ func (c selfCLI) bounded(d time.Duration) teamOps {
 	return c
 }
 
+// interruptible is the same adapter with its commands running under ctx: the
+// platform context the supervisor cancels when a cancel arrives while a
+// delivery is in flight, so the in-flight subprocess the adapter opened is
+// the one that ends. A nil ctx keeps the adapter as is.
+func (c selfCLI) interruptible(ctx context.Context) teamOps {
+	if ctx != nil {
+		c.Ctx = ctx
+	}
+	return c
+}
+
 // step runs one self subprocess and maps any failure to the fixed error of
 // the operation.
 func (c selfCLI) step(op string, args ...string) (string, error) {
-	out, err := runStepIn(c.Dir, c.Exe, args, c.timeout(), c.Env)
+	out, err := runStepInCtx(c.Dir, c.Exe, args, c.timeout(), c.Env, c.Ctx)
 	if err != nil {
 		return "", teamOpsError(op)
 	}
 	return out, nil
+}
+
+// runStepInCtx is runStepIn (prepare.go) with the platform context of the
+// subprocess: a cancel of ctx ends only the command the runner opened. A
+// nil ctx runs without one, exactly like runStepIn.
+func runStepInCtx(dir, exe string, args []string, timeout time.Duration, env platform.Env, ctx context.Context) (string, error) {
+	opts := platform.RunOptions{Context: ctx, Env: env, Cwd: dir, TimeoutMs: timeoutMs(timeout)}
+	var result platform.RunResult
+	if filepath.IsAbs(exe) {
+		result = platform.RunExecutable(exe, args, opts)
+	} else {
+		result = platform.RunCli(exe, args, opts)
+	}
+	if result.NotFound || result.TimedOut || result.Status == nil || *result.Status != 0 {
+		return "", errSubprocess
+	}
+	return result.Stdout, nil
 }
 
 // teamOpsError is the fixed error of one failed operation; the subprocess
@@ -190,7 +229,7 @@ func (c selfCLI) Send(name, path string) error {
 // provider states print a JSON object instead of a tab line, so a line that
 // carries the agent in its agent field is read the same way.
 func (c selfCLI) Status(name string) (string, string, error) {
-	opts := platform.RunOptions{Env: c.Env, Cwd: c.Dir, TimeoutMs: timeoutMs(c.timeout())}
+	opts := platform.RunOptions{Context: c.Ctx, Env: c.Env, Cwd: c.Dir, TimeoutMs: timeoutMs(c.timeout())}
 	var result platform.RunResult
 	if filepath.IsAbs(c.Exe) {
 		result = platform.RunExecutable(c.Exe, []string{"status", name}, opts)

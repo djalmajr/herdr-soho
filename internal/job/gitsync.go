@@ -4,13 +4,18 @@
 // draft pull request once (looking up an existing one first), commits
 // leftovers as a wip checkpoint, and reports the clean and in-sync facts the
 // report derives limpeza.removivel from. It never removes a worktree, a
-// branch, or a pull request. Every subprocess goes through runStep with a
-// bounded timeout, and its errors are fixed strings that name the step —
-// subprocess output, URLs, and environment values never appear in them.
+// branch, or a pull request. Every subprocess runs with a bounded timeout,
+// and, when the optional Context is set, under it: a cancel of that context
+// ends only the subprocesses this sync opened and the step reports
+// errCancelled, not the step error. The other errors are fixed strings that
+// name the step — subprocess output, URLs, and environment values never
+// appear in them.
 package job
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +47,13 @@ type GitSync struct {
 	// the supervisor's terminal procedure clamps each subprocess to the
 	// remaining time of its step (never to zero, which would mean none).
 	Limit func(time.Duration) time.Duration
+	// Context, when non-nil, is the platform context every subprocess runs
+	// under (the same pattern as runStepInCtx): a cancel of it ends only the
+	// subprocesses GitSync itself opened — the supervisor's pending cancel
+	// cutting the in-flight periodic sync — and a step whose subprocess
+	// ended that way reports errCancelled, not the fixed step error, so the
+	// cut is not mistaken for a failure.
+	Context context.Context
 }
 
 // limited applies Limit to a timeout.
@@ -74,6 +86,20 @@ type PushResult struct {
 // step and nothing else.
 func gitSyncError(step string) error {
 	return &ExitError{Code: ExitFailed, Msg: "job: git sync failed: " + step}
+}
+
+// errCancelled is the fixed error of a step whose subprocess ended because
+// the GitSync context was cancelled: the supervisor's pending cancel cut
+// the in-flight periodic sync, and the cut is not a failure (no friction,
+// no refused-push block). A nil context (every caller without one, such as
+// the terminal procedure) is never cancelled, so the terminal path keeps
+// its own errors.
+var errCancelled = errors.New("job: git sync cut by the cancel")
+
+// cancelled reports whether this GitSync's context was cancelled: the
+// step's subprocess is the one the cancel ended.
+func (g *GitSync) cancelled() bool {
+	return g.Context != nil && g.Context.Err() != nil
 }
 
 func (g *GitSync) localTimeout() time.Duration {
@@ -114,8 +140,11 @@ func (g *GitSync) ghEnv() platform.Env {
 
 // Head is the worktree's HEAD sha.
 func (g *GitSync) Head() (string, error) {
-	out, err := runStep("git", []string{"-C", g.Dir, "rev-parse", "HEAD"}, g.localTimeout(), g.gitEnv())
+	out, err := runStepInCtx("", "git", []string{"-C", g.Dir, "rev-parse", "HEAD"}, g.localTimeout(), g.gitEnv(), g.Context)
 	if err != nil {
+		if g.cancelled() {
+			return "", errCancelled
+		}
 		return "", gitSyncError("head")
 	}
 	return strings.TrimSpace(out), nil
@@ -124,8 +153,11 @@ func (g *GitSync) Head() (string, error) {
 // RemoteHead is the sha of the remote job branch; "" (no error) when the
 // remote branch does not exist yet.
 func (g *GitSync) RemoteHead() (string, error) {
-	out, err := runStep("git", []string{"-C", g.Dir, "ls-remote", "origin", "refs/heads/" + g.Branch}, g.netTimeout(), g.gitEnv())
+	out, err := runStepInCtx("", "git", []string{"-C", g.Dir, "ls-remote", "origin", "refs/heads/" + g.Branch}, g.netTimeout(), g.gitEnv(), g.Context)
 	if err != nil {
+		if g.cancelled() {
+			return "", errCancelled
+		}
 		return "", gitSyncError("remote head")
 	}
 	fields := strings.Fields(out)
@@ -143,8 +175,11 @@ func (g *GitSync) RemoteHead() (string, error) {
 // non-nil slice.
 func (g *GitSync) Commits() ([]Commit, error) {
 	commits := []Commit{}
-	out, err := runStep("git", []string{"-C", g.Dir, "log", "--reverse", "--format=%H%x09%s", "refs/remotes/origin/" + g.Base + "..HEAD"}, g.localTimeout(), g.gitEnv())
+	out, err := runStepInCtx("", "git", []string{"-C", g.Dir, "log", "--reverse", "--format=%H%x09%s", "refs/remotes/origin/" + g.Base + "..HEAD"}, g.localTimeout(), g.gitEnv(), g.Context)
 	if err != nil {
+		if g.cancelled() {
+			return nil, errCancelled
+		}
 		return nil, gitSyncError("commits")
 	}
 	for _, line := range strings.Split(out, "\n") {
@@ -166,8 +201,11 @@ func (g *GitSync) Commits() ([]Commit, error) {
 // RemoteHead(). Resumo stays empty; the report builder derives removivel and
 // sincronizado from these fields.
 func (g *GitSync) Facts() (ReportFacts, error) {
-	out, err := runStep("git", []string{"-C", g.Dir, "status", "--porcelain"}, g.localTimeout(), g.gitEnv())
+	out, err := runStepInCtx("", "git", []string{"-C", g.Dir, "status", "--porcelain"}, g.localTimeout(), g.gitEnv(), g.Context)
 	if err != nil {
+		if g.cancelled() {
+			return ReportFacts{}, errCancelled
+		}
 		return ReportFacts{}, gitSyncError("status")
 	}
 	head, err := g.Head()
@@ -205,13 +243,19 @@ func (g *GitSync) Push() (PushResult, error) {
 	}
 	// RunCli directly (deadline and WaitDelay, argv only) so a timeout, a
 	// missing executable or a killed process stays apart from a refused push:
-	// only a non-zero exit is reported as Rejected for the blocked event.
-	result := platform.RunCli("git", []string{"-C", g.Dir, "push", "--porcelain", "origin", "HEAD:refs/heads/" + g.Branch}, platform.RunOptions{Env: gitEnv, TimeoutMs: timeoutMs(g.netTimeout())})
+	// only a non-zero exit is reported as Rejected for the blocked event. The
+	// optional context runs under the supervisor's cancel observer: a cancel
+	// of it kills this push and reports the cut, not a refusal.
+	result := platform.RunCli("git", []string{"-C", g.Dir, "push", "--porcelain", "origin", "HEAD:refs/heads/" + g.Branch}, platform.RunOptions{Context: g.Context, Env: gitEnv, TimeoutMs: timeoutMs(g.netTimeout())})
 	switch {
+	case !result.NotFound && !result.TimedOut && result.Status != nil && *result.Status == 0:
+		return PushResult{Pushed: true, Head: head}, nil
+	case g.cancelled():
+		// The cancel cut this push: whatever the exit (a git killed on
+		// Windows exits 1), it is the cut, never a refusal.
+		return PushResult{}, errCancelled
 	case result.NotFound || result.TimedOut || result.Status == nil:
 		return PushResult{Head: head}, gitSyncError("push")
-	case *result.Status == 0:
-		return PushResult{Pushed: true, Head: head}, nil
 	default:
 		return PushResult{Rejected: true, Head: head}, nil
 	}
@@ -226,7 +270,10 @@ func (g *GitSync) Checkpoint() (bool, error) {
 	// The timeout is read immediately before each subprocess: under a Limit
 	// that means "what is left of the step", a later command must not get the
 	// remainder the first one saw.
-	if _, err := runStep("git", []string{"-C", g.Dir, "add", "-A"}, g.localTimeout(), env); err != nil {
+	if _, err := runStepInCtx("", "git", []string{"-C", g.Dir, "add", "-A"}, g.localTimeout(), env, g.Context); err != nil {
+		if g.cancelled() {
+			return false, errCancelled
+		}
 		return false, gitSyncError("checkpoint")
 	}
 	// diff --cached --quiet exits 0 when nothing is staged and 1 when the
@@ -234,10 +281,13 @@ func (g *GitSync) Checkpoint() (bool, error) {
 	// same error, so a genuine diff failure falls through to the commit,
 	// which fails on its own when nothing was staged and surfaces as the
 	// checkpoint error instead of committing an empty commit.
-	if _, err := runStep("git", []string{"-C", g.Dir, "diff", "--cached", "--quiet"}, g.localTimeout(), env); err == nil {
+	if _, err := runStepInCtx("", "git", []string{"-C", g.Dir, "diff", "--cached", "--quiet"}, g.localTimeout(), env, g.Context); err == nil {
 		return false, nil
 	}
-	if _, err := runStep("git", []string{"-C", g.Dir, "commit", "--no-verify", "-m", "wip(job): checkpoint"}, g.localTimeout(), env); err != nil {
+	if _, err := runStepInCtx("", "git", []string{"-C", g.Dir, "commit", "--no-verify", "-m", "wip(job): checkpoint"}, g.localTimeout(), env, g.Context); err != nil {
+		if g.cancelled() {
+			return false, errCancelled
+		}
 		return false, gitSyncError("checkpoint")
 	}
 	return true, nil
@@ -250,8 +300,11 @@ func (g *GitSync) Checkpoint() (bool, error) {
 // deletes a branch.
 func (g *GitSync) EnsureDraftPR(title, body string) (PullRequest, bool, error) {
 	ghEnv := g.ghEnv()
-	list, err := runStep("gh", []string{"pr", "list", "--repo", g.Repo, "--head", g.Branch, "--state", "all", "--json", "number,url,isDraft", "--limit", "1"}, g.ghTimeout(), ghEnv)
+	list, err := runStepInCtx("", "gh", []string{"pr", "list", "--repo", g.Repo, "--head", g.Branch, "--state", "all", "--json", "number,url,isDraft", "--limit", "1"}, g.ghTimeout(), ghEnv, g.Context)
 	if err != nil {
+		if g.cancelled() {
+			return PullRequest{}, false, errCancelled
+		}
 		return PullRequest{}, false, gitSyncError("pr")
 	}
 	// Only a JSON array of zero or one element is accepted; anything else
@@ -279,8 +332,11 @@ func (g *GitSync) EnsureDraftPR(title, body string) (PullRequest, bool, error) {
 	if len(items) != 0 {
 		return PullRequest{}, false, gitSyncError("pr")
 	}
-	create, err := runStep("gh", []string{"pr", "create", "--repo", g.Repo, "--draft", "--base", g.Base, "--head", g.Branch, "--title", title, "--body", body}, g.ghTimeout(), ghEnv)
+	create, err := runStepInCtx("", "gh", []string{"pr", "create", "--repo", g.Repo, "--draft", "--base", g.Base, "--head", g.Branch, "--title", title, "--body", body}, g.ghTimeout(), ghEnv, g.Context)
 	if err != nil {
+		if g.cancelled() {
+			return PullRequest{}, false, errCancelled
+		}
 		return PullRequest{}, false, gitSyncError("pr")
 	}
 	url := lastNonEmptyLine(create)

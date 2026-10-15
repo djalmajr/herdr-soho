@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Control requests are queued by the dispatcher (job amend, send, cancel,
@@ -46,6 +47,25 @@ func controlRefused(status string) bool {
 	default:
 		return false
 	}
+}
+
+// cancelPending reports the cancel the job accepted and has not yet
+// recorded: the pending control/cancel.json together with the persisted
+// acceptance anchor (CancelRequestedAt). Either side missing is not a
+// pending cancel: the file without the anchor is a legacy acceptance the
+// refusal does not cover, and the anchor without the file is a crashed
+// acceptance nothing has queued. The read is lock-free like the other
+// reads; it runs under the job lock in the request writers.
+func cancelPending(st State, ctl string) (bool, error) {
+	if st.CancelRequestedAt == "" {
+		return false, nil
+	}
+	if _, err := os.Stat(filepath.Join(ctl, "cancel.json")); err == nil {
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("job: control unreadable: %w", err)
+	}
+	return false, nil
 }
 
 // readControlSeq reads the control/seq decimal counter; an absent file is 0.
@@ -108,14 +128,16 @@ func writeControlSeq(ctl string, next int) error {
 // RequestAmend queues the amendment body verbatim as
 // control/amend-<NNNNNN>.md and returns the item, its counter value being
 // the incremented seq. A job in a terminal outcome, collected or closed is
-// refused with exit 2 "job: job is not active".
+// refused with exit 2 "job: job is not active"; a job with a pending cancel
+// is refused with exit 2 "job: cancel_pending: the job is being canceled",
+// before anything enters control/.
 func (s *Store) RequestAmend(id string, body []byte) (ControlItem, error) {
 	return s.requestControlBody(id, "amend", body)
 }
 
 // RequestSend queues the note body verbatim as control/send-<NNNNNN>.md and
-// returns the item. The refusal of a job that is no longer active is the
-// same as RequestAmend.
+// returns the item. The refusals of a job that is no longer active and of a
+// job being canceled are the same as RequestAmend.
 func (s *Store) RequestSend(id string, body []byte) (ControlItem, error) {
 	return s.requestControlBody(id, "send", body)
 }
@@ -131,6 +153,13 @@ func (s *Store) requestControlBody(id, kind string, body []byte) (ControlItem, e
 			return errUsage("job: job is not active")
 		}
 		ctl := filepath.Join(dir, "control")
+		// An amend or send under a pending cancel is refused before anything
+		// enters control/: the job is being canceled.
+		if pending, err := cancelPending(st, ctl); err != nil {
+			return err
+		} else if pending {
+			return errUsage("job: cancel_pending: the job is being canceled")
+		}
 		if err := os.MkdirAll(ctl, 0o700); err != nil {
 			return err
 		}
@@ -162,15 +191,21 @@ func (s *Store) requestControlBody(id, kind string, body []byte) (ControlItem, e
 }
 
 // RequestCancel queues control/cancel.json ({"grace":<seconds>}); a single
-// pending cancel is the queue. A job in a terminal outcome, collected or
-// closed, or one with a pending cancel, is a no-op that reports false.
+// pending cancel is the queue. The acceptance records the grace anchor in
+// the state (CancelRequestedAt and CancelDeadline) in the same locked
+// operation, before the request file, so the supervisor — across restarts
+// — measures the grace from the acceptance. A job in a terminal outcome,
+// collected or closed, or one with a pending cancel, is a no-op that reports
+// false: the second request changes neither the anchor nor the file.
 func (s *Store) RequestCancel(id string, grace int) (bool, error) {
 	return s.requestControlFlag(id, "cancel.json", grace)
 }
 
 // RequestCheckpoint queues the empty control/checkpoint marker; a single
 // pending marker is the queue. The no-op refusals are the same as
-// RequestCancel.
+// RequestCancel, except a job with a pending cancel is refused with exit 2
+// "job: cancel_pending: the job is being canceled", before the marker
+// no-op.
 func (s *Store) RequestCheckpoint(id string) (bool, error) {
 	return s.requestControlFlag(id, "checkpoint", 0)
 }
@@ -186,6 +221,16 @@ func (s *Store) requestControlFlag(id, name string, grace int) (bool, error) {
 			return nil
 		}
 		ctl := filepath.Join(dir, "control")
+		// A checkpoint under a pending cancel is refused before the
+		// single-marker no-op: the job is being canceled. A repeat cancel is
+		// the no-op below (the queue is a single file).
+		if name == "checkpoint" {
+			if pending, err := cancelPending(st, ctl); err != nil {
+				return err
+			} else if pending {
+				return errUsage("job: cancel_pending: the job is being canceled")
+			}
+		}
 		if err := os.MkdirAll(ctl, 0o700); err != nil {
 			return err
 		}
@@ -204,6 +249,20 @@ func (s *Store) requestControlFlag(id, name string, grace int) (bool, error) {
 			}
 		}
 		queued = true
+		if name == "cancel.json" {
+			// The acceptance anchor lands in the state before the request
+			// file, under the same job lock and on the store's clock: the
+			// grace the supervisor measures (also after a restart) is the
+			// one recorded here, at the acceptance. A crash between the two
+			// leaves the anchor without the file: nothing is pending, and
+			// the next request re-records a fresh anchor.
+			now := s.clock().Now()
+			st.CancelRequestedAt = now.Format(time.RFC3339Nano)
+			st.CancelDeadline = now.Add(time.Duration(grace) * time.Second).Format(time.RFC3339Nano)
+			if err := saveState(dir, st); err != nil {
+				return err
+			}
+		}
 		return writeAtomic0600(filepath.Join(ctl, name), body)
 	})
 	return queued, err

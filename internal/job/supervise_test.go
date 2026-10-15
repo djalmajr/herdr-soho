@@ -1,6 +1,7 @@
 package job
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -49,13 +50,43 @@ type fakeTeam struct {
 	releaseCalls     int
 	releaseTeamCalls int
 	gcCalls          int
-	rosterRows       []rosterRow
-	rosterErr        error
-	rosterCalls      int
+	// releaseErr, releaseTeamErr and gcErr, when set, are returned by the
+	// release-family calls so the finalize release gate can be driven: the
+	// cleanup event lands only on a pass whose release ended clean.
+	releaseErr     error
+	releaseTeamErr error
+	gcErr          error
+	rosterRows     []rosterRow
+	rosterErr      error
+	rosterCalls    int
 	// recoveryStatus is the one-shot per-name status the recovery candidate
 	// read consumes: the watch-loop script is not consumed by that read, and
 	// a second read for the same name falls back to the script.
 	recoveryStatus map[string]fakeStatus
+	// deliveryCtx is the platform context the supervisor's interruptible
+	// adapter handed the in-flight delivery (nil when the delivery ran
+	// without one).
+	deliveryCtx context.Context
+	// bounds records the limit each bounded delivery adapter received, in
+	// call order.
+	bounds []time.Duration
+	// statusBounds records the limit of every bounded Status read.
+	statusBounds []time.Duration
+	// stuckDispatchCall and stuckSendCall name the 1-based delivery call
+	// (the brief's dispatch is call 1) that closes entered and waits for
+	// the delivery context to be cancelled before failing: the scripted
+	// stuck delivery. With no context (a supervisor without the
+	// interruptible adapter) it fails at once.
+	stuckDispatchCall int
+	stuckSendCall     int
+	entered           chan struct{}
+	// unblockedAt is when the last stuck delivery came back.
+	unblockedAt time.Time
+	// dispatchCut and sendCut, when set, replace the plain delivery errors
+	// with the scripted cut, which may advance the shared clock past the
+	// stop deadline before it returns.
+	dispatchCut func() error
+	sendCut     func() error
 }
 
 var _ teamOps = (*fakeTeam)(nil)
@@ -79,11 +110,35 @@ func (f *fakeTeam) SpawnOrchestrator() (string, error) {
 
 func (f *fakeTeam) Dispatch(name, briefPath string, amend bool) error {
 	f.dispatches = append(f.dispatches, fakeDispatch{Name: name, Path: briefPath, Amend: amend})
+	if f.stuckDispatchCall > 0 && len(f.dispatches) == f.stuckDispatchCall {
+		f.stuckDispatchCall = 0
+		close(f.entered)
+		if f.deliveryCtx != nil {
+			<-f.deliveryCtx.Done()
+			f.unblockedAt = time.Now()
+		}
+		return errors.New("the delivery context was cancelled")
+	}
+	if f.dispatchCut != nil {
+		return f.dispatchCut()
+	}
 	return f.dispatchErr
 }
 
 func (f *fakeTeam) Send(name, path string) error {
 	f.sends = append(f.sends, fakeSend{Name: name, Path: path})
+	if f.stuckSendCall > 0 && len(f.sends) == f.stuckSendCall {
+		f.stuckSendCall = 0
+		close(f.entered)
+		if f.deliveryCtx != nil {
+			<-f.deliveryCtx.Done()
+			f.unblockedAt = time.Now()
+		}
+		return errors.New("the delivery context was cancelled")
+	}
+	if f.sendCut != nil {
+		return f.sendCut()
+	}
 	return f.sendErr
 }
 
@@ -105,17 +160,17 @@ func (f *fakeTeam) Status(name string) (string, string, error) {
 
 func (f *fakeTeam) Release(name string) error {
 	f.releaseCalls++
-	return nil
+	return f.releaseErr
 }
 
 func (f *fakeTeam) ReleaseTeam() error {
 	f.releaseTeamCalls++
-	return nil
+	return f.releaseTeamErr
 }
 
 func (f *fakeTeam) GC() error {
 	f.gcCalls++
-	return nil
+	return f.gcErr
 }
 
 func (f *fakeTeam) Roster() ([]rosterRow, error) {
@@ -124,6 +179,59 @@ func (f *fakeTeam) Roster() ([]rosterRow, error) {
 		return nil, f.rosterErr
 	}
 	return f.rosterRows, nil
+}
+
+// bounded and interruptible are the supervisor's delivery adapters over
+// the fake: bounded records the limit the adapter received, and
+// interruptible records the delivery context, so the scripted deliveries
+// observe the very values the supervisor used.
+func (f *fakeTeam) bounded(d time.Duration) teamOps {
+	return &boundFakeTeam{fakeTeam: f, inner: f, bound: d}
+}
+
+func (f *fakeTeam) interruptible(ctx context.Context) teamOps {
+	return &ctxFakeTeam{fakeTeam: f, inner: f, ctx: ctx}
+}
+
+// boundFakeTeam records the limit and hands the delivery to the ops that
+// owned it (the fake itself, or a wrapper over it).
+type boundFakeTeam struct {
+	*fakeTeam
+	inner teamOps
+	bound time.Duration
+}
+
+func (w *boundFakeTeam) Dispatch(name, briefPath string, amend bool) error {
+	w.fakeTeam.bounds = append(w.fakeTeam.bounds, w.bound)
+	return w.inner.Dispatch(name, briefPath, amend)
+}
+
+func (w *boundFakeTeam) Send(name, path string) error {
+	w.fakeTeam.bounds = append(w.fakeTeam.bounds, w.bound)
+	return w.inner.Send(name, path)
+}
+
+func (w *boundFakeTeam) Status(name string) (string, string, error) {
+	w.fakeTeam.statusBounds = append(w.fakeTeam.statusBounds, w.bound)
+	return w.inner.Status(name)
+}
+
+// ctxFakeTeam records the delivery context and hands the delivery to the
+// ops that owned it.
+type ctxFakeTeam struct {
+	*fakeTeam
+	inner teamOps
+	ctx   context.Context
+}
+
+func (w *ctxFakeTeam) Dispatch(name, briefPath string, amend bool) error {
+	w.fakeTeam.deliveryCtx = w.ctx
+	return w.inner.Dispatch(name, briefPath, amend)
+}
+
+func (w *ctxFakeTeam) Send(name, path string) error {
+	w.fakeTeam.deliveryCtx = w.ctx
+	return w.inner.Send(name, path)
 }
 
 // crashBetweenSpawnAndRecord is the sentinel panic of the crash-window test.

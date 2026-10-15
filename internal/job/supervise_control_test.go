@@ -2,6 +2,7 @@ package job
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
 // The control delivery and budget tests drive the supervisor's watch loop
@@ -127,6 +130,16 @@ func (f *flakyDispatch) Dispatch(name, briefPath string, amend bool) error {
 		return errors.New("dispatch failed")
 	}
 	return nil
+}
+
+// The delivery adapters must keep the scripted failure in the delivery
+// path: they wrap the flaky, not the fake underneath it.
+func (f *flakyDispatch) bounded(d time.Duration) teamOps {
+	return &boundFakeTeam{fakeTeam: f.fakeTeam, inner: f, bound: d}
+}
+
+func (f *flakyDispatch) interruptible(ctx context.Context) teamOps {
+	return &ctxFakeTeam{fakeTeam: f.fakeTeam, inner: f, ctx: ctx}
 }
 
 func countTipe(events []Event, tipo string) int {
@@ -691,6 +704,451 @@ func TestSuperviseControlSecondCancelNoEffect(t *testing.T) {
 	}
 }
 
+// TestDeliveryInterruptedWhenCancelArrives pins the in-flight delivery the
+// pending cancel interrupts: outside the stop the delivery runs under a
+// context a background observer cancels the moment control/cancel.json
+// appears (checked every poll), the delivery returns in under 2 s with the
+// single delivery_uncertain mark (no amend_received, no retry), and the
+// stop starts on the next tick.
+func TestDeliveryInterruptedWhenCancelArrives(t *testing.T) {
+	var friction []string
+	store, jobDir, _, team, sup := nsSup(t, 100*time.Millisecond, &friction)
+	item, err := store.RequestAmend("job-1", []byte("amend the brief\n"))
+	if err != nil || item.Seq != 1 {
+		t.Fatalf("amend: item=%+v err=%v", item, err)
+	}
+	// The delivery blocks on the delivery context until the observer
+	// cancels it: the second dispatch is the control delivery (the first
+	// is the brief).
+	team.stuckDispatchCall = 2
+	team.entered = make(chan struct{})
+	// The stop runs for 60 s over the 100 ms poll: the orchestrator works
+	// through it.
+	working := make([]fakeStatus, 700)
+	for i := range working {
+		working[i] = fakeStatus{State: "working"}
+	}
+	team.statusScript = working
+	done := make(chan struct {
+		exit int
+		err  error
+	}, 1)
+	go func() {
+		exit, err := sup.Run()
+		done <- struct {
+			exit int
+			err  error
+		}{exit, err}
+	}()
+	<-team.entered
+	t0 := time.Now()
+	if queued, err := store.RequestCancel("job-1", 60); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("Run: %v", res.err)
+	}
+	if res.exit != ExitCanceled {
+		t.Fatalf("exit = %d, want %d (the interrupted delivery must not stop the stop path)", res.exit, ExitCanceled)
+	}
+	// The delivery came back in under 2 s after the cancel arrived: the
+	// observer cancelled the context and the in-flight delivery ended.
+	if elapsed := team.unblockedAt.Sub(t0); elapsed >= 2*time.Second {
+		t.Fatalf("the interrupted delivery took %v after the cancel, want less than 2 s", elapsed)
+	}
+	if st := supState(t, store); st.Status != StatusCanceled {
+		t.Fatalf("state = %+v", st)
+	}
+	// The single uncertain mark with the request's counter; nothing was
+	// delivered, unblocked or retired.
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countTipe(events, "delivery_uncertain"); n != 1 {
+		t.Fatalf("delivery_uncertain = %d, want 1", n)
+	}
+	var marked *Event
+	for i := range events {
+		if events[i].Tipo == "delivery_uncertain" {
+			marked = &events[i]
+		}
+	}
+	if marked.Refs["seq_ref"] != "1" {
+		t.Fatalf("delivery_uncertain refs = %+v, want seq_ref 1", marked.Refs)
+	}
+	if n := countTipe(events, "amend_received"); n != 0 {
+		t.Fatalf("amend_received = %d, want none (the cut delivery records, it does not deliver)", n)
+	}
+	// No retry: the amend is dispatched exactly once: the brief, the cut
+	// amend and the stop amendment, in order.
+	if len(team.dispatches) != 3 {
+		t.Fatalf("dispatches = %+v, want the brief, the cut amend and the stop amendment", team.dispatches)
+	}
+	if team.dispatches[1].Path != item.Path || !team.dispatches[1].Amend {
+		t.Fatalf("dispatches[1] = %+v, want the cut amend", team.dispatches[1])
+	}
+	if team.dispatches[2].Path != filepath.Join(jobDir, "stop-amend.md") || !team.dispatches[2].Amend {
+		t.Fatalf("dispatches[2] = %+v, want the stop amendment", team.dispatches[2])
+	}
+	// The request stays pending on the terminal job; the cancel retired
+	// once.
+	if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"amend-000001.md", "seq"}) {
+		t.Fatalf("pending control = %v, want the still-pending amend", got)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"cancel.json-000002"}) {
+		t.Fatalf("retired control = %v, want the single retired cancel", got)
+	}
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v, want none (the cut marks, it does not retry)", friction)
+	}
+}
+
+// TestDeliveryUncertainDuringGrace pins the queue delivery cut by the grace
+// while the stop runs: a delivery that fails after the stop deadline has
+// passed records the single delivery_uncertain event (refs.seq_ref the
+// request's counter) and keeps the request pending (no amend_received,
+// no retirement), and the tick does not retry it.
+func TestDeliveryUncertainDuringGrace(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+	item, err := store.RequestSend("job-1", []byte("note\n"))
+	if err != nil || item.Seq != 1 {
+		t.Fatalf("send: item=%+v err=%v", item, err)
+	}
+	if queued, err := store.RequestCancel("job-1", 10); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	// The delivery runs during the grace and fails after advancing the
+	// clock past the deadline: the cut.
+	team.sendCut = func() error {
+		clock.mono += int64(20 * time.Second)
+		return errors.New("the delivery was cut by the grace")
+	}
+	team.statusScript = []fakeStatus{{State: "working"}}
+	exit, err := sup.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exit != ExitCanceled {
+		t.Fatalf("exit = %d, want %d", exit, ExitCanceled)
+	}
+	if st := supState(t, store); st.Status != StatusCanceled {
+		t.Fatalf("state = %+v", st)
+	}
+	// The single uncertain mark with the request's counter; nothing was
+	// delivered, unblocked or retired.
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countTipe(events, "delivery_uncertain"); n != 1 {
+		t.Fatalf("delivery_uncertain = %d, want 1", n)
+	}
+	var marked *Event
+	for i := range events {
+		if events[i].Tipo == "delivery_uncertain" {
+			marked = &events[i]
+		}
+	}
+	if marked.Refs["seq_ref"] != "1" {
+		t.Fatalf("delivery_uncertain refs = %+v, want seq_ref 1", marked.Refs)
+	}
+	if n := countTipe(events, "amend_received"); n != 0 {
+		t.Fatalf("amend_received = %d, want none (the cut delivery records, it does not deliver)", n)
+	}
+	// The delivery ran once, bounded to the remaining grace: the stop
+	// amendment and the cut send, both with the full 10 s at their start.
+	if len(team.sends) != 1 {
+		t.Fatalf("sends = %+v, want the single cut delivery (no retry)", team.sends)
+	}
+	if len(team.bounds) != 2 || team.bounds[0] != 10*time.Second || team.bounds[1] != 10*time.Second {
+		t.Fatalf("bounds = %v, want the remaining grace on the stop amendment and on the delivery", team.bounds)
+	}
+	// The request stays pending on the terminal job; the cancel retired
+	// once.
+	if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"send-000001.md", "seq"}) {
+		t.Fatalf("pending control = %v, want the still-pending send", got)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"cancel.json-000002"}) {
+		t.Fatalf("retired control = %v, want the single retired cancel", got)
+	}
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v, want none (the cut marks, it does not retry)", friction)
+	}
+}
+
+// TestDeliveryUncertainSurvivesRestartWithoutResend pins the uncertain
+// delivery across a restart: the mark lands in the log before the first
+// process dies (before the terminal), and the next supervisor skips the
+// marked request instead of re-sending it.
+func TestDeliveryUncertainSurvivesRestartWithoutResend(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := nsSup(t, 100*time.Millisecond, &friction)
+	item, err := store.RequestSend("job-1", []byte("note\n"))
+	if err != nil || item.Seq != 1 {
+		t.Fatalf("send: item=%+v err=%v", item, err)
+	}
+	// The delivery blocks on the delivery context until the observer
+	// cancels it: the send is the only Send call.
+	team.stuckSendCall = 1
+	team.entered = make(chan struct{})
+	team.statusScript = []fakeStatus{{State: "working"}}
+	// The first process dies after its first sleep: after the uncertain
+	// mark, before the terminal.
+	clock.stopAfter = 1
+	clock.stop = errCancelRestartCrash
+	done := make(chan struct {
+		exit    int
+		err     error
+		crashed bool
+	}, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if !errors.Is(r.(error), errCancelRestartCrash) {
+					panic(r)
+				}
+				done <- struct {
+					exit    int
+					err     error
+					crashed bool
+				}{0, nil, true}
+			}
+		}()
+		exit, err := sup.Run()
+		done <- struct {
+			exit    int
+			err     error
+			crashed bool
+		}{exit, err, false}
+	}()
+	<-team.entered
+
+	if queued, err := store.RequestCancel("job-1", 60); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	res := <-done
+	if !res.crashed {
+		t.Fatalf("the first supervisor ended (exit=%d err=%v), want the crash before the terminal", res.exit, res.err)
+	}
+	if st := supState(t, store); st.Status != StatusRunning {
+		t.Fatalf("status after the crash = %s, want running", st.Status)
+	}
+	// The mark landed before the crash.
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countTipe(events, "delivery_uncertain"); n != 1 {
+		t.Fatalf("delivery_uncertain after the crash = %d, want 1", n)
+	}
+	// The next supervisor over the same store and the same fake: it must
+	// skip the marked request and start the stop once, on the persisted
+	// deadline.
+	clock2 := &nsClock{now: clock.now}
+	working := make([]fakeStatus, 700)
+	for i := range working {
+		working[i] = fakeStatus{State: "working"}
+	}
+	team.statusScript = working
+	sup2 := &Supervisor{Store: store, ID: "job-1", Ops: team, Clock: clock2, Poll: 100 * time.Millisecond, Friction: func(message string) { friction = append(friction, message) }}
+	exit, err := sup2.Run()
+	if err != nil {
+		t.Fatalf("restart Run: %v", err)
+	}
+	if exit != ExitCanceled {
+		t.Fatalf("exit = %d, want %d (the in-flight cancel must survive the restart)", exit, ExitCanceled)
+	}
+	if st := supState(t, store); st.Status != StatusCanceled {
+		t.Fatalf("state = %+v", st)
+	}
+	// No resend: exactly one send across both processes, the cut one.
+	if len(team.sends) != 1 {
+		t.Fatalf("sends = %+v, want exactly the cut send (the mark must survive the restart)", team.sends)
+	}
+	// The mark was not re-recorded.
+	events, err = readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countTipe(events, "delivery_uncertain"); n != 1 {
+		t.Fatalf("delivery_uncertain = %d, want 1 (the mark is not re-recorded)", n)
+	}
+	// The request stays pending on the terminal job; the cancel retired
+	// once.
+	if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"send-000001.md", "seq"}) {
+		t.Fatalf("pending control = %v, want the still-pending send", got)
+	}
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v, want none", friction)
+	}
+}
+
+// TestNoDeliveryAttemptAfterTheGraceDeadline pins the queue delivery during
+// the stop when the grace is already spent: with no time left there is no
+// attempt (the request stays in control/), and the stop ends the job on
+// the first check.
+func TestNoDeliveryAttemptAfterTheGraceDeadline(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+	// A queue request pending before the cancel's acceptance.
+	if _, err := store.RequestSend("job-1", []byte("note\n")); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	// A zero-grace cancel: the deadline is now, so the queue delivery has
+	// no time at all.
+	if queued, err := store.RequestCancel("job-1", 0); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	team.statusScript = []fakeStatus{{State: "working"}}
+	exit, err := sup.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exit != ExitCanceled {
+		t.Fatalf("exit = %d, want %d", exit, ExitCanceled)
+	}
+	// No queue delivery was attempted and the spent deadline skips the
+	// stop amendment too: only the brief was dispatched, and no send ran
+	// at all.
+	if len(team.dispatches) != 1 || team.dispatches[0].Path != filepath.Join(jobDir, "orchestrator-brief.md") {
+		t.Fatalf("dispatches = %+v, want the brief only (no time left: no attempt)", team.dispatches)
+	}
+	if len(team.sends) != 0 {
+		t.Fatalf("sends = %+v, want none (no time left: no attempt)", team.sends)
+	}
+	// No bounded delivery at all: the stop amendment is not dispatched
+	// with the spent bound.
+	if len(team.bounds) != 0 {
+		t.Fatalf("bounds = %v, want none (no time left: no attempt)", team.bounds)
+	}
+	// Nothing was delivered, marked or retired: the request stays pending
+	// on the terminal job.
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countTipe(events, "delivery_uncertain"); n != 0 {
+		t.Fatalf("delivery_uncertain = %d, want none (no attempt was made)", n)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"send-000001.md", "seq"}) {
+		t.Fatalf("pending control = %v, want the still-pending send", got)
+	}
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v", friction)
+	}
+	if clock.sleeps != 0 {
+		t.Fatalf("sleeps = %d, want 0 (the spent deadline ends the stop on the first check)", clock.sleeps)
+	}
+}
+
+// TestStopAmendmentBoundedByTheGrace pins the bounded stop amendment:
+// beginStop computes the grace deadline before dispatching the stop
+// amendment, and the dispatch runs limited to the grace remaining; a cut
+// dispatch keeps the stop running to the deadline, with exactly one
+// friction line and no delivery_uncertain mark for it.
+func TestStopAmendmentBoundedByTheGrace(t *testing.T) {
+	t.Run("the stop amendment is limited to the grace remaining", func(t *testing.T) {
+		var friction []string
+		store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+		if queued, err := store.RequestCancel("job-1", 60); !queued || err != nil {
+			t.Fatalf("cancel: queued=%v err=%v", queued, err)
+		}
+		team.statusScript = []fakeStatus{{State: "working"}}
+		// The process dies after the first sleep: enough to start the stop
+		// and dispatch the amendment once.
+		clock.stopAfter = 1
+		clock.stop = errCancelRestartCrash
+		runUntilStop(t, sup, errCancelRestartCrash)
+		if team.dispatches[len(team.dispatches)-1].Path != filepath.Join(jobDir, "stop-amend.md") {
+			t.Fatalf("dispatches = %+v, want the stop amendment last", team.dispatches)
+		}
+		// The stop amendment is the only bounded delivery: the brief is
+		// dispatched before the stop, and the queue is empty.
+		if len(team.bounds) != 1 || team.bounds[0] != 60*time.Second {
+			t.Fatalf("bounds = %v, want the full grace on the stop amendment", team.bounds)
+		}
+		if len(friction) != 0 {
+			t.Fatalf("friction = %v", friction)
+		}
+	})
+	t.Run("a cut stop amendment keeps the stop running with one friction line", func(t *testing.T) {
+		var friction []string
+		store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+		if queued, err := store.RequestCancel("job-1", 60); !queued || err != nil {
+			t.Fatalf("cancel: queued=%v err=%v", queued, err)
+		}
+		// Only the stop amendment (the second dispatch; the brief is the
+		// first) is cut.
+		team.dispatchCut = func() error {
+			if len(team.dispatches) < 2 {
+				return nil
+			}
+			return errors.New("the stop amendment dispatch was cut")
+		}
+		working := make([]fakeStatus, 7)
+		for i := range working {
+			working[i] = fakeStatus{State: "working"}
+		}
+		team.statusScript = working
+		exit, err := sup.Run()
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if exit != ExitCanceled {
+			t.Fatalf("exit = %d, want %d (the stop runs to the deadline even when the dispatch is cut)", exit, ExitCanceled)
+		}
+		if st := supState(t, store); st.Status != StatusCanceled {
+			t.Fatalf("state = %+v", st)
+		}
+		// Exactly one friction line, the cut; no delivery_uncertain mark for
+		// the stop amendment (it is not a queue request).
+		if len(friction) != 1 || friction[0] != "job: the supervisor cannot dispatch the stop amendment" {
+			t.Fatalf("friction = %v, want exactly the cut line", friction)
+		}
+		events, err := readEvents(jobDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := countTipe(events, "delivery_uncertain"); n != 0 {
+			t.Fatalf("delivery_uncertain = %d, want none (the stop amendment cut only goes to friction)", n)
+		}
+		// The stop ran to the deadline: six 10 s sleeps.
+		if clock.sleeps != 6 {
+			t.Fatalf("sleeps = %d, want 6 (the grace deadline)", clock.sleeps)
+		}
+	})
+}
+
+// TestSelfCLIInterruptibleContextCancelsTheInFlightStep pins the
+// interruptible adapter against a real fake executable: cancelling the
+// delivery context ends the in-flight subprocess the adapter opened (the
+// platform cancels only the command it started) and the step returns in
+// under 2 s with an error.
+func TestSelfCLIInterruptibleContextCancelsTheInFlightStep(t *testing.T) {
+	f := newTeamOpsFix(t, []fakecli.Rule{{AnyArgs: true, Delay: 20000}})
+	ctx, cancel := context.WithCancel(context.Background())
+	ops := f.cli().interruptible(ctx)
+	done := make(chan error, 1)
+	go func() { done <- ops.Dispatch("orch-1", "brief.md", false) }()
+	time.Sleep(300 * time.Millisecond)
+	start := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("the cancelled delivery succeeded, want an error")
+		}
+		if elapsed := time.Since(start); elapsed >= 2*time.Second {
+			t.Fatalf("the cancelled delivery took %v, want less than 2 s", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the cancelled delivery did not return within 2 s")
+	}
+}
+
 func TestSuperviseBudgetWarningThenTimeout(t *testing.T) {
 	var friction []string
 	store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
@@ -967,4 +1425,48 @@ func TestSuperviseControlRepeatedCheckpointConverges(t *testing.T) {
 	if st := supState(t, store); st.Status != StatusDone {
 		t.Fatalf("state = %+v", st)
 	}
+}
+
+// TestStopStatusReadBoundedByTheGrace pins the stop's own reads of the
+// orchestrator: each is limited to the grace left, and once the grace is
+// spent the stop ends without reading at all.
+func TestStopStatusReadBoundedByTheGrace(t *testing.T) {
+	t.Run("the reads during the grace are limited to what is left", func(t *testing.T) {
+		var friction []string
+		store, _, _, team, sup := nsSup(t, 10*time.Second, &friction)
+		if queued, err := store.RequestCancel("job-1", 30); !queued || err != nil {
+			t.Fatalf("cancel: queued=%v err=%v", queued, err)
+		}
+		team.statusScript = []fakeStatus{{State: "working"}}
+		exit, err := sup.Run()
+		if err != nil || exit != ExitCanceled {
+			t.Fatalf("Run = %d, %v; want %d", exit, err, ExitCanceled)
+		}
+		if len(team.statusBounds) == 0 {
+			t.Fatal("no stop read of the orchestrator was limited to the grace")
+		}
+		for i, b := range team.statusBounds {
+			if b <= 0 || b > 30*time.Second {
+				t.Fatalf("status bound %d = %v, want within the 30 s grace", i, b)
+			}
+		}
+	})
+	t.Run("a spent grace ends the stop without a read", func(t *testing.T) {
+		var friction []string
+		store, _, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+		if queued, err := store.RequestCancel("job-1", 0); !queued || err != nil {
+			t.Fatalf("cancel: queued=%v err=%v", queued, err)
+		}
+		team.statusScript = []fakeStatus{{State: "working"}}
+		exit, err := sup.Run()
+		if err != nil || exit != ExitCanceled {
+			t.Fatalf("Run = %d, %v; want %d", exit, err, ExitCanceled)
+		}
+		if len(team.statusBounds) != 0 {
+			t.Fatalf("status bounds = %v, want no read once the grace is spent", team.statusBounds)
+		}
+		if clock.sleeps != 0 {
+			t.Fatalf("sleeps = %d, want the stop to end on its first check", clock.sleeps)
+		}
+	})
 }

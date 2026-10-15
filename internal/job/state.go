@@ -104,6 +104,18 @@ type State struct {
 	// restart does not run them again. Both are internal and omitempty.
 	FinishingStartedAt string `json:"finishing_started_at,omitempty"`
 	FinishingSynced    bool   `json:"finishing_synced,omitempty"`
+	// CancelRequestedAt and CancelDeadline are the wall ts (RFC3339Nano)
+	// the cancel's grace counts from, recorded at the acceptance (the
+	// requestControlFlag write of control/cancel.json, in the same locked
+	// operation): the acceptance instant and the acceptance plus the
+	// requested grace. A restarted supervisor ends the grace on the
+	// persisted deadline instead of measuring a fresh one; a state without
+	// them (a job accepted by a binary before the fields) or with an
+	// unreadable deadline keeps the full-grace-from-process bound, with one
+	// friction line. Both are internal and omitempty, so a state without
+	// them serializes byte for byte as before.
+	CancelRequestedAt string `json:"cancel_requested_at,omitempty"`
+	CancelDeadline    string `json:"cancel_deadline,omitempty"`
 }
 
 // TerminalIntent is the terminal outcome a supervisor process committed to

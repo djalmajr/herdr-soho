@@ -990,6 +990,246 @@ func TestSuperviseRelease(t *testing.T) {
 	})
 }
 
+// TestCleanupOnlyAfterSuccessfulRelease pins the cleanup gate: the
+// cleanup event lands only on a pass whose release (the job orchestrator,
+// the team and the gc) ended clean in that pass. A canceled job whose
+// release fails keeps today's friction, gets no cleanup event, and the
+// workspace close follows today's path; a later pass with a successful
+// release appends the cleanup exactly once (the log deduplicates it).
+func TestCleanupOnlyAfterSuccessfulRelease(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	// Pass one: the release of the job orchestrator fails.
+	f.team.releaseErr = errors.New("the release failed")
+	exit, done, err := f.sup.finishOutcome(StatusCanceled, "cancelado", ExitCanceled)
+	if err != nil || !done || exit != ExitCanceled {
+		t.Fatalf("finishOutcome = %d %v %v, want canceled with exit 21", exit, done, err)
+	}
+	// No cleanup event: the release did not end clean in this pass.
+	if n := countTipes(f.events(t), "cleanup"); n != 0 {
+		t.Fatalf("cleanup events = %d, want none after a failed release", n)
+	}
+	// The friction names the failure, as today.
+	found := false
+	for _, line := range *f.friction {
+		if strings.Contains(line, "the release failed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("friction = %v, want the release failure named", *f.friction)
+	}
+	// The workspace close follows today's path: it ran and was recorded.
+	if len(f.herdr.CloseIDs) != 1 || f.herdr.CloseIDs[0] != "ws-1" {
+		t.Fatalf("herdr close = %v, want ws-1 as today", f.herdr.CloseIDs)
+	}
+	if st := f.state(t); st.Status != StatusCanceled || !st.WorkspaceClosed {
+		t.Fatalf("state = %+v, want canceled with the workspace closed", st)
+	}
+	// A new pass (a fresh process over the terminal job) with a successful
+	// release appends the cleanup exactly once.
+	f.team.releaseErr = nil
+	sup2 := f.supRestarted(t)
+	sup2.finalize(StatusCanceled)
+	if n := countTipes(f.events(t), "cleanup"); n != 1 {
+		t.Fatalf("cleanup events = %d, want exactly one after the successful release", n)
+	}
+	cleanup := f.events(t)
+	last := cleanup[len(cleanup)-1]
+	if last.Tipo != "cleanup" || last.Resumo != "processes released; worktree kept" {
+		t.Fatalf("cleanup event = %+v", last)
+	}
+	// The pass added no terminal event and ran the release steps again.
+	if n := countTipes(cleanup, "terminal"); n != 1 {
+		t.Fatalf("terminal events = %d, want still one", n)
+	}
+	if f.team.releaseCalls != 2 || f.team.releaseTeamCalls != 2 || f.team.gcCalls != 2 {
+		t.Fatalf("release=%d releaseTeam=%d gc=%d, want one each per pass", f.team.releaseCalls, f.team.releaseTeamCalls, f.team.gcCalls)
+	}
+	assertSyncPostconditions(t, f.job)
+}
+
+// TestCleanupGateReevaluatedOnRestart: the release condition is re-evaluated
+// on every pass, never stored in memory. Process one fails the gc and the
+// close (no cleanup event, the workspace stays open, today's close path);
+// process two, a restart over the terminal job with the release now
+// succeeding, appends the cleanup exactly once in total and closes the
+// workspace once.
+func TestCleanupGateReevaluatedOnRestart(t *testing.T) {
+	f := newSupGitFixture(t, supGitGhRules)
+	f.team.gcErr = errors.New("the gc failed")
+	f.herdr.CloseErr = errors.New("job: herdr workspace close failed")
+	if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+		t.Fatal(err)
+	}
+	exit, done, err := f.sup.finishOutcome(StatusCanceled, "cancelado", ExitCanceled)
+	if err != nil || !done || exit != ExitCanceled {
+		t.Fatalf("finishOutcome = %d %v %v, want canceled with exit 21", exit, done, err)
+	}
+	// Pass one: no cleanup event, and today's failed-close path (friction,
+	// the report says open, no WorkspaceClosed record).
+	if n := countTipes(f.events(t), "cleanup"); n != 0 {
+		t.Fatalf("cleanup events = %d, want none after a failed release", n)
+	}
+	if st := f.state(t); st.WorkspaceClosed {
+		t.Fatal("a failed close records no WorkspaceClosed")
+	}
+	if limpeza := f.report(t)["limpeza"].(map[string]any); limpeza["workspace"] != "open" {
+		t.Fatalf("report limpeza = %v, want the open workspace", limpeza)
+	}
+	found := false
+	for _, line := range *f.friction {
+		if strings.Contains(line, "the gc failed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("friction = %v, want the gc failure named", *f.friction)
+	}
+	// Process two: a fresh process over the terminal job, with the release
+	// and the close now succeeding.
+	f.team.gcErr = nil
+	f.herdr.CloseErr = nil
+	sup2 := f.supRestarted(t)
+	if exit, err := sup2.Run(); err != nil || exit != ExitCanceled {
+		t.Fatalf("restarted Run = %d %v, want 21", exit, err)
+	}
+	if n := countTipes(f.events(t), "cleanup"); n != 1 {
+		t.Fatalf("cleanup events = %d, want exactly one across both passes", n)
+	}
+	// The close is attempted once per pass (today's path): the failed
+	// attempt of pass one, the successful one of pass two. The workspace
+	// is closed once: the state says so after pass two.
+	if len(f.herdr.CloseIDs) != 2 || f.herdr.CloseIDs[0] != "ws-1" || f.herdr.CloseIDs[1] != "ws-1" {
+		t.Fatalf("herdr close = %v, want the one attempt per pass", f.herdr.CloseIDs)
+	}
+	if st := f.state(t); !st.WorkspaceClosed {
+		t.Fatalf("state = %+v, want the workspace closed", st)
+	}
+	if limpeza := f.report(t)["limpeza"].(map[string]any); limpeza["workspace"] != "closed" {
+		t.Fatalf("report limpeza = %v, want the closed workspace", limpeza)
+	}
+	assertSyncPostconditions(t, f.job)
+}
+
+// TestCleanupRetriedOverClosedWorkspace: pass one fails the orchestrator
+// release while the workspace close succeeds (the close never depends on
+// the release): no cleanup event, the close is recorded. Process two, a
+// restart over the terminal job with the workspace already closed, finds
+// the cleanup still pending in the log: the release of the agent that no
+// longer exists (its pane closed with the workspace, no roster row) counts
+// as done and the cleanup lands exactly once; every other release failure
+// still blocks it, and the recorded close is never re-attempted. The
+// restart is driven through the Run path, not a direct finalize.
+func TestCleanupRetriedOverClosedWorkspace(t *testing.T) {
+	t.Run("the missing agent counts as done and the cleanup lands once", func(t *testing.T) {
+		f := newSupGitFixture(t, supGitGhRules)
+		if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+			t.Fatal(err)
+		}
+		// Pass one: the agent is rostered and its release fails;
+		// the close succeeds regardless.
+		f.team.rosterRows = collabRoster("orch-1")
+		f.team.releaseErr = errors.New("the release failed")
+		exit, done, err := f.sup.finishOutcome(StatusCanceled, "cancelado", ExitCanceled)
+		if err != nil || !done || exit != ExitCanceled {
+			t.Fatalf("finishOutcome = %d %v %v, want canceled with exit 21", exit, done, err)
+		}
+		if n := countTipes(f.events(t), "cleanup"); n != 0 {
+			t.Fatalf("cleanup events = %d, want none after a failed release", n)
+		}
+		if st := f.state(t); st.Status != StatusCanceled || !st.WorkspaceClosed {
+			t.Fatalf("state = %+v, want canceled with the workspace closed", st)
+		}
+
+		// Process two: the transient failure is behind, and the agent no
+		// longer exists — its pane closed with the workspace and the roster
+		// has no row for it (the release of it would fail as missing). The
+		// restart path over the terminal job retries the pending cleanup.
+		f.team.rosterRows = nil
+		f.team.releaseErr = errors.New("the agent is gone")
+		sup2 := f.supRestarted(t)
+		if exit, err := sup2.Run(); err != nil || exit != ExitCanceled {
+			t.Fatalf("restarted Run = %d %v, want 21", exit, err)
+		}
+		// The cleanup lands exactly once, on the retried pass, with its
+		// fixed body.
+		if n := countTipes(f.events(t), "cleanup"); n != 1 {
+			t.Fatalf("cleanup events = %d, want exactly one after the retried pass", n)
+		}
+		cleanup := f.events(t)
+		if last := cleanup[len(cleanup)-1]; last.Tipo != "cleanup" || last.Resumo != "processes released; worktree kept" {
+			t.Fatalf("last event = %+v, want the cleanup", last)
+		}
+		// The retried pass attempts the release once more; its failure is
+		// the release's "not in the roster" answer (no row for the agent
+		// over the closed workspace), which counts as done. The team
+		// release and the gc run once per pass.
+		if f.team.releaseCalls != 2 || f.team.releaseTeamCalls != 2 || f.team.gcCalls != 2 {
+			t.Fatalf("release=%d releaseTeam=%d gc=%d, want one attempt per pass (the missing agent's failure counts as done)", f.team.releaseCalls, f.team.releaseTeamCalls, f.team.gcCalls)
+		}
+		// The close is not attempted again: the recorded close stands, and
+		// the pass added no terminal event.
+		if len(f.herdr.CloseIDs) != 1 || f.herdr.CloseIDs[0] != "ws-1" {
+			t.Fatalf("herdr close = %v, want the single recorded close", f.herdr.CloseIDs)
+		}
+		if n := countTipes(cleanup, "terminal"); n != 1 {
+			t.Fatalf("terminal events = %d, want still one", n)
+		}
+		if st := f.state(t); !st.WorkspaceClosed {
+			t.Fatalf("state = %+v, want the workspace closed", st)
+		}
+		assertSyncPostconditions(t, f.job)
+	})
+
+	t.Run("a rostered agent with a failing release still blocks the cleanup", func(t *testing.T) {
+		f := newSupGitFixture(t, supGitGhRules)
+		if _, err := f.store.Transition(supGitID, StatusFinishing); err != nil {
+			t.Fatal(err)
+		}
+		f.team.rosterRows = collabRoster("orch-1")
+		f.team.releaseErr = errors.New("the release failed")
+		exit, done, err := f.sup.finishOutcome(StatusCanceled, "cancelado", ExitCanceled)
+		if err != nil || !done || exit != ExitCanceled {
+			t.Fatalf("finishOutcome = %d %v %v, want canceled with exit 21", exit, done, err)
+		}
+		if n := countTipes(f.events(t), "cleanup"); n != 0 {
+			t.Fatalf("cleanup events = %d, want none after a failed release", n)
+		}
+		if st := f.state(t); !st.WorkspaceClosed {
+			t.Fatalf("state = %+v, want the workspace closed", st)
+		}
+
+		// Process two: the agent is still rostered and its release still
+		// fails: every failure but the missing-agent one keeps blocking the
+		// cleanup, and the recorded close is not re-attempted.
+		sup2 := f.supRestarted(t)
+		if exit, err := sup2.Run(); err != nil || exit != ExitCanceled {
+			t.Fatalf("restarted Run = %d %v, want 21", exit, err)
+		}
+		if n := countTipes(f.events(t), "cleanup"); n != 0 {
+			t.Fatalf("cleanup events = %d, want none while the rostered release fails", n)
+		}
+		if f.team.releaseCalls != 2 {
+			t.Fatalf("release calls = %d, want the retried release of the rostered agent", f.team.releaseCalls)
+		}
+		if len(f.herdr.CloseIDs) != 1 || f.herdr.CloseIDs[0] != "ws-1" {
+			t.Fatalf("herdr close = %v, want the single recorded close", f.herdr.CloseIDs)
+		}
+		found := false
+		for _, line := range *f.friction {
+			if strings.Contains(line, "the release failed") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("friction = %v, want the release failure named", *f.friction)
+		}
+	})
+}
+
 func TestSuperviseNewSupervisorGitWiring(t *testing.T) {
 	t.Run("a worktree-mode job wires the git sync", func(t *testing.T) {
 		store, _, _, _ := supFixture(t)

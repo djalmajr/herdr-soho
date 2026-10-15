@@ -12,6 +12,7 @@
 package job
 
 import (
+	"errors"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -26,8 +27,17 @@ const gitSyncCadence = 30 * time.Second
 // syncGit keeps the job branch in sync on every tick: on pushNow or once
 // every 30 s of ticks it runs a sync pass. A nil Git (workspace mode)
 // runs no git at all. GitSync failures go to friction without a state
-// change; store write failures propagate.
+// change; store write failures propagate. While a stop is running it runs
+// no pass at all: the stop path owns the job, and the final commit and
+// push are the finishing's, inside its own budget — a periodic network
+// step must not delay the stop.
 func (s *Supervisor) syncGit() (int, bool, error) {
+	if s.stopping != "" {
+		// A stop is already running: the periodic sync does not run during
+		// the stop (the final commit and push are the finishing's, inside
+		// its budget), so it never delays the stop's end.
+		return 0, false, nil
+	}
 	s.lastPushTick++
 	due := s.pushNow || s.lastPushTick >= s.syncTicks()
 	s.pushNow = false
@@ -47,13 +57,37 @@ func (s *Supervisor) syncTicks() int {
 	return every
 }
 
-// syncGitOnce runs one sync pass: the new commit events, the push, the
-// unblock of a block this path set, and the draft pull request when the
-// remote carries the local head and no pr_opened event exists yet. It is
-// called from the watch loop (syncGit) and from finalize (the final push
-// and pull request, where the cadence does not apply).
+// syncGitOnce runs one watch-loop sync pass: the new commit events, the
+// push, the unblock of a block this path set, and the draft pull request
+// when the remote carries the local head and no pr_opened event exists
+// yet. It is the slow step of the tick (a network push of up to the net
+// timeout), so it runs under the cancel observer — the same watch as the
+// in-flight delivery: the sync's git subprocesses run under the context
+// the observer cancels when control/cancel.json appears, and a pending
+// cancel that arrives in flight ends only the subprocess GitSync opened.
+// A cut pass counts no failure (syncGitPass turns the cut into a clean
+// return: no friction, no refused-push block) and marks the tick cut by
+// the cancel, so the loop starts the next tick without sleeping the poll
+// interval and its deliverControl sees the cancel and starts the stop at
+// once. The terminal procedure's final push (finalSync) does not use this
+// path: it has its own step bounds and a nil context.
 func (s *Supervisor) syncGitOnce() (int, bool, error) {
-	return s.syncGitPass(nil)
+	if s.Git == nil {
+		return 0, false, nil
+	}
+	ctx, stopWatching := s.watchForCancel()
+	defer stopWatching()
+	s.Git.Context = ctx
+	defer func() { s.Git.Context = nil }()
+	code, done, err := s.syncGitPass(nil)
+	if ctx.Err() != nil {
+		// The pending cancel cut this tick's slow step (or arrived just
+		// after the pass ended): no failure was counted, and the loop
+		// skips the poll sleep so the next tick starts the stop at once.
+		s.tickCutByCancel = true
+		return 0, false, nil
+	}
+	return code, done, err
 }
 
 // finSync is what one bounded final sync learned: cut is true when a step
@@ -80,15 +114,21 @@ func (s *Supervisor) cutIfStepEnded(fin *finSync) {
 	}
 }
 
-// syncGitPass is syncGitOnce with an optional bounded final sync (fin, set
-// by finalSync): the git steps run under the step deadline finalSync began,
-// and the draft pull request is its own step with its own bound.
+// syncGitPass is syncGitOnce's pass with an optional bounded final sync
+// (fin, set by finalSync): the git steps run under the step deadline
+// finalSync began, and the draft pull request is its own step with its own
+// bound. A git step cut by the pending cancel (errCancelled, the watch
+// loop's observer) ends the pass cleanly: no friction, no refused-push
+// block, no failure — the caller marks the tick cut by the cancel.
 func (s *Supervisor) syncGitPass(fin *finSync) (int, bool, error) {
 	if s.Git == nil {
 		return 0, false, nil
 	}
 	head, err := s.Git.Head()
 	if err != nil {
+		if errors.Is(err, errCancelled) {
+			return 0, false, nil
+		}
 		s.frictionf(err.Error())
 		fin.fail()
 		s.cutIfStepEnded(fin)
@@ -127,6 +167,9 @@ func (s *Supervisor) syncGitPass(fin *finSync) (int, bool, error) {
 		// failed listing leaves it unchanged so the next sync walks again.
 		commits, err := s.Git.Commits()
 		if err != nil {
+			if errors.Is(err, errCancelled) {
+				return 0, false, nil
+			}
 			s.frictionf(err.Error())
 			fin.fail()
 			s.cutIfStepEnded(fin)
@@ -158,6 +201,9 @@ func (s *Supervisor) syncGitPass(fin *finSync) (int, bool, error) {
 	}
 	result, err := s.Git.Push()
 	if err != nil {
+		if errors.Is(err, errCancelled) {
+			return 0, false, nil
+		}
 		s.frictionf(err.Error())
 		fin.fail()
 		s.cutIfStepEnded(fin)
@@ -196,6 +242,9 @@ func (s *Supervisor) syncGitPass(fin *finSync) (int, bool, error) {
 		}
 		pr, _, err := s.Git.EnsureDraftPR(s.prTitle, s.prBody())
 		if err != nil {
+			if errors.Is(err, errCancelled) {
+				return 0, false, nil
+			}
 			s.frictionf(err.Error())
 			fin.fail()
 			s.cutIfStepEnded(fin)
@@ -361,12 +410,12 @@ func (s *Supervisor) finalSync(status string) (cut bool) {
 // outcome is recorded and finalSync has pushed: the collaboration
 // settlement of the persisted outcomes (a fresh process over a terminal
 // job captures them first), the release of the job orchestrator, the
-// team, and the registered copies and processes, the cleanup event
-// (checked against the log first so a retry converges), and the Herdr
-// workspace close last. It never removes a worktree, a directory, a
-// branch, or a pull request; its failures go to friction and the path
-// continues, because everything durable is written before the process may
-// end with the workspace.
+// team, and the registered copies and processes, the cleanup event (the
+// release gate and the log check below), and the Herdr workspace close
+// last. It never removes a worktree, a directory, a branch, or a pull
+// request; its failures go to friction and the path continues, because
+// everything durable is written before the process may end with the
+// workspace.
 func (s *Supervisor) finalize(status string) {
 	jobDir, err := s.Store.readDir(s.ID)
 	if err != nil {
@@ -444,23 +493,35 @@ func (s *Supervisor) finalize(status string) {
 
 	// Release: the job orchestrator, then the remaining workers, then
 	// the job's registered copies and processes. Errors are friction; the
-	// path continues.
+	// path continues, but a failed release in this pass keeps the cleanup
+	// event out of this pass (the gate below): the event claims the
+	// processes are released, so it lands only on a pass whose release
+	// ended clean; a later pass re-evaluates the release and appends it
+	// then.
+	released := true
 	if snap.State.WorkspaceID != "" {
 		if snap.State.Orchestrator != "" {
-			if err := s.Ops.Release(snap.State.Orchestrator); err != nil {
+			if err := s.releaseOrchestrator(snap.State.Orchestrator, snap.State.WorkspaceClosed); err != nil {
 				s.frictionf(err.Error())
+				released = false
 			}
 		}
 		if err := s.Ops.ReleaseTeam(); err != nil {
 			s.frictionf(err.Error())
+			released = false
 		}
 		if err := s.Ops.GC(); err != nil {
 			s.frictionf(err.Error())
+			released = false
 		}
 	}
 
 	// The cleanup event is checked against the log first: a crashed first
-	// attempt may have recorded it already, and the retry converges.
+	// attempt may have recorded it already, and the retry converges. The
+	// release gate: it is appended only when the release of this pass
+	// ended clean, so a failed release keeps the event pending for a
+	// later pass (and a pass whose release fails after the event is
+	// recorded adds nothing, the log already carries it).
 	cleanupDone := false
 	for _, event := range events {
 		if event.Tipo == "cleanup" {
@@ -468,7 +529,7 @@ func (s *Supervisor) finalize(status string) {
 			break
 		}
 	}
-	if !cleanupDone {
+	if !cleanupDone && released {
 		if _, err := s.Store.Append(s.ID, EventIn{
 			Tipo:   "cleanup",
 			Resumo: "processes released; worktree kept",
@@ -511,6 +572,38 @@ func (s *Supervisor) finalize(status string) {
 			s.frictionf("job: finalize: " + err.Error())
 		}
 	}
+}
+
+// releaseOrchestrator releases the job orchestrator, counting a release of
+// an agent that no longer exists as done — but only on a pass over a job
+// whose workspace is already recorded closed: its pane closed with the
+// workspace, and the release CLI answers such a name with its "not in the
+// roster" refusal (exit 3, the fixed message of the roster check the
+// release runs first), so nothing is left to release. The release runs as
+// today first; on a failure over a closed workspace, the answer is read
+// back from the roster line the refusal consults (the same state dir and
+// working dir this adapter runs from): a row for the name means the agent
+// still exists and the failure still blocks the cleanup, and an
+// unreadable roster blocks it as well. On a pass whose workspace is not
+// closed yet, every failure blocks exactly as today.
+func (s *Supervisor) releaseOrchestrator(name string, workspaceClosed bool) error {
+	err := s.Ops.Release(name)
+	if err == nil || !workspaceClosed {
+		return err
+	}
+	rows, rerr := s.Ops.Roster()
+	if rerr != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.Name == name {
+			return err
+		}
+	}
+	// No roster row for the agent over a closed workspace: the release's
+	// "not in the roster" refusal stands — the agent is gone, and the
+	// release counts as done.
+	return nil
 }
 
 // reportFacts is the finalize report facts: the git facts and commits with

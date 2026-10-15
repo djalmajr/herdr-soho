@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // controlDir is the control directory of the startedJob test job.
@@ -130,11 +131,10 @@ func TestControlPendingOrderAndIgnoresUnknown(t *testing.T) {
 	s, root := startedJob(t)
 	ctl := controlDir(root)
 
-	queued, err := s.RequestCancel("job-1", 30)
-	if err != nil || !queued {
-		t.Fatalf("cancel: %v err=%v", queued, err)
-	}
-	queued, err = s.RequestCheckpoint("job-1")
+	// The checkpoint and the bodies are requested before the cancel: with a
+	// pending cancel they are refused with cancel_pending, and this test
+	// pins the pending order, not the refusal.
+	queued, err := s.RequestCheckpoint("job-1")
 	if err != nil || !queued {
 		t.Fatalf("checkpoint: %v err=%v", queued, err)
 	}
@@ -143,6 +143,10 @@ func TestControlPendingOrderAndIgnoresUnknown(t *testing.T) {
 	}
 	if _, err := s.RequestSend("job-1", []byte("b")); err != nil {
 		t.Fatal(err)
+	}
+	queued, err = s.RequestCancel("job-1", 30)
+	if err != nil || !queued {
+		t.Fatalf("cancel: %v err=%v", queued, err)
 	}
 
 	// Unknown files (a stray name and a temp remnant) are ignored.
@@ -195,7 +199,18 @@ func TestControlCancelCheckpointRetry(t *testing.T) {
 	s, root := startedJob(t)
 	ctl := controlDir(root)
 
-	queued, err := s.RequestCancel("job-1", 120)
+	// The checkpoint requests come before the cancel: with a pending cancel
+	// the checkpoint is refused with cancel_pending, and this test pins the
+	// single-file queue no-ops and the retired copies, not the refusal.
+	queued, err := s.RequestCheckpoint("job-1")
+	if err != nil || !queued {
+		t.Fatalf("checkpoint: %v err=%v", queued, err)
+	}
+	queued, err = s.RequestCheckpoint("job-1")
+	if err != nil || queued {
+		t.Fatalf("second checkpoint: %v err=%v", queued, err)
+	}
+	queued, err = s.RequestCancel("job-1", 120)
 	if err != nil || !queued {
 		t.Fatalf("cancel: %v err=%v", queued, err)
 	}
@@ -205,14 +220,6 @@ func TestControlCancelCheckpointRetry(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(filepath.Join(ctl, "cancel.json")); err != nil || string(raw) != `{"grace":120}` {
 		t.Fatalf("cancel file after retry = %q err=%v", raw, err)
-	}
-	queued, err = s.RequestCheckpoint("job-1")
-	if err != nil || !queued {
-		t.Fatalf("checkpoint: %v err=%v", queued, err)
-	}
-	queued, err = s.RequestCheckpoint("job-1")
-	if err != nil || queued {
-		t.Fatalf("second checkpoint: %v err=%v", queued, err)
 	}
 
 	cancel, err := s.PendingControl("job-1")
@@ -227,14 +234,15 @@ func TestControlCancelCheckpointRetry(t *testing.T) {
 	}
 
 	// A new request after the retire is accepted, with its own suffix: the
-	// retired copy keeps the old grace bytes.
-	queued, err = s.RequestCancel("job-1", 30)
-	if err != nil || !queued {
-		t.Fatalf("cancel after retire: %v err=%v", queued, err)
-	}
+	// retired copy keeps the old grace bytes. The checkpoint comes before
+	// the cancel: the fresh cancel is pending from its acceptance on.
 	queued, err = s.RequestCheckpoint("job-1")
 	if err != nil || !queued {
 		t.Fatalf("checkpoint after retire: %v err=%v", queued, err)
+	}
+	queued, err = s.RequestCancel("job-1", 30)
+	if err != nil || !queued {
+		t.Fatalf("cancel after retire: %v err=%v", queued, err)
 	}
 	pending, err := s.PendingControl("job-1")
 	if err != nil || len(pending) != 2 || pending[0].Kind != "cancel" || pending[1].Kind != "checkpoint" {
@@ -427,6 +435,240 @@ func TestControlTerminalRefusal(t *testing.T) {
 	}
 }
 
+// TestAmendSendCheckpointRefusedWhileCancelPending: with a cancel pending
+// (the pending control/cancel.json and the persisted acceptance anchor),
+// amend, send and checkpoint are refused with exit 2 and the cancel_pending
+// message, and no file enters control/; the guard is the pair — a legacy
+// acceptance (the file without the anchor) and a crashed acceptance (the
+// anchor without the file) refuse nothing; a terminal job keeps the "job is
+// not active" refusal.
+func TestAmendSendCheckpointRefusedWhileCancelPending(t *testing.T) {
+	t0 := time.Date(2026, 10, 9, 10, 0, 0, 0, time.FixedZone("-03:00", -3*3600))
+	root := t.TempDir()
+	clock := &nsClock{now: t0}
+	s := Open(root)
+	s.Clock = clock
+	if _, err := s.Start("job-1", []byte(supTestBrief)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition("job-1", StatusPreparing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition("job-1", StatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	if queued, err := s.RequestCancel("job-1", 30); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{"amend", func() error { _, err := s.RequestAmend("job-1", []byte("body")); return err }},
+		{"send", func() error { _, err := s.RequestSend("job-1", []byte("body")); return err }},
+		{"checkpoint", func() error { _, err := s.RequestCheckpoint("job-1"); return err }},
+	} {
+		err := tc.run()
+		if exitCode(t, err) != ExitUsage || err.Error() != "job: cancel_pending: the job is being canceled" {
+			t.Fatalf("%s with the pending cancel: %v, want exit 2 cancel_pending", tc.name, err)
+		}
+	}
+	// No file entered control/: the single pending cancel is untouched.
+	if got := controlEntries(t, controlDir(root)); !reflect.DeepEqual(got, []string{"cancel.json"}) {
+		t.Fatalf("pending control = %v, want only the pending cancel", got)
+	}
+
+	// The guard is the pair, either side missing on its own: a legacy
+	// acceptance (the file without the anchor) refuses nothing.
+	t.Run("legacy acceptance refuses nothing", func(t *testing.T) {
+		root := t.TempDir()
+		s := Open(root)
+		if _, err := s.Start("job-1", []byte(supTestBrief)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Transition("job-1", StatusPreparing); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Transition("job-1", StatusRunning); err != nil {
+			t.Fatal(err)
+		}
+		ctl := controlDir(root)
+		if err := os.MkdirAll(ctl, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(ctl, "cancel.json"), []byte(`{"grace":30}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.RequestAmend("job-1", []byte("body")); err != nil {
+			t.Fatalf("legacy acceptance: %v, want the amend queued", err)
+		}
+		if queued, err := s.RequestCheckpoint("job-1"); !queued || err != nil {
+			t.Fatalf("legacy acceptance checkpoint: queued=%v err=%v, want queued", queued, err)
+		}
+	})
+
+	// A crashed acceptance (the anchor recorded, the file never published)
+	// refuses nothing: nothing is pending.
+	t.Run("crashed acceptance refuses nothing", func(t *testing.T) {
+		root := t.TempDir()
+		s := Open(root)
+		if _, err := s.Start("job-1", []byte(supTestBrief)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Transition("job-1", StatusPreparing); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Transition("job-1", StatusRunning); err != nil {
+			t.Fatal(err)
+		}
+		if queued, err := s.RequestCancel("job-1", 30); !queued || err != nil {
+			t.Fatalf("cancel: queued=%v err=%v", queued, err)
+		}
+		if err := os.Remove(filepath.Join(controlDir(root), "cancel.json")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.RequestAmend("job-1", []byte("body")); err != nil {
+			t.Fatalf("crashed acceptance: %v, want the amend queued", err)
+		}
+	})
+
+	// A terminal job keeps the "job is not active" refusal: it comes first,
+	// and cancel and checkpoint stay the no-ops that write nothing.
+	setControlStatus(t, root, "job-1", StatusCanceled)
+	_, err := s.RequestAmend("job-1", []byte("body"))
+	if exitCode(t, err) != ExitUsage || err.Error() != "job: job is not active" {
+		t.Fatalf("terminal amend: %v", err)
+	}
+	_, err = s.RequestSend("job-1", []byte("body"))
+	if exitCode(t, err) != ExitUsage || err.Error() != "job: job is not active" {
+		t.Fatalf("terminal send: %v", err)
+	}
+	if queued, err := s.RequestCancel("job-1", 30); queued || err != nil {
+		t.Fatalf("terminal cancel: queued=%v err=%v, want the no-op", queued, err)
+	}
+	if queued, err := s.RequestCheckpoint("job-1"); queued || err != nil {
+		t.Fatalf("terminal checkpoint: queued=%v err=%v, want the no-op", queued, err)
+	}
+	if got := controlEntries(t, controlDir(root)); !reflect.DeepEqual(got, []string{"cancel.json"}) {
+		t.Fatalf("pending control = %v, want only the pending cancel", got)
+	}
+}
+
+// TestRequestCancelPersistsGraceAnchor: the acceptance records the grace
+// anchor in the state — the acceptance instant and the acceptance plus the
+// requested grace, in the store clock's RFC3339Nano — before the request
+// file lands, and a second cancel is a no-op that changes neither.
+func TestRequestCancelPersistsGraceAnchor(t *testing.T) {
+	t0 := time.Date(2026, 10, 9, 10, 0, 0, 0, time.FixedZone("-03:00", -3*3600))
+	root := t.TempDir()
+	clock := &nsClock{now: t0}
+	s := Open(root)
+	s.Clock = clock
+	if _, err := s.Start("job-1", []byte(supTestBrief)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition("job-1", StatusPreparing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition("job-1", StatusRunning); err != nil {
+		t.Fatal(err)
+	}
+
+	if queued, err := s.RequestCancel("job-1", 30); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	snap, err := s.Snapshot("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := t0.Format(time.RFC3339Nano); snap.State.CancelRequestedAt != want {
+		t.Fatalf("cancel_requested_at = %q, want %q (the acceptance instant)", snap.State.CancelRequestedAt, want)
+	}
+	if want := t0.Add(30 * time.Second).Format(time.RFC3339Nano); snap.State.CancelDeadline != want {
+		t.Fatalf("cancel_deadline = %q, want %q (the acceptance plus the grace)", snap.State.CancelDeadline, want)
+	}
+	if raw, err := os.ReadFile(filepath.Join(controlDir(root), "cancel.json")); err != nil || string(raw) != `{"grace":30}` {
+		t.Fatalf("cancel.json = %q err=%v", raw, err)
+	}
+
+	// A second cancel is a no-op: it queues nothing and changes neither the
+	// anchor nor the request file.
+	if queued, err := s.RequestCancel("job-1", 120); queued || err != nil {
+		t.Fatalf("second cancel: queued=%v err=%v, want the no-op", queued, err)
+	}
+	snap, err = s.Snapshot("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := t0.Format(time.RFC3339Nano); snap.State.CancelRequestedAt != want {
+		t.Fatalf("cancel_requested_at after the no-op = %q, want %q", snap.State.CancelRequestedAt, want)
+	}
+	if want := t0.Add(30 * time.Second).Format(time.RFC3339Nano); snap.State.CancelDeadline != want {
+		t.Fatalf("cancel_deadline after the no-op = %q, want %q", snap.State.CancelDeadline, want)
+	}
+	if raw, err := os.ReadFile(filepath.Join(controlDir(root), "cancel.json")); err != nil || string(raw) != `{"grace":30}` {
+		t.Fatalf("cancel.json after the no-op = %q err=%v", raw, err)
+	}
+}
+
+// TestCancelGraceZeroEndsOnFirstCheck: a zero grace records a deadline equal
+// to the acceptance, and the first checkBudget check after the stop starts
+// ends it in the same tick — no tick boundary is crossed, even though the
+// orchestrator keeps working.
+func TestCancelGraceZeroEndsOnFirstCheck(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+	if queued, err := store.RequestCancel("job-1", 0); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	// The deadline equals the acceptance: the anchor and its deadline agree
+	// on the same instant.
+	st := supState(t, store)
+	if st.CancelDeadline != st.CancelRequestedAt || st.CancelDeadline == "" {
+		t.Fatalf("zero grace: cancel_deadline = %q, want the acceptance %q", st.CancelDeadline, st.CancelRequestedAt)
+	}
+	// The orchestrator keeps working: only the zero deadline can end the
+	// stop.
+	working := make([]fakeStatus, 3)
+	for i := range working {
+		working[i] = fakeStatus{State: "working"}
+	}
+	team.statusScript = working
+
+	exit, err := sup.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exit != ExitCanceled {
+		t.Fatalf("exit = %d, want %d", exit, ExitCanceled)
+	}
+	if st := supState(t, store); st.Status != StatusCanceled {
+		t.Fatalf("state = %+v", st)
+	}
+	// The first checkBudget check ended the stop: no tick boundary crossed.
+	if clock.sleeps != 0 {
+		t.Fatalf("sleeps = %d, want 0 (the first checkBudget check ends the stop)", clock.sleeps)
+	}
+	// A zero grace leaves no time for the stop amendment: it is written
+	// but never dispatched, so the brief is the only dispatch.
+	if len(team.dispatches) != 1 || team.dispatches[0].Amend {
+		t.Fatalf("dispatches = %+v, want only the brief (no time, no stop amendment)", team.dispatches)
+	}
+	assertStopAmend(t, jobDir)
+	if terminal := eventsLast(t, jobDir); terminal.Refs["exit"] != "21" || terminal.Refs["motivo"] != "cancelado" {
+		t.Fatalf("terminal refs = %+v", terminal.Refs)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"seq"}) {
+		t.Fatalf("pending control = %v, want only seq", got)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"cancel.json-000001"}) {
+		t.Fatalf("retired control = %v, want the single retired cancel", got)
+	}
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v, want none", friction)
+	}
+}
+
 // crashCounterRename points the rename hook at a failure of only the
 // counter rename: the request bodies still publish, the seq file never
 // lands.
@@ -549,13 +791,16 @@ func TestControlRetireSuffixNoCollision(t *testing.T) {
 	}
 	renameAtomic = os.Rename
 
-	queued, err := s.RequestCancel("job-1", 60)
-	if err != nil || !queued {
-		t.Fatalf("cancel: %v err=%v", queued, err)
-	}
-	queued, err = s.RequestCheckpoint("job-1")
+	// The checkpoint is requested before the cancel: with a pending cancel
+	// the checkpoint is refused with cancel_pending, and this test pins the
+	// retired suffixes, not the refusal.
+	queued, err := s.RequestCheckpoint("job-1")
 	if err != nil || !queued {
 		t.Fatalf("checkpoint: %v err=%v", queued, err)
+	}
+	queued, err = s.RequestCancel("job-1", 60)
+	if err != nil || !queued {
+		t.Fatalf("cancel: %v err=%v", queued, err)
 	}
 	cancel, err := s.PendingControl("job-1")
 	if err != nil || len(cancel) != 3 || cancel[0].Kind != "cancel" || cancel[1].Kind != "checkpoint" || cancel[2].Name != "amend-000001.md" {
