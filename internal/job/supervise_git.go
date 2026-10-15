@@ -12,6 +12,7 @@
 package job
 
 import (
+	"errors"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -26,8 +27,17 @@ const gitSyncCadence = 30 * time.Second
 // syncGit keeps the job branch in sync on every tick: on pushNow or once
 // every 30 s of ticks it runs a sync pass. A nil Git (workspace mode)
 // runs no git at all. GitSync failures go to friction without a state
-// change; store write failures propagate.
+// change; store write failures propagate. While a stop is running it runs
+// no pass at all: the stop path owns the job, and the final commit and
+// push are the finishing's, inside its own budget — a periodic network
+// step must not delay the stop.
 func (s *Supervisor) syncGit() (int, bool, error) {
+	if s.stopping != "" {
+		// A stop is already running: the periodic sync does not run during
+		// the stop (the final commit and push are the finishing's, inside
+		// its budget), so it never delays the stop's end.
+		return 0, false, nil
+	}
 	s.lastPushTick++
 	due := s.pushNow || s.lastPushTick >= s.syncTicks()
 	s.pushNow = false
@@ -47,13 +57,37 @@ func (s *Supervisor) syncTicks() int {
 	return every
 }
 
-// syncGitOnce runs one sync pass: the new commit events, the push, the
-// unblock of a block this path set, and the draft pull request when the
-// remote carries the local head and no pr_opened event exists yet. It is
-// called from the watch loop (syncGit) and from finalize (the final push
-// and pull request, where the cadence does not apply).
+// syncGitOnce runs one watch-loop sync pass: the new commit events, the
+// push, the unblock of a block this path set, and the draft pull request
+// when the remote carries the local head and no pr_opened event exists
+// yet. It is the slow step of the tick (a network push of up to the net
+// timeout), so it runs under the cancel observer — the same watch as the
+// in-flight delivery: the sync's git subprocesses run under the context
+// the observer cancels when control/cancel.json appears, and a pending
+// cancel that arrives in flight ends only the subprocess GitSync opened.
+// A cut pass counts no failure (syncGitPass turns the cut into a clean
+// return: no friction, no refused-push block) and marks the tick cut by
+// the cancel, so the loop starts the next tick without sleeping the poll
+// interval and its deliverControl sees the cancel and starts the stop at
+// once. The terminal procedure's final push (finalSync) does not use this
+// path: it has its own step bounds and a nil context.
 func (s *Supervisor) syncGitOnce() (int, bool, error) {
-	return s.syncGitPass(nil)
+	if s.Git == nil {
+		return 0, false, nil
+	}
+	ctx, stopWatching := s.watchForCancel()
+	defer stopWatching()
+	s.Git.Context = ctx
+	defer func() { s.Git.Context = nil }()
+	code, done, err := s.syncGitPass(nil)
+	if ctx.Err() != nil {
+		// The pending cancel cut this tick's slow step (or arrived just
+		// after the pass ended): no failure was counted, and the loop
+		// skips the poll sleep so the next tick starts the stop at once.
+		s.tickCutByCancel = true
+		return 0, false, nil
+	}
+	return code, done, err
 }
 
 // finSync is what one bounded final sync learned: cut is true when a step
@@ -80,15 +114,21 @@ func (s *Supervisor) cutIfStepEnded(fin *finSync) {
 	}
 }
 
-// syncGitPass is syncGitOnce with an optional bounded final sync (fin, set
-// by finalSync): the git steps run under the step deadline finalSync began,
-// and the draft pull request is its own step with its own bound.
+// syncGitPass is syncGitOnce's pass with an optional bounded final sync
+// (fin, set by finalSync): the git steps run under the step deadline
+// finalSync began, and the draft pull request is its own step with its own
+// bound. A git step cut by the pending cancel (errCancelled, the watch
+// loop's observer) ends the pass cleanly: no friction, no refused-push
+// block, no failure — the caller marks the tick cut by the cancel.
 func (s *Supervisor) syncGitPass(fin *finSync) (int, bool, error) {
 	if s.Git == nil {
 		return 0, false, nil
 	}
 	head, err := s.Git.Head()
 	if err != nil {
+		if errors.Is(err, errCancelled) {
+			return 0, false, nil
+		}
 		s.frictionf(err.Error())
 		fin.fail()
 		s.cutIfStepEnded(fin)
@@ -127,6 +167,9 @@ func (s *Supervisor) syncGitPass(fin *finSync) (int, bool, error) {
 		// failed listing leaves it unchanged so the next sync walks again.
 		commits, err := s.Git.Commits()
 		if err != nil {
+			if errors.Is(err, errCancelled) {
+				return 0, false, nil
+			}
 			s.frictionf(err.Error())
 			fin.fail()
 			s.cutIfStepEnded(fin)
@@ -158,6 +201,9 @@ func (s *Supervisor) syncGitPass(fin *finSync) (int, bool, error) {
 	}
 	result, err := s.Git.Push()
 	if err != nil {
+		if errors.Is(err, errCancelled) {
+			return 0, false, nil
+		}
 		s.frictionf(err.Error())
 		fin.fail()
 		s.cutIfStepEnded(fin)
@@ -196,6 +242,9 @@ func (s *Supervisor) syncGitPass(fin *finSync) (int, bool, error) {
 		}
 		pr, _, err := s.Git.EnsureDraftPR(s.prTitle, s.prBody())
 		if err != nil {
+			if errors.Is(err, errCancelled) {
+				return 0, false, nil
+			}
 			s.frictionf(err.Error())
 			fin.fail()
 			s.cutIfStepEnded(fin)

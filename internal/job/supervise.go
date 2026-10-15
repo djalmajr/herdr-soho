@@ -140,10 +140,16 @@ type Supervisor struct {
 
 	// Tick bookkeeping: consecutive bad observations (the gone-family
 	// states, status errors) and the unknown states already reported to
-	// friction.
-	goneStreak int
-	errStreak  int
-	frictioned map[string]bool
+	// friction. tickCutByCancel marks the tick the pending cancel cut one
+	// of its slow calls (the orchestrator's status read, the periodic git
+	// sync): the cut counted no failure (no friction, no error streak, no
+	// refused-push block), and the watch loop starts the next tick without
+	// sleeping the poll interval, so its deliverControl sees the cancel and
+	// starts the stop at once.
+	goneStreak      int
+	errStreak       int
+	frictioned      map[string]bool
+	tickCutByCancel bool
 
 	// Wake bookkeeping: the queue and its worker (nil when the hook is
 	// disabled) and the highest event seq queued in this process
@@ -543,12 +549,19 @@ func (s *Supervisor) Run() (int, error) {
 		return code, nil
 	}
 	for {
+		s.tickCutByCancel = false
 		code, done, err := s.tick()
 		if err != nil {
 			return ExitFailed, err
 		}
 		if done {
 			return code, nil
+		}
+		if s.tickCutByCancel {
+			// The pending cancel cut this tick's slow call: the next tick
+			// starts at once (no poll sleep) so its deliverControl sees the
+			// cancel and starts the stop.
+			continue
 		}
 		s.clockSleep(s.poll())
 	}
@@ -867,13 +880,19 @@ func orchestratorBriefSection(id string) []byte {
 // tick runs one watch iteration: the wake queue first (it only enqueues),
 // then the dispatcher's control requests (amend, send, checkpoint,
 // cancel), then the git sync (a checkpoint request pushes in the same tick;
-// a rejected push blocks the job before the orchestrator is read), then,
-// while a stop is running, the job budget (the stop path's end); otherwise
-// the job orchestrator — read once, the blocked-boundary crossing first (a
-// block entry's settle lands before the tick's budget check, so the active
-// time accrued up to the block is enforced while blocked), then the job
-// budget against the post-crossing state, then the done and gone-family
-// outcomes.
+// a rejected push blocks the job before the orchestrator is read; while a
+// stop is running the periodic sync does not run at all), then, while a
+// stop is running, the job budget (the stop path's end); otherwise the job
+// orchestrator — read once, the blocked-boundary crossing first (a block
+// entry's settle lands before the tick's budget check, so the active time
+// accrued up to the block is enforced while blocked), then the job budget
+// against the post-crossing state, then the done and gone-family outcomes.
+// Outside the stop the two slow steps (the periodic git sync and the
+// orchestrator's status read) run under the cancel observer: a pending
+// cancel that arrives in flight cuts them without counting a failure (no
+// friction, no error streak, no refused-push block), and the tick ends so
+// the next starts at once, without the poll sleep, and its deliverControl
+// starts the stop.
 func (s *Supervisor) tick() (int, bool, error) {
 	if code, done, err := s.dispatchWakes(); err != nil || done {
 		return code, true, err
@@ -916,8 +935,21 @@ func (s *Supervisor) checkOrchestrator() (int, bool, error) {
 		return s.accumulate()
 	}
 	st := snap.State
-	state, reportPath, err := s.Ops.Status(st.Orchestrator)
+	// The status read runs under the cancel observer (the same watch as the
+	// in-flight delivery): a pending cancel that arrives while the read is
+	// in flight ends only the read this adapter opened, and the cut is not
+	// a failure (no friction, no error streak) — the tick ends without
+	// sleeping and the next tick's deliverControl starts the stop.
+	statusCtx, stopWatching := s.watchForCancel()
+	state, reportPath, err := s.interruptibleOps(statusCtx).Status(st.Orchestrator)
+	cut := statusCtx.Err() != nil
+	stopWatching()
 	if err != nil {
+		if cut {
+			s.goneStreak = 0
+			s.tickCutByCancel = true
+			return 0, false, nil
+		}
 		s.goneStreak = 0
 		return s.accumulate()
 	}

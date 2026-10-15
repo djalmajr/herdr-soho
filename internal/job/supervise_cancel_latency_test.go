@@ -1,11 +1,15 @@
 package job
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
 // supervise_cancel_latency_test.go pins, with the test clock, the hard
@@ -357,4 +361,391 @@ func TestCancelTerminalWithinTheHardBound(t *testing.T) {
 		}
 		assertCanceledTerminal(t, store, jobDir, "cancel.json-000001")
 	})
+}
+
+// The in-flight slow steps the pending cancel cuts (this amendment): the
+// orchestrator's status read and the periodic git sync run under the cancel
+// observer outside the stop, so a cancel that arrives in flight ends only
+// the command the adapter (or GitSync) opened — in under 2 s — the tick
+// counts no failure (no friction, no status error streak, no refused-push
+// block), and the loop starts the next tick without the poll sleep, so its
+// deliverControl sees the cancel and starts the stop at once. While a stop
+// is running the periodic sync does not run at all: the final commit and
+// push are the finishing's, inside its own budget.
+
+// stuckStatusTeam wraps the fake team with the scripted slow orchestrator
+// status: its first status read (the watch loop's) blocks on the
+// interruptible context until the supervisor's observer cancels it, and
+// comes back as the failure the cut is the cause of. Every other read
+// passes through to the scripted fake.
+type stuckStatusTeam struct {
+	*fakeTeam
+	// statusCtx is the interruptible context the supervisor handed the
+	// in-flight read (nil when the read ran without one).
+	statusCtx context.Context
+	// stuck makes the next read block until its context is cancelled.
+	stuck bool
+	// started is closed when the in-flight read blocks.
+	started chan struct{}
+	// cutAt is when the in-flight read came back (zero when it ran without
+	// a context).
+	cutAt time.Time
+}
+
+func (w *stuckStatusTeam) bounded(d time.Duration) teamOps {
+	return &boundFakeTeam{fakeTeam: w.fakeTeam, inner: w, bound: d}
+}
+
+func (w *stuckStatusTeam) interruptible(ctx context.Context) teamOps {
+	return &stuckStatusCtx{fakeTeam: w.fakeTeam, team: w, ctx: ctx}
+}
+
+// Status is the scripted read: the stuck one blocks on the context and
+// fails; the rest pass through to the fake.
+func (w *stuckStatusTeam) Status(name string) (string, string, error) {
+	if w.stuck {
+		w.stuck = false
+		close(w.started)
+		if w.statusCtx != nil {
+			<-w.statusCtx.Done()
+			w.cutAt = time.Now()
+		}
+		return "", "", errors.New("the status context was cancelled")
+	}
+	return w.fakeTeam.Status(name)
+}
+
+// stuckStatusCtx records the interruptible context on the way to the
+// scripted read, the way the production adapter hands it to the command;
+// the embedded fake provides every other operation.
+type stuckStatusCtx struct {
+	*fakeTeam
+	team *stuckStatusTeam
+	ctx  context.Context
+}
+
+func (w *stuckStatusCtx) Status(name string) (string, string, error) {
+	w.team.statusCtx = w.ctx
+	return w.team.Status(name)
+}
+
+// A cancel that lands while the orchestrator's status read is in flight:
+// the read runs under the cancel observer, the observer cancels its context
+// the moment the pending cancel appears, the in-flight read the adapter
+// opened ends in under 2 s, the tick counts no failure, and the stop starts
+// on the next tick without the poll sleep — the terminal record lands at
+// most grace + defaultSupervisorPoll past the acceptance.
+func TestCancelCutsTheSlowOrchestratorStatus(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := nsSup(t, 0, &friction)
+	sup.FinishingLimits = finishingLimits{Budget: cancelLatencyBudget}
+	watch := &stuckStatusTeam{fakeTeam: team, stuck: true, started: make(chan struct{})}
+	sup.Ops = watch
+	team.statusScript = workingStatuses(10)
+	runDone := make(chan struct {
+		exit int
+		err  error
+	}, 1)
+	go func() {
+		exit, err := sup.Run()
+		runDone <- struct {
+			exit int
+			err  error
+		}{exit, err}
+	}()
+	// The first watch-loop status read is in flight (blocking on its
+	// context): the cancel arrives during the read, with grace 10.
+	<-watch.started
+	t0 := clock.now
+	t0Real := time.Now()
+	if queued, err := store.RequestCancel("job-1", 10); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	res := <-runDone
+	if res.err != nil {
+		t.Fatalf("Run: %v", res.err)
+	}
+	if res.exit != ExitCanceled {
+		t.Fatalf("exit = %d, want %d (the cut read must not fail the job)", res.exit, ExitCanceled)
+	}
+	if watch.cutAt.IsZero() {
+		t.Fatalf("the read did not block on the interruptible context")
+	}
+	// The cut read came back in under 2 s of the acceptance: the observer
+	// cancelled the context and the in-flight read ended.
+	if elapsed := watch.cutAt.Sub(t0Real); elapsed >= 2*time.Second {
+		t.Fatalf("the cut status read took %v after the acceptance, want under 2 s", elapsed)
+	}
+	// The stop started on the next tick, without the poll sleep: the stop
+	// amendment ran bounded to the full grace (a slept tick would have cut
+	// the bound by the interval).
+	if len(team.bounds) != 1 || team.bounds[0] != 10*time.Second {
+		t.Fatalf("bounds = %v, want the full grace on the stop amendment", team.bounds)
+	}
+	if len(team.dispatches) != 2 {
+		t.Fatalf("dispatches = %+v, want the brief and the stop amendment", team.dispatches)
+	}
+	assertStopAmend(t, jobDir)
+	// The terminal record is exactly at the deadline (the stop ended on
+	// the first tick at or past it) and within the hard bound.
+	if !clock.now.Equal(t0.Add(10 * time.Second)) {
+		t.Fatalf("terminal at %s, want %s (the stop ended on the deadline)", clock.now, t0.Add(10*time.Second))
+	}
+	assertTerminalWithinHardBound(t, clock, t0, 10*time.Second, cancelLatencyBudget)
+	// The cut read counted no failure: no friction and no status error
+	// streak (three failed reads would have failed the job).
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v, want none (the cut read counts no failure)", friction)
+	}
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countTipe(events, "delivery_uncertain"); n != 0 {
+		t.Fatalf("delivery_uncertain = %d, want none (the cut read is not a queue delivery)", n)
+	}
+	assertCanceledTerminal(t, store, jobDir, "cancel.json-000001")
+}
+
+// supCancelGhRules is the fake gh of the cancel git fixture: the list
+// answers an existing draft pull request, so no create runs.
+var supCancelGhRules = []fakecli.Rule{{Argv: ghListArgv(), Stdout: supGitPRJSON}}
+
+// supCancelGitFixture is the nsSup-shaped fixture over a real git job
+// worktree: the store and the supervisor share the nanosecond test clock
+// (the ticks and the stop deadline run on test time), the git sync is the
+// real one (a real git push to the local bare remote), and the team is the
+// fake (the scripted working orchestrator). The supGitFixture supplies the
+// git fixture (the worktree, the bare remote and the hook helpers).
+type supCancelGitFixture struct {
+	git      *supGitFixture
+	store    *Store
+	jobDir   string
+	clock    *nsClock
+	team     *fakeTeam
+	friction *[]string
+	sup      *Supervisor
+}
+
+func newSupCancelGitFixture(t *testing.T, ghRules []fakecli.Rule) *supCancelGitFixture {
+	t.Helper()
+	git := newSupGitFixture(t, ghRules)
+	root := t.TempDir()
+	clock := &nsClock{now: time.Date(2026, 10, 9, 10, 0, 0, 0, time.FixedZone("-03:00", -3*3600))}
+	store := Open(root)
+	store.Clock = clock
+	if _, err := store.Start("job-1", []byte(supTestBrief)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition("job-1", StatusPreparing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Record("job-1", func(st *State) {
+		st.Dir = git.job.dir
+		st.Branch = gitSyncBranch
+		st.Base = "main"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition("job-1", StatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	team := &fakeTeam{spawnName: "orch-1"}
+	var friction []string
+	sup := &Supervisor{
+		Store:    store,
+		ID:       "job-1",
+		Ops:      team,
+		Clock:    clock,
+		Git:      &GitSync{Env: git.job.base.env, Dir: git.job.dir, Branch: gitSyncBranch, Base: "main", Repo: gitSyncRepo},
+		Friction: func(message string) { friction = append(friction, message) },
+	}
+	return &supCancelGitFixture{
+		git: git, store: store, jobDir: filepath.Join(root, "jobs", "job-1"),
+		clock: clock, team: team, friction: &friction, sup: sup,
+	}
+}
+
+// waitHookCalls polls the bare remote's pre-receive call log until at least
+// want calls are logged (the push is in flight), failing the test as a
+// fixture error when they never arrive. A partial line (the hook logging
+// while the poll reads) is a retry, not an error.
+func waitHookCalls(t *testing.T, f *supGitFixture, want int) {
+	t.Helper()
+	log := filepath.Join(f.job.base.fakeDir, remoteHookName+".calls.jsonl")
+	deadline := time.Now().Add(scaledDuration(10 * time.Second))
+	for {
+		if calls, err := fakecli.ReadCalls(log); err == nil && len(calls) >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fixture error: the held push logged fewer than %d pre-receive call(s) before the deadline", want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// A cancel that lands while the periodic git sync's push is in flight (a
+// real push held at the bare remote, the holdRemotePush pattern): the sync
+// runs under the cancel observer, the observer cancels the sync's context
+// the moment the pending cancel appears, the git push GitSync opened ends
+// in under 2 s, no push failure friction and no refused-push block count,
+// and the stop starts at once on the next tick. The branch is still
+// unpushed, so the finishing's final push runs inside its own budget and is
+// cut by its own step bound.
+func TestCancelCutsTheStalledPeriodicPush(t *testing.T) {
+	f := newSupCancelGitFixture(t, nil)
+	f.sup.FinishingLimits = finishingLimits{Budget: cancelLatencyBudget, Git: scaledDuration(time.Second)}
+	f.git.job.commitIn(t, "feat: first")
+	holdRemotePush(t, f.git, scaledDuration(8*time.Second))
+	f.team.statusScript = workingStatuses(10)
+	// The periodic sync is due on the sixth tick (the 30 s cadence on the
+	// 5 s default poll): its push is the one the cancel cuts.
+	runDone := make(chan struct {
+		exit int
+		err  error
+	}, 1)
+	go func() {
+		exit, err := f.sup.Run()
+		runDone <- struct {
+			exit int
+			err  error
+		}{exit, err}
+	}()
+	// The held push is in flight (the remote's pre-receive fake logged the
+	// call): the cancel arrives during the push, with grace 10.
+	waitHookCalls(t, f.git, 1)
+	t0Real := time.Now()
+	t0 := f.clock.now
+	if queued, err := f.store.RequestCancel("job-1", 10); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	res := <-runDone
+	if res.err != nil {
+		t.Fatalf("Run: %v", res.err)
+	}
+	if res.exit != ExitCanceled {
+		t.Fatalf("exit = %d, want %d (the cut push must not fail the job)", res.exit, ExitCanceled)
+	}
+	// The cut push and the stop came at once: the terminal is well inside
+	// the hold (the push is not run to its end) plus the cut slack.
+	if elapsed := time.Since(t0Real); elapsed > scaledDuration(5*time.Second) {
+		t.Fatalf("the terminal came %v after the acceptance, want the cut push and the stop at once", elapsed)
+	}
+	// The stop started on the next tick, without the poll sleep: the stop
+	// amendment ran bounded to the full grace (a slept tick would have cut
+	// the bound by the interval).
+	if len(f.team.bounds) != 1 || f.team.bounds[0] != 10*time.Second {
+		t.Fatalf("bounds = %v, want the full grace on the stop amendment", f.team.bounds)
+	}
+	// The terminal record is exactly at the deadline and within the hard
+	// bound.
+	if !f.clock.now.Equal(t0.Add(10 * time.Second)) {
+		t.Fatalf("terminal at %s, want %s (the stop ended on the deadline)", f.clock.now, t0.Add(10*time.Second))
+	}
+	assertTerminalWithinHardBound(t, f.clock, t0, 10*time.Second, cancelLatencyBudget)
+	events, err := readEvents(f.jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The cut periodic push counts no failure: no push event (the
+	// finishing's final push is cut by its own step bound and records none
+	// either), no refused-push block, and the new commit was announced
+	// before the push.
+	if n := countTipes(events, "push"); n != 0 {
+		t.Fatalf("push events = %d, want none (the periodic push was cut, the finishing push by its step bound)", n)
+	}
+	if n := countTipes(events, "blocked"); n != 0 {
+		t.Fatalf("blocked events = %d, want none (no refused-push block)", n)
+	}
+	if n := countTipes(events, "commit"); n != 1 {
+		t.Fatalf("commit events = %d, want the one announced before the push", n)
+	}
+	// The friction is exactly the finishing's cut final push: the periodic
+	// cut wrote none.
+	if len(*f.friction) != 1 || (*f.friction)[0] != "job: git sync failed: push" {
+		t.Fatalf("friction = %v, want exactly the finishing's cut final push", *f.friction)
+	}
+	// Both pushes reached the remote (the cut periodic and the cut
+	// finishing): the hook ran twice.
+	requireRemoteHookCalls(t, f.git, 2)
+	assertCanceledTerminal(t, f.store, f.jobDir, "cancel.json-000001")
+}
+
+// While a stop is running the tick runs no periodic git sync: the cadence
+// that is due on a stop tick does not push (the final commit and push are
+// the finishing's, inside its budget). The cancel is accepted before the
+// first stop tick and the cadence is due on every tick (a 30 s poll is one
+// tick per cadence): a periodic pass would run on both stop ticks and push
+// into the diverged remote ref (a refused push that would block the job),
+// which the stop must not do.
+func TestNoPeriodicSyncWhileStopping(t *testing.T) {
+	f := newSupCancelGitFixture(t, supCancelGhRules)
+	f.sup.Poll = 30 * time.Second // one tick per cadence: the sync is due on every tick
+	f.sup.FinishingLimits = finishingLimits{Budget: cancelLatencyBudget}
+	f.git.job.commitIn(t, "feat: first")
+	f.team.statusScript = workingStatuses(10)
+	var t0 time.Time
+	f.clock.onSleep = func() {
+		if f.clock.sleeps == 1 {
+			t0 = f.clock.now
+			if queued, err := f.store.RequestCancel("job-1", 30); !queued || err != nil {
+				t.Fatalf("cancel: queued=%v err=%v", queued, err)
+			}
+			// The remote job ref diverges from the local head (the pre-cancel
+			// push created it): every later push is refused, so a periodic
+			// pass on a stop tick would block the job for the refused push.
+			sha, err := f.git.job.base.git(f.git.job.base.bare, "rev-parse", "refs/heads/main")
+			if err != nil {
+				t.Fatalf("rev-parse main: %v", err)
+			}
+			tree, err := f.git.job.base.git(f.git.job.base.bare, "rev-parse", "main^{tree}")
+			if err != nil {
+				t.Fatalf("rev-parse main tree: %v", err)
+			}
+			diverge, err := f.git.job.base.git(f.git.job.base.bare, "commit-tree", strings.TrimSpace(tree), "-p", strings.TrimSpace(sha), "-m", "diverge")
+			if err != nil {
+				t.Fatalf("commit-tree: %v", err)
+			}
+			if out, err := f.git.job.base.git(f.git.job.base.bare, "update-ref", "refs/heads/"+gitSyncBranch, strings.TrimSpace(diverge)); err != nil {
+				t.Fatalf("update-ref: %s: %v", out, err)
+			}
+		}
+	}
+	exit, err := f.sup.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exit != ExitCanceled {
+		t.Fatalf("exit = %d, want %d", exit, ExitCanceled)
+	}
+	// The terminal record is exactly at the deadline and within the hard
+	// bound.
+	if !f.clock.now.Equal(t0.Add(30 * time.Second)) {
+		t.Fatalf("terminal at %s, want %s (the stop ended on the deadline)", f.clock.now, t0.Add(30*time.Second))
+	}
+	assertTerminalWithinHardBound(t, f.clock, t0, 30*time.Second, cancelLatencyBudget)
+	events, err := readEvents(f.jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No periodic sync ran on the stop ticks: a refused push of a periodic
+	// pass would have blocked the job and pushed again; the only push is
+	// the finishing's final one (refused by the diverged ref).
+	if n := countTipes(events, "blocked"); n != 0 {
+		t.Fatalf("blocked events = %d, want none (no periodic sync ran on the stop ticks)", n)
+	}
+	if n := countTipes(events, "push"); n != 2 {
+		t.Fatalf("push events = %d, want the pre-cancel push and the finishing's final one", n)
+	}
+	if n := countTipes(events, "commit"); n != 1 {
+		t.Fatalf("commit events = %d, want the one announced by the pre-cancel sync", n)
+	}
+	if n := countTipes(events, "pr_opened"); n != 1 {
+		t.Fatalf("pr_opened events = %d, want the one from the pre-cancel sync", n)
+	}
+	if len(*f.friction) != 0 {
+		t.Fatalf("friction = %v, want none (a refused push counts no failure)", *f.friction)
+	}
+	assertCanceledTerminal(t, f.store, f.jobDir, "cancel.json-000001")
 }

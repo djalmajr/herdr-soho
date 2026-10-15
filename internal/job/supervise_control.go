@@ -453,10 +453,17 @@ func (s *Supervisor) checkBudget(orchState string) (int, bool, error) {
 		return 0, false, err
 	}
 	if s.stopping != "" {
+		// The stop never waits on a read past its deadline: with the grace
+		// spent it ends without reading the orchestrator, and otherwise the
+		// read is limited to the grace left.
+		remaining := time.Duration(s.stopDeadline - s.Clock.Monotonic())
+		if remaining <= 0 {
+			return s.endStop(st)
+		}
 		state := orchState
 		if state == "" {
 			if name := st.Orchestrator; name != "" {
-				if read, _, err := s.Ops.Status(name); err == nil {
+				if read, _, err := s.boundedOps(remaining).Status(name); err == nil {
 					state = read
 				}
 			}

@@ -1426,3 +1426,47 @@ func TestSuperviseControlRepeatedCheckpointConverges(t *testing.T) {
 		t.Fatalf("state = %+v", st)
 	}
 }
+
+// TestStopStatusReadBoundedByTheGrace pins the stop's own reads of the
+// orchestrator: each is limited to the grace left, and once the grace is
+// spent the stop ends without reading at all.
+func TestStopStatusReadBoundedByTheGrace(t *testing.T) {
+	t.Run("the reads during the grace are limited to what is left", func(t *testing.T) {
+		var friction []string
+		store, _, _, team, sup := nsSup(t, 10*time.Second, &friction)
+		if queued, err := store.RequestCancel("job-1", 30); !queued || err != nil {
+			t.Fatalf("cancel: queued=%v err=%v", queued, err)
+		}
+		team.statusScript = []fakeStatus{{State: "working"}}
+		exit, err := sup.Run()
+		if err != nil || exit != ExitCanceled {
+			t.Fatalf("Run = %d, %v; want %d", exit, err, ExitCanceled)
+		}
+		if len(team.statusBounds) == 0 {
+			t.Fatal("no stop read of the orchestrator was limited to the grace")
+		}
+		for i, b := range team.statusBounds {
+			if b <= 0 || b > 30*time.Second {
+				t.Fatalf("status bound %d = %v, want within the 30 s grace", i, b)
+			}
+		}
+	})
+	t.Run("a spent grace ends the stop without a read", func(t *testing.T) {
+		var friction []string
+		store, _, clock, team, sup := nsSup(t, 10*time.Second, &friction)
+		if queued, err := store.RequestCancel("job-1", 0); !queued || err != nil {
+			t.Fatalf("cancel: queued=%v err=%v", queued, err)
+		}
+		team.statusScript = []fakeStatus{{State: "working"}}
+		exit, err := sup.Run()
+		if err != nil || exit != ExitCanceled {
+			t.Fatalf("Run = %d, %v; want %d", exit, err, ExitCanceled)
+		}
+		if len(team.statusBounds) != 0 {
+			t.Fatalf("status bounds = %v, want no read once the grace is spent", team.statusBounds)
+		}
+		if clock.sleeps != 0 {
+			t.Fatalf("sleeps = %d, want the stop to end on its first check", clock.sleeps)
+		}
+	})
+}

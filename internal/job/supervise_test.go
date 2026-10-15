@@ -70,6 +70,8 @@ type fakeTeam struct {
 	// bounds records the limit each bounded delivery adapter received, in
 	// call order.
 	bounds []time.Duration
+	// statusBounds records the limit of every bounded Status read.
+	statusBounds []time.Duration
 	// stuckDispatchCall and stuckSendCall name the 1-based delivery call
 	// (the brief's dispatch is call 1) that closes entered and waits for
 	// the delivery context to be cancelled before failing: the scripted
@@ -207,6 +209,11 @@ func (w *boundFakeTeam) Dispatch(name, briefPath string, amend bool) error {
 func (w *boundFakeTeam) Send(name, path string) error {
 	w.fakeTeam.bounds = append(w.fakeTeam.bounds, w.bound)
 	return w.inner.Send(name, path)
+}
+
+func (w *boundFakeTeam) Status(name string) (string, string, error) {
+	w.fakeTeam.statusBounds = append(w.fakeTeam.statusBounds, w.bound)
+	return w.inner.Status(name)
 }
 
 // ctxFakeTeam records the delivery context and hands the delivery to the
