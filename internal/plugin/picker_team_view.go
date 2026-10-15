@@ -9,15 +9,18 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/sessionref"
 )
 
-// pickerTeamView is the picker's read-only team view (DJA-317 slice A):
-// the soho team roster and the effective role configuration of the
-// selected row's workspace, for rows of the local machine. The two CLI
-// reads (roster and roles, exactly) run off the key path with
-// HERDR_SOHO_NOWRITE=1 through the shared teamCall, and only their
-// finished result comes back to the list's goroutine, where
-// applyPickerTeamView applies it. A late result of another row or of a
+// pickerTeamView is the session popup's read-only team view (DJA-317,
+// slices A and B): the soho team roster and the effective role
+// configuration of the selected row's workspace, for rows of the local
+// machine. The same type serves the picker's state (slice A) and the
+// board runtime's state (slice B, the runtime the picker command runs
+// on). The two CLI reads (roster and roles, exactly) run off the key
+// path with HERDR_SOHO_NOWRITE=1 through the shared teamCall, and only
+// their finished result comes back to the list's goroutine, where
+// applyTeamView applies it. A late result of another row or of a
 // superseded open is discarded, and nothing here writes: a failed call
-// shows its cause in its own block and the other block keeps its content.
+// shows its cause in its own block and the other block keeps its
+// content.
 type pickerTeamView struct {
 	// target is the soho team target of the selected row (the row's
 	// workspace_id, pane_id and cwd; the reads need no tab id).
@@ -39,8 +42,9 @@ type pickerTeamView struct {
 	// loaded is true once the finished result was applied; until then
 	// the view shows "loading team…".
 	loaded bool
-	// loadSeq is the open's sequence (the picker's teamLoadSeq at the
-	// open): a result of another open (stale sequence) is discarded.
+	// loadSeq is the open's sequence (the owning state's teamLoadSeq at
+	// the open): a result of another open (stale sequence) is
+	// discarded.
 	loadSeq       int
 	rosterLines   []string
 	rosterFailure string
@@ -63,20 +67,16 @@ type pickerTeamViewResult struct {
 	rolesCause  string
 }
 
-// openPickerTeamView opens the read-only team view on the selected row.
-// The row's workspace_id, pane_id and cwd build the team target and the
-// cwd is validated like resolveTeamTarget does (it must exist and be a
+// openTeamView builds the read-only team view of one row (DJA-317,
+// shared by the picker's and the board's states): the row's
+// workspace_id, pane_id and cwd build the team target and the cwd is
+// validated like resolveTeamTarget does (it must exist and be a
 // directory); a row of another machine opens the view with the slice-B
-// message and no CLI call at all. Every open starts a new load sequence,
-// so a late result of the previous open (or of another row) is discarded.
-func (s *PickerState) openPickerTeamView() {
-	list := s.visible()
-	if len(list) == 0 {
-		return
-	}
-	entry := list[min(s.Selected, len(list)-1)]
+// message and no CLI call at all. seq is the open's sequence (the
+// owning state's teamLoadSeq at the open): a result of another open
+// (a stale sequence) is discarded.
+func openTeamView(seq int, entry PickerEntry) *pickerTeamView {
 	machine := sessionMachineOf(entry)
-	s.teamLoadSeq++
 	v := &pickerTeamView{
 		target: teamTarget{
 			WorkspaceID: pickerString(entry["workspace_id"]),
@@ -87,7 +87,7 @@ func (s *PickerState) openPickerTeamView() {
 		machine:        machine,
 		workspaceLabel: pickerString(entry["workspace_label"]),
 		remote:         machine != sessionref.LocalMachine,
-		loadSeq:        s.teamLoadSeq,
+		loadSeq:        seq,
 	}
 	if !v.remote {
 		if cause := pickerTeamCwdCause(v.target.Cwd); cause != "" {
@@ -96,7 +96,20 @@ func (s *PickerState) openPickerTeamView() {
 			v.targetErr = cause
 		}
 	}
-	s.TeamView = v
+	return v
+}
+
+// openPickerTeamView opens the read-only team view on the selected row.
+// Every open starts a new load sequence, so a late result of the
+// previous open (or of another row) is discarded.
+func (s *PickerState) openPickerTeamView() {
+	list := s.visible()
+	if len(list) == 0 {
+		return
+	}
+	entry := list[min(s.Selected, len(list)-1)]
+	s.teamLoadSeq++
+	s.TeamView = openTeamView(s.teamLoadSeq, entry)
 }
 
 // pickerTeamCwdCause validates the row's cwd like resolveTeamTarget does:
@@ -142,43 +155,54 @@ func runPickerTeamViewLoad(ctx contextpkg.Context, exe string, env platform.Env,
 	publish(res)
 }
 
-// applyPickerTeamView folds one finished load into the open view and
-// reports whether it applied: a result of another row or of a
-// superseded open (a stale sequence) is discarded, the view of a remote
-// or invalid-target row never takes a result, and an already applied
-// view is not loaded twice.
-func (s *PickerState) applyPickerTeamView(res pickerTeamViewResult) bool {
-	v := s.TeamView
-	if v == nil || v.remote || v.targetErr != "" || v.loaded {
+// applyTeamView folds one finished load into the open view and reports
+// whether it applied (DJA-317, shared by the picker's and the board's
+// states): a result of another row or of a superseded open (a stale
+// sequence) is discarded, the view of a remote or invalid-target row
+// never takes a result, and an already applied view is not loaded
+// twice.
+func applyTeamView(view *pickerTeamView, res pickerTeamViewResult) bool {
+	if view == nil || view.remote || view.targetErr != "" || view.loaded {
 		return false
 	}
-	if res.seq != v.loadSeq || res.entryRef != v.entryRef {
+	if res.seq != view.loadSeq || res.entryRef != view.entryRef {
 		return false
 	}
-	v.rosterLines = res.rosterLines
-	v.rosterFailure = res.rosterCause
-	v.rolesLines = res.rolesLines
-	v.rolesFailure = res.rolesCause
-	v.loaded = true
+	view.rosterLines = res.rosterLines
+	view.rosterFailure = res.rosterCause
+	view.rolesLines = res.rolesLines
+	view.rolesFailure = res.rolesCause
+	view.loaded = true
 	return true
 }
 
-// teamViewScroll moves the open team view one line (up/down) or one page
-// (page-up/page-down) with the team panel's page size, clamped at the
-// top; the bottom clamps by scrollLines in the renderer, like the panel.
-func (s *PickerState) teamViewScroll(key string) {
-	v := s.TeamView
+// applyPickerTeamView applies one finished load to the picker's open
+// view, on the picker's goroutine.
+func (s *PickerState) applyPickerTeamView(res pickerTeamViewResult) bool {
+	return applyTeamView(s.TeamView, res)
+}
+
+// teamViewScrollMove moves the open team view one line (up/down) or one
+// page (page-up/page-down) with the team panel's page size, clamped at
+// the top; the bottom clamps by scrollLines in the renderer, like the
+// panel. It is shared by the picker's and the board's states.
+func teamViewScrollMove(view *pickerTeamView, key string) {
 	switch key {
 	case "up":
-		v.scroll--
+		view.scroll--
 	case "down":
-		v.scroll++
+		view.scroll++
 	case "page-up":
-		v.scroll -= teamViewScrollPage
+		view.scroll -= teamViewScrollPage
 	case "page-down":
-		v.scroll += teamViewScrollPage
+		view.scroll += teamViewScrollPage
 	}
-	if v.scroll < 0 {
-		v.scroll = 0
+	if view.scroll < 0 {
+		view.scroll = 0
 	}
+}
+
+// teamViewScroll scrolls the picker's open team view.
+func (s *PickerState) teamViewScroll(key string) {
+	teamViewScrollMove(s.TeamView, key)
 }

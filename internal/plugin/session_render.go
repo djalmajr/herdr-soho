@@ -41,14 +41,17 @@ type SessionRenderOptions struct {
 	Board         bool   // board flavor: r Refresh in the footer, task title in the detail
 	Scope         string // scope filter disclosed in the footer (always, incl. all)
 	Status        string // status filter disclosed in the footer (always, incl. all)
-	// TeamKey discloses the picker's "i Team" shortcut in the footer's
-	// action line: only the picker binds i to the read-only team view
-	// (DJA-317 slice A), so the board and the legacy frames leave it off
-	// - the footer never advertises a key the frame does not bind.
+	// TeamKey discloses the "i Team" shortcut in the footer's action
+	// line: the board-derived session runtime binds i to the read-only
+	// team view in the enhanced list focus (DJA-317, slices A and B), so
+	// the unified frame discloses it - the legacy frames (non-enhanced
+	// picker and board) leave it off, and the footer never advertises a
+	// key the frame does not bind.
 	TeamKey bool
-	// TeamView is the picker's open read-only team view (DJA-317 slice
-	// A): when it is set, renderSessionPopup replaces the row window
-	// with the view inside the same frame.
+	// TeamView is the session popup's open read-only team view (DJA-317,
+	// slices A and B, shared by the picker's and the board's states):
+	// when it is set, renderSessionPopup replaces the row window with
+	// the view inside the same frame.
 	TeamView *pickerTeamView
 }
 
