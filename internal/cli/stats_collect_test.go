@@ -26,7 +26,7 @@ func newCommandFixture(t *testing.T) *statsFixture {
 	t.Helper()
 	root := filepath.Clean(filepath.Dir(testSkillDir(t)))
 	base := t.TempDir()
-	f := &statsFixture{t: t, root: root, state: filepath.Join(base, "state"), workspace: "ws", reports: filepath.Join(base, "state", "ws", "reports"), briefs: filepath.Join(base, "state", "ws", "briefs"), tmp: filepath.Join(base, "tmp"), skill: filepath.Join(root, "skills", "herdr-soho"), fakebin: filepath.Join(base, "fakebin")}
+	f := &statsFixture{t: t, root: root, state: filepath.Join(base, "state"), workspace: "ws", reports: filepath.Join(base, "state", "ws", "reports"), briefs: filepath.Join(base, "state", "ws", "briefs"), tmp: filepath.Join(base, "tmp"), skill: filepath.Join(root, "skills", "soho"), fakebin: filepath.Join(base, "fakebin")}
 	if _, err := fakecli.Install(t, f.fakebin, "herdr", nil); err != nil {
 		t.Fatal(err)
 	}

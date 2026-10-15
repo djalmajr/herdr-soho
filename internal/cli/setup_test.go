@@ -77,7 +77,7 @@ func TestSetupWriteRejectsSetBeforeAnyWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
-	skill, err := filepath.Abs(filepath.Join(oldCwd, "..", "..", "skills", "herdr-soho"))
+	skill, err := filepath.Abs(filepath.Join(oldCwd, "..", "..", "skills", "soho"))
 	if err != nil {
 		t.Fatal(err)
 	}

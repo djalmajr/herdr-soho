@@ -38,8 +38,8 @@ func setupWriteFixture(t *testing.T) (string, platform.Env, *core.Config) {
 	env["PATH"] = filepath.Dir(git) + string(os.PathListSeparator) + env.Get("PATH")
 	env["HOME"] = t.TempDir()
 	env["XDG_CONFIG_HOME"] = filepath.Join(env["HOME"], ".config")
-	env["HERDR_SOHO_DIR"] = ".herdr-soho"
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
+	env["HERDR_SOHO_DIR"] = ".soho"
+	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	delete(env, "HERDR_WORKSPACE_ID")
 	delete(env, "HERDR_ENV")
 	ctx := core.LoadConfig(env, root)
@@ -114,8 +114,10 @@ func TestSetupWriteBlockAndHooks(t *testing.T) {
 		}
 	})
 	t.Run("legacy block migrates in place", func(t *testing.T) { // Mutation captured: leaving legacy markers prevents setup from upgrading existing managed instructions.
+		// DJA-318: the recognized legacy generation is the pre-rename herdr-soho block; the
+		// herdr-agents generation is retired (below).
 		file := filepath.Join(t.TempDir(), "AGENTS.md")
-		if err := os.WriteFile(file, []byte("before\n<!-- herdr-agents:start -->\nold herdr-agents block\n<!-- herdr-agents:end -->\nafter\n"), 0o600); err != nil {
+		if err := os.WriteFile(file, []byte("before\n<!-- herdr-soho:start -->\nold herdr-soho block\n<!-- herdr-soho:end -->\nafter\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if got := setupWriteBlock(file); got != "updated" {
@@ -124,6 +126,19 @@ func TestSetupWriteBlockAndHooks(t *testing.T) {
 		content, _ := os.ReadFile(file)
 		if !strings.Contains(string(content), setuptext.SetupStart) || strings.Contains(string(content), setuptext.LegacySetupStart) || !strings.Contains(string(content), "before\n") || !strings.Contains(string(content), "after\n") {
 			t.Fatalf("legacy not migrated: %q", content)
+		}
+	})
+	t.Run("the retired herdr-agents block is user text and a soho block is appended", func(t *testing.T) { // DJA-318: the herdr-agents generation is no longer recognized as a managed block.
+		file := filepath.Join(t.TempDir(), "AGENTS.md")
+		if err := os.WriteFile(file, []byte("before\n<!-- herdr-agents:start -->\nold herdr-agents block\n<!-- herdr-agents:end -->\nafter\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := setupWriteBlock(file); got != "written" {
+			t.Fatal(got)
+		}
+		content, _ := os.ReadFile(file)
+		if !strings.Contains(string(content), setuptext.SetupStart) || !strings.Contains(string(content), "old herdr-agents block\n<!-- herdr-agents:end -->\nafter\n") {
+			t.Fatalf("retired block must stay user text with the soho block appended: %q", content)
 		}
 	})
 	t.Run("hooks merge without losing user entries and are idempotent", func(t *testing.T) { // Mutation captured: replacing the hooks object loses user hooks or duplicates Herdr entries on rerun.
@@ -185,7 +200,7 @@ func TestCmdSetupDryRunAndRefusalPrecedeWrites(t *testing.T) {
 		if code != 4 || out != "" || !strings.Contains(msg, "tracked by git") {
 			t.Fatalf("code=%d out=%q msg=%q", code, out, msg)
 		}
-		for _, p := range []string{".claude/settings.json", ".agents/herdr-soho.conf"} {
+		for _, p := range []string{".claude/settings.json", ".agents/soho.conf"} {
 			if _, err := os.Stat(filepath.Join(root, p)); !os.IsNotExist(err) {
 				t.Fatalf("refusal left %s: %v", p, err)
 			}
@@ -557,9 +572,9 @@ func TestSetupCanonicalGitignoreAppendsWithoutRewriting(t *testing.T) {
 		seed []byte
 		want []byte
 	}{
-		{"CRLF", []byte("keep\r\n*.log\r\n"), []byte("keep\r\n*.log\r\n.herdr-soho/\n")},
-		{"LF", []byte("keep\n*.log\n"), []byte("keep\n*.log\n.herdr-soho/\n")},
-		{"no final newline", []byte("keep\n*.log"), []byte("keep\n*.log\n.herdr-soho/\n")},
+		{"CRLF", []byte("keep\r\n*.log\r\n"), []byte("keep\r\n*.log\r\n.soho/\n")},
+		{"LF", []byte("keep\n*.log\n"), []byte("keep\n*.log\n.soho/\n")},
+		{"no final newline", []byte("keep\n*.log"), []byte("keep\n*.log\n.soho/\n")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { // Mutation captured: rewriting normalized .gitignore text changes existing line endings or file mode.
@@ -570,7 +585,7 @@ func TestSetupCanonicalGitignoreAppendsWithoutRewriting(t *testing.T) {
 			}
 			code, out, msg := runSetupWrite([]string{"--no-hooks"}, ctx, env, root)
 			got, err := os.ReadFile(file)
-			if code != 0 || err != nil || string(got) != string(tc.want) || !strings.Contains(out, "state dir ignored: .herdr-soho/") {
+			if code != 0 || err != nil || string(got) != string(tc.want) || !strings.Contains(out, "state dir ignored: .soho/") {
 				t.Fatalf("code=%d stdout=%q message=%q .gitignore=%q err=%v", code, out, msg, got, err)
 			}
 			info, err := os.Stat(file)
@@ -584,7 +599,7 @@ func TestSetupCanonicalGitignoreAppendsWithoutRewriting(t *testing.T) {
 		code, out, msg := runSetupWrite([]string{"--no-hooks"}, ctx, env, root)
 		file := filepath.Join(root, ".gitignore")
 		got, err := os.ReadFile(file)
-		if code != 0 || err != nil || string(got) != ".herdr-soho/\n" || !strings.Contains(out, "state dir ignored: .herdr-soho/") {
+		if code != 0 || err != nil || string(got) != ".soho/\n" || !strings.Contains(out, "state dir ignored: .soho/") {
 			t.Fatalf("code=%d stdout=%q message=%q .gitignore=%q err=%v", code, out, msg, got, err)
 		}
 		if runtime.GOOS != "windows" {
@@ -621,7 +636,7 @@ func TestSetupCanonicalGitignoreAppendsWithoutRewriting(t *testing.T) {
 		code, out, msg := runSetupWrite([]string{"--no-hooks"}, ctx, env, root)
 		linkInfo, linkErr := os.Lstat(filepath.Join(root, ".gitignore"))
 		got, readErr := os.ReadFile(target)
-		if code != 0 || linkErr != nil || readErr != nil || linkInfo.Mode()&os.ModeSymlink == 0 || string(got) != "keep\r\n.herdr-soho/\n" || !strings.Contains(out, "state dir ignored: .herdr-soho/") {
+		if code != 0 || linkErr != nil || readErr != nil || linkInfo.Mode()&os.ModeSymlink == 0 || string(got) != "keep\r\n.soho/\n" || !strings.Contains(out, "state dir ignored: .soho/") {
 			t.Fatalf("code=%d stdout=%q message=%q link=%v/%v target=%q/%v", code, out, msg, linkInfo, linkErr, got, readErr)
 		}
 	})
@@ -647,7 +662,7 @@ func TestSetupCanonicalIgnoreUsesMainCheckoutFromLinkedWorktree(t *testing.T) {
 	code, out, msg := runSetupWrite([]string{"--no-hooks"}, &ctx, env, linked)
 	mainIgnore, mainErr := os.ReadFile(filepath.Join(root, ".gitignore"))
 	linkIgnore, linkErr := os.ReadFile(filepath.Join(linked, ".gitignore"))
-	if code != 0 || mainErr != nil || string(mainIgnore) != ".herdr-soho/\n" || !os.IsNotExist(linkErr) || !strings.Contains(out, "state dir ignored: .herdr-soho/") {
+	if code != 0 || mainErr != nil || string(mainIgnore) != ".soho/\n" || !os.IsNotExist(linkErr) || !strings.Contains(out, "state dir ignored: .soho/") {
 		t.Fatalf("code=%d stdout=%q message=%q main .gitignore=%q/%v linked .gitignore=%q/%v", code, out, msg, mainIgnore, mainErr, linkIgnore, linkErr)
 	}
 }

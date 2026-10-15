@@ -29,7 +29,7 @@ func TestDoctorRoutesThroughGoAndReportsFirstRun(t *testing.T) { // JS: "doctor 
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 	}
 	settings := filepath.Join(repo, ".claude", "settings.json")
-	if !strings.Contains(out.String(), "no herdr-soho hooks in .claude/settings.json") {
+	if !strings.Contains(out.String(), "no soho hooks in .claude/settings.json") {
 		t.Fatalf("missing hook diagnosis: %s", out.String())
 	}
 	_ = settings

@@ -55,7 +55,7 @@ func newOwnFix(t *testing.T, underRoot bool) *ownFix {
 	// newJobFix's relative HERDR_SOHO_SKILL_DIR resolves against, so the
 	// fixture pins the skill directory to an absolute path for the
 	// chdir'd runs.
-	skillDir, err := filepath.Abs(filepath.Join("..", "..", "skills", "herdr-soho"))
+	skillDir, err := filepath.Abs(filepath.Join("..", "..", "skills", "soho"))
 	if err != nil {
 		t.Fatal(err)
 	}

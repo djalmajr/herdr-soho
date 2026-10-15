@@ -25,7 +25,7 @@ func assignedFixture(t *testing.T, additional []fakecli.Rule) (*fixture, collabo
 	if err != nil {
 		t.Fatal(err)
 	}
-	skill, _ := filepath.Abs(filepath.Join("..", "..", "skills", "herdr-soho"))
+	skill, _ := filepath.Abs(filepath.Join("..", "..", "skills", "soho"))
 	rules := append([]fakecli.Rule{}, additional...)
 	rules = append(rules,
 		fakecli.Rule{Argv: []string{"agent", "get", "author"}, Stdout: workerAgent("author", "ws:p1", "codex", dir, "a1")},
@@ -101,7 +101,7 @@ func TestAssignedSendSubmitsOnceToWorkingRecipient(t *testing.T) {
 	headerID := strings.Fields(strings.SplitN(message, "\n", 2)[0])[1]
 	// The closing line closes the peer marker with a slash (PeerEndPrefix);
 	// the assignment message keeps its header, metadata and quoted body.
-	wantTail := "> First line with \"quotes\" and \\path\n> Segunda linha Ω\n>\n> Last line\n[/herdr-soho:peer] " + headerID + " end of message"
+	wantTail := "> First line with \"quotes\" and \\path\n> Segunda linha Ω\n>\n> Last line\n[/soho:peer] " + headerID + " end of message"
 	if !strings.HasSuffix(message, wantTail) {
 		t.Fatalf("multiline body or closing marker was changed: %q", message)
 	}

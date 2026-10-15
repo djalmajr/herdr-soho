@@ -1,13 +1,13 @@
 ---
-title: "herdr-soho: <one line — what went wrong or what is missing>"
-labels: herdr-soho
+title: "soho: <one line — what went wrong or what is missing>"
+labels: soho
 ---
 
 ## Scenario
 
 - **Goal of the run:** <what the orchestrator was trying to do>
 - **Roles / kinds involved:** <e.g. implementer=codex, reviewer=claude>
-- **Command:** `herdr-soho <command> <args>`
+- **Command:** `soho <command> <args>`
 
 ## What happened
 
@@ -20,13 +20,13 @@ labels: herdr-soho
 ## Environment
 
 ```
-<paste `herdr-soho env` output (includes the `runtime: go <version>` line)>
-<paste `herdr-soho config` output>
+<paste `soho env` output (includes the `runtime: go <version>` line)>
+<paste `soho config` output>
 ```
 
 ## Evidence
 
-- Report / brief paths (redacted if needed): <paths under .herdr-soho/>
+- Report / brief paths (redacted if needed): <paths under .soho/>
 - Worker screen excerpt: <herdr agent read … --lines 30, trimmed>
 
 ## Proposed change (optional)

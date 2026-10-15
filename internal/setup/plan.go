@@ -339,7 +339,7 @@ func CmdPlan(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	if tmpBase == "" {
 		tmpBase = os.TempDir()
 	}
-	tmpd, err := os.MkdirTemp(tmpBase, "herdr-soho-plan.")
+	tmpd, err := os.MkdirTemp(tmpBase, "soho-plan.")
 	if err != nil {
 		platform.DieFriction("setup --plan: could not create simulation directory", 4)
 	}

@@ -1,10 +1,10 @@
-# herdr-soho defaults. Copy the keys you want to change into
-#   ~/.config/herdr-soho/config          (user-wide)
-#   <repo>/.agents/herdr-soho.conf       (per project, wins over user)
+# soho defaults. Copy the keys you want to change into
+#   ~/.config/soho/config          (user-wide)
+#   <repo>/.agents/soho.conf       (per project, wins over user)
 # A fourth, session-only layer lives in the git-ignored state dir:
-#   <state>/session.conf — written by `herdr-soho session set`
-# (above user/project, below flags and HERDR_SOHO_*; never versioned).
-# Environment variables HERDR_SOHO_<KEY> win over both; command flags win over all.
+#   <state>/session.conf — written by `soho session set`
+# (above user/project, below flags and SOHO_*; never versioned).
+# Environment variables SOHO_<KEY> win over both; command flags win over all.
 # Format: key=value, one per line, `#` comments. Dots in keys are allowed (args.codex=…).
 
 # Name given to the caller's own agent (the orchestrator) by `init`/`spawn`, so
@@ -226,7 +226,7 @@ pressure_swap_percent=80
 
 # State root: briefs, reports, roster. Relative paths are under the repo root.
 # Must be writable by every worker sandbox (Codex denies .agents/ and .codex/).
-state_dir=.herdr-soho
+state_dir=.soho
 
 # Language the workers must write reports in (empty = language of the brief).
 report_language=
@@ -241,10 +241,10 @@ report_language=
 # ignores it).
 setup_target=canonical
 
-# Peer messages (`herdr-soho send`): whether this project accepts messages
+# Peer messages (`soho send`): whether this project accepts messages
 # delivered to its agents by another agent: auto (default) | off. The sending
 # side reads this key in the target's directory — a local target only, with
-# the target's session layer and none of the sender's HERDR_SOHO_*/
+# the target's session layer and none of the sender's SOHO_*/HERDR_SOHO_*/
 # HERDR_AGENTS_* variables; a remote target's policy is not consulted — and
 # off refuses the message with exit 18. Every attempt is recorded in
 # <state>/peer-messages.tsv (never the message body).
@@ -317,7 +317,7 @@ feedback_to=
 # the ids the CLI lists; `a|b` tries alternatives in order. Regexes resolve to
 # the NEWEST matching model at spawn time, so these defaults track new
 # releases without edits. Per role: role.<role>.model / role.<role>.effort /
-# role.<role>.kind. Check with: herdr-soho model <kind> <spec> [effort].
+# role.<role>.kind. Check with: soho model <kind> <spec> [effort].
 model.claude.orchestrator=fable
 model.claude.worker=opus
 # The planner is the orchestrator: `spawn planner` exits 12 and opens no pane.

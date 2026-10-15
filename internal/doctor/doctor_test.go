@@ -363,8 +363,8 @@ func TestDoctorRecognizesNativeAndOldSessionStartHooks(t *testing.T) { // JS: "d
 		"the exact pre-rename legacy hook warns for the setup replacement", setuptext.LegacyHookDoctor(),
 		"an older version of the hooks in .claude/settings.json: run '",
 	}, {
-		"a foreign command that only mentions herdr-soho is not a herdr-soho hook", "sh -c herdr-soho doctor",
-		"warn   no herdr-soho hooks in .claude/settings.json",
+		"a foreign command that only mentions herdr-soho is not a soho hook", "sh -c herdr-soho doctor",
+		"warn   no soho hooks in .claude/settings.json",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()

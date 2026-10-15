@@ -394,7 +394,7 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 			}
 		}
 		env["HERDR_SOHO_DIR"] = ""
-		if got := classifyLocalState(root, ctx, env, root).shown; got != ".herdr-soho/" {
+		if got := classifyLocalState(root, ctx, env, root).shown; got != ".soho/" {
 			t.Fatalf("default shown=%q", got)
 		}
 	})

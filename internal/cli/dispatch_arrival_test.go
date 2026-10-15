@@ -86,7 +86,7 @@ func newDispatchArrivalFixture(t *testing.T, initialMode string, initialSeq, nex
 		}
 	}
 	env["HERDR_ENV"], env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = "1", state, "ws"
-	env["HERDR_SOHO_ROLES"], env["HERDR_SOHO_SKILL_DIR"] = roles, "../../skills/herdr-soho"
+	env["HERDR_SOHO_ROLES"], env["HERDR_SOHO_SKILL_DIR"] = roles, "../../skills/soho"
 	env["HERDR_SOHO_PROMPT_CHECK_SECONDS"], env["HERDR_SOHO_PROMPT_SETTLE_SECONDS"] = "1", settle
 	env["HERDR_SOHO_BRIEF_LINT"], env["TMPDIR"] = "off", root
 	env["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing.sock")

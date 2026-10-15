@@ -484,7 +484,7 @@ func newTM3bHarnessAt(t *testing.T, root, briefText string) tm3bHarness {
 	env["SOHO_FAKECLI_CONFIG"] = filepath.Join(bin, "herdr.json")
 	env["HERDR_SOHO_DIR"] = state
 	env["HERDR_WORKSPACE_ID"] = "ws"
-	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/herdr-soho"
+	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/soho"
 	env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
 	env["HERDR_SOHO_PROMPT_SETTLE_SECONDS"] = "0"
 	env["HERDR_SOHO_BRIEF_LINT"] = "off"

@@ -18,13 +18,13 @@ import (
 func ptr(value string) *string { return &value }
 
 // nativeHookShape guards the generated command's portability as a class: it
-// must be exactly the three-token PATH command `herdr-soho hook <sub>`, with
-// no shell engine, no absolute personal path and no shell expansion.
+// must be exactly the three-token PATH command `soho hook <sub>`, with no
+// shell engine, no absolute personal path and no shell expansion.
 func nativeHookShape(t *testing.T, event, command, sub string) {
 	t.Helper()
 	fields := strings.Fields(command)
-	if len(fields) != 3 || fields[0] != "herdr-soho" || fields[1] != "hook" || fields[2] != sub {
-		t.Fatalf("%s hook %q is not the native 'herdr-soho hook %s' PATH command", event, command, sub)
+	if len(fields) != 3 || fields[0] != "soho" || fields[1] != "hook" || fields[2] != sub {
+		t.Fatalf("%s hook %q is not the native 'soho hook %s' PATH command", event, command, sub)
 	}
 	for _, hostile := range []string{"sh -c", "bash -c", "node", "bun", "/Users/", `C:\\Users`, "/home/", "$HOME", "${", "scripts/"} {
 		if strings.Contains(command, hostile) {
@@ -35,7 +35,7 @@ func nativeHookShape(t *testing.T, event, command, sub string) {
 func TestSetupTextCases(t *testing.T) {
 	t.Run(`// JS: "setupBlock: markers, heading, no absolute path (test-setup.sh rule)"`, func(t *testing.T) {
 		block := SetupBlock()
-		if !strings.HasPrefix(block, SetupStart+"\n## Multi-agent workflow (herdr-soho)\n") || !strings.HasSuffix(block, SetupEnd+"\n") || strings.Contains(block, "/Users/") || strings.Contains(block, `C:\\Users\\`) {
+		if !strings.HasPrefix(block, SetupStart+"\n## Multi-agent workflow (soho)\n") || !strings.HasSuffix(block, SetupEnd+"\n") || strings.Contains(block, "/Users/") || strings.Contains(block, `C:\\Users\\`) {
 			t.Fatal("setup block markers or portability changed")
 		}
 	})
@@ -60,7 +60,10 @@ func TestSetupTextCases(t *testing.T) {
 				// bullet; the testutil oracle rewrites only that exact
 				// sentence to the approved replacement.
 				content := strings.TrimPrefix(*file.Content, "# Agent instructions\n\n")
-				content = testutil.ApplyPeerBlockOracle(content).(string)
+				// The frozen golden predates the DJA-318 setup-text
+				// rename; the soho-rename oracle rewrites only the exact
+				// frozen herdr-soho block to the soho block.
+				content = testutil.RewriteSohoRename(testutil.ApplyPeerBlockOracle(content).(string))
 				want = &content
 			}
 		}
@@ -69,13 +72,13 @@ func TestSetupTextCases(t *testing.T) {
 		}
 	})
 	t.Run("setupHookReminder: exact portable PATH command, no trailing newline", func(t *testing.T) { // JS: "setupHookReminder: exact text, no trailing newline"
-		if SetupHookReminder() != "herdr-soho hook reminder" || strings.Contains(SetupHookReminder(), "\n") {
+		if SetupHookReminder() != "soho hook reminder" || strings.Contains(SetupHookReminder(), "\n") {
 			t.Fatalf("reminder literal changed: %q", SetupHookReminder())
 		}
 		nativeHookShape(t, "UserPromptSubmit", SetupHookReminder(), "reminder")
 	})
 	t.Run("setupHookDoctor: exact portable PATH command, no trailing newline", func(t *testing.T) { // JS: "setupHookDoctor: exact text, no trailing newline"
-		if SetupHookDoctor() != "herdr-soho hook doctor" || strings.Contains(SetupHookDoctor(), "\n") {
+		if SetupHookDoctor() != "soho hook doctor" || strings.Contains(SetupHookDoctor(), "\n") {
 			t.Fatalf("doctor hook literal changed: %q", SetupHookDoctor())
 		}
 		nativeHookShape(t, "SessionStart", SetupHookDoctor(), "doctor")
@@ -139,7 +142,7 @@ func TestSetupTextCases(t *testing.T) {
 				} `json:"hooks"`
 			}
 			foreign, native string
-		}{{"UserPromptSubmit", doc.Hooks["UserPromptSubmit"], "echo my own reminder", "herdr-soho hook reminder"}, {"SessionStart", doc.Hooks["SessionStart"], "bash something-else.sh", "herdr-soho hook doctor"}} {
+		}{{"UserPromptSubmit", doc.Hooks["UserPromptSubmit"], "echo my own reminder", "soho hook reminder"}, {"SessionStart", doc.Hooks["SessionStart"], "bash something-else.sh", "soho hook doctor"}} {
 			if len(event.entries) != 2 {
 				t.Fatalf("%s entries=%d, want the foreign command plus the native one: %s", event.name, len(event.entries), *first)
 			}
@@ -195,8 +198,11 @@ func TestSetupTextCases(t *testing.T) {
 		}
 	})
 	t.Run("setupBlockResult: legacy block is renamed in place and keeps its own text", func(t *testing.T) { // JS: "setupBlockResult: a legacy block is renamed in place and keeps its own text"
-		in := "before herdr-agents\n" + LegacySetupStart + "\n## workflow herdr-agents\nHERDR_AGENTS_DIR\ncustom\n" + LegacySetupEnd + "\nafter\n"
-		want := "before herdr-agents\n" + SetupStart + "\n## workflow herdr-soho\nHERDR_SOHO_DIR\ncustom\n" + SetupEnd + "\nafter\n"
+		// DJA-318: the recognized legacy generation is the herdr-soho
+		// block; it migrates in place and keeps the lines the project
+		// added, exactly like the herdr-agents rename did.
+		in := "before herdr-soho\n" + LegacySetupStart + "\n## workflow herdr-soho\nHERDR_SOHO_DIR\ncustom\n" + LegacySetupEnd + "\nafter\n"
+		want := "before herdr-soho\n" + SetupStart + "\n## workflow soho\nSOHO_DIR\ncustom\n" + SetupEnd + "\nafter\n"
 		if got := SetupBlockResult(ptr(in)); got == nil || *got != want {
 			t.Fatalf("legacy rename result=%v", got)
 		}
@@ -218,11 +224,14 @@ func TestSetupTextCases(t *testing.T) {
 		}
 	})
 	t.Run("legacy hooks: pinned sha256 and length of the exact pre-rename commands", func(t *testing.T) { // JS: "legacy hooks: pinned sha256 and length of the exact pre-rename commands"
+		// DJA-318: the recognized legacy generation is the pre-rename
+		// herdr-soho native PATH command (the herdr-agents generation is
+		// retired), so the pins are its exact literals.
 		cases := []struct {
 			s    string
 			n    int
 			hash string
-		}{{LegacyHookReminder(), 220, "76ecb6d012d80693694393dbd61fe423132cbe1cad4e805984ca59a479e57f7e"}, {LegacyHookDoctor(), 526, "aeefff35cf1dded4818f047ede0bbd5c3cc2aa0812c378e913dc694a5ae59535"}}
+		}{{LegacyHookReminder(), 24, "2ef437205b8c0b2991f9e747dece3c976f25f3c5670fb903a391ab0475bd4db3"}, {LegacyHookDoctor(), 22, "04dc429f905559b7aed68d46e632e7dbea4053cafaccebb12fa34409098e5e61"}}
 		for _, c := range cases {
 			sum := sha256.Sum256([]byte(c.s))
 			if len(utf16.Encode([]rune(c.s))) != c.n || hex.EncodeToString(sum[:]) != c.hash {
@@ -297,7 +306,7 @@ func TestSetupTextCases(t *testing.T) {
 		if err := json.Unmarshal([]byte(*first), &doc); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(*first, "sh -c herdr-soho setup") || !strings.Contains(*first, `"herdr-soho hook reminder"`) || !strings.Contains(*first, `"herdr-soho hook doctor"`) {
+		if !strings.Contains(*first, "sh -c herdr-soho setup") || !strings.Contains(*first, `"soho hook reminder"`) || !strings.Contains(*first, `"soho hook doctor"`) {
 			t.Fatalf("unexpected merged commands: %s", *first)
 		}
 	})
@@ -330,7 +339,7 @@ func TestSetupTextCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := SettingsHooksResult(ptr(string(seed)))
-		if got == nil || !strings.Contains(*got, "my-herdr-agents-thing run") || !strings.Contains(*got, "echo herdr-agents legacy cleanup") || !strings.Contains(*got, `"herdr-soho hook reminder"`) || !strings.Contains(*got, `"herdr-soho hook doctor"`) {
+		if got == nil || !strings.Contains(*got, "my-herdr-agents-thing run") || !strings.Contains(*got, "echo herdr-agents legacy cleanup") || !strings.Contains(*got, `"soho hook reminder"`) || !strings.Contains(*got, `"soho hook doctor"`) {
 			t.Fatalf("user commands not preserved: %v", got)
 		}
 	})
@@ -359,15 +368,27 @@ func TestSetupTextDifferential(t *testing.T) {
 	}
 	// The frozen parity oracle keeps the exact pre-native hook commands as
 	// the expected hook outputs (raw for reminder/doctor rows and
-	// JSON-quoted inside the hooks-result documents), and the pre-DJA-330
-	// "Peer messages" bullet inside the expected block texts. The testutil
+	// JSON-quoted inside the hooks-result documents), the pre-DJA-330
+	// "Peer messages" bullet inside the expected block texts, and the
+	// pre-DJA-318 herdr-soho setup block and hook literals. The testutil
 	// oracle adapters rewrite only those exact strings to the approved
-	// native literals and the DJA-330 replacement. The seed inputs and
-	// every other expectation are untouched.
+	// native literals, the DJA-330 replacement and the soho setup-text
+	// contract. The seed inputs and every other expectation are untouched.
+	// The DJA-318 setup-text rename re-contracts two frozen block-result
+	// seeds (a herdr-soho block migrates in place keeping the project's
+	// lines; the retired herdr-agents block is no longer recognized and is
+	// kept as a user prefix with the soho block appended): the documented
+	// SohoRenameBlockResultExpected adaptation replaces those expectations
+	// only.
 	for i := range rows {
 		if rows[i].Expected != nil {
-			adapted := testutil.ApplyPeerBlockOracle(testutil.ApplyHookOracle(*rows[i].Expected)).(string)
+			adapted := testutil.RewriteSohoRename(testutil.ApplyPeerBlockOracle(testutil.ApplyHookOracle(*rows[i].Expected)).(string))
 			rows[i].Expected = &adapted
+		}
+		if rows[i].Kind == "block-result" && rows[i].Input != nil {
+			if expected, ok := testutil.SohoRenameBlockResultExpected(*rows[i].Input); ok {
+				rows[i].Expected = &expected
+			}
 		}
 	}
 	for i, r := range rows {

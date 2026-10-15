@@ -295,7 +295,7 @@ func assertSafeLocalRels(rels []string, cmdName string) {
 		for _, seg := range strings.Split(norm, "/") {
 			last, _ := utf8.DecodeLastRuneInString(seg)
 			if unicode.IsSpace(last) || last == '\ufeff' {
-				platform.DieFriction(fmt.Sprintf("%s: refusing to ignore state path '%s' via the git exclude file because a path segment ends in whitespace (git strips it from the exclude pattern, so the directory would stay untracked) (no files were changed; set HERDR_SOHO_DIR or state_dir to a plain directory name such as .herdr-soho)", cmdName, raw), 4)
+				platform.DieFriction(fmt.Sprintf("%s: refusing to ignore state path '%s' via the git exclude file because a path segment ends in whitespace (git strips it from the exclude pattern, so the directory would stay untracked) (no files were changed; set SOHO_DIR or state_dir to a plain directory name such as .soho)", cmdName, raw), 4)
 			}
 		}
 		unsafe := strings.ContainsAny(norm, "*?[\\]\n\r")
@@ -305,7 +305,7 @@ func assertSafeLocalRels(rels []string, cmdName string) {
 			}
 		}
 		if unsafe {
-			platform.DieFriction(fmt.Sprintf("%s: refusing to ignore state path '%s' via the git exclude file because it contains git-ignore metacharacters or escapes the repo root (no files were changed; set HERDR_SOHO_DIR or state_dir to a plain directory name such as .herdr-soho)", cmdName, raw), 4)
+			platform.DieFriction(fmt.Sprintf("%s: refusing to ignore state path '%s' via the git exclude file because it contains git-ignore metacharacters or escapes the repo root (no files were changed; set SOHO_DIR or state_dir to a plain directory name such as .soho)", cmdName, raw), 4)
 		}
 	}
 }
@@ -458,7 +458,7 @@ func preflightLocalExcludes(root string, rels []string, env platform.Env, cmdNam
 		probeDir = up
 	}
 	if active {
-		if f, err := os.CreateTemp(probeDir, ".herdr-soho-probe-"); err != nil {
+		if f, err := os.CreateTemp(probeDir, ".soho-probe-"); err != nil {
 			platform.DieFriction(fmt.Sprintf("%s: cannot write the git exclude file at %s (no files were changed)", cmdName, excl), 4)
 		} else {
 			name := f.Name()

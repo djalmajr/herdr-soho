@@ -46,7 +46,7 @@ func tm8CommandFixture(t *testing.T) (platform.Env, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	skillDir, err := filepath.Abs(filepath.Join(packageDir, "..", "..", "skills", "herdr-soho"))
+	skillDir, err := filepath.Abs(filepath.Join(packageDir, "..", "..", "skills", "soho"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -313,9 +313,11 @@ func TestDoctorTM6CLIAndParity(t *testing.T) {
 					wantOut = testutil.ApplyRoleOracleToLanesOffDoctor(wantOut)
 				}
 				// The frozen golden predates the herdr-soho -> soho rename; the
-				// exact-substitution name oracle adapts the expected names.
-				wantOut = testutil.RewriteSohoName(wantOut)
-				wantErr := testutil.RewriteSohoName(want.Err)
+				// exact-substitution name oracle adapts the expected names, and the
+				// DJA-318 rename oracle (outermost) adapts the setup block, the hook
+				// literals and the doctor advisory lines to the soho contract.
+				wantOut = testutil.ApplySohoRenameOracle(testutil.ApplyHookOracle(testutil.RewriteSohoName(wantOut))).(string)
+				wantErr := testutil.ApplySohoRenameOracle(testutil.ApplyHookOracle(testutil.RewriteSohoName(want.Err))).(string)
 				if code != want.RC || out != wantOut || errOut != wantErr {
 					want.Out = wantOut
 					t.Fatalf("golden %s step %d args=%v\ncode=%d want=%d\nstdout difference: %s\nstderr difference: %s\nstdout=%q\nwant=%q\nstderr=%q\nwant=%q", tc.golden, i, want.Args, code, want.RC, firstGoldenLineDifference(out, want.Out), firstGoldenLineDifference(errOut, wantErr), out, want.Out, errOut, wantErr)

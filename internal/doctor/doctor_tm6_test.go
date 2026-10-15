@@ -27,7 +27,7 @@ func tm6DoctorEnv(t *testing.T) (platform.Env, string) {
 		}
 	}
 	_, file, _, _ := runtime.Caller(0)
-	skill := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "skills", "herdr-soho"))
+	skill := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "skills", "soho"))
 	for _, role := range []string{"implementer", "designer", "tasker", "scouter", "researcher", "reviewer", "security-reviewer", "ui-reviewer", "inspector", "documenter", "planner", "sub-orchestrator"} {
 		kind := "grok"
 		if role == "reviewer" || role == "documenter" {

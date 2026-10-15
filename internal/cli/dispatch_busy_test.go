@@ -85,7 +85,7 @@ func newBusyDispatchFixture(t *testing.T) *busyDispatchFixture {
 			"HERDR_SOHO_DIR":                   state,
 			"HERDR_WORKSPACE_ID":               "ws",
 			"HERDR_SOHO_ROLES":                 roles,
-			"HERDR_SOHO_SKILL_DIR":             "../../skills/herdr-soho",
+			"HERDR_SOHO_SKILL_DIR":             "../../skills/soho",
 			"HERDR_SOHO_PROMPT_CHECK_SECONDS":  "1",
 			"HERDR_SOHO_PROMPT_SETTLE_SECONDS": "0",
 			"HERDR_SOHO_BRIEF_LINT":            "off",

@@ -1,4 +1,4 @@
-# herdr-soho
+# soho
 
 A small team of coding agents, each in its own Herdr panel. You stay in your panel and lead. The others research, write code, or review. They never commit, push, or open pull requests.
 
@@ -26,7 +26,7 @@ Say so in your panel. To stop one agent, close its panel or name it. To stop the
 
 ## Commands for humans
 
-The native `herdr-soho` binary needs Herdr and the external agent CLIs you select. The CLI and optional plugin are implemented in Go; Node.js, Bun and Bash are not project dependencies. The binary embeds the skill resources and can publish a verified bundle in its explicit user cache. Read-only mode only reuses an existing bundle. See the repository README for verified binary installation and source builds.
+The native `soho` binary needs Herdr and the external agent CLIs you select. The CLI and optional plugin are implemented in Go; Node.js, Bun and Bash are not project dependencies. The binary embeds the skill resources and can publish a verified bundle in its explicit user cache. Read-only mode only reuses an existing bundle. See the repository README for verified binary installation and source builds.
 
 - `explain` — what is happening, in plain text. When nothing is running, what the team is and how to start.
 - `roster` — the agents this team opened, and whether each report is ready.

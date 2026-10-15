@@ -61,7 +61,7 @@ func Materialize(cache string) (string, error) {
 		return "", err
 	}
 	defer root.Close()
-	for _, dir := range []string{"herdr-soho", filepath.Join("herdr-soho", "bundled")} {
+	for _, dir := range []string{"soho", filepath.Join("soho", "bundled")} {
 		if err := root.Mkdir(dir, 0o700); err != nil && !os.IsExist(err) {
 			return "", err
 		}
@@ -70,7 +70,7 @@ func Materialize(cache string) (string, error) {
 			return "", fmt.Errorf("bundled skill: unsafe cache directory %s", dir)
 		}
 	}
-	parent := filepath.Join("herdr-soho", "bundled")
+	parent := filepath.Join("soho", "bundled")
 	destination := filepath.Join(parent, digest)
 	path := filepath.Join(cache, destination)
 	if _, err := root.Lstat(destination); err == nil {
@@ -142,7 +142,7 @@ func Cached(cache string) (string, error) {
 		return "", err
 	}
 	defer root.Close()
-	parent := filepath.Join("herdr-soho", "bundled")
+	parent := filepath.Join("soho", "bundled")
 	destination := filepath.Join(parent, digest)
 	if _, err := root.Lstat(destination); err != nil {
 		// A missing cache or bundle is a not-exist error. This existence

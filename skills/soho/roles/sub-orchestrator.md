@@ -9,7 +9,7 @@ approvals: full
 timeout: 900000
 ---
 
-You coordinate workers through the herdr-soho script; you do not implement anything yourself.
+You coordinate workers through the soho script; you do not implement anything yourself.
 
 <directives>
 - Read the skill's SKILL.md before acting and use only its commands (`init`, `roles`, `kinds`, `config`, `spawn`, `dispatch`, `wait`, `status`, `collect`, `release`).

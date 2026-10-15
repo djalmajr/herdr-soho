@@ -171,7 +171,7 @@ var inlineComment = regexp.MustCompile(`[ \t]#.*$`)
 
 func isFile(p string) bool { st, e := os.Stat(p); return e == nil && st.Mode().IsRegular() }
 
-// entryScript is the native herdr-soho executable for the setup guidance
+// entryScript is the native executable for the setup guidance
 // lines: the absolute SOHO_BIN override or the currently running binary
 // (platform.LauncherPath), never the obsolete skill scripts launcher.
 func entryScript(env platform.Env) string {
@@ -1092,9 +1092,9 @@ func checkSetup(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 			s.Warning(fmt.Sprintf("an older instruction block in %s: run '%s setup' to rename it in place (its text is kept)", filepath.Base(target), entry))
 		}
 	} else if setupLocal {
-		s.Warning(fmt.Sprintf("no herdr-soho block in CLAUDE.local.md: run '%s setup --local' (writes the delegation rules between <!-- herdr-soho:start/end --> markers, kept unversioned)", entry))
+		s.Warning(fmt.Sprintf("no soho block in CLAUDE.local.md: run '%s setup --local' (writes the delegation rules between <!-- soho:start/end --> markers, kept unversioned)", entry))
 	} else {
-		s.Warning(fmt.Sprintf("no herdr-soho block in AGENTS.md/CLAUDE.md: run '%s setup' (writes the delegation rules between <!-- herdr-soho:start/end --> markers)", entry))
+		s.Warning(fmt.Sprintf("no soho block in AGENTS.md/CLAUDE.md: run '%s setup' (writes the delegation rules between <!-- soho:start/end --> markers)", entry))
 	}
 	// A separate CLAUDE.md (not a symlink, not the file setup targets) that
 	// still carries only the pre-rename block: Claude Code keeps reading it.
@@ -1122,18 +1122,18 @@ func checkSetup(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 			s.Warning(fmt.Sprintf("an older version of the hooks in .claude/settings.json: run '%s setup' to replace them", entry))
 		}
 	} else if ln || setupLocal {
-		s.Warning(fmt.Sprintf("no herdr-soho hooks in .claude/settings.json: run '%s setup --local' (UserPromptSubmit reminder + SessionStart doctor)", entry))
+		s.Warning(fmt.Sprintf("no soho hooks in .claude/settings.json: run '%s setup --local' (UserPromptSubmit reminder + SessionStart doctor)", entry))
 	} else {
-		s.Warning(fmt.Sprintf("no herdr-soho hooks in .claude/settings.json: run '%s setup' (UserPromptSubmit reminder + SessionStart doctor)", entry))
+		s.Warning(fmt.Sprintf("no soho hooks in .claude/settings.json: run '%s setup' (UserPromptSubmit reminder + SessionStart doctor)", entry))
 	}
 }
 
 // settingsDoctorHook classifies the SessionStart hook the settings file
 // carries: "native" when the exact current native command is present,
 // "old" for the recognized previous herdr-soho shell command, "legacy" for
-// the exact pre-rename legacy command, and "" for anything else.
+// the exact pre-rename herdr-soho native command, and "" for anything else.
 // Recognition is by exact command equality; a foreign command that merely
-// mentions herdr-soho is not a herdr-soho hook.
+// mentions herdr-soho is not a soho hook.
 func settingsDoctorHook(file string) string {
 	raw, e := platform.ReadTextFile(file)
 	if e != nil {

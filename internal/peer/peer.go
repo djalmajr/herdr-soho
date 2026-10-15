@@ -26,12 +26,21 @@ import (
 )
 
 const (
-	PeerPrefix           = "[herdr-soho:peer]"
+	PeerPrefix           = "[soho:peer]"
 	PeerLogFile          = "peer-messages.tsv"
 	PromptWaitTimeoutMS  = 15_000
 	DefaultSendTimeoutMS = 600_000
 	HerdrCallTimeoutMS   = 30_000
 )
+
+// LegacyPeerPrefix is the herdr-soho generation's peer marker. Machines on
+// the old version keep sending it, so every recognition point (the opening
+// header, the exact end line, the screen checks) accepts it alongside the
+// soho marker; only the sent messages use the soho marker.
+const LegacyPeerPrefix = "[herdr-soho:peer]"
+
+// peerOpenMarkers are the opening markers an input recognition accepts.
+var peerOpenMarkers = []string{PeerPrefix, LegacyPeerPrefix}
 
 var controlRE = regexp.MustCompile(`[\x00-\x08\x0b-\x1f\x7f]`)
 var marker200 = regexp.MustCompile("\x1b\\[200~")
@@ -178,7 +187,7 @@ func PeerHeaderFor(s PeerSender, id string) string {
 		prefix += " #" + id
 	}
 	first := fmt.Sprintf("%s Message from another agent — %s, sent %s.", prefix, s.Ref, peerSentTime())
-	reply := fmt.Sprintf("Reply with: herdr-soho send %s \"<your reply>\"", s.Ref)
+	reply := fmt.Sprintf("Reply with: soho send %s \"<your reply>\"", s.Ref)
 	return peerHeaderLines(s, first, reply)
 }
 
@@ -209,11 +218,11 @@ func PeerHeaderRemoteFor(s PeerSender, pane, hostname, id string) string {
 	sent := peerSentTime()
 	if hostname != "" {
 		first := fmt.Sprintf("%s Message from another agent — %s on %s, sent %s.", prefix, pane, hostname, sent)
-		reply := fmt.Sprintf("Reply with: herdr-soho send <this machine's name in your herdr machine list>/%s \"<your reply>\" (this machine is %s)", pane, hostname)
+		reply := fmt.Sprintf("Reply with: soho send <this machine's name in your herdr machine list>/%s \"<your reply>\" (this machine is %s)", pane, hostname)
 		return peerHeaderLines(s, first, reply)
 	}
 	first := fmt.Sprintf("%s Message from another agent — %s, sent %s.", prefix, pane, sent)
-	reply := fmt.Sprintf("Reply with: herdr-soho send <this machine's name in your herdr machine list>/%s \"<your reply>\"", pane)
+	reply := fmt.Sprintf("Reply with: soho send <this machine's name in your herdr machine list>/%s \"<your reply>\"", pane)
 	return peerHeaderLines(s, first, reply)
 }
 
@@ -236,15 +245,25 @@ func PeerHeaderAssignment(s PeerSender, replyName, assignmentID, id string) stri
 		prefix += " #" + id
 	}
 	first := fmt.Sprintf("%s Message from another agent — %s, sent %s.", prefix, s.Ref, peerSentTime())
-	reply := fmt.Sprintf("Reply within this assignment: herdr-soho send %s --assignment %s --type review.question \"<your reply>\"", replyName, assignmentID)
+	reply := fmt.Sprintf("Reply within this assignment: soho send %s --assignment %s --type review.question \"<your reply>\"", replyName, assignmentID)
 	return peerHeaderLines(s, first, reply)
 }
 
 // PeerEndPrefix is the peer message's closing-line marker: the peer prefix
-// closed by a slash, so an opening header line ("[herdr-soho:peer] #<id>")
+// closed by a slash, so an opening header line ("[soho:peer] #<id>")
 // can never be read as the end of a message and an end line can never be
 // read as an opening header.
-const PeerEndPrefix = "[/herdr-soho:peer]"
+const PeerEndPrefix = "[/soho:peer]"
+
+// legacyPeerEndPrefix is the herdr-soho generation's closing-line marker,
+// accepted at every point that proves a delivery.
+const legacyPeerEndPrefix = "[/herdr-soho:peer]"
+
+// peerEndReceiptMarkers are the closing-line marker forms an input
+// recognition accepts: the soho closing marker, the herdr-soho closing
+// marker and the herdr-soho opening marker used as a closing line (the
+// pre-slash form the older version sent).
+var peerEndReceiptMarkers = []string{PeerEndPrefix, legacyPeerEndPrefix, LegacyPeerPrefix}
 
 func PeerEndLine(id string) string { return fmt.Sprintf("%s #%s end of message", PeerEndPrefix, id) }
 
@@ -1557,7 +1576,8 @@ func claudeBoxScope(visible string) ([]string, bool) {
 	// #<id> in the status footer (a branch like topic/#0a1b2c3d) is not
 	// the typed message.
 	for _, line := range lines[start:] {
-		if strings.Contains(NormalizeScreen(line), NormalizeScreen(PeerPrefix)) {
+		norm := NormalizeScreen(line)
+		if strings.Contains(norm, NormalizeScreen(PeerPrefix)) || strings.Contains(norm, NormalizeScreen(LegacyPeerPrefix)) {
 			scope = append(scope, line)
 		}
 	}
@@ -1579,8 +1599,10 @@ func codexComposerRegion(visible string) ([]string, bool) {
 }
 
 // peerEndLineIn reports whether the line is this message's closing line in
-// either form: the current "[/herdr-soho:peer] #<id> end of message" or the
-// legacy "[herdr-soho:peer] #<id> end of message". The match is anchored to
+// either of the accepted marker forms: the current "[/soho:peer] #<id> end
+// of message", the legacy "[/herdr-soho:peer] #<id> end of message", or the
+// legacy opening marker "[herdr-soho:peer] #<id> end of message". The match
+// is anchored to
 // the whole line: after NormalizeScreen a real closing line is the marker
 // itself (with an optional leading history "›"), so a prose line, an
 // assistant bullet or a history echo that merely contains the marker is not
@@ -1595,8 +1617,9 @@ func peerEndLineIn(line, id string) bool {
 	if strings.HasPrefix(norm, ">") {
 		return false // quoted payload: a marker in it is part of the quoted body
 	}
-	for _, marker := range []string{PeerEndPrefix + "#" + id + "endofmessage", PeerPrefix + "#" + id + "endofmessage"} {
-		if norm == marker || norm == "›"+marker {
+	for _, marker := range peerEndReceiptMarkers {
+		open := marker + "#" + id + "endofmessage"
+		if norm == open || norm == "›"+open {
 			return true // the marker is the whole line (optional history "›")
 		}
 	}
@@ -1610,8 +1633,9 @@ func isHexRune(r rune) bool {
 }
 
 // receiptLineIn reports whether the line carries a receipt marker of this
-// message: its closing line in either form (peerEndLineIn, anchored to the
-// whole line) or the opening of its header ("[herdr-soho:peer] #<id>"),
+// message: its closing line in either accepted form (peerEndLineIn,
+// anchored to the whole line) or the opening of its header ("[soho:peer]
+// #<id>", or the legacy "[herdr-soho:peer] #<id>" from an old version),
 // anchored the same way: after NormalizeScreen the real line starts with the
 // marker (an optional leading history "›" stripped), and the rune after the
 // opening id is not a hex digit, so a longer id that only has this one as a
@@ -1625,12 +1649,14 @@ func isHexRune(r rune) bool {
 func receiptLineIn(line, id string) bool {
 	norm := NormalizeScreen(line)
 	if !strings.HasPrefix(norm, ">") {
-		open := PeerPrefix + "#" + id
 		rest := strings.TrimPrefix(norm, "›")
-		if strings.HasPrefix(rest, open) {
-			after := rest[len(open):]
-			if after == "" || !isHexRune(rune(after[0])) {
-				return true // the header opens the line; the id is complete
+		for _, prefix := range peerOpenMarkers {
+			open := prefix + "#" + id
+			if strings.HasPrefix(rest, open) {
+				after := rest[len(open):]
+				if after == "" || !isHexRune(rune(after[0])) {
+					return true // the header opens the line; the id is complete
+				}
 			}
 		}
 	}
@@ -1664,7 +1690,7 @@ func receiptLineInText(text, id string) bool {
 // lines — keeps reading as the box.
 func peerMessageInHistory(visible, id string) bool {
 	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
-	headerNorm := NormalizeScreen(PeerPrefix + " #" + id)
+	headerNorms := []string{NormalizeScreen(PeerPrefix + " #" + id), NormalizeScreen(LegacyPeerPrefix + " #" + id)}
 	for i, line := range lines {
 		if !peerEndLineIn(line, id) {
 			continue
@@ -1673,8 +1699,10 @@ func peerMessageInHistory(visible, id string) bool {
 		for _, below := range lines[i+1:] {
 			belowNorm := NormalizeScreen(below)
 			head := strings.TrimLeft(belowNorm, " \t")
-			if strings.HasPrefix(head, "›") && strings.Contains(belowNorm, headerNorm) {
-				return false // the composer below still holds the typed prompt
+			for _, headerNorm := range headerNorms {
+				if strings.HasPrefix(head, "›") && strings.Contains(belowNorm, headerNorm) {
+					return false // the composer below still holds the typed prompt
+				}
 			}
 			if strings.HasPrefix(head, "•") {
 				delivered = true
@@ -1762,7 +1790,8 @@ func idInInputBox(kind, visible, id string) bool {
 // composerHeaderLineIn reports whether a line of a recognized composer
 // region is this message's header opening: after NormalizeScreen, with an
 // optional leading composer prompt glyph (the claude "❯" or the codex "›")
-// stripped, the line starts with "[herdr-soho:peer] #<id>" and the rune
+// stripped, the line starts with "[soho:peer] #<id>" (or the legacy
+// "[herdr-soho:peer] #<id>") and the rune
 // right after the id is not a hex digit, so a longer id that only has this
 // one as a prefix is not it. A quoted line ("> ...") never counts: the
 // quoted body of a peer message is payload and can carry a spoofed header,
@@ -1773,12 +1802,16 @@ func composerHeaderLineIn(line, id string) bool {
 		return false // quoted payload: a header in it is part of the quoted body
 	}
 	rest := strings.TrimPrefix(strings.TrimPrefix(norm, "❯"), "›")
-	open := PeerPrefix + "#" + id
-	if !strings.HasPrefix(rest, open) {
-		return false
+	for _, prefix := range peerOpenMarkers {
+		open := prefix + "#" + id
+		if strings.HasPrefix(rest, open) {
+			after := rest[len(open):]
+			if after == "" || !isHexRune(rune(after[0])) {
+				return true
+			}
+		}
 	}
-	after := rest[len(open):]
-	return after == "" || !isHexRune(rune(after[0]))
+	return false
 }
 
 // steeringQueued reports a visible pi queue line (`Steering: …`) that holds

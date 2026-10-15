@@ -109,14 +109,14 @@ func writeHooksSection(root string, env platform.Env) {
 	settings := filepath.Join(root, ".claude", "settings.json")
 	setupWriteHooks(settings)
 	_, _ = fmt.Fprintf(platform.Stdout, "hooks written: %s (UserPromptSubmit reminder, SessionStart doctor)\n", settings)
-	// The generated hooks are the portable PATH commands 'herdr-soho hook
-	// reminder' / 'herdr-soho hook doctor': they resolve the native binary
+	// The generated hooks are the portable PATH commands 'soho hook
+	// reminder' / 'soho hook doctor': they resolve the native binary
 	// through PATH at hook time. Check that PATH with the shared platform
 	// resolution over the explicit env (never the deleted skill scripts
 	// paths, never the process-global HOME). Resolution only: the binary
 	// is not executed here and PATH is not modified.
-	if _, found := platform.FindExecutable("herdr-soho", env, platform.Current()); !found {
-		core.Warn("SessionStart hook cannot resolve herdr-soho in PATH; add the native herdr-soho binary to PATH so the generated hooks ('herdr-soho hook reminder', 'herdr-soho hook doctor') can run", "", "setup")
+	if _, found := platform.FindExecutable("soho", env, platform.Current()); !found {
+		core.Warn("SessionStart hook cannot resolve soho in PATH; add the native soho binary to PATH so the generated hooks ('soho hook reminder', 'soho hook doctor') can run", "", "setup")
 	}
 }
 
@@ -296,7 +296,7 @@ func CmdSetup(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	if info, err := os.Stat(claude); err == nil && info.Mode().IsRegular() && !setupIsSymlink(claude) && target != claude {
 		text, readErr := platform.ReadTextFile(claude)
 		if readErr == nil && strings.Contains(text, setuptext.LegacySetupStart) && !strings.Contains(text, setuptext.SetupStart) {
-			core.Warn("CLAUDE.md exists separately and still has the legacy herdr-agents block: run 'setup --target CLAUDE.md' too", "", "setup")
+			core.Warn("CLAUDE.md exists separately and still has the legacy herdr-soho block: run 'setup --target CLAUDE.md' too", "", "setup")
 		} else if readErr == nil && !strings.Contains(text, setuptext.SetupStart) {
 			core.Warn("CLAUDE.md exists separately and has no block: run 'setup --target CLAUDE.md' too, or make CLAUDE.md a symlink to AGENTS.md", "", "setup")
 		}

@@ -5,14 +5,14 @@ Observed failures while building and validating this skill (2026-09-20, Herdr 0.
 ## Worker says it wrote the report, file never appears
 
 - **Symptom:** the agent replies with the report path; `collect` falls back to terminal output; `ls` shows nothing. Codex prints `zsh: operation not permitted: …/.agents/…`.
-- **Cause:** Codex's `workspace-write` sandbox allows the repo root, `/tmp` and `$TMPDIR` but **denies its own config roots `.agents/` and `.codex/`** (tested: `.claude`, `.cache`, `.tmp`, `.worktrees`, `node_modules/.cache` and `.herdr-soho` are writable).
-- **Now:** state lives in `<repo>/.herdr-soho/`. Never move it under `.agents/`. With `HERDR_SOHO_DIR`, make sure every kind can write there.
+- **Cause:** Codex's `workspace-write` sandbox allows the repo root, `/tmp` and `$TMPDIR` but **denies its own config roots `.agents/` and `.codex/`** (tested: `.claude`, `.cache`, `.tmp`, `.worktrees`, `node_modules/.cache` and `.soho` are writable).
+- **Now:** state lives in `<repo>/.soho/`. Never move it under `.agents/`. With `SOHO_DIR`, make sure every kind can write there.
 
 ## `dispatch --wait` returns `done` while the worker is still working
 
 - **Symptom:** `wait_status: done`, `report_exists: false`; the pane shows the agent still calling tools (Codex during MCP calls).
 - **Cause:** Herdr waits for a *lifecycle state*, not a turn. Integrations flicker `idle`/`done` mid-task. `agent get .revision` does **not** change with the screen, so it is useless as an activity signal (tried; failed).
-- **Now:** `dispatch` keeps polling for the report file until the agent is not `working` **and** the visible screen checksum has been stable for `HERDR_SOHO_SETTLED_GRACE` seconds (45), or the timeout is spent.
+- **Now:** `dispatch` keeps polling for the report file until the agent is not `working` **and** the visible screen checksum has been stable for `SOHO_SETTLED_GRACE` seconds (45), or the timeout is spent.
 - **Do:** never `release --close` before the report exists. Closing the pane kills the worker mid-task; two test runs were lost this way.
 
 ## `agent start` times out; pane shows a model list and a shell prompt (Cursor)
@@ -112,7 +112,7 @@ Use a verified native release binary, or build an explicitly selected checkout w
 ## Worker in a worktree cannot write the report
 
 - **Cause:** the report path is under the main repo; sandboxes limit the worker to its own cwd (+ `/tmp`).
-- **Now:** when the roster cwd differs from the repo root, `dispatch` routes brief and report through `$TMPDIR/herdr-soho/<ws>/reports/`.
+- **Now:** when the roster cwd differs from the repo root, `dispatch` routes brief and report through `$TMPDIR/soho/<ws>/reports/`.
 
 ## `wait` reported `blocked` once for a worker that went on working
 
@@ -173,7 +173,7 @@ Use a verified native release binary, or build an explicitly selected checkout w
 
 ## Validating a new or updated kind
 
-1. `herdr agent` must list the kind; the executable must be in `PATH` (`herdr-soho kinds`).
+1. `herdr agent` must list the kind; the executable must be in `PATH` (`soho kinds`).
 2. Add the executable, family, effort, model and approval mappings in `internal/kinds/kinds.go` and a row in `kinds.md`.
 3. Smoke: a 15-line read-only brief (`scouter`) asking for one constant and its reader in the current repo. `spawn --approvals full --effort <ceiling+1>` (expect a clamp warning) → `dispatch` (waits on the report) → `collect` → `release --close`. Watch for: startup dialogs, report written to the right path, focus still on the pane that had it before spawn, `friction` empty afterwards.
 4. The caller's tab holds at most `split_max_panes` panes (4 → 2×2 on a 213×57 tab); later workers overflow into herd tabs labelled after their roles (`impl+rev`) or `--tab-label`.
@@ -242,7 +242,7 @@ Use a verified native release binary, or build an explicitly selected checkout w
 - **Symptom:** two agents with an edit role work in the same cwd; builds and test runs see each other's changes in progress.
 - **Cause:** one shared working tree; nothing isolates the two.
 - **Now:** `spawn` (a new worker and a reuse alike) warns per other live edit-role agent in the same cwd: `'<a>' and '<b>' both edit <cwd>: builds and test runs see each other's changes in progress; give each a git worktree (spawn --cwd <worktree>) to isolate them` — the extra `agent list` read happens only when a candidate exists. `dispatch` tells the worker whose tree is shared (one `agent list` read, never a call per agent): the composed prompt (brief and amendment) adds `Another worker edits this same tree now: run the global checks the brief asks for, but report failures in files you do not own as outside your slice (name the files), not as [partial] items of yours.` (a Herdr failure listing the agents skips the line: it is advisory).
-- **Do:** one worktree per worker (or per branch): `git worktree add .worktrees/<slug>` (or `herdr worktree create`), then `spawn <role> --cwd <worktree>`; the roster stays in the main repo and the brief and report are routed through `$TMPDIR/herdr-soho/<ws>/reports/` (mirrored back into the state dir on `done`). Merge with `git -C <worktree> diff | git apply` (or cherry-pick). A reviewer can read and test in a worktree of the branch under review. Rust projects: give each worktree its own `CARGO_TARGET_DIR` so the target directories do not collide. The orchestrator's own mutation checks follow the copy rule in the next entry.
+- **Do:** one worktree per worker (or per branch): `git worktree add .worktrees/<slug>` (or `herdr worktree create`), then `spawn <role> --cwd <worktree>`; the roster stays in the main repo and the brief and report are routed through `$TMPDIR/soho/<ws>/reports/` (mirrored back into the state dir on `done`). Merge with `git -C <worktree> diff | git apply` (or cherry-pick). A reviewer can read and test in a worktree of the branch under review. Rust projects: give each worktree its own `CARGO_TARGET_DIR` so the target directories do not collide. The orchestrator's own mutation checks follow the copy rule in the next entry.
 
 ## A mutation check in the shared tree breaks another worker's tests
 
@@ -255,7 +255,7 @@ Use a verified native release binary, or build an explicitly selected checkout w
 
 - **Symptom:** a mutation check runs in a throwaway copy, but its build reads or writes artifacts under the original project tree.
 - **Cause:** the copy inherited a shared build-output environment variable, a Cargo `target-dir` setting, or a symlink into the source tree.
-- **Now:** give the copy its own build output (for example, `CARGO_TARGET_DIR=<copy>/target`) and run `herdr-soho mutation-guard <copy>` before mutating. If the guard fails, do not mutate.
+- **Now:** give the copy its own build output (for example, `CARGO_TARGET_DIR=<copy>/target`) and run `soho mutation-guard <copy>` before mutating. If the guard fails, do not mutate.
 - **Do:** report the shared-artifact configuration. Never automatically clean a shared cache or the source tree's build output as recovery.
 
 ## The orchestrator cannot commit while workers edit the same tree
@@ -285,7 +285,7 @@ Use a verified native release binary, or build an explicitly selected checkout w
 
 - **Symptom:** `wait` exits 9 with a `timeout` line; the pane shows the agent still calling tools and no report has appeared.
 - **Cause:** the wait's timeout — the role's effective timeout (the frontmatter `timeout`, else `dispatch_timeout`, × 1.5 for `xhigh`, × 2 for `max`) or the explicit `--timeout` — is shorter than the work. A timeout is not a failure.
-- **Now:** the `timeout` line carries `elapsed_ms` and `state` (the last probe tag, `working` or `pending`), and each timed-out agent gets a friction line: `timeout waiting for '<agent>'; it may still be working (state: <state>). Run: herdr-soho wait <agent> --timeout <2×>` — the suggestion doubles the timeout this wait used.
+- **Now:** the `timeout` line carries `elapsed_ms` and `state` (the last probe tag, `working` or `pending`), and each timed-out agent gets a friction line: `timeout waiting for '<agent>'; it may still be working (state: <state>). Run: soho wait <agent> --timeout <2×>` — the suggestion doubles the timeout this wait used.
 - **Do:** check with `status <agent>`; re-run `wait <agent> --timeout <2×>` (or `--any` to wake per report). If the process instead died with 137 and no cause line, it was killed from outside — see the exit-137 entry.
 
 ## A claude worker resumed the orchestrator's conversation
@@ -320,4 +320,4 @@ Use a verified native release binary, or build an explicitly selected checkout w
 
 ## A collaboration command cannot resolve the native binary
 
-All workflow commands run in the same Go executable. There is no interpreter fallback. Verify the installed binary and the explicit native `HERDR_SOHO_BIN` override, if set. The override must be an absolute regular native executable and is validated before worker compact, spawn or prompt effects. Run `herdr-soho capabilities --json` to inspect the native protocol capabilities; install a verified compatible release when the command is absent. Preserve assignment history while resolving the executable.
+All workflow commands run in the same Go executable. There is no interpreter fallback. Verify the installed binary and the explicit native `SOHO_BIN` override, if set. The override must be an absolute regular native executable and is validated before worker compact, spawn or prompt effects. Run `soho capabilities --json` to inspect the native protocol capabilities; install a verified compatible release when the command is absent. Preserve assignment history while resolving the executable.

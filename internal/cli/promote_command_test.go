@@ -10,7 +10,7 @@ func TestPromotePublicCommand(t *testing.T) {
 		env, cwd := commandFixture(t)
 		delete(env, "HERDR_ENV")
 		code, out, stderr := runIn(t, []string{"promote", "--help"}, env, cwd)
-		if code != 0 || stderr != "" || !strings.Contains(out, "herdr-soho promote") || !strings.Contains(out, "keeps its pane") {
+		if code != 0 || stderr != "" || !strings.Contains(out, "soho promote") || !strings.Contains(out, "keeps its pane") {
 			t.Fatalf("help: code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})

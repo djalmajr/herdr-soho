@@ -32,7 +32,7 @@ func tm5DetectFixture(t *testing.T) (string, string, platform.Env, *core.Config)
 			t.Fatal(err)
 		}
 	}
-	env := platform.Env{"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": conf, "TMPDIR": tmp, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "PATH": "", "HERDR_SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "herdr-soho")}
+	env := platform.Env{"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": conf, "TMPDIR": tmp, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "PATH": "", "HERDR_SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho")}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
 	return root, home, env, ctx
 }
@@ -275,7 +275,7 @@ func TestSetupDetectTM5PolicyCases(t *testing.T) {
 		}
 		home := t.TempDir()
 		env["HOME"], env["USERPROFILE"], env["XDG_CONFIG_HOME"], env["TMPDIR"] = home, home, filepath.Join(home, ".config"), t.TempDir()
-		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
+		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 		delete(env, "HERDR_SOHO_MODELS_TIMEOUT")
 		started := time.Now()
 		row := tm5DetectKind(t, tm5DetectDoc(t, ctx, env, root), "grok")
@@ -406,7 +406,7 @@ func runDetectTM5Golden(t *testing.T, name string) {
 	}
 	env["HOME"], env["USERPROFILE"], env["XDG_CONFIG_HOME"], env["TMPDIR"] = home, home, conf, tmp
 	env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = filepath.Join(fixture, "state"), "ws"
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
+	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	env["HERDR_SOHO_MODELS_TIMEOUT"], env["OPENCODE_CONFIG"] = "30", ""
 	write := func(path, body string) {
 		t.Helper()

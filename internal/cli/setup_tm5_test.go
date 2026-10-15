@@ -51,9 +51,10 @@ func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 	// JS golden still says inside Herdr.
 	for i := range want.Steps {
 		// The frozen golden predates the soho name layer; the exact-substitution
-		// name oracle adapts the expected output and error.
-		want.Steps[i].Out = testutil.RewriteSohoName(want.Steps[i].Out)
-		want.Steps[i].Err = testutil.RewriteSohoName(want.Steps[i].Err)
+		// name oracle adapts the expected output and error, and the DJA-318
+		// rename oracle adapts the herdr-soho → soho generation change.
+		want.Steps[i].Out = testutil.ApplySohoRenameOracle(testutil.ApplyHookOracle(testutil.RewriteSohoName(want.Steps[i].Out))).(string)
+		want.Steps[i].Err = testutil.ApplySohoRenameOracle(testutil.ApplyHookOracle(testutil.RewriteSohoName(want.Steps[i].Err))).(string)
 		if strings.Join(want.Steps[i].Args, " ") == "doctor" {
 			out := want.Steps[i].Out
 			if !strings.Contains(out, "ok     inside Herdr (HERDR_ENV=1)\n") {
@@ -199,7 +200,7 @@ func setupTM5CommandFixture(t *testing.T) (platform.Env, string) {
 
 func setupTM5SkillDir(t *testing.T) string {
 	t.Helper()
-	dir, err := filepath.Abs(filepath.Join("..", "..", "skills", "herdr-soho"))
+	dir, err := filepath.Abs(filepath.Join("..", "..", "skills", "soho"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,14 +259,14 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			return out.String()
 		}
 		missing := run()
-		if !strings.Contains(missing, "no herdr-soho block in CLAUDE.local.md") || !strings.Contains(missing, "setup --local") || strings.Contains(missing, "no herdr-soho block in AGENTS.md/CLAUDE.md") {
+		if !strings.Contains(missing, "no soho block in CLAUDE.local.md") || !strings.Contains(missing, "setup --local") || strings.Contains(missing, "no soho block in AGENTS.md/CLAUDE.md") {
 			t.Fatalf("local setup target warning=%s", missing)
 		}
-		if err := os.WriteFile(filepath.Join(repo, "CLAUDE.local.md"), []byte("<!-- herdr-soho:start -->\n<!-- herdr-soho:end -->\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(repo, "CLAUDE.local.md"), []byte("<!-- soho:start -->\n<!-- soho:end -->\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		valid := run()
-		if !strings.Contains(valid, "instruction block present in CLAUDE.local.md") || strings.Contains(valid, "no herdr-soho block") {
+		if !strings.Contains(valid, "instruction block present in CLAUDE.local.md") || strings.Contains(valid, "no soho block") {
 			t.Fatalf("valid local block status=%s", valid)
 		}
 	})
@@ -286,7 +287,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		local := filepath.Join(repo, "CLAUDE.local.md")
-		if err := os.WriteFile(local, []byte("<!-- herdr-soho:start -->\n<!-- herdr-soho:end -->\n"), 0o600); err != nil {
+		if err := os.WriteFile(local, []byte("<!-- soho:start -->\n<!-- soho:end -->\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		conf := filepath.Join(repo, ".agents", "soho.conf")
@@ -314,7 +315,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			return out.String()
 		}
 		localOutput := run()
-		localWant := "warn   no herdr-soho hooks in .claude/settings.json: run '" + entry + " setup --local' (UserPromptSubmit reminder + SessionStart doctor)"
+		localWant := "warn   no soho hooks in .claude/settings.json: run '" + entry + " setup --local' (UserPromptSubmit reminder + SessionStart doctor)"
 		if !strings.Contains(normalizeGoldenRootPathSeparators(localOutput), normalizeGoldenRootPathSeparators(localWant)) {
 			t.Fatalf("missing local hooks warning %q in %s", localWant, localOutput)
 		}
@@ -325,7 +326,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		canonicalOutput := run()
-		canonicalWant := "warn   no herdr-soho hooks in .claude/settings.json: run '" + entry + " setup' (UserPromptSubmit reminder + SessionStart doctor)"
+		canonicalWant := "warn   no soho hooks in .claude/settings.json: run '" + entry + " setup' (UserPromptSubmit reminder + SessionStart doctor)"
 		if !strings.Contains(normalizeGoldenRootPathSeparators(canonicalOutput), normalizeGoldenRootPathSeparators(canonicalWant)) {
 			t.Fatalf("missing canonical hooks warning %q in %s", canonicalWant, canonicalOutput)
 		}

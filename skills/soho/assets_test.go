@@ -73,7 +73,7 @@ func TestBundleRefusesCorruptionWithoutOverwriting(t *testing.T) {
 
 func TestBundleRefusesSymlinkedCacheChild(t *testing.T) {
 	cache, outside := t.TempDir(), t.TempDir()
-	if err := os.Symlink(outside, filepath.Join(cache, "herdr-soho")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(cache, "soho")); err != nil {
 		// Native Windows symlinks need an OS permission; this is a platform
 		// capability result, never permission to weaken the production check.
 		t.Skipf("native symlink creation denied: %v", err)
@@ -112,7 +112,7 @@ func TestBundleConcurrentPublishCleansOwnedStages(t *testing.T) {
 			t.Errorf("different published paths: %q / %q", dir, want)
 		}
 	}
-	entries, err := os.ReadDir(filepath.Join(cache, "herdr-soho", "bundled"))
+	entries, err := os.ReadDir(filepath.Join(cache, "soho", "bundled"))
 	if err != nil || len(entries) != 1 || strings.HasPrefix(entries[0].Name(), ".staging-") {
 		t.Fatalf("left owned staging directories: %v %v", entries, err)
 	}
@@ -184,7 +184,7 @@ func TestBundleCachedIsStrictlyReadOnly(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		parent := filepath.Join(cache, "herdr-soho", "bundled")
+		parent := filepath.Join(cache, "soho", "bundled")
 		if err := os.MkdirAll(parent, 0o700); err != nil {
 			t.Fatal(err)
 		}

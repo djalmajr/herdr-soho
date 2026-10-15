@@ -65,7 +65,7 @@ Herdr also accepts `--kind pi|opencode`. The skill supports them as **generic** 
 
 ### Configuration examples (fictional names)
 
-User config (`~/.config/herdr-soho/config`) or project file (`.agents/herdr-soho.conf`) — one model and effort per kind, plus a whole lane on a generic kind:
+User config (`~/.config/soho/config`) or project file (`.agents/soho.conf`) — one model and effort per kind, plus a whole lane on a generic kind:
 
 ```ini
 # model per kind (provider/id) and effort (ladder: low|medium|high|xhigh|max)
@@ -170,7 +170,7 @@ Traps seen when a generic kind runs a reasoning model served by your own OpenAI-
 
 ## Probing a kind (`setup --probe`)
 
-`setup --probe [--kind K --model M] [--timeout SECONDS]` answers "is this kind/model actually usable right now?" with one tiny non-interactive prompt per kind/model — no pane, no Herdr, no TTY, short timeout (`HERDR_SOHO_PROBE_TIMEOUT` or `--timeout`, whole seconds ≥ 1, default 20 s; 0 is a usage error). Flags confirmed with each CLI's `--help` on 2026-09-23:
+`setup --probe [--kind K --model M] [--timeout SECONDS]` answers "is this kind/model actually usable right now?" with one tiny non-interactive prompt per kind/model — no pane, no Herdr, no TTY, short timeout (`SOHO_PROBE_TIMEOUT` or `--timeout`, whole seconds ≥ 1, default 20 s; 0 is a usage error). Flags confirmed with each CLI's `--help` on 2026-09-23:
 
 | Kind | Probe command | Notes |
 |---|---|---|

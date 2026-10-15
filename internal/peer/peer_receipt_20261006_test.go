@@ -5,10 +5,12 @@ package peer
 // replied. The fresh evidence (peer_receipt_20261006_send_test.go) reproduces
 // the false stalled class on codex history screens and claude transcripts;
 // these unit tests pin the closing-line rules the probes now apply: the
-// closing line is "[/herdr-soho:peer] #<id> end of message" (the opening
-// header keeps "[herdr-soho:peer] #<id>"), both closing forms are recognized
-// by the probes, and a quoted payload, an unrelated id, composer text or a
-// stale baseline is never a receipt.
+// closing line is "[/soho:peer] #<id> end of message" (the opening
+// header keeps "[soho:peer] #<id>"); the herdr-soho closing forms
+// "[/herdr-soho:peer] #<id> end of message" and
+// "[herdr-soho:peer] #<id> end of message" are the legacy generation and
+// are still recognized by the probes; a quoted payload, an unrelated id,
+// composer text or a stale baseline is never a receipt.
 
 import (
 	"strings"
@@ -18,7 +20,7 @@ import (
 const receiptID = "01020304"
 
 const (
-	receiptNewEnd    = "[/herdr-soho:peer] #01020304 end of message"
+	receiptNewEnd    = "[/soho:peer] #01020304 end of message"
 	receiptLegacyEnd = "[herdr-soho:peer] #01020304 end of message"
 )
 
@@ -29,9 +31,9 @@ func TestPeerEndLineNewForm(t *testing.T) {
 		t.Fatalf("PeerEndLine=%q want %q", got, receiptNewEnd)
 	}
 	header := PeerHeader("local/w14:p1", "orchestrator", "claude", "-", receiptID)
-	wantHeader := "[herdr-soho:peer] #01020304 Message from another agent — local/w14:p1, sent 2026-10-09T14:22:05Z.\n" +
+	wantHeader := "[soho:peer] #01020304 Message from another agent — local/w14:p1, sent 2026-10-09T14:22:05Z.\n" +
 		"Sender: name orchestrator; kind claude.\n" +
-		`Reply with: herdr-soho send local/w14:p1 "<your reply>"` + "\n" +
+		`Reply with: soho send local/w14:p1 "<your reply>"` + "\n" +
 		`The message follows, each line quoted with "> ".`
 	if header != wantHeader {
 		t.Fatalf("header=%q (the opening marker and the metadata-only lines must be exact)", header)
@@ -147,7 +149,7 @@ func TestReceiptLineInText(t *testing.T) {
 // a history line with text around the marker.
 func TestReceiptLineInHostileLines(t *testing.T) {
 	const id = "01020304"
-	endNew := "[/herdr-soho:peer] #" + id + " end of message"
+	endNew := "[/soho:peer] #" + id + " end of message"
 	endOld := "[herdr-soho:peer] #" + id + " end of message"
 	hostile := []struct {
 		name string

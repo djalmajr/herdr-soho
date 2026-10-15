@@ -47,7 +47,7 @@ func newJobFix(t *testing.T) *jobFix {
 	}
 	f.env = platform.Env{
 		"HOME": f.home, "USERPROFILE": f.home, "XDG_CONFIG_HOME": filepath.Join(root, "xdg"),
-		"HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho", "PATH": filepath.Join(root, "bin"),
+		"HERDR_SOHO_SKILL_DIR": "../../skills/soho", "PATH": filepath.Join(root, "bin"),
 	}
 	userFile := platform.UserConfigPath(platform.Current(), f.env)
 	if err := os.MkdirAll(filepath.Dir(userFile), 0o700); err != nil {
@@ -988,7 +988,7 @@ func TestJobUsage(t *testing.T) {
 	platform.Stdout, platform.Stderr = &out, &errOut
 	code := Run([]string{"job", "--help"}, platform.Env{})
 	platform.Stdout, platform.Stderr = oldOut, oldErr
-	if code != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), "herdr-soho job") {
+	if code != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), "soho job") {
 		t.Fatalf("job --help code=%d out=%q err=%q", code, out.String(), errOut.String())
 	}
 }

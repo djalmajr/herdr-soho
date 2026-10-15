@@ -22,7 +22,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/skills/herdr-soho"
+	"github.com/djalmajr/herdr-soho/skills/soho"
 )
 
 // Env is an explicit environment passed to platform helpers and commands.
@@ -372,11 +372,12 @@ func SkillDir(env Env) string {
 
 // SkillDirSource returns the skill directory and its origin: "SOHO_SKILL_DIR"
 // for the configured value, "executable" for a skill tree beside the executable,
-// "home" for <home>/.agents/skills/herdr-soho or <home>/.claude/skills/herdr-soho
-// (tried in that order; <home> is HOME, USERPROFILE on Windows), "bundled" for
-// the embedded skill materialized into the cache derived from the env. It dies
-// with the same message as before when no source holds a skill and no usable
-// cache can be derived from the env.
+// "home" for <home>/.agents/skills/soho or <home>/.claude/skills/soho, then the
+// legacy <home>/.agents/skills/herdr-soho or <home>/.claude/skills/herdr-soho
+// (each pair tried in that order; <home> is HOME, USERPROFILE on Windows),
+// "bundled" for the embedded skill materialized into the cache derived from
+// the env. It dies with the same message as before when no source holds a
+// skill and no usable cache can be derived from the env.
 func SkillDirSource(env Env) (string, string) {
 	dir, source := SkillDirSourceOrEmpty(env)
 	if dir != "" {
@@ -414,6 +415,10 @@ func SkillDirSourceOrEmpty(env Env) (string, string) {
 	}
 	if home != "" {
 		for _, dir := range []string{
+			filepath.Join(home, ".agents", "skills", "soho"),
+			filepath.Join(home, ".claude", "skills", "soho"),
+			// Legacy: the herdr-soho generation installed the skill under the
+			// old name; a soho tree wins, an old-only install still works.
 			filepath.Join(home, ".agents", "skills", "herdr-soho"),
 			filepath.Join(home, ".claude", "skills", "herdr-soho"),
 		} {

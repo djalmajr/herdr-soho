@@ -448,7 +448,7 @@ func newR11Fixture(t *testing.T, tc r11Case) *r11Fixture {
 		}
 	}
 	env["HERDR_ENV"], env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = "1", state, "ws"
-	env["HERDR_SOHO_ROLES"], env["HERDR_SOHO_SKILL_DIR"] = roles, "../../skills/herdr-soho"
+	env["HERDR_SOHO_ROLES"], env["HERDR_SOHO_SKILL_DIR"] = roles, "../../skills/soho"
 	check := tc.check
 	if check == "" {
 		check = "1"

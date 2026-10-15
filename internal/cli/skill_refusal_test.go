@@ -229,7 +229,7 @@ func TestSetupRefusesInsideTheSkill(t *testing.T) {
 	}
 	agents := filepath.Join(proj, "AGENTS.md")
 	data, err := os.ReadFile(agents)
-	if err != nil || !strings.Contains(string(data), "<!-- herdr-soho:start -->") {
+	if err != nil || !strings.Contains(string(data), "<!-- soho:start -->") {
 		t.Fatalf("control AGENTS.md=%q err=%v", data, err)
 	}
 }
