@@ -112,10 +112,12 @@ func setupTM7GoldenPath(t *testing.T, name string) string {
 }
 
 // readSetupTM7Golden loads a frozen oracle golden and applies the testutil
-// hook oracle adapter: the frozen expected hook outputs embed the exact
-// pre-native herdr-soho shell commands (raw and JSON-quoted, in the
-// expected Files/Out values), and the adapter rewrites only those exact
-// strings to the approved native literals. Seeds and every other frozen
+// hook oracle adapter and the DJA-330 peer-block oracle adapter: the frozen
+// expected hook outputs embed the exact pre-native herdr-soho shell commands
+// (raw and JSON-quoted, in the expected Files/Out values), and the frozen
+// expected block texts and plan diffs keep the pre-DJA-330 "Peer messages"
+// bullet. The adapters rewrite only those exact strings to the approved
+// native literals and the DJA-330 replacement. Seeds and every other frozen
 // expectation pass through untouched.
 func readSetupTM7Golden[T any](t *testing.T, name string) T {
 	t.Helper()
@@ -127,7 +129,7 @@ func readSetupTM7Golden[T any](t *testing.T, name string) T {
 	if err := json.Unmarshal(data, &tree); err != nil {
 		t.Fatal(err)
 	}
-	adapted, err := json.Marshal(testutil.ApplyHookOracle(tree))
+	adapted, err := json.Marshal(testutil.ApplyPeerBlockOracle(testutil.ApplyHookOracle(tree)))
 	if err != nil {
 		t.Fatal(err)
 	}
