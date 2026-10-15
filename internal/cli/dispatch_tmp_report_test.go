@@ -99,7 +99,15 @@ func TestDispatchTmpSohoReportIsReadByWait(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("wait code=%d stderr=%q", code, stderr)
 	}
-	if !strings.Contains(out, `"status":"done"`) || !strings.Contains(out, `"`+reportPath+`"`) {
+	// Compare the decoded fields: the JSON line escapes the backslashes of a
+	// Windows path, so the raw path is not a substring of it.
+	settled, err := jsonjs.Parse([]byte(strings.TrimSpace(out)))
+	if err != nil {
+		t.Fatalf("wait JSON %q: %v", out, err)
+	}
+	status, _ := settled.(*jsonjs.Object).Get("status")
+	settledReport, _ := settled.(*jsonjs.Object).Get("report")
+	if status != "done" || settledReport != reportPath {
 		t.Fatalf("wait did not settle done on the soho-scratch report: out=%q", out)
 	}
 }
