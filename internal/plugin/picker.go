@@ -50,8 +50,8 @@ type PickerState struct {
 	NavPending bool
 	NavTarget  PickerEntry
 	NavFailure *PickerFailure // action feedback survives discovery publications
-	// TeamView is the open read-only team view of the selected row (DJA-317
-	// slice A): nil while the list has the frame. While it is open the
+	// TeamView is the open read-only team view of the selected row: nil
+	// while the list has the frame. While it is open the
 	// list's keys never move the selection, so Esc and i return to the
 	// same row, by the full ref, like the picker's selection rule.
 	TeamView *pickerTeamView
@@ -261,7 +261,7 @@ func RenderPicker(state *PickerState, width int) string {
 }
 
 func (s *PickerState) ApplyKey(key string) string {
-	// The read-only team view (DJA-317 slice A) overlays the list: while
+	// The read-only team view overlays the list: while
 	// it is open, Esc and i go back to the list with the same selection,
 	// the arrow and page keys scroll its content, Ctrl-C closes the modal
 	// as before, and the list keys and the search text never reach the
@@ -318,7 +318,7 @@ func (s *PickerState) ApplyKey(key string) string {
 		return "copy"
 	case "i":
 		// i opens the read-only team view of the selected row in the
-		// enhanced list focus (DJA-317 slice A); in the enhanced search
+		// enhanced list focus; in the enhanced search
 		// focus the same key is ordinary search text, as c already is, and
 		// the legacy input keeps it as query text (frozen contract).
 		if s.NavPending || s.Exit != "" {

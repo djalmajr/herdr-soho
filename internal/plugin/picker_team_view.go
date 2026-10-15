@@ -9,12 +9,11 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/sessionref"
 )
 
-// pickerTeamView is the session popup's read-only team view (DJA-317,
-// slices A and B): the soho team roster and the effective role
+// pickerTeamView is the session popup's read-only team view: the soho
+// team roster and the effective role
 // configuration of the selected row's workspace, for rows of the local
-// machine. The same type serves the picker's state (slice A) and the
-// board runtime's state (slice B, the runtime the picker command runs
-// on). The two CLI reads (roster and roles, exactly) run off the key
+// machine. The same type serves the picker's state and the board
+// runtime's state (the runtime the picker command runs on). The two CLI reads (roster and roles, exactly) run off the key
 // path with HERDR_SOHO_NOWRITE=1 through the shared teamCall, and only
 // their finished result comes back to the list's goroutine, where
 // applyTeamView applies it. A late result of another row or of a
@@ -32,9 +31,8 @@ type pickerTeamView struct {
 	// ("TEAM  <workspace> · <machine>").
 	machine        string
 	workspaceLabel string
-	// remote is true for a row of another machine: the view shows the
-	// slice-B message and never calls the CLI (the remote path is
-	// slice B).
+	// remote is true for a row of another machine: the view shows that
+	// remote team views are not available yet and never calls the CLI.
 	remote bool
 	// targetErr is non-empty when the row's cwd failed validation: the
 	// view shows the cause and no CLI call is made.
@@ -67,12 +65,12 @@ type pickerTeamViewResult struct {
 	rolesCause  string
 }
 
-// openTeamView builds the read-only team view of one row (DJA-317,
-// shared by the picker's and the board's states): the row's
+// openTeamView builds the read-only team view of one row (shared by
+// the picker's and the board's states): the row's
 // workspace_id, pane_id and cwd build the team target and the cwd is
 // validated like resolveTeamTarget does (it must exist and be a
-// directory); a row of another machine opens the view with the slice-B
-// message and no CLI call at all. seq is the open's sequence (the
+// directory); a row of another machine opens the view with the
+// remote-machine message and no CLI call at all. seq is the open's sequence (the
 // owning state's teamLoadSeq at the open): a result of another open
 // (a stale sequence) is discarded.
 func openTeamView(seq int, entry PickerEntry) *pickerTeamView {
@@ -156,7 +154,7 @@ func runPickerTeamViewLoad(ctx contextpkg.Context, exe string, env platform.Env,
 }
 
 // applyTeamView folds one finished load into the open view and reports
-// whether it applied (DJA-317, shared by the picker's and the board's
+// whether it applied (shared by the picker's and the board's
 // states): a result of another row or of a superseded open (a stale
 // sequence) is discarded, the view of a remote or invalid-target row
 // never takes a result, and an already applied view is not loaded

@@ -275,7 +275,7 @@ func TestPickerTeamViewRemoteRowShowsSliceBMessageWithoutCLI(t *testing.T) {
 		t.Fatalf("view=%+v want the remote view", v)
 	}
 	frame := renderSessionPopup(pickerTeamViewOptions(s, ""), 80, 24)
-	if !strings.Contains(frame, "team view: remote machines come in the next slice") {
+	if !strings.Contains(frame, "team view: not available yet for remote machines") {
 		t.Fatalf("frame missing the slice-B message:\n%s", frame)
 	}
 	if calls := pickerTeamCalls(t, cli); len(calls) != 0 {

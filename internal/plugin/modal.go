@@ -238,7 +238,7 @@ func pickerModalDetail(entry PickerEntry, width int) string {
 // selection (no cursor at all when the pin is missing), the counts and
 // the board totals over the visible unified sessions. The "i Team"
 // shortcut is disclosed in the footer (the runtime binds it in the
-// enhanced list focus, DJA-317 slice B), and the open team view
+// enhanced list focus), and the open team view
 // replaces the row window in the same frame.
 func unifiedSessionOptions(state *BoardState, notice string) SessionRenderOptions {
 	sel := state.Selected

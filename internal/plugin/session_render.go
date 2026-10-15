@@ -43,13 +43,13 @@ type SessionRenderOptions struct {
 	Status        string // status filter disclosed in the footer (always, incl. all)
 	// TeamKey discloses the "i Team" shortcut in the footer's action
 	// line: the board-derived session runtime binds i to the read-only
-	// team view in the enhanced list focus (DJA-317, slices A and B), so
+	// team view in the enhanced list focus, so
 	// the unified frame discloses it - the legacy frames (non-enhanced
 	// picker and board) leave it off, and the footer never advertises a
 	// key the frame does not bind.
 	TeamKey bool
-	// TeamView is the session popup's open read-only team view (DJA-317,
-	// slices A and B, shared by the picker's and the board's states):
+	// TeamView is the session popup's open read-only team view (shared
+	// by the picker's and the board's states):
 	// when it is set, renderSessionPopup replaces the row window with
 	// the view inside the same frame.
 	TeamView *pickerTeamView
@@ -907,7 +907,7 @@ func renderSessionPopup(o SessionRenderOptions, width, height int) string {
 	}
 	if o.TeamView != nil {
 		// The picker's read-only team view replaces the row window inside
-		// the same frame (DJA-317 slice A); the list is drawn by the
+		// the same frame; the list is drawn by the
 		// caller only while the view is closed.
 		return renderPickerTeamFrame(&o, width, height)
 	}
@@ -1120,7 +1120,7 @@ func sessionRowsWindow(o *SessionRenderOptions, avail, rowsCap int) []string {
 }
 
 // pickerTeamViewOptions builds the picker's frame options with the
-// read-only team view attached (DJA-317 slice A): the same unified
+// read-only team view attached: the same unified
 // session options the picker's list frame uses, with the "i Team"
 // shortcut disclosed in the footer and the open view attached so
 // renderSessionPopup draws it in the row window's place.
@@ -1147,7 +1147,7 @@ func pickerTeamTitle(v *pickerTeamView) string {
 // block and the ROLES block. A failed call shows one "<name>: <cause>"
 // line (the description teamCall returns) in its own block and the other
 // block keeps its content; an empty roster shows "no soho team in this
-// workspace". A remote row shows the slice-B message and an invalid cwd
+// workspace". A remote row shows the remote-machine message and an invalid cwd
 // its cause. Every line is cut to the width with the team panel's text
 // helpers (teamCut/teamWrap).
 func pickerTeamContent(v *pickerTeamView, avail int) []string {
@@ -1158,7 +1158,7 @@ func pickerTeamContent(v *pickerTeamView, avail int) []string {
 	}
 	content = append(content, sessionStyleBold+title+sessionStyleReset)
 	if v.remote {
-		content = append(content, teamCut("team view: remote machines come in the next slice", avail))
+		content = append(content, teamCut("team view: not available yet for remote machines", avail))
 		return content
 	}
 	if v.targetErr != "" {
@@ -1195,8 +1195,8 @@ func pickerTeamBlock(name string, lines []string, failure, empty string, avail i
 	return out
 }
 
-// renderPickerTeamFrame draws the picker's read-only team view (DJA-317
-// slice A) inside the picker's own modal frame: the frame chrome (the
+// renderPickerTeamFrame draws the picker's read-only team view inside
+// the picker's own modal frame: the frame chrome (the
 // meta header, the search row, the footer with the "i Team" shortcut and
 // the fixed status strip) is the picker's, and the row window (the list
 // area) is replaced by the view. The blocks are cut to the width with the

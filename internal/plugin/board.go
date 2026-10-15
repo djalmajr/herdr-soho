@@ -45,7 +45,7 @@ type BoardState struct {
 	NavTarget  PickerEntry
 	NavFailure *PickerFailure // action feedback survives refresh publications
 	// TeamView is the open read-only team view of the selected row
-	// (DJA-317 slice B, the same type and rules as the picker's slice A):
+	// (the same type and rules as the picker's):
 	// nil while the list has the frame. While it is open the list's keys
 	// never move the selection, so Esc and i return to the same row, by
 	// the full ref, like the picker's selection rule.
@@ -426,7 +426,7 @@ func RenderBoard(state *BoardState, width int) string {
 }
 
 func (s *BoardState) ApplyKey(key string) string {
-	// The read-only team view (DJA-317 slice B) overlays the list: while
+	// The read-only team view overlays the list: while
 	// it is open, Esc and i go back to the list with the same selection,
 	// the arrow and page keys scroll its content, Ctrl-C closes the modal
 	// as before, and the list keys and the search text never reach the
@@ -497,7 +497,7 @@ func (s *BoardState) ApplyKey(key string) string {
 		return "copy"
 	case "i":
 		// i opens the read-only team view of the selected row in the
-		// enhanced list focus (DJA-317 slice B); in the enhanced search
+		// enhanced list focus; in the enhanced search
 		// focus the same key is ordinary search text, as c already is, and
 		// the legacy input keeps it as query text (frozen contract).
 		if s.NavPending || s.Exit != "" {
@@ -631,10 +631,10 @@ func (s *BoardState) startNavigation() string {
 }
 
 // openBoardTeamView opens the read-only team view on the selected row
-// (DJA-317 slice B, the board runtime's i key): the row's workspace_id,
+// (the board runtime's i key): the row's workspace_id,
 // pane_id and cwd build the team target and the cwd is validated like
 // resolveTeamTarget does; a row of another machine opens the view with
-// the slice-B message and no CLI call at all. During a refresh the
+// the remote-machine message and no CLI call at all. During a refresh the
 // selection resolves by the pinned ref, like Enter and c do. Every open
 // starts a new load sequence, so a late result of the previous open (or
 // of another row) is discarded. It reports whether a load is needed - a
@@ -1107,7 +1107,7 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 			navCancelActive()
 		}
 	}()
-	// One in-flight team-view load at a time (DJA-317 slice B): a new
+	// One in-flight team-view load at a time: a new
 	// open cancels the previous in-flight load, and the loop's exit - for
 	// any reason - cancels the current one, so a closed modal never
 	// leaves a CLI read in flight.
@@ -1203,7 +1203,7 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 				}()
 			}
 			if action == "team" {
-				// i opened the team view on a local row (DJA-317 slice B):
+				// i opened the team view on a local row:
 				// the loop's worker runs the two NOWRITE reads off the key
 				// path (the discovery-load pattern) and only the finished
 				// result comes back to the loop's goroutine, which applies
@@ -1320,7 +1320,7 @@ func boardNavApplyResult(state *BoardState, res NavigationResult) {
 }
 
 // boardApplyTeamResult folds one finished team-view load into the board
-// state on the loop's goroutine (DJA-317 slice B): the loop's worker
+// state on the loop's goroutine: the loop's worker
 // published the result and only the loop touches the live state; a
 // result of another row or of a superseded open is discarded.
 func boardApplyTeamResult(state *BoardState, res pickerTeamViewResult) bool {
