@@ -123,32 +123,51 @@ func (s *Supervisor) deliverControlBody(item ControlItem, amend bool) error {
 	if err != nil {
 		return err
 	}
-	// The hold: before any delivery attempt, read the orchestrator's
-	// current state — the same read checkOrchestrator uses. A blocked or
-	// question read keeps the request pending (no Dispatch, no Send): the
-	// Herdr would refuse the prompt before any input. A read of any other
-	// state, or a failed read, delivers exactly as before.
-	if state, _, err := s.Ops.Status(snap.State.Orchestrator); err == nil && (state == "blocked" || state == "question") {
-		return s.holdControlHeld(item)
-	}
 	ops := s.Ops
 	var deliveryCtx context.Context
 	stopWatching := func() {}
 	if s.stopping != "" {
-		// During the stop the delivery is limited to the remaining grace
-		// (the bounded adapter); with no time left there is no attempt —
-		// the request stays in control/ and the stop ends the job.
+		// During the stop the hold read and the delivery are limited to
+		// the remaining grace (the bounded adapter); with no time left
+		// there is no read and no attempt — the request stays in control/
+		// and the stop ends the job.
 		remaining := time.Duration(s.stopDeadline - s.Clock.Monotonic())
 		if remaining <= 0 {
 			return nil
 		}
 		ops = s.boundedOps(remaining)
 	} else {
-		// Outside the stop the delivery runs under the context the
-		// observer cancels when a pending cancel arrives in flight: the
-		// in-flight subprocess the adapter opened is the one that ends.
+		// Outside the stop the hold read and the delivery run under the
+		// context the observer cancels when a pending cancel arrives in
+		// flight: the in-flight subprocess the adapter opened is the one
+		// that ends.
 		deliveryCtx, stopWatching = s.watchForCancel()
 		ops = s.interruptibleOps(deliveryCtx)
+	}
+	// The hold: before any delivery attempt, read the orchestrator's
+	// current state — the same read checkOrchestrator uses — through the
+	// same protections as the delivery. A blocked or question read keeps
+	// the request pending (no Dispatch, no Send): the Herdr would refuse
+	// the prompt before any input. A read the cancel cut attempts nothing
+	// and marks nothing: the request stays pending for the stop. A read of
+	// any other state, or a failed read, delivers exactly as before.
+	state, _, statusErr := ops.Status(snap.State.Orchestrator)
+	if deliveryCtx != nil && deliveryCtx.Err() != nil {
+		stopWatching()
+		return nil
+	}
+	if statusErr == nil && (state == "blocked" || state == "question") {
+		stopWatching()
+		return s.holdControlHeld(item)
+	}
+	if s.stopping != "" {
+		// The read used part of the grace: the delivery gets only what is
+		// left, and nothing once it is spent.
+		remaining := time.Duration(s.stopDeadline - s.Clock.Monotonic())
+		if remaining <= 0 {
+			return nil
+		}
+		ops = s.boundedOps(remaining)
 	}
 	var deliverErr error
 	if amend {

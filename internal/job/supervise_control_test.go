@@ -1870,3 +1870,84 @@ func TestStopStatusReadBoundedByTheGrace(t *testing.T) {
 		}
 	})
 }
+
+// TestHoldReadCutByTheCancelArrival pins the hold read behind the same
+// protection as the delivery: outside the stop it runs under the cancel
+// observer, so a cancel accepted while it is in flight cuts it; the cut
+// read attempts nothing and marks nothing, and the job is canceled within
+// the hard bound.
+func TestHoldReadCutByTheCancelArrival(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := nsSup(t, 0, &friction)
+	sup.FinishingLimits = finishingLimits{Budget: cancelLatencyBudget}
+	if _, err := store.RequestAmend("job-1", []byte("the answer\n")); err != nil {
+		t.Fatalf("amend: %v", err)
+	}
+	watch := &stuckStatusTeam{fakeTeam: team, stuck: true, started: make(chan struct{})}
+	sup.Ops = watch
+	team.statusScript = workingStatuses(10)
+	runDone := make(chan struct {
+		exit int
+		err  error
+	}, 1)
+	go func() {
+		exit, err := sup.Run()
+		runDone <- struct {
+			exit int
+			err  error
+		}{exit, err}
+	}()
+	// The hold read of the pending amend is in flight: the cancel arrives.
+	<-watch.started
+	t0 := clock.now
+	t0Real := time.Now()
+	if queued, err := store.RequestCancel("job-1", 10); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	res := <-runDone
+	if res.err != nil || res.exit != ExitCanceled {
+		t.Fatalf("Run = %d, %v; want %d", res.exit, res.err, ExitCanceled)
+	}
+	if watch.cutAt.IsZero() {
+		t.Fatal("the hold read did not run under the cancel observer")
+	}
+	if elapsed := watch.cutAt.Sub(t0Real); elapsed >= 2*time.Second {
+		t.Fatalf("the cut hold read took %v after the acceptance, want under 2 s", elapsed)
+	}
+	assertTerminalWithinHardBound(t, clock, t0, 10*time.Second, cancelLatencyBudget)
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countTipe(events, "delivery_uncertain"); n != 0 {
+		t.Fatalf("delivery_uncertain = %d, want none (the cut read attempted nothing)", n)
+	}
+	if n := countTipe(events, "control_held"); n != 0 {
+		t.Fatalf("control_held = %d, want none (the cut read held nothing)", n)
+	}
+}
+
+// TestHoldReadSkippedOnceTheGraceIsSpent: during the stop the hold read
+// runs only with grace left; once it is spent there is no read and no
+// attempt for the pending request.
+func TestHoldReadSkippedOnceTheGraceIsSpent(t *testing.T) {
+	var friction []string
+	store, _, _, team, sup := nsSup(t, 10*time.Second, &friction)
+	if _, err := store.RequestSend("job-1", []byte("note\n")); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if queued, err := store.RequestCancel("job-1", 0); !queued || err != nil {
+		t.Fatalf("cancel: queued=%v err=%v", queued, err)
+	}
+	team.statusScript = []fakeStatus{{State: "working"}}
+	exit, err := sup.Run()
+	if err != nil || exit != ExitCanceled {
+		t.Fatalf("Run = %d, %v; want %d", exit, err, ExitCanceled)
+	}
+	if team.statusCalls != 0 {
+		t.Fatalf("status reads = %d, want none once the grace is spent", team.statusCalls)
+	}
+	if len(team.sends) != 0 {
+		t.Fatalf("sends = %+v, want none once the grace is spent", team.sends)
+	}
+}
