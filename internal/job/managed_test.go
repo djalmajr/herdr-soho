@@ -281,3 +281,55 @@ func TestManagedSelectionRefused(t *testing.T) {
 		wantOutcome(t, out, ManagedRefused, "")
 	})
 }
+
+// TestManagedParentSuperviseShape: the direct-parent parser accepts
+// exactly the two forms job start runs — `job supervise --id <ID>` and
+// `job supervise --id <ID> --repo <ORG/REPO>`, in that order, with a valid
+// id and repo — and keeps the existing classification for every other
+// variation: parentNotSupervisor (0) for arguments without the supervise
+// shape, parentUnknown (2) for the supervise shape with an invalid id or
+// repo. The child prints the parent's kind (managedHelperChild) before its
+// outcome line; the bound run proves the accepted repo form end to end.
+func TestManagedParentSuperviseShape(t *testing.T) {
+	requireProcExec(t)
+	const (
+		kindNotSupervisor = 0
+		kindSupervisor    = 1
+		kindUnknown       = 2
+	)
+	cases := []struct {
+		name string
+		args []string
+		kind int
+	}{
+		{"id only", []string{"job", "supervise", "--id", "job-1"}, kindSupervisor},
+		{"id and repo", []string{"job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo"}, kindSupervisor},
+		{"repo before id", []string{"job", "supervise", "--repo", "example-org/example-repo", "--id", "job-1"}, kindUnknown},
+		{"repeated repo", []string{"job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo", "--repo", "example-org/example-repo"}, kindUnknown},
+		{"invalid repo", []string{"job", "supervise", "--id", "job-1", "--repo", "inválido"}, kindUnknown},
+		{"empty repo", []string{"job", "supervise", "--id", "job-1", "--repo", ""}, kindUnknown},
+		{"extra argument", []string{"job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo", "extra"}, kindUnknown},
+		{"repo without value", []string{"job", "supervise", "--id", "job-1", "--repo"}, kindUnknown},
+		{"invalid id", []string{"job", "supervise", "--id", "../job-1"}, kindUnknown},
+		{"not the supervise shape", []string{"job", "status", "--id", "job-1"}, kindNotSupervisor},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newManagedFixture(t)
+			out := f.run(t, managedRun{parentArgs: c.args})
+			if !strings.Contains(out, fmt.Sprintf("parentkind=%d\n", c.kind)) {
+				t.Fatalf("output %q, want parentkind=%d", out, c.kind)
+			}
+		})
+	}
+	// The accepted repo form binds the launch and the child gets the
+	// selection, exactly like the id-only form.
+	t.Run("id and repo binds the launch", func(t *testing.T) {
+		f := newManagedFixture(t)
+		out := f.run(t, managedRun{bind: true, parentArgs: []string{"job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo"}})
+		if !strings.HasPrefix(out, "bind=true reason=\n") {
+			t.Fatalf("bind: %q", out)
+		}
+		wantOutcome(t, out, ManagedBound, f.base)
+	})
+}

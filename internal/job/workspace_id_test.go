@@ -85,7 +85,7 @@ func TestStartHostileWorkspaceID(t *testing.T) {
 			if len(fake.CloseIDs) != 0 || len(fake.RunCalls) != 0 {
 				t.Fatalf("CloseIDs = %v RunCalls = %+v", fake.CloseIDs, fake.RunCalls)
 			}
-			if len(friction) != 1 || friction[0] != "job: the Herdr workspace was left open: its id is invalid" ||
+			if len(friction) != 1 || friction[0] != "job: the Herdr workspace job-job-1 was left open: its id is invalid" ||
 				strings.Contains(friction[0], id) {
 				t.Fatalf("friction = %v", friction)
 			}
