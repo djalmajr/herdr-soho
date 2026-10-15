@@ -281,13 +281,16 @@ func TestUnifiedPageKeysMeasureTheSharedRenderer(t *testing.T) {
 		t.Fatalf("page-down re-pinned %q want %q (explicit movement)", got, want)
 	}
 	// Repeated paging at the bound stays clamped, no implicit move past.
-	for i := 0; i < 4; i++ {
+	// The fixed status/detail dividers reduce a short viewport to one
+	// selectable row. Exercise enough pages to reach either bound even
+	// at that minimum capacity, then keep paging to prove clamping.
+	for i := 0; i <= len(s.visible()); i++ {
 		s.ApplyKey("page-down")
 	}
 	if s.Selected != len(s.visible())-1 {
 		t.Fatalf("page-down at the bound=%d want last", s.Selected)
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i <= len(s.visible()); i++ {
 		s.ApplyKey("page-up")
 	}
 	if s.Selected != 0 {
@@ -330,8 +333,13 @@ func TestUnifiedPageKeysRawAndKittyEncodings(t *testing.T) {
 	page := sessionSelectableWindow(unifiedSessionOptions(s, ""), 80, 12)
 	s.Selected = 4
 	s.ApplyKey("page-up")
+	if want := max(4-page, 0); s.Selected != want {
+		t.Fatalf("page-up from 4 with page %d=%d want %d", page, s.Selected, want)
+	}
+	s.Selected = 0
+	s.ApplyKey("page-up")
 	if s.Selected != 0 {
-		t.Fatalf("page-up from 4 with page %d=%d want 0 (clamped)", page, s.Selected)
+		t.Fatalf("page-up at the first row=%d want 0 (clamped)", s.Selected)
 	}
 	// The standard page keys (CSI 5~ / CSI 6~, the kitty protocol's
 	// functional-key codes for PageUp/PageDown) drive the same movement.
@@ -349,7 +357,13 @@ func TestUnifiedPageKeysRawAndKittyEncodings(t *testing.T) {
 	if raw.Selected != min(2*page, len(raw.visible())-1) {
 		t.Fatalf("raw 6~ x2=%d want %d", raw.Selected, min(2*page, len(raw.visible())-1))
 	}
-	raw.FeedChunk("\x1b[6~") // past the bound: clamped
+	raw.FeedChunk("\x1b[6~")
+	if want := min(3*page, len(raw.visible())-1); raw.Selected != want {
+		t.Fatalf("raw 6~ x3=%d want %d", raw.Selected, want)
+	}
+	for i := 0; i <= len(raw.visible()); i++ {
+		raw.FeedChunk("\x1b[6~") // reach the bound even with one-row pages
+	}
 	if raw.Selected != len(raw.visible())-1 {
 		t.Fatalf("raw 6~ at the bound=%d want last (%d)", raw.Selected, len(raw.visible())-1)
 	}
@@ -783,8 +797,53 @@ func unifiedLoopSnapshot() string {
 
 func lastFrame(t *testing.T, data []byte) string {
 	t.Helper()
-	frames := strings.Split(string(data), "\x1b[H\x1b[J")
-	return frames[len(frames)-1]
+	// Replay row-addressed updates: a remote/header-only patch retains
+	// untouched rows, while a replaced band must never survive as history.
+	stream := string(data)
+	positions := frameLineRe.FindAllStringIndex(stream, -1)
+	rows := map[int]string{}
+	maxRow := 0
+	for i, pos := range positions {
+		row, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(stream[pos[0]:pos[1]], "\x1b["), ";1H"))
+		end := len(stream)
+		if i+1 < len(positions) {
+			end = positions[i+1][0]
+		}
+		segment := stream[pos[1]:end]
+		if strings.HasPrefix(segment, "\x1b[J") {
+			for r := range rows {
+				if r >= row {
+					delete(rows, r)
+				}
+			}
+			continue
+		}
+		rows[row] = segment
+		maxRow = max(maxRow, row)
+	}
+	var frame strings.Builder
+	for row := 1; row <= maxRow; row++ {
+		if segment, ok := rows[row]; ok {
+			fmt.Fprintf(&frame, "\x1b[%d;1H%s", row, segment)
+		}
+	}
+	return frame.String()
+}
+
+func TestUnifiedFrameParserAppliesPatchesWithoutStaleSelection(t *testing.T) {
+	stream := "\x1b[1;1H\x1b[Kheader\x1b[2;1H\x1b[K\x1b[7mold-selection\x1b[0m\x1b[3;1H\x1b[Kother"
+	stream += "\x1b[1;1H\x1b[Knew header"
+	if !frameBandedLineContains(t, []byte(stream), "old-selection") {
+		t.Fatal("header patch lost the unchanged selection")
+	}
+	stream += "\x1b[2;1H\x1b[Kother\x1b[3;1H\x1b[K\x1b[7mnew-selection\x1b[0m"
+	if frameBandedLineContains(t, []byte(stream), "old-selection") || !frameBandedLineContains(t, []byte(stream), "new-selection") {
+		t.Fatal("row patches reused a historical selection")
+	}
+	stream += "\x1b[3;1H\x1b[J"
+	if frameBandedLineContains(t, []byte(stream), "new-selection") {
+		t.Fatal("display cleanup retained a removed selection")
+	}
 }
 
 // frameBandedLines returns the reverse-banded (selected) lines of the
@@ -794,6 +853,8 @@ func frameBandedLines(t *testing.T, data []byte) []string {
 	t.Helper()
 	var out []string
 	for _, seg := range frameLineRe.Split(lastFrame(t, data), -1) {
+		// The row erase precedes its content, including the left margin.
+		seg = strings.TrimPrefix(seg, "\x1b[K")
 		// A frame line may carry a leading margin space before the band
 		// escape; the band (reverse video) marks the selected line.
 		if strings.HasPrefix(strings.TrimLeft(seg, " "), "\x1b[7m") {

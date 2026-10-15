@@ -564,13 +564,80 @@ func redrawArea(w io.Writer, rendered string) {
 	_, _ = fmt.Fprint(w, "\x1b[J")
 }
 
-func redrawModal(w io.Writer, rendered string) {
-	_, _ = fmt.Fprint(w, "\x1b[H\x1b[J")
-	for row, line := range strings.Split(strings.TrimSuffix(rendered, "\n"), "\n") {
-		// Raw terminals do not translate LF to CRLF. Absolute positioning
-		// also avoids scrolling when the last row fills the viewport.
-		_, _ = fmt.Fprintf(w, "\x1b[%d;1H%s", row+1, line)
+// buildModalFrame encodes one modal frame as a single bounded byte stream
+// for the shared transport: every row is cursor-addressed (no LF/CRLF, so
+// a frame as tall as the viewport cannot scroll and the final viewport
+// row cannot scroll itself away) and erased at its addressed start,
+// immediately before the row's content in the same buffered frame, so no
+// stale cell of a longer previous row survives. The erase leads the
+// content on purpose: a row that fills the terminal width exactly leaves
+// the cursor on the right margin (pending auto-wrap), where a trailing
+// end-of-line erase would erase the row's last content cell; with the
+// erase at the row start the last column is always preserved. Nothing
+// erases the visible viewport before the paint: the previous frame stays
+// on screen until the new frame's bytes replace it row by row. The stream
+// is one bounded string (the row count is capped by the renderer's
+// height), ready for one write. It carries no display erase: the caller's
+// trailing below-frame cleanup (which it knows, because it measured the
+// viewport) is the only erase that may follow all rows.
+func buildModalFrame(rendered string) string {
+	rows := strings.Split(strings.TrimSuffix(rendered, "\n"), "\n")
+	var frame strings.Builder
+	frame.Grow(len(rendered) + 8*len(rows))
+	for i, line := range rows {
+		frame.WriteString("\x1b[" + strconv.Itoa(i+1) + ";1H\x1b[K")
+		frame.WriteString(line)
 	}
+	return frame.String()
+}
+
+// buildModalPatch leaves unchanged rows on screen while remote snapshots
+// arrive. Each changed or removed row is addressed and erased once; the
+// caller falls back to a complete frame after resize or a failed write.
+func buildModalPatch(previous, rendered string) string {
+	oldRows := strings.Split(strings.TrimSuffix(previous, "\n"), "\n")
+	newRows := strings.Split(strings.TrimSuffix(rendered, "\n"), "\n")
+	var patch strings.Builder
+	for row := 0; row < max(len(oldRows), len(newRows)); row++ {
+		line := ""
+		if row < len(newRows) {
+			line = newRows[row]
+		}
+		if row < len(oldRows) && row < len(newRows) && oldRows[row] == line {
+			continue
+		}
+		fmt.Fprintf(&patch, "\x1b[%d;1H\x1b[K%s", row+1, line)
+	}
+	return patch.String()
+}
+
+// modalFrameRows is the number of rows one frame paints.
+func modalFrameRows(rendered string) int {
+	return len(strings.Split(strings.TrimSuffix(rendered, "\n"), "\n"))
+}
+
+// writeModalFrame is the transport's single bounded write: the whole
+// frame goes to the wire in one call, so the old separate clear write and
+// per-row writes - and the blank and partial frames they exposed - are
+// gone. One buffered write removes those separate writes; it is not
+// pixel-level proof that a terminal never shows intermediate processing
+// of the frame. A short write is a failed frame, reported - never
+// treated as painted.
+func writeModalFrame(w io.Writer, frame string) error {
+	n, err := io.WriteString(w, frame)
+	if err == nil && n != len(frame) {
+		err = fmt.Errorf("modal frame write: %d of %d bytes", n, len(frame))
+	}
+	return err
+}
+
+// redrawModal paints one complete modal frame as one bounded buffered
+// write (buildModalFrame + writeModalFrame): no home+erase-display before
+// the paint, no separate write per row. Stale rows left below a shorter
+// frame are the caller's cleanup: the caller knows the viewport height,
+// which the transport signature does not carry.
+func redrawModal(w io.Writer, rendered string) error {
+	return writeModalFrame(w, buildModalFrame(rendered))
 }
 
 func RunPicker(env platform.Env, platformName, executable string) (code int) {

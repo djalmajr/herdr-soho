@@ -35,7 +35,7 @@ type SessionRenderOptions struct {
 	Loading       int
 	LoadingLocal  bool
 	Failures      []PickerFailure
-	Notice        string // navigation feedback (pending or failed)
+	Notice        string // consumer-resolved feedback for the fixed bottom status line (copy confirmation or the navigation/failure guidance that outranks it; empty = Ready)
 	Totals        string // board totals line (counts + update time); "" = count from Entries
 	Noun          string // singular selection noun ("pane"/"agent"); default "session"
 	Board         bool   // board flavor: r Refresh in the footer, task title in the detail
@@ -189,8 +189,9 @@ func sessionFooterSegments(o *SessionRenderOptions, avail int) [][]string {
 // sessionStatusCore is the bottom-anchored feedback, ordered from the
 // least to the most essential so a tight popup trims from the front: the
 // no-results/empty line, the machine failures (a navigation failure
-// rides along in Failures), the board pin-missing guidance and the
-// navigation notice.
+// rides along in Failures) and the board pin-missing guidance. The
+// navigation/copy notice has its own fixed strip below the footer
+// (sessionStatusStripParts), so it never changes the core's reserved rows.
 func sessionStatusCore(o *SessionRenderOptions) []string {
 	var core []string
 	n := len(o.Entries)
@@ -211,10 +212,108 @@ func sessionStatusCore(o *SessionRenderOptions) []string {
 	if o.PinnedMissing {
 		core = append(core, "selected session left this load; pick another with ↑/↓")
 	}
-	if note := StripPickerControls(o.Notice); note != "" {
-		core = append(core, note)
-	}
 	return core
+}
+
+// sessionStatusStripRows is the reserved fixed status strip below the
+// footer for a frame of height h: at ordinary heights the theme-neutral
+// divider and the one-line status (the operator's fixed copy-
+// confirmation strip, kept below the shortcuts); at tiny heights the
+// deterministic degradation - first the divider, then the status line -
+// so the frame never overflows and the footer and at least one
+// selectable row keep their room.
+func sessionStatusStripRows(height int) int {
+	switch {
+	case height >= 10:
+		return 2
+	case height >= 7:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// sessionStatusStripLabel is the theme-neutral label of the fixed bottom
+// status line at ordinary widths: "STATUS" plus the two-column gap that
+// separates it from the content.
+const sessionStatusStripLabel = "STATUS  "
+
+// sessionStatusStripParts is the content of the fixed bottom status
+// line and its emphasis: "Ready" while idle, or the consumer-resolved
+// notice (the copy confirmation with its truthful wording, or the
+// navigation/failure guidance that outranks it) sanitized like every
+// other display value. The content keeps normal emphasis; the confirmed
+// native copy is bold so the acknowledgement stays visible, while the
+// unconfirmed OSC 52 wording (which must never read as confirmed) and
+// every other guidance stay plain. The emphasis keys off the truthful
+// wording the consumer owns (copyNoticeFor): the confirmed copy reads
+// "Copied <ref>", the fallback keeps "(unconfirmed)" in the text.
+func sessionStatusStripParts(o *SessionRenderOptions) (content string, bold bool) {
+	content = "Ready"
+	if note := StripPickerControls(o.Notice); note != "" {
+		content = note
+		bold = strings.HasPrefix(content, "Copied ") && !strings.Contains(content, "(unconfirmed)")
+	}
+	return content, bold
+}
+
+// sessionStatusSliceTail is the tail-keeping counterpart of
+// displaySlice for the fixed status line: a whole-rune suffix of text
+// that fits width display columns, starting with a single ellipsis when
+// the text does not fit, so a clipped notice keeps its end - the useful
+// pane reference - instead of its head.
+func sessionStatusSliceTail(text string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if displayWidth(text) <= width {
+		return text
+	}
+	runes := []rune(text)
+	start := len(runes)
+	used := 0
+	for i := len(runes) - 1; i >= 0; i-- {
+		w := displayRuneWidth(runes[i])
+		if used+w > width-1 { // keep one column for the ellipsis
+			break
+		}
+		used += w
+		start = i
+	}
+	return "\u2026" + string(runes[start:])
+}
+
+// sessionStatusStripLine is the fixed bottom status line: the dim
+// "STATUS" label and the content at ordinary widths, and the content
+// alone at very narrow widths (the notice outranks the label, and a
+// clipped notice keeps its tail - the pane reference - instead of its
+// head). The label is dim chrome; the content keeps normal emphasis and
+// the confirmed copy is bold.
+func sessionStatusStripLine(o *SessionRenderOptions, avail, pad int) string {
+	if avail <= 0 {
+		return ""
+	}
+	content, bold := sessionStatusStripParts(o)
+	contentStyle := ""
+	if bold {
+		contentStyle = sessionStyleBold
+	}
+	line := ""
+	if displayWidth(sessionStatusStripLabel)+displayWidth(content) <= avail {
+		line = sessionStyleDim + sessionStatusStripLabel + sessionStyleReset + contentStyle + content
+	} else {
+		if displayWidth(content) > avail {
+			content = sessionStatusSliceTail(content, avail)
+		}
+		line = contentStyle + content
+	}
+	if contentStyle != "" {
+		line += sessionStyleReset
+	}
+	if pad > 0 {
+		line = strings.Repeat(" ", pad) + line
+	}
+	return line
 }
 
 // sessionDetailLine is the selected entry's metadata: the full ref, the
@@ -644,14 +743,13 @@ func sessionFooterRows(height int) int {
 	return f
 }
 
-// sessionFrameCaps is the shared viewport math of one frame of width×
-// height: the row-window capacity (rowsCap) and whether the
-// selected-metadata row is reserved above the footer (detailSlot). The
-// renderer and the page keys both consume it, so a page always matches
-// the selectable rows the renderer fits in its window; the feedback and
-// detail reservations leave the window at least one row with entries, so
-// a tiny viewport still shows one item.
-func sessionFrameCaps(o SessionRenderOptions, width, height int) (rowsCap int, detailSlot bool) {
+// sessionFrameMiddle is the shared raw budget of one frame of width×
+// height: the middle rows left after the top chrome, the control footer
+// and the fixed status strip, and whether the selected-metadata line is
+// drawable there. The frame caps and the detail dividers both derive
+// from it, so the page keys, the row window and the dividers always
+// agree on the reserved rows.
+func sessionFrameMiddle(o *SessionRenderOptions, width, height int) (cap int, detailOn bool) {
 	o.normalize()
 	if width <= 0 || height <= 0 {
 		return 0, false
@@ -661,10 +759,9 @@ func sessionFrameCaps(o SessionRenderOptions, width, height int) (rowsCap int, d
 		pad = 1
 	}
 	avail := width - pad
-	core := sessionStatusCore(&o)
 	// The same styled line the renderer draws: a styled empty detail is
 	// still a non-empty line, so the slot is reserved with that rule.
-	detail := sessionStyleDim + sessionDetailLine(&o, avail) + sessionStyleReset
+	detail := sessionStyleDim + sessionDetailLine(o, avail) + sessionStyleReset
 	if pad > 0 {
 		detail = strings.Repeat(" ", pad) + detail
 	}
@@ -674,19 +771,42 @@ func sessionFrameCaps(o SessionRenderOptions, width, height int) (rowsCap int, d
 		middle = 0
 	}
 	f := sessionFooterRows(height)
-	cap := middle - f
+	strip := sessionStatusStripRows(height)
+	cap = middle - f - strip
 	if cap < 0 {
 		cap = 0
 	}
 	if len(o.Entries) <= 0 || cap < 1 {
 		return 0, false
 	}
-	detailOn := o.selectedEntry() != nil && detail != ""
+	return cap, o.selectedEntry() != nil && detail != ""
+}
+
+// sessionFrameCaps is the shared viewport math of one frame of width×
+// height: the row-window capacity (rowsCap) and whether the
+// selected-metadata row is reserved above the footer (detailSlot). The
+// renderer and the page keys both consume it, so a page always matches
+// the selectable rows the renderer fits in its window; the feedback,
+// detail (with its dividers, sessionDetailDividers) and fixed status-
+// strip reservations leave the window at least one row with entries, so
+// a tiny viewport still shows one item.
+func sessionFrameCaps(o SessionRenderOptions, width, height int) (rowsCap int, detailSlot bool) {
+	o.normalize()
+	cap, detailOn := sessionFrameMiddle(&o, width, height)
+	if cap < 1 {
+		return 0, false
+	}
+	core := sessionStatusCore(&o)
 	detailSlot = detailOn && cap >= 2
+	// The dividers around the reserved detail count in the same budget:
+	// at ordinary sizes both fit and reserve two rows with the detail;
+	// on a tiny height the optional dividers drop first so the content
+	// (the window and the detail row) keeps its room.
+	detailDividers := sessionDetailDividers(&o, width, height)
 	statusCap := len(core)
 	if detailSlot {
-		if statusCap > cap-2 {
-			statusCap = cap - 2
+		if statusCap > cap-2-detailDividers {
+			statusCap = cap - 2 - detailDividers
 		}
 	} else {
 		if statusCap > cap-1 {
@@ -696,8 +816,25 @@ func sessionFrameCaps(o SessionRenderOptions, width, height int) (rowsCap int, d
 	rowsCap = cap - statusCap
 	if detailSlot {
 		rowsCap--
+		rowsCap -= detailDividers
 	}
 	return rowsCap, detailSlot
+}
+
+// sessionDetailDividers is the number of theme-neutral dividers reserved
+// around the selected-metadata row for one frame of width×height: 2 at
+// ordinary sizes when the diagnostic core fits, 0 when they must yield
+// to content. It is the same budget term sessionFrameCaps subtracts
+// from the row window, so the renderer and the page keys agree.
+func sessionDetailDividers(o *SessionRenderOptions, width, height int) int {
+	o.normalize()
+	cap, detailOn := sessionFrameMiddle(o, width, height)
+	// Optional chrome yields before diagnostic text when the viewport
+	// cannot fit the core, one selectable row and the metadata row.
+	if detailOn && cap >= 4 && len(sessionStatusCore(o)) <= cap-4 {
+		return 2
+	}
+	return 0
 }
 
 // sessionSelectableWindow counts the selectable entries the renderer fits
@@ -739,12 +876,15 @@ func sessionSelectableWindow(o SessionRenderOptions, width, height int) int {
 
 // renderSessionPopup renders one frame of the shared session popup for
 // the picker and the board: the meta header, the search row, a dim
-// separator, the row window (table or tree) and the bottom-anchored
-// detail/status block and control footer. The host viewport is consumed
-// as supplied (the popup is already 80% of the terminal, so it is never
-// multiplied again), every line is cut to width display columns and the
-// frame is exactly height lines, so the footer always sits on the last
-// row even with few results.
+// separator, the row window (table or tree), the bottom-anchored status
+// core and the selected-metadata block (the metadata row between two
+// theme-neutral dividers at ordinary sizes), the control footer and -
+// below the footer - the fixed status strip (the divider and the
+// STATUS/notice line, reserved so copying never moves a row). The host
+// viewport is consumed as supplied (the popup is already 80% of the
+// terminal, so it is never multiplied again), every line is cut to width
+// display columns and the frame is exactly height lines, so the bottom
+// block always sits on the last rows even with few results.
 func renderSessionPopup(o SessionRenderOptions, width, height int) string {
 	if width <= 0 || height <= 0 {
 		return ""
@@ -806,7 +946,8 @@ func renderSessionPopup(o SessionRenderOptions, width, height int) string {
 		middle = 0
 	}
 	f := sessionFooterRows(height)
-	cap := middle - f
+	strip := sessionStatusStripRows(height)
+	cap := middle - f - strip
 	if cap < 0 {
 		cap = 0
 	}
@@ -817,6 +958,7 @@ func renderSessionPopup(o SessionRenderOptions, width, height int) string {
 	// capacity and the reserved detail slot, so the page keys move by
 	// exactly what the renderer fits.
 	rowsCap, detailSlot := sessionFrameCaps(o, width, height)
+	detailDividers := sessionDetailDividers(&o, width, height)
 	if n > 0 {
 		if cap >= 1 {
 			// The selected-metadata row is reserved before the rows
@@ -826,8 +968,8 @@ func renderSessionPopup(o SessionRenderOptions, width, height int) string {
 			// one leaf, then the feedback, then the detail.
 			if detailSlot {
 				statusCap = len(core)
-				if statusCap > cap-2 {
-					statusCap = cap - 2
+				if statusCap > cap-2-detailDividers {
+					statusCap = cap - 2 - detailDividers
 				}
 			} else {
 				statusCap = len(core)
@@ -871,9 +1013,29 @@ func renderSessionPopup(o SessionRenderOptions, width, height int) string {
 		lines = append(lines, lineAt(line))
 	}
 	if detailSlot {
+		// The selected-metadata block: the metadata row, drawn exactly
+		// once, between the two theme-neutral dividers at ordinary sizes
+		// (the dividers degrade before content on tiny heights).
+		if detailDividers >= 2 {
+			lines = append(lines, separator)
+		}
 		lines = append(lines, detail)
+		if detailDividers >= 2 {
+			lines = append(lines, separator)
+		}
 	}
 	lines = append(lines, footerLines[len(footerLines)-f:]...)
+	// The fixed status strip below the shortcuts: the theme-neutral
+	// divider and the one-line status (the dim STATUS label with the
+	// Ready/notice content, the confirmed copy in bold), reserved by the
+	// shared frame math so the strip's row count and position never
+	// change when copying.
+	if strip >= 2 {
+		lines = append(lines, separator)
+	}
+	if strip >= 1 {
+		lines = append(lines, sessionStatusStripLine(&o, avail, pad))
+	}
 	return strings.Join(lines, "\n") + "\n"
 }
 
