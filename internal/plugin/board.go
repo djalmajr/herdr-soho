@@ -503,13 +503,13 @@ func (s *BoardState) ApplyKey(key string) string {
 		if s.NavPending || s.Exit != "" {
 			return ""
 		}
+		if !s.ViewState.Enabled || s.ViewState.SearchFocused {
+			s.applyBoardChar("i")
+			return ""
+		}
 		if s.pinnedMissing() {
 			// The pinned ref left the visible list while the load is
 			// still running: there is no target row to open the view on.
-			return ""
-		}
-		if !s.ViewState.Enabled || s.ViewState.SearchFocused {
-			s.applyBoardChar("i")
 			return ""
 		}
 		if s.openBoardTeamView() {
@@ -775,6 +775,47 @@ func (s *BoardState) FeedChunk(chunk string) string {
 		}
 	}
 	return s.Exit
+}
+
+// boardTeamLoad is the session loop's one in-flight team-view load: the
+// cancel of its reads and the sequence of the open it belongs to.
+type boardTeamLoad struct {
+	cancel contextpkg.CancelFunc
+	seq    int
+}
+
+// start supersedes the in-flight load (its reads are cancelled) and
+// returns the context of the new load for the open with sequence seq.
+func (l *boardTeamLoad) start(seq int) contextpkg.Context {
+	l.stop()
+	ctx, cancel := contextpkg.WithCancel(contextpkg.Background())
+	l.cancel, l.seq = cancel, seq
+	return ctx
+}
+
+// finish retires the cancel only for the current load's result: a late
+// result of a superseded open must not drop the cancel of the load that
+// replaced it, or closing the modal would leave that load running.
+func (l *boardTeamLoad) finish(res pickerTeamViewResult) {
+	if res.seq == l.seq {
+		l.stop()
+	}
+}
+
+// stop cancels the in-flight load, if any (the loop's exit).
+func (l *boardTeamLoad) stop() {
+	if l.cancel != nil {
+		l.cancel()
+		l.cancel = nil
+	}
+}
+
+// shutdown ends the modal the way Esc on the list does, closing an open
+// team view first: EOF and a shutdown signal end the popup, never only
+// the team view over it.
+func (s *BoardState) shutdown() {
+	s.TeamView = nil
+	s.ApplyKey("esc")
 }
 
 func (s *BoardState) FlushEsc() string {
@@ -1112,12 +1153,8 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 	// any reason - cancels the current one, so a closed modal never
 	// leaves a CLI read in flight.
 	teamResults := make(chan pickerTeamViewResult, 1)
-	var teamCancelActive contextpkg.CancelFunc
-	defer func() {
-		if teamCancelActive != nil {
-			teamCancelActive()
-		}
-	}()
+	var teamLoad boardTeamLoad
+	defer teamLoad.stop()
 	var escTimer <-chan time.Time
 	var resize <-chan time.Time
 	lastWidth, lastHeight := modalDimensions(stdout, width)
@@ -1139,7 +1176,7 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 				redrawSession(stdout, state, width)
 			}
 		case <-shutdownSignals:
-			state.ApplyKey("esc")
+			state.shutdown()
 		case <-refresh.C:
 			requestBoardUpdate(updateReq)
 		case update, ok := <-updateChannel:
@@ -1154,8 +1191,9 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 				if item.err == io.EOF {
 					if state.EscPending {
 						state.FlushEsc()
-					} else {
-						state.ApplyKey("esc")
+					}
+					if state.Exit == "" {
+						state.shutdown()
 					}
 					break
 				}
@@ -1211,12 +1249,8 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 				// is discarded there. A new open supersedes the in-flight
 				// load: it is cancelled, so the closed row's reads stop
 				// running.
-				if teamCancelActive != nil {
-					teamCancelActive()
-				}
-				teamCtx, teamCancel := contextpkg.WithCancel(contextpkg.Background())
-				teamCancelActive = teamCancel
 				view := state.TeamView
+				teamCtx := teamLoad.start(view.loadSeq)
 				redrawSession(stdout, state, width)
 				go func() {
 					runPickerTeamViewLoad(teamCtx, executable, env, platformName, view, func(res pickerTeamViewResult) {
@@ -1267,7 +1301,7 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 			boardNavApplyResult(state, res)
 			redrawSession(stdout, state, width)
 		case res := <-teamResults:
-			teamCancelActive = nil
+			teamLoad.finish(res)
 			boardApplyTeamResult(state, res)
 			redrawSession(stdout, state, width)
 		}

@@ -435,3 +435,162 @@ func TestBoardTeamViewLoopOpensLoadsAndReturns(t *testing.T) {
 		t.Fatal("board did not close after Esc")
 	}
 }
+
+// TestBoardTeamViewIIsSearchTextWhileThePinIsMissing pins the order of
+// the i key's gates: in the search focus i is search text even during a
+// refresh whose pinned selection left the list; only the list-focus open
+// is refused while the pin is missing.
+func TestBoardTeamViewIIsSearchTextWhileThePinIsMissing(t *testing.T) {
+	_, _, cwd := pickerTeamFixtureOK(t)
+	s := boardTeamState(pickerTeamEntries(t, cwd))
+	s.refreshing = true
+	s.selectedRef = "local/w9:p9"
+	if !s.pinnedMissing() {
+		t.Fatal("fixture: the pinned selection should be missing during the refresh")
+	}
+	s.ViewState.SearchFocused = true
+	s.Query = "ab"
+	if action := s.ApplyKey("i"); action != "" {
+		t.Fatalf("i in the search focus action=%q", action)
+	}
+	if s.Query != "abi" || s.TeamView != nil {
+		t.Fatalf("query=%q view=%v want i appended to the search while the pin is missing", s.Query, s.TeamView)
+	}
+	s.ViewState.SearchFocused = false
+	if action := s.ApplyKey("i"); action != "" || s.TeamView != nil {
+		t.Fatalf("list-focus i with a missing pin action=%q view=%v want nothing", action, s.TeamView)
+	}
+}
+
+// TestBoardTeamLoadKeepsTheCurrentCancelOnAStaleResult pins the loop's
+// load bookkeeping: a late result of a superseded open does not retire
+// the cancel of the load that replaced it, so closing the modal still
+// cancels that load; the current load's own result retires it.
+func TestBoardTeamLoadKeepsTheCurrentCancelOnAStaleResult(t *testing.T) {
+	var load boardTeamLoad
+	first := load.start(1)
+	second := load.start(2)
+	if first.Err() == nil {
+		t.Fatal("a new open did not cancel the superseded load")
+	}
+	load.finish(pickerTeamViewResult{seq: 1})
+	if second.Err() != nil {
+		t.Fatal("the stale result cancelled the current load")
+	}
+	load.stop()
+	if second.Err() == nil {
+		t.Fatal("closing the modal after a stale result did not cancel the current load")
+	}
+	third := load.start(3)
+	load.finish(pickerTeamViewResult{seq: 3})
+	if third.Err() == nil || load.cancel != nil {
+		t.Fatal("the current load's own result did not retire its cancel")
+	}
+}
+
+// startBoardTeamLoop runs the production session loop over the team-view
+// fixture with the view-opening row listed, and returns the input writer,
+// the output path, the shutdown channel and the loop's exit code channel.
+func startBoardTeamLoop(t *testing.T) (*os.File, string, chan os.Signal, chan int) {
+	t.Helper()
+	cwd := t.TempDir()
+	dir := t.TempDir()
+	herdr, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{
+		{Argv: []string{"api", "snapshot"}, Stdout: boardTeamLoopSnapshot(cwd)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli, err := fakecli.Install(t, dir, "cli", []fakecli.Rule{
+		{Argv: []string{"roster"}, Stdout: pickerTeamRosterFixture},
+		{Argv: []string{"roles"}, Stdout: pickerTeamRolesFixture},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := platform.Env{}
+	for _, entry := range fakecli.Env(testutil.CleanEnv(t), dir, fakecli.EnvOptions{IncludeBasePath: true}) {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	env["HERDR_BIN_PATH"] = herdr
+	input, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.CreateTemp(t.TempDir(), "board-")
+	if err != nil {
+		_ = input.Close()
+		_ = writer.Close()
+		t.Fatal(err)
+	}
+	oldInterval := boardRefreshInterval
+	boardRefreshInterval = time.Hour
+	shutdown := make(chan os.Signal, 1)
+	finished := make(chan int, 1)
+	loopDone := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case shutdown <- os.Interrupt:
+		default:
+		}
+		_ = writer.Close()
+		select {
+		case <-loopDone:
+		case <-time.After(5 * time.Second):
+			t.Error("board loop did not stop during cleanup")
+			return
+		}
+		_ = input.Close()
+		_ = output.Close()
+		boardRefreshInterval = oldInterval
+	})
+	state := NewBoardState()
+	go func() {
+		defer close(loopDone)
+		finished <- withPickerTerminalMouse(true, func() (func() error, error) { return func() error { return nil }, nil }, output, state, func() int {
+			return runSessionLoopWithSignals(env, "darwin", cli, input, output, true, shutdown, true, state)
+		})
+	}()
+	waitOutput(t, output.Name(), "w1:p1")
+	if _, err := writer.Write([]byte("i")); err != nil {
+		t.Fatal(err)
+	}
+	waitOutput(t, output.Name(), "TEAM  alpha · local")
+	return writer, output.Name(), shutdown, finished
+}
+
+// TestBoardTeamViewEOFClosesTheModalWithTheViewOpen: the end of the input
+// ends the popup even while the team view is open, instead of closing only
+// the view and leaving the loop waiting for input that never comes.
+func TestBoardTeamViewEOFClosesTheModalWithTheViewOpen(t *testing.T) {
+	writer, _, _, finished := startBoardTeamLoop(t)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-finished:
+		if code != 0 {
+			t.Fatalf("exit code=%d want 0 at EOF", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("EOF with the team view open did not end the modal")
+	}
+}
+
+// TestBoardTeamViewShutdownSignalClosesTheModalWithTheViewOpen: a
+// shutdown signal ends the popup even while the team view is open.
+func TestBoardTeamViewShutdownSignalClosesTheModalWithTheViewOpen(t *testing.T) {
+	_, _, shutdown, finished := startBoardTeamLoop(t)
+	shutdown <- os.Interrupt
+	select {
+	case code := <-finished:
+		if code != 0 {
+			t.Fatalf("exit code=%d want 0 on the shutdown signal", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the shutdown signal with the team view open did not end the modal")
+	}
+}
