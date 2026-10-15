@@ -15,13 +15,16 @@ import (
 // ReposRoot is absolute when the configured value starts with ~ or %USERPROFILE%.
 // TimeoutMin is the default job budget in minutes.
 // BlockedTimeoutMin is the default blocked budget in minutes.
+// FinishingTimeoutMin is the terminal procedure's (finishing) budget in
+// minutes.
 type Machine struct {
-	Label             string
-	Orgs              []string
-	ReposRoot         string
-	TimeoutMin        int
-	BlockedTimeoutMin int
-	WakeCmd           string
+	Label               string
+	Orgs                []string
+	ReposRoot           string
+	TimeoutMin          int
+	BlockedTimeoutMin   int
+	FinishingTimeoutMin int
+	WakeCmd             string
 
 	// reposRootHome records that ReposRoot was expanded from the home
 	// directory (a leading ~ or %USERPROFILE%): the job start then hands
@@ -32,22 +35,24 @@ type Machine struct {
 // Machine defaults: the user configuration file's values win, and a missing
 // file or key falls back to these.
 const (
-	defaultMachineLabel      = ""
-	defaultJobOrgs           = ""
-	defaultJobReposRoot      = "~/repo.git"
-	defaultJobTimeout        = "120"
-	defaultJobBlockedTimeout = "1440"
-	defaultJobWakeCmd        = ""
+	defaultMachineLabel        = ""
+	defaultJobOrgs             = ""
+	defaultJobReposRoot        = "~/repo.git"
+	defaultJobTimeout          = "120"
+	defaultJobBlockedTimeout   = "1440"
+	defaultJobFinishingTimeout = "10"
+	defaultJobWakeCmd          = ""
 )
 
 // LoadMachine reads machine_label, job_orgs, job_repos_root, job_timeout,
-// job_blocked_timeout and job_wake_cmd only from the user configuration
-// file (the current path, else the legacy one) through core.ReadConfigFilePairs,
-// falling back to the defaults above. osName selects the user file and the
-// home directory used to expand a leading ~ or %USERPROFILE%. Project and
-// session files and HERDR_SOHO_* environment variables never change these
-// six values. An unreadable user file, an invalid timeout, an invalid
-// blocked timeout, or an invalid organization token is *platform.ExitError
+// job_blocked_timeout, job_finishing_timeout and job_wake_cmd only from the
+// user configuration file (the current path, else the legacy one) through
+// core.ReadConfigFilePairs, falling back to the defaults above. osName
+// selects the user file and the home directory used to expand a leading ~
+// or %USERPROFILE%. Project and session files and HERDR_SOHO_* environment
+// variables never change these seven values. An unreadable user file, an
+// invalid timeout, an invalid blocked timeout, an invalid finishing
+// timeout, or an invalid organization token is *platform.ExitError
 // with code 2. An unresolvable ~ panics with the same exit platform.HomeDir
 // uses.
 func LoadMachine(osName string, env platform.Env) (Machine, error) {
@@ -68,12 +73,13 @@ func LoadMachineFor(osName string, env platform.Env, sel core.UserSelection) (Ma
 		}
 	}
 	values := map[string]string{
-		"machine_label":       defaultMachineLabel,
-		"job_orgs":            defaultJobOrgs,
-		"job_repos_root":      defaultJobReposRoot,
-		"job_timeout":         defaultJobTimeout,
-		"job_blocked_timeout": defaultJobBlockedTimeout,
-		"job_wake_cmd":        defaultJobWakeCmd,
+		"machine_label":         defaultMachineLabel,
+		"job_orgs":              defaultJobOrgs,
+		"job_repos_root":        defaultJobReposRoot,
+		"job_timeout":           defaultJobTimeout,
+		"job_blocked_timeout":   defaultJobBlockedTimeout,
+		"job_finishing_timeout": defaultJobFinishingTimeout,
+		"job_wake_cmd":          defaultJobWakeCmd,
 	}
 	for _, pair := range pairs {
 		if _, known := values[pair.Key]; known {
@@ -92,14 +98,19 @@ func LoadMachineFor(osName string, env platform.Env, sel core.UserSelection) (Ma
 	if err != nil {
 		return Machine{}, err
 	}
+	finishingTimeout, err := parseFinishingTimeout(values["job_finishing_timeout"])
+	if err != nil {
+		return Machine{}, err
+	}
 	return Machine{
-		Label:             values["machine_label"],
-		Orgs:              orgs,
-		ReposRoot:         expandReposRoot(osName, env, sel, values["job_repos_root"]),
-		TimeoutMin:        timeout,
-		BlockedTimeoutMin: blockedTimeout,
-		WakeCmd:           values["job_wake_cmd"],
-		reposRootHome:     reposRootFromHome(values["job_repos_root"]),
+		Label:               values["machine_label"],
+		Orgs:                orgs,
+		ReposRoot:           expandReposRoot(osName, env, sel, values["job_repos_root"]),
+		TimeoutMin:          timeout,
+		BlockedTimeoutMin:   blockedTimeout,
+		FinishingTimeoutMin: finishingTimeout,
+		WakeCmd:             values["job_wake_cmd"],
+		reposRootHome:       reposRootFromHome(values["job_repos_root"]),
 	}, nil
 }
 
@@ -180,6 +191,23 @@ func parseBlockedTimeout(raw string) (int, error) {
 	n, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, exitErr(2, "job: invalid job_blocked_timeout '"+raw+"'")
+	}
+	return n, nil
+}
+
+// parseFinishingTimeout is the terminal procedure's budget machine key:
+// 1..1440 minutes (config.go's jobFinishingTimeoutValueOk), the same shape
+// as parseBlockedTimeout.
+func parseFinishingTimeout(raw string) (int, error) {
+	if raw == "" {
+		raw = defaultJobFinishingTimeout
+	}
+	if !core.ConfigValueOk("job_finishing_timeout", raw, nil, "") {
+		return 0, exitErr(2, "job: invalid job_finishing_timeout '"+raw+"'")
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, exitErr(2, "job: invalid job_finishing_timeout '"+raw+"'")
 	}
 	return n, nil
 }

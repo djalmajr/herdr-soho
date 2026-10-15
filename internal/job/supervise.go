@@ -50,6 +50,40 @@ func supervisorExit(status string) int {
 	}
 }
 
+// The terminal procedure (the finishing phase) has its own budget and one
+// bound per step inside it; the zero finishingLimits are these defaults.
+const (
+	defaultFinishingBudget     = 10 * time.Minute
+	defaultFinishingGitStep    = 5 * time.Minute
+	defaultFinishingGHStep     = 2 * time.Minute
+	defaultFinishingCollabStep = defaultTimeoutGrace
+)
+
+// finishingLimits are the bounds of the terminal procedure: the whole
+// budget and the final git sync, draft pull request and collaboration
+// steps inside it. A zero field is its default; tests set small values.
+type finishingLimits struct {
+	Budget time.Duration
+	Git    time.Duration
+	GH     time.Duration
+	Collab time.Duration
+}
+
+func (l finishingLimits) git() time.Duration    { return limitOr(l.Git, defaultFinishingGitStep) }
+func (l finishingLimits) gh() time.Duration     { return limitOr(l.GH, defaultFinishingGHStep) }
+func (l finishingLimits) collab() time.Duration { return limitOr(l.Collab, defaultFinishingCollabStep) }
+
+func limitOr(d, fallback time.Duration) time.Duration {
+	if d > 0 {
+		return d
+	}
+	return fallback
+}
+
+// finishingBudgetMotivo is the motivo of a done job whose final push or
+// draft pull request was cut by the terminal procedure's budget.
+const finishingBudgetMotivo = "tempo de finalização esgotado"
+
 // Supervisor watches one job. The loop sleeps through Clock.Sleep, never
 // time.Sleep directly; a zero Poll is 5 s.
 type Supervisor struct {
@@ -59,6 +93,10 @@ type Supervisor struct {
 	Clock    Clock
 	Poll     time.Duration
 	Friction func(string)
+
+	// FinishingLimits bound the terminal procedure; the zero value is the
+	// defaults.
+	FinishingLimits finishingLimits
 
 	// Wake: the machine's job wake hook; nil or an empty Cmd disables it
 	// (no worker, no cursor).
@@ -152,6 +190,23 @@ type Supervisor struct {
 	// close exactly as a fresh process's failed capture does, and a later
 	// supervisor pass retries the capture.
 	collabUnenumerated bool
+
+	// The terminal procedure's budget (finishing_started_at): finBase is
+	// the virtual Monotonic base the budget counts from, captured once per
+	// process from the persisted anchor (ensureFinishingBase); stepDeadline
+	// and stepName are the Monotonic deadline and the name of the git or
+	// pull request step now running (0 when none), which the GitSync
+	// timeouts are clamped to; askDeadline bounds the collaboration stop
+	// request while the terminal path's capture runs (0 outside it).
+	// finBudget is the budget recorded with the job at start
+	// (finishing_timeout_min), read with the anchor by
+	// ensureFinishingBase; 0 when the state predates the field.
+	finBase      int64
+	finBaseSet   bool
+	finBudget    time.Duration
+	stepDeadline int64
+	stepName     string
+	askDeadline  int64
 }
 
 // NewSupervisor wires the production supervisor over a recorded job: the
@@ -384,7 +439,8 @@ func (s *Supervisor) Run() (int, error) {
 				return intent.Exit, nil
 			}
 			if snap.State.Status == StatusRunning || snap.State.Status == StatusBlocked {
-				if _, err := s.Store.Transition(s.ID, StatusFinishing); err != nil {
+				if _, err := s.Store.TransitionSettle(s.ID, StatusFinishing, s.anchorFinishing); err != nil {
+					s.frictionf("job: the supervisor could not enter finishing: " + err.Error())
 					return ExitFailed, err
 				}
 			}
@@ -1060,8 +1116,24 @@ const decisionsPendingMotivo = "decisions pending"
 // write, so time spent blocked is never charged to the active budget (from
 // running, both sides are active and nothing settles, as before).
 func (s *Supervisor) enterFinishing(intent *TerminalIntent, motivo *string) error {
+	err := s.enterFinishingWrite(intent, motivo)
+	if err != nil {
+		// The returned error is the store's own (callers match its code);
+		// the text and the step go to friction.
+		s.frictionf("job: the supervisor could not enter finishing: " + err.Error())
+	}
+	return err
+}
+
+// enterFinishingWrite is the state write of enterFinishing. The finishing
+// anchor (the wall ts the terminal procedure's budget counts from) lands
+// only with the terminal intent: the provisional entry of the pending
+// decision path (no intent, straight back to blocked) must not start the
+// budget while the job waits for the decision.
+func (s *Supervisor) enterFinishingWrite(intent *TerminalIntent, motivo *string) error {
 	update := func(st *State) {
 		if intent != nil {
+			s.anchorFinishing(st)
 			st.TerminalIntent = intent
 		}
 		if motivo != nil {
@@ -1115,24 +1187,62 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 	// the intent and the terminal transition leaves the outcome for the
 	// restart instead of re-deriving it.
 	intent := &TerminalIntent{Status: status, Motivo: motivo, Exit: exit}
-	if _, err := s.Store.Record(s.ID, func(st *State) { st.TerminalIntent = intent }); err != nil {
+	if _, err := s.Store.Record(s.ID, func(st *State) {
+		s.anchorFinishing(st)
+		st.TerminalIntent = intent
+	}); err != nil {
+		s.frictionf("job: the supervisor could not record the terminal intent: " + err.Error())
 		return 0, true, err
 	}
+	// A terminal event an earlier pass already published is final: its
+	// outcome (the recorded intent's) stands even when the deadline is
+	// already spent and the sync below is cut. The read is the job's own
+	// events, before the finalSync, with the same readDir/readEvents the
+	// append below uses, and its error goes to friction and back, like the
+	// append's read.
+	terminalDir, err := s.Store.readDir(s.ID)
+	if err != nil {
+		s.frictionf("job: the supervisor could not read the job directory for the terminal event: " + err.Error())
+		return 0, true, err
+	}
+	terminalEvents, err := readEvents(terminalDir)
+	if err != nil {
+		s.frictionf("job: the supervisor could not read the events for the terminal event: " + err.Error())
+		return 0, true, err
+	}
+	announced := hasTipo(terminalEvents, "terminal")
 	// The final push happens while the job is still finishing, so its events
-	// precede the terminal event.
-	s.finalSync(status)
+	// precede the terminal event. It runs inside the terminal procedure's
+	// budget: a done job whose final push or pull request was cut by it is
+	// not done, and the rewritten failed outcome is durable before anything
+	// else, so a restart converges on it — unless the terminal event
+	// already announced the outcome, which the rewrite may not undo.
+	s.ensureFinishingBase()
+	if cut := s.finalSync(status); cut && status == StatusDone && !announced {
+		status, motivo, exit = StatusFailed, finishingBudgetMotivo, ExitFailed
+		intent = &TerminalIntent{Status: status, Motivo: motivo, Exit: exit}
+		stored := motivo
+		if _, err := s.Store.Record(s.ID, func(st *State) {
+			st.TerminalIntent = intent
+			st.Motivo = &stored
+		}); err != nil {
+			s.frictionf("job: the supervisor could not record the terminal intent: " + err.Error())
+			return 0, true, err
+		}
+	}
 	// The collaboration capture: the outcomes are merged into the state
 	// (the persisted ones stand forever) and persisted before the
 	// terminal transition; an enumeration that could not be restored by
 	// the deadline still persists every known id, and the friction names
 	// it.
-	outcomes, capErr := s.endCollaborations(s.collabDeadline())
+	outcomes, capErr := s.endCollaborationsFinishing()
 	if capErr != nil {
 		s.frictionf("job: the supervisor cannot enumerate the collaborations: " + capErr.Error())
 		s.collabUnenumerated = true
 	}
 	s.collabEnded = true
 	if err := s.persistCollabOutcomes(outcomes); err != nil {
+		s.frictionf("job: the supervisor could not persist the collaboration outcomes: " + err.Error())
 		return 0, true, err
 	}
 	// The terminal event lands at most once: a crashed earlier pass may
@@ -1140,10 +1250,12 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 	// duplicate.
 	jobDir, err := s.Store.readDir(s.ID)
 	if err != nil {
+		s.frictionf("job: the supervisor could not read the job directory for the terminal event: " + err.Error())
 		return 0, true, err
 	}
 	events, err := readEvents(jobDir)
 	if err != nil {
+		s.frictionf("job: the supervisor could not read the events for the terminal event: " + err.Error())
 		return 0, true, err
 	}
 	if !hasTipo(events, "terminal") {
@@ -1152,10 +1264,13 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 			refs["motivo"] = motivo
 		}
 		if _, err := s.Store.Append(s.ID, EventIn{Tipo: "terminal", Refs: refs}); err != nil {
+			s.frictionf("job: the supervisor could not append the terminal event: " + err.Error())
 			return 0, true, err
 		}
 	}
-	if _, err := s.Store.Transition(s.ID, status); err != nil {
+	if err := s.transitionTerminal(status); err != nil {
+		// The terminal state was not saved within the budget: the job stays
+		// finishing with its terminal intent, and finalize never runs for it.
 		return 0, true, err
 	}
 	// The job is terminal: a cancel still pending (it stays pending through
@@ -1166,6 +1281,190 @@ func (s *Supervisor) finishOutcome(status, motivo string, exit int) (int, bool, 
 	s.finishWakes()
 	s.finalize(status)
 	return exit, true, nil
+}
+
+// clk is the supervisor's clock, the system clock when none is set.
+func (s *Supervisor) clk() Clock {
+	if s.Clock != nil {
+		return s.Clock
+	}
+	return systemClock{}
+}
+
+// anchorFinishing records the terminal procedure's anchor (the wall ts its
+// budget counts from) when the state has none: it runs inside the locked
+// write that records the terminal intent or enters finishing, and never
+// overwrites an anchor that is there, so a restart keeps the deadline.
+func (s *Supervisor) anchorFinishing(st *State) {
+	if st.FinishingStartedAt == "" {
+		st.FinishingStartedAt = s.clk().Now().Format(time.RFC3339Nano)
+	}
+}
+
+// ensureFinishingBase captures the process's virtual Monotonic base of the
+// terminal procedure's budget, once per process, like ensureIntervalBase:
+// the first reading minus the wall time elapsed since the persisted anchor,
+// clamped at zero so a future anchor counts as no time spent. The wall
+// clock is compared only here; from then on the budget runs on the
+// monotonic clock only, so a backwards Now never extends it, and a restart
+// counts the downtime. A state that holds a terminal intent but no anchor (a
+// job finishing before the field existed) is anchored now and the anchor is
+// persisted.
+func (s *Supervisor) ensureFinishingBase() {
+	if s.finBaseSet {
+		return
+	}
+	s.finBaseSet = true
+	clock := s.clk()
+	s.finBase = clock.Monotonic()
+	snap, err := s.Store.Snapshot(s.ID)
+	if err != nil {
+		s.frictionf("job: the supervisor could not read the finishing anchor: " + err.Error())
+		return
+	}
+	if min := snap.State.FinishingTimeoutMin; min > 0 {
+		s.finBudget = time.Duration(min) * time.Minute
+	}
+	anchor := snap.State.FinishingStartedAt
+	if anchor == "" {
+		if _, err := s.Store.Record(s.ID, s.anchorFinishing); err != nil {
+			s.frictionf("job: the supervisor could not record the finishing anchor: " + err.Error())
+		}
+		return
+	}
+	if start, err := time.Parse(time.RFC3339Nano, anchor); err == nil {
+		if elapsed := clock.Now().Sub(start); elapsed > 0 {
+			s.finBase -= int64(elapsed)
+		}
+	}
+}
+
+// finishingBudget is the length of the terminal procedure's budget: the
+// test seam FinishingLimits.Budget when set, else the value recorded with
+// the job at start (read once per process by ensureFinishingBase, never
+// from the machine configuration), else the built-in 10 minutes for a state
+// that predates the field. Every use of the budget (the deadline, the
+// terminal write retries, the step caps) goes through it, after
+// ensureFinishingBase.
+func (s *Supervisor) finishingBudget() time.Duration {
+	if s.FinishingLimits.Budget > 0 {
+		return s.FinishingLimits.Budget
+	}
+	if s.finBudget > 0 {
+		return s.finBudget
+	}
+	return defaultFinishingBudget
+}
+
+// finDeadline is the Monotonic deadline of the terminal procedure's budget.
+func (s *Supervisor) finDeadline() int64 {
+	return s.finBase + int64(s.finishingBudget())
+}
+
+// finRemaining is what is left of the terminal procedure's budget.
+func (s *Supervisor) finRemaining() time.Duration {
+	return time.Duration(s.finDeadline() - s.clk().Monotonic())
+}
+
+// beginFinStep starts one bounded step of the terminal procedure: its
+// deadline is the step's own bound or the budget's end, whichever comes
+// first. A step with no time left is skipped with one friction line naming
+// it, and reports false.
+func (s *Supervisor) beginFinStep(name string, bound time.Duration) bool {
+	now := s.clk().Monotonic()
+	deadline := now + int64(bound)
+	if end := s.finDeadline(); end < deadline {
+		deadline = end
+	}
+	if deadline <= now {
+		s.frictionf("job: finishing budget exhausted before " + name)
+		return false
+	}
+	s.stepDeadline, s.stepName = deadline, name
+	return true
+}
+
+// stepCut reports whether the step now running reached its deadline (a
+// subprocess killed by the clamped timeout counts as the step being cut) and
+// names it in friction.
+func (s *Supervisor) stepCut() bool {
+	if s.stepDeadline == 0 || s.clk().Monotonic() < s.stepDeadline {
+		return false
+	}
+	s.frictionf("job: finishing budget exhausted during " + s.stepName)
+	return true
+}
+
+// finCap is the GitSync timeout clamp: while a finishing step runs, every
+// subprocess timeout is the original default or the step's remaining time,
+// whichever is shorter, never below one millisecond (a zero would mean no
+// timeout) and rounded up to whole milliseconds so the kill never lands
+// before the step's deadline.
+func (s *Supervisor) finCap(d time.Duration) time.Duration {
+	if s.stepDeadline == 0 {
+		return d
+	}
+	remaining := time.Duration(s.stepDeadline - s.clk().Monotonic())
+	if remaining < time.Millisecond {
+		remaining = time.Millisecond
+	}
+	remaining = (remaining + time.Millisecond - 1) / time.Millisecond * time.Millisecond
+	if remaining < d {
+		return remaining
+	}
+	return d
+}
+
+// finCollabDeadline is the deadline of the collaboration wait of the
+// terminal path: the collaboration step's bound from now, or the stop's own
+// deadline when a stop is running in this process, and in both cases never
+// past the end of the terminal procedure's budget.
+func (s *Supervisor) finCollabDeadline() int64 {
+	deadline := s.clk().Monotonic() + int64(s.FinishingLimits.collab())
+	if s.stopping != "" {
+		deadline = s.stopDeadline
+	}
+	if end := s.finDeadline(); end < deadline {
+		deadline = end
+	}
+	return deadline
+}
+
+// endCollaborationsFinishing is the collaboration capture of the terminal
+// path inside the terminal procedure's budget: the wait and the stop
+// request's commands are bounded by finCollabDeadline.
+func (s *Supervisor) endCollaborationsFinishing() ([]CollaborationOutcome, error) {
+	s.ensureFinishingBase()
+	deadline := s.finCollabDeadline()
+	s.askDeadline = deadline
+	defer func() { s.askDeadline = 0 }()
+	return s.endCollaborations(deadline)
+}
+
+// transitionTerminal writes the terminal state (idempotent on a state that
+// is already terminal). A failed write is retried at the poll cadence while
+// the terminal procedure's budget remains, at least once in total and at
+// most one attempt per poll of the budget (a clock that does not advance
+// cannot hold it); each distinct error text goes to friction once, and the
+// last error is returned unchanged when the budget is spent.
+func (s *Supervisor) transitionTerminal(status string) error {
+	s.ensureFinishingBase()
+	maxRetries := int(s.finishingBudget() / s.poll())
+	lastText := ""
+	for retries := 0; ; retries++ {
+		_, err := s.Store.Transition(s.ID, status)
+		if err == nil {
+			return nil
+		}
+		if text := "job: the supervisor could not record the terminal state " + status + ": " + err.Error(); text != lastText {
+			s.frictionf(text)
+			lastText = text
+		}
+		if s.finRemaining() <= 0 || retries >= maxRetries {
+			return err
+		}
+		s.clockSleep(s.poll())
+	}
 }
 
 // frictionUnknown reports an unknown orchestrator state to friction, once
@@ -1200,48 +1499,57 @@ func (s *Supervisor) fail(motivo string, exit int) error {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
 		// The status is unknown, so the unsettled walk must not run.
-		s.frictionf("job: the supervisor could not record the failure")
+		s.frictionf("job: the supervisor could not record the failure: " + err.Error())
 		return err
 	}
 	if snap.State.Status == StatusBlocked {
 		// The failure exit from blocked: the settle, the re-anchor and the
 		// intent land with the crossing in one write; the Store.Fail walk
 		// then runs from finishing.
-		if err := s.settleAndTransitionWith(snap.State, StatusFinishing, true, func(st *State) { st.TerminalIntent = intent }); err != nil {
+		if err := s.settleAndTransitionWith(snap.State, StatusFinishing, true, func(st *State) {
+			s.anchorFinishing(st)
+			st.TerminalIntent = intent
+		}); err != nil {
 			// The job stays blocked and unsettled: the failure walk refused
 			// to run from a state it could not cross, and the restart
 			// converges on the still-blocked job.
-			s.frictionf("job: the supervisor could not record the failure")
+			s.frictionf("job: the supervisor could not record the failure: " + err.Error())
 			return err
 		}
 	} else {
 		// The terminal intent, best effort: on error, friction and continue
 		// — the failure still has to be recorded.
-		if _, err := s.Store.Record(s.ID, func(st *State) { st.TerminalIntent = intent }); err != nil {
-			s.frictionf("job: the supervisor could not record the terminal intent")
+		if _, err := s.Store.Record(s.ID, func(st *State) {
+			s.anchorFinishing(st)
+			st.TerminalIntent = intent
+		}); err != nil {
+			s.frictionf("job: the supervisor could not record the terminal intent: " + err.Error())
 		}
 	}
+	s.ensureFinishingBase()
 	s.finalSync(StatusFailed)
 	// The collaboration capture, persisted before the failure walk; an
 	// enumeration that could not be restored by the deadline still
 	// persists every known id, and the friction names it.
-	outcomes, capErr := s.endCollaborations(s.collabDeadline())
+	outcomes, capErr := s.endCollaborationsFinishing()
 	if capErr != nil {
 		s.frictionf("job: the supervisor cannot enumerate the collaborations: " + capErr.Error())
 		s.collabUnenumerated = true
 	}
 	s.collabEnded = true
 	if err := s.persistCollabOutcomes(outcomes); err != nil {
-		s.frictionf("job: the supervisor could not persist the collaboration outcomes")
+		s.frictionf("job: the supervisor could not persist the collaboration outcomes: " + err.Error())
 	}
 	if _, err := s.Store.Fail(s.ID, motivo, exit); err != nil {
-		if s.Friction != nil {
-			s.Friction("job: the supervisor could not record the failure")
-		}
-	} else {
-		// The job is terminal: a pending cancel has nothing left to deliver.
-		s.retirePendingCancel()
+		// The failed state was not saved: the job stays finishing with its
+		// terminal intent, so the pending cancel is not retired, finalize
+		// (the cleanup event, the release, the workspace close) never runs
+		// for it, and the store's own error is returned unwrapped.
+		s.frictionf("job: the supervisor could not record the failure: " + err.Error())
+		return err
 	}
+	// The job is terminal: a pending cancel has nothing left to deliver.
+	s.retirePendingCancel()
 	// The terminal events wake the dispatcher too; the worker drains
 	// before the release and the workspace close.
 	s.finishWakes()

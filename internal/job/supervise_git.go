@@ -53,22 +53,57 @@ func (s *Supervisor) syncTicks() int {
 // called from the watch loop (syncGit) and from finalize (the final push
 // and pull request, where the cadence does not apply).
 func (s *Supervisor) syncGitOnce() (int, bool, error) {
+	return s.syncGitPass(nil)
+}
+
+// finSync is what one bounded final sync learned: cut is true when a step
+// of the terminal procedure ran out of its bound (a subprocess killed by
+// the clamped timeout, or a step skipped for lack of time) and failed is
+// true when any step failed for another reason (a git or gh error, a
+// refused push, a store error): the sync is recorded as complete only when
+// it neither failed nor was cut.
+type finSync struct{ cut, failed bool }
+
+// fail marks the final sync as not clean; a nil fin (the watch loop's pass)
+// records nothing.
+func (f *finSync) fail() {
+	if f != nil {
+		f.failed = true
+	}
+}
+
+// cutIfStepEnded marks the final sync cut when the failure just seen is the
+// step's bound being reached; a nil fin (the watch loop's pass) is never cut.
+func (s *Supervisor) cutIfStepEnded(fin *finSync) {
+	if fin != nil && s.stepCut() {
+		fin.cut = true
+	}
+}
+
+// syncGitPass is syncGitOnce with an optional bounded final sync (fin, set
+// by finalSync): the git steps run under the step deadline finalSync began,
+// and the draft pull request is its own step with its own bound.
+func (s *Supervisor) syncGitPass(fin *finSync) (int, bool, error) {
 	if s.Git == nil {
 		return 0, false, nil
 	}
 	head, err := s.Git.Head()
 	if err != nil {
 		s.frictionf(err.Error())
+		fin.fail()
+		s.cutIfStepEnded(fin)
 		return 0, false, nil
 	}
 	jobDir, err := s.Store.readDir(s.ID)
 	if err != nil {
 		s.frictionf("job: git sync: " + err.Error())
+		fin.fail()
 		return 0, false, nil
 	}
 	events, err := readEvents(jobDir)
 	if err != nil {
 		s.frictionf("job: git sync: " + err.Error())
+		fin.fail()
 		return 0, false, nil
 	}
 	// The announced shas seed from the existing commit events, so a
@@ -93,6 +128,8 @@ func (s *Supervisor) syncGitOnce() (int, bool, error) {
 		commits, err := s.Git.Commits()
 		if err != nil {
 			s.frictionf(err.Error())
+			fin.fail()
+			s.cutIfStepEnded(fin)
 			return 0, false, nil
 		}
 		for _, commit := range commits {
@@ -122,10 +159,13 @@ func (s *Supervisor) syncGitOnce() (int, bool, error) {
 	result, err := s.Git.Push()
 	if err != nil {
 		s.frictionf(err.Error())
+		fin.fail()
+		s.cutIfStepEnded(fin)
 		return 0, false, nil
 	}
 	switch {
 	case result.Rejected:
+		fin.fail()
 		if _, err := s.Store.Append(s.ID, EventIn{
 			Tipo: "push",
 			Refs: map[string]string{"motivo": "push_rejected"},
@@ -150,9 +190,15 @@ func (s *Supervisor) syncGitOnce() (int, bool, error) {
 	// open the draft pull request when one is not known yet. No commits,
 	// no pull request.
 	if !prKnown && s.prTitle != "" {
+		if fin != nil && !s.beginFinStep("the draft pull request", s.FinishingLimits.gh()) {
+			fin.cut = true
+			return 0, false, nil
+		}
 		pr, _, err := s.Git.EnsureDraftPR(s.prTitle, s.prBody())
 		if err != nil {
 			s.frictionf(err.Error())
+			fin.fail()
+			s.cutIfStepEnded(fin)
 			return 0, false, nil
 		}
 		s.lastPR = &pr
@@ -255,14 +301,60 @@ func (s *Supervisor) frictionf(message string) {
 // events precede the terminal event and wake the dispatcher with it. On
 // cancel or timeout the leftovers are committed first as
 // wip(job): checkpoint.
-func (s *Supervisor) finalSync(status string) {
-	if (status == StatusCanceled || status == StatusTimeout) && s.Git != nil {
+//
+// The final sync runs inside the terminal procedure's budget
+// (finishing_started_at): the git steps (the checkpoint, the commit
+// announcements and the push) are one bounded step and the draft pull
+// request another, each ending at its own bound or at the budget's end,
+// whichever comes first, with every subprocess timeout clamped to what is
+// left of the step. It reports whether a step was cut (a subprocess killed
+// by the clamp, or a step skipped for lack of time); the caller turns a cut
+// into the failed outcome of a done job. Only a fully clean sync is recorded
+// (finishing_synced), so a restart does not run it again: a step that was cut
+// or failed for another reason (a git or gh error, a refused push, a store
+// error) leaves the field false, and the restart runs the sync again.
+func (s *Supervisor) finalSync(status string) (cut bool) {
+	if s.Git == nil {
+		return false
+	}
+	s.ensureFinishingBase()
+	if snap, err := s.Store.Snapshot(s.ID); err == nil && snap.State.FinishingSynced {
+		return false
+	}
+	s.Git.Limit = s.finCap
+	defer func() {
+		s.Git.Limit = nil
+		s.stepDeadline, s.stepName = 0, ""
+	}()
+	if !s.beginFinStep("the final push", s.FinishingLimits.git()) {
+		return true
+	}
+	fin := &finSync{}
+	if status == StatusCanceled || status == StatusTimeout {
 		if _, err := s.Git.Checkpoint(); err != nil {
 			s.frictionf(err.Error())
+			fin.fail()
+			s.cutIfStepEnded(fin)
 		}
 	}
+	if fin.cut {
+		return true
+	}
 	// The final sync ignores the watch cadence.
-	s.syncGitOnce()
+	if _, _, err := s.syncGitPass(fin); err != nil {
+		// A store error returned by the pass: the sync is not clean.
+		fin.fail()
+	}
+	if fin.cut {
+		return true
+	}
+	if fin.failed {
+		return false
+	}
+	if _, err := s.Store.Record(s.ID, func(st *State) { st.FinishingSynced = true }); err != nil {
+		s.frictionf("job: the supervisor could not record the completed final sync: " + err.Error())
+	}
+	return false
 }
 
 // finalize finishes every terminal outcome the same way, after the

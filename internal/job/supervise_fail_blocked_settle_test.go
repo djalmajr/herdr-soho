@@ -476,7 +476,7 @@ func TestSuperviseFailBlockedWriteErrorAtCrossing(t *testing.T) {
 	if team.releaseCalls != 0 || len(herdr.CloseIDs) != 0 || st.WorkspaceClosed {
 		t.Fatalf("release = %d close = %v closed = %v, want none (the failure walk never ran)", team.releaseCalls, herdr.CloseIDs, st.WorkspaceClosed)
 	}
-	if len(friction) != 1 || friction[0] != "job: the supervisor could not record the failure" {
+	if len(friction) != 1 || friction[0] != "job: the supervisor could not record the failure: injected write error at the crossing write" {
 		t.Fatalf("friction = %v, want exactly the one failure-record line", friction)
 	}
 	// The restart through Run() converges to failed with exact totals.

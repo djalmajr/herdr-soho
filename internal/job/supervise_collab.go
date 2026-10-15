@@ -39,6 +39,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/djalmajr/herdr-soho/internal/collaboration"
 	"github.com/djalmajr/herdr-soho/internal/core"
@@ -298,7 +299,12 @@ func (s *Supervisor) askCollaborations() {
 	}); err != nil {
 		s.frictionf("job: the supervisor cannot record the collaborations asked to finish: " + err.Error())
 	}
-	rows, err := s.Ops.Roster()
+	ops, ok := s.collabOps()
+	if !ok {
+		s.frictionf("job: finishing budget exhausted before the collaboration stop request")
+		return
+	}
+	rows, err := ops.Roster()
 	if err != nil {
 		s.frictionf("job: the supervisor cannot read the team roster to ask the collaborations to finish")
 		return
@@ -325,11 +331,35 @@ func (s *Supervisor) askCollaborations() {
 			if !team[p.Name] {
 				continue
 			}
-			if err := s.Ops.Dispatch(p.Name, path, true); err != nil {
+			ops, ok := s.collabOps()
+			if !ok {
+				s.frictionf("job: finishing budget exhausted during the collaboration stop request")
+				return
+			}
+			if err := ops.Dispatch(p.Name, path, true); err != nil {
 				s.frictionf("job: the supervisor cannot dispatch the stop amendment to " + p.Name)
 			}
 		}
 	}
+}
+
+// collabOps is the team adapter for one command of the collaboration stop
+// request: outside the terminal procedure's capture it is the supervisor's
+// own; inside it, an adapter whose command timeout is lowered to what is left
+// of the collaboration step (one that cannot be bounded is used as is). It
+// reports false when no time is left.
+func (s *Supervisor) collabOps() (teamOps, bool) {
+	if s.askDeadline == 0 {
+		return s.Ops, true
+	}
+	remaining := time.Duration(s.askDeadline - s.clk().Monotonic())
+	if remaining <= 0 {
+		return nil, false
+	}
+	if b, ok := s.Ops.(interface{ bounded(time.Duration) teamOps }); ok {
+		return b.bounded(remaining), true
+	}
+	return s.Ops, true
 }
 
 // endCollaborations is the common terminal-path collaboration step, called

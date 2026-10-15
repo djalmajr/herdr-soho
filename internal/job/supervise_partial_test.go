@@ -225,6 +225,8 @@ func TestSupervisePartialOutcomesPersistBeforeTheTerminalTransition(t *testing.T
 	team.rosterRows = collabRoster("impl-1", "rev-1")
 	report := writeOrchestratorReport(t, "# report\n\n- [done] item\n")
 	team.statusScript = []fakeStatus{{State: "working"}, {State: "working"}, {State: "done", Report: report}}
+	// The first process has no budget left to retry the crashed write.
+	sup.FinishingLimits = finishingLimits{Budget: 10 * time.Second}
 	// Crash the terminal transition's state write: the first state.json
 	// whose top-level outcome is the done one is the transition itself —
 	// the intent record (which carries the done status inside the intent,
@@ -264,8 +266,8 @@ func TestSupervisePartialOutcomesPersistBeforeTheTerminalTransition(t *testing.T
 	if countTipe(events, "terminal") != 1 {
 		t.Fatalf("terminal events at the crash = %d, want one (it lands before the transition)", countTipe(events, "terminal"))
 	}
-	if len(friction1) != 0 {
-		t.Fatalf("friction at the crash = %v, want none", friction1)
+	if want := []string{"job: the supervisor could not record the terminal state done: crash"}; !reflect.DeepEqual(friction1, want) {
+		t.Fatalf("friction at the crash = %q, want %q", friction1, want)
 	}
 	// The crash was scripted once: the restart transitions without it.
 	renameAtomic = previous

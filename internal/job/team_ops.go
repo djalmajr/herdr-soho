@@ -63,6 +63,17 @@ func (c selfCLI) timeout() time.Duration {
 	return defaultTeamOpsTimeout
 }
 
+// bounded is the same adapter with every command timeout lowered to at most
+// d (never raised above its own bound): the terminal procedure's collaboration
+// step runs its dispatches and roster reads through it, so one command
+// cannot outlast the step's remaining time.
+func (c selfCLI) bounded(d time.Duration) teamOps {
+	if d > 0 && d < c.timeout() {
+		c.Timeout = d
+	}
+	return c
+}
+
 // step runs one self subprocess and maps any failure to the fixed error of
 // the operation.
 func (c selfCLI) step(op string, args ...string) (string, error) {
@@ -179,7 +190,7 @@ func (c selfCLI) Send(name, path string) error {
 // provider states print a JSON object instead of a tab line, so a line that
 // carries the agent in its agent field is read the same way.
 func (c selfCLI) Status(name string) (string, string, error) {
-	opts := platform.RunOptions{Env: c.Env, Cwd: c.Dir, TimeoutMs: int(c.timeout() / time.Millisecond)}
+	opts := platform.RunOptions{Env: c.Env, Cwd: c.Dir, TimeoutMs: timeoutMs(c.timeout())}
 	var result platform.RunResult
 	if filepath.IsAbs(c.Exe) {
 		result = platform.RunExecutable(c.Exe, []string{"status", name}, opts)

@@ -37,6 +37,19 @@ type GitSync struct {
 	LocalTimeout time.Duration
 	NetTimeout   time.Duration
 	GhTimeout    time.Duration
+	// Limit, when set, is consulted by every timeout below with the
+	// original default or configured value and returns the timeout to use:
+	// the supervisor's terminal procedure clamps each subprocess to the
+	// remaining time of its step (never to zero, which would mean none).
+	Limit func(time.Duration) time.Duration
+}
+
+// limited applies Limit to a timeout.
+func (g *GitSync) limited(d time.Duration) time.Duration {
+	if g.Limit != nil {
+		return g.Limit(d)
+	}
+	return d
 }
 
 // Commit is one commit of the job branch ahead of the base, oldest first.
@@ -65,23 +78,23 @@ func gitSyncError(step string) error {
 
 func (g *GitSync) localTimeout() time.Duration {
 	if g.LocalTimeout <= 0 {
-		return defaultLocalSyncTimeout
+		return g.limited(defaultLocalSyncTimeout)
 	}
-	return g.LocalTimeout
+	return g.limited(g.LocalTimeout)
 }
 
 func (g *GitSync) netTimeout() time.Duration {
 	if g.NetTimeout <= 0 {
-		return defaultNetSyncTimeout
+		return g.limited(defaultNetSyncTimeout)
 	}
-	return g.NetTimeout
+	return g.limited(g.NetTimeout)
 }
 
 func (g *GitSync) ghTimeout() time.Duration {
 	if g.GhTimeout <= 0 {
-		return defaultGhSyncTimeout
+		return g.limited(defaultGhSyncTimeout)
 	}
-	return g.GhTimeout
+	return g.limited(g.GhTimeout)
 }
 
 // gitEnv is the subprocess environment for git steps: GIT_TERMINAL_PROMPT=0
@@ -193,7 +206,7 @@ func (g *GitSync) Push() (PushResult, error) {
 	// RunCli directly (deadline and WaitDelay, argv only) so a timeout, a
 	// missing executable or a killed process stays apart from a refused push:
 	// only a non-zero exit is reported as Rejected for the blocked event.
-	result := platform.RunCli("git", []string{"-C", g.Dir, "push", "--porcelain", "origin", "HEAD:refs/heads/" + g.Branch}, platform.RunOptions{Env: gitEnv, TimeoutMs: int(g.netTimeout() / time.Millisecond)})
+	result := platform.RunCli("git", []string{"-C", g.Dir, "push", "--porcelain", "origin", "HEAD:refs/heads/" + g.Branch}, platform.RunOptions{Env: gitEnv, TimeoutMs: timeoutMs(g.netTimeout())})
 	switch {
 	case result.NotFound || result.TimedOut || result.Status == nil:
 		return PushResult{Head: head}, gitSyncError("push")
@@ -210,8 +223,10 @@ func (g *GitSync) Push() (PushResult, error) {
 // caller pushes after it.
 func (g *GitSync) Checkpoint() (bool, error) {
 	env := g.gitEnv()
-	local := g.localTimeout()
-	if _, err := runStep("git", []string{"-C", g.Dir, "add", "-A"}, local, env); err != nil {
+	// The timeout is read immediately before each subprocess: under a Limit
+	// that means "what is left of the step", a later command must not get the
+	// remainder the first one saw.
+	if _, err := runStep("git", []string{"-C", g.Dir, "add", "-A"}, g.localTimeout(), env); err != nil {
 		return false, gitSyncError("checkpoint")
 	}
 	// diff --cached --quiet exits 0 when nothing is staged and 1 when the
@@ -219,10 +234,10 @@ func (g *GitSync) Checkpoint() (bool, error) {
 	// same error, so a genuine diff failure falls through to the commit,
 	// which fails on its own when nothing was staged and surfaces as the
 	// checkpoint error instead of committing an empty commit.
-	if _, err := runStep("git", []string{"-C", g.Dir, "diff", "--cached", "--quiet"}, local, env); err == nil {
+	if _, err := runStep("git", []string{"-C", g.Dir, "diff", "--cached", "--quiet"}, g.localTimeout(), env); err == nil {
 		return false, nil
 	}
-	if _, err := runStep("git", []string{"-C", g.Dir, "commit", "--no-verify", "-m", "wip(job): checkpoint"}, local, env); err != nil {
+	if _, err := runStep("git", []string{"-C", g.Dir, "commit", "--no-verify", "-m", "wip(job): checkpoint"}, g.localTimeout(), env); err != nil {
 		return false, gitSyncError("checkpoint")
 	}
 	return true, nil
@@ -235,8 +250,7 @@ func (g *GitSync) Checkpoint() (bool, error) {
 // deletes a branch.
 func (g *GitSync) EnsureDraftPR(title, body string) (PullRequest, bool, error) {
 	ghEnv := g.ghEnv()
-	gh := g.ghTimeout()
-	list, err := runStep("gh", []string{"pr", "list", "--repo", g.Repo, "--head", g.Branch, "--state", "all", "--json", "number,url,isDraft", "--limit", "1"}, gh, ghEnv)
+	list, err := runStep("gh", []string{"pr", "list", "--repo", g.Repo, "--head", g.Branch, "--state", "all", "--json", "number,url,isDraft", "--limit", "1"}, g.ghTimeout(), ghEnv)
 	if err != nil {
 		return PullRequest{}, false, gitSyncError("pr")
 	}
@@ -265,7 +279,7 @@ func (g *GitSync) EnsureDraftPR(title, body string) (PullRequest, bool, error) {
 	if len(items) != 0 {
 		return PullRequest{}, false, gitSyncError("pr")
 	}
-	create, err := runStep("gh", []string{"pr", "create", "--repo", g.Repo, "--draft", "--base", g.Base, "--head", g.Branch, "--title", title, "--body", body}, gh, ghEnv)
+	create, err := runStep("gh", []string{"pr", "create", "--repo", g.Repo, "--draft", "--base", g.Base, "--head", g.Branch, "--title", title, "--body", body}, g.ghTimeout(), ghEnv)
 	if err != nil {
 		return PullRequest{}, false, gitSyncError("pr")
 	}

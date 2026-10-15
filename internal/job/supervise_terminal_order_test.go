@@ -191,8 +191,8 @@ func TestSuperviseCrashAfterFinishingKeepsTheTerminalIntent(t *testing.T) {
 		t.Fatalf("failure=%d terminal=%d, want no failure and one terminal event", countTipe(events, "failure"), countTipe(events, "terminal"))
 	}
 	requireWorkspaceClosed(t, herdr2, team2)
-	if len(friction1) != 0 || len(friction2) != 0 {
-		t.Fatalf("friction = %v / %v, want none", friction1, friction2)
+	if want := []string{"job: the supervisor could not record the terminal intent: crash"}; !reflect.DeepEqual(friction1, want) || len(friction2) != 0 {
+		t.Fatalf("friction = %q / %q, want %q / none", friction1, friction2, want)
 	}
 }
 
@@ -374,7 +374,7 @@ func TestSuperviseCrashAfterFinishingKeepsTheStopOutcome(t *testing.T) {
 	if terminal := events[len(events)-2]; terminal.Tipo != "terminal" || terminal.Refs["exit"] != "21" || terminal.Refs["motivo"] != "cancelado" {
 		t.Fatalf("terminal event = %+v, want exit 21 cancelado", terminal)
 	}
-	if len(friction) != 0 {
-		t.Fatalf("friction = %v, want none", friction)
+	if want := []string{"job: the supervisor could not record the terminal intent: crash"}; !reflect.DeepEqual(friction, want) {
+		t.Fatalf("friction = %q, want exactly the crash line of the first process and nothing from the restart: %q", friction, want)
 	}
 }

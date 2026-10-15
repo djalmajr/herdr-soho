@@ -70,6 +70,12 @@ type State struct {
 	// state that predates it, which checks the machine default at check
 	// time.
 	BlockedTimeoutMin int `json:"blocked_timeout_min,omitempty"`
+	// FinishingTimeoutMin is the budget in minutes of the job's terminal
+	// procedure (the finishing phase), recorded at start in the same write
+	// as BlockedTimeoutMin and immutable for the job's life; 0 on a state
+	// that predates it, which uses the built-in 10 minutes at read time and
+	// is never rewritten.
+	FinishingTimeoutMin int `json:"finishing_timeout_min,omitempty"`
 	// Equipe is the team resolution the job ran with (the report's
 	// equipe field), recorded with the run facts: the source file and the
 	// brief override keys, an empty non-nil list when there are none.
@@ -89,6 +95,15 @@ type State struct {
 	Colaboracoes   []CollaborationOutcome `json:"colaboracoes,omitempty"`
 	CollabIDs      []string               `json:"collab_ids,omitempty"`
 	TerminalIntent *TerminalIntent        `json:"terminal_intent,omitempty"`
+	// FinishingStartedAt is the wall ts (RFC3339Nano) the terminal
+	// procedure's own budget counts from: set once, in the same locked
+	// write that records the terminal intent or enters finishing, and
+	// never overwritten, so a restarted supervisor keeps the same
+	// deadline. FinishingSynced records that the final git and pull
+	// request steps completed without being cut by that budget, so a
+	// restart does not run them again. Both are internal and omitempty.
+	FinishingStartedAt string `json:"finishing_started_at,omitempty"`
+	FinishingSynced    bool   `json:"finishing_synced,omitempty"`
 }
 
 // TerminalIntent is the terminal outcome a supervisor process committed to
