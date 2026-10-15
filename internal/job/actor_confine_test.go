@@ -2,11 +2,13 @@ package job
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -422,6 +424,52 @@ func TestActorConfineExclude(t *testing.T) {
 		got, _ := os.ReadFile(filepath.Join(co, ".git", "info", "exclude"))
 		if string(got) != "/agent state/w7/\n" {
 			t.Fatalf("exclude = %q", got)
+		}
+	})
+	t.Run("jobs sharing the checkout never lose each other's lines", func(t *testing.T) {
+		// Each job appends its own line through its own handle. With a seek
+		// to the end and a separate write, two handles at the same end could
+		// overwrite each other; with O_APPEND every line survives. The run
+		// covers both a missing file (concurrent creation) and an existing
+		// one.
+		for _, existing := range []bool{false, true} {
+			co := newCheckout(t)
+			if existing {
+				mustMkdir(t, filepath.Join(co, ".git", "info"))
+				if err := os.WriteFile(filepath.Join(co, ".git", "info", "exclude"), []byte("# local\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			const jobs = 32
+			start := make(chan struct{})
+			refused := make(chan string, jobs)
+			var wg sync.WaitGroup
+			for i := 0; i < jobs; i++ {
+				line := fmt.Sprintf("/state/w%d/", i)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-start
+					if !appendExclude(co, line) {
+						refused <- line
+					}
+				}()
+			}
+			close(start)
+			wg.Wait()
+			close(refused)
+			for line := range refused {
+				t.Errorf("existing=%v: append of %s refused", existing, line)
+			}
+			got, err := os.ReadFile(filepath.Join(co, ".git", "info", "exclude"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < jobs; i++ {
+				if line := fmt.Sprintf("/state/w%d/", i); !excludeHas(got, line) {
+					t.Errorf("existing=%v: %s lost from exclude %q", existing, line, got)
+				}
+			}
 		}
 	})
 	t.Run("an existing file without a final newline", func(t *testing.T) {

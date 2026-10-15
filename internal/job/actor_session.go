@@ -556,20 +556,27 @@ func appendExclude(checkout, line string) bool {
 		}
 	}
 	if pre == nil {
+		// Another job in the same checkout may create the file first: that
+		// is not a failure, the line then goes through the append below.
 		f, err := top.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-		if err != nil {
-			return false
-		}
-		_, werr := f.WriteString(line + "\n")
-		if cerr := f.Close(); werr != nil || cerr != nil {
+		switch {
+		case err == nil:
+			_, werr := f.WriteString(line + "\n")
+			if cerr := f.Close(); werr != nil || cerr != nil {
+				return false
+			}
+		case !os.IsExist(err):
 			return false
 		}
 		pre, err = top.Lstat(file)
-		if err != nil || !pre.Mode().IsRegular() {
+		if err != nil || !pre.Mode().IsRegular() || pre.Size() > maxExcludeBytes {
 			return false
 		}
 	}
-	f, err := top.OpenFile(file, platform.ReadWriteNonBlocking, 0)
+	// O_APPEND makes every write land at the current end of the file, so
+	// jobs that share the checkout never overwrite each other's lines: a
+	// seek to the end followed by a separate write could.
+	f, err := top.OpenFile(file, platform.ReadWriteNonBlocking|os.O_APPEND, 0)
 	if err != nil {
 		return false
 	}
@@ -588,9 +595,6 @@ func appendExclude(checkout, line string) bool {
 	add := line + "\n"
 	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
 		add = "\n" + add
-	}
-	if _, err := f.Seek(0, io.SeekEnd); err != nil {
-		return false
 	}
 	if _, err := f.WriteString(add); err != nil {
 		return false
