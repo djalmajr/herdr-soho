@@ -204,9 +204,10 @@ func TestSuperviseControlDeliveryOrder(t *testing.T) {
 		t.Fatalf("checkpoint: queued=%v err=%v", queued, err)
 	}
 	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
-	// Tick one delivers everything, then the orchestrator works to the
-	// report.
-	team.statusScript = []fakeStatus{{State: "working"}, {State: "working"}, {State: "working"}, {State: "done", Report: report}}
+	// Tick one delivers everything (the two hold reads, one per pending
+	// request, both see the working orchestrator and deliver as before),
+	// then the orchestrator works to the report.
+	team.statusScript = []fakeStatus{{State: "working"}, {State: "working"}, {State: "working"}, {State: "working"}, {State: "working"}, {State: "done", Report: report}}
 
 	exit, err := sup.Run()
 	if err != nil {
@@ -325,7 +326,11 @@ func TestSuperviseControlSendDoesNotUnblock(t *testing.T) {
 	var friction []string
 	store, jobDir, clock, team, sup := ctlSup(t, 10*time.Second, &friction)
 	// The job blocks during the loop (the orchestrator's question); the
-	// send lands while it is blocked, and the orchestrator keeps asking.
+	// send lands while it is blocked. The hold read of the delivery tick
+	// already sees the orchestrator working (the human answered in the
+	// pane between the tick's two reads), so the send is delivered; the
+	// check read of the same tick sees the question again and the job
+	// stays blocked: the delivery itself must not unblock it.
 	var sendPath string
 	clock.onSleep = func() {
 		if clock.sleeps == 1 {
@@ -336,7 +341,7 @@ func TestSuperviseControlSendDoesNotUnblock(t *testing.T) {
 			sendPath = item.Path
 		}
 	}
-	team.statusScript = []fakeStatus{{State: "question"}, {State: "question"}}
+	team.statusScript = []fakeStatus{{State: "question"}, {State: "working"}, {State: "question"}}
 	clock.stopAfter = 2
 	clock.stop = errors.New("stop the watch loop")
 
@@ -372,13 +377,406 @@ func TestSuperviseControlSendDoesNotUnblock(t *testing.T) {
 	}
 }
 
+// The hold (DJA-262): while the job orchestrator is blocked, the
+// supervisor does not re-send a pending amend or send on every tick —
+// the Herdr refuses the prompt before any input. The request stays in
+// control/ and lands, at most once per request, one control_held event
+// (refs.seq_ref the request's counter, deduplicated by tipo and seq_ref
+// in the log, across restarts) with one friction line; it is delivered
+// on the first tick the orchestrator is not blocked anymore.
+func TestSuperviseControlAmendHeldWhileBlocked(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := ctlSup(t, 10*time.Second, &friction)
+	// The dispatcher's amend lands while the orchestrator is blocked
+	// (the human's answer in the pane is still pending): the supervisor
+	// holds it instead of re-sending it into the refusal.
+	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
+	var amendPath string
+	clock.onSleep = func() {
+		if clock.sleeps == 1 {
+			item, err := store.RequestAmend("job-1", []byte("the answer to the question"))
+			if err != nil {
+				panic(err)
+			}
+			amendPath = item.Path
+		}
+	}
+	// The status reads, in order: tick 1 (check: working, the amend is
+	// not pending yet); tick 2 (hold: blocked, check: blocked); tick 3
+	// (hold: blocked, check: working); tick 4 (hold: working, check:
+	// done).
+	team.statusScript = []fakeStatus{
+		{State: "working"},
+		{State: "blocked"}, {State: "blocked"},
+		{State: "blocked"}, {State: "working"},
+		{State: "working"}, {State: "done", Report: report},
+	}
+
+	exit, err := sup.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	// No amend dispatch on the blocked ticks: the single delivery
+	// happens once the orchestrator works again, with the request's
+	// path, and the request retires once.
+	if len(team.dispatches) != 2 || team.dispatches[1] != (fakeDispatch{Name: "orch-1", Path: amendPath, Amend: true}) {
+		t.Fatalf("dispatches = %+v", team.dispatches)
+	}
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"accepted", "worker_spawned", "control_held", "blocked", "unblocked", "amend_received", "worker_done", "terminal", "cleanup"}
+	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("event types = %v, want %v", got, want)
+	}
+	// Exactly one control_held, with the request's counter and the
+	// fixed resumo, before the block; the delivery lands after the
+	// unblock, with its own counter.
+	held := events[2]
+	if held.Refs["seq_ref"] != "1" || held.Resumo != "held: the job orchestrator is blocked" {
+		t.Fatalf("control_held = %+v", held)
+	}
+	amendEv := events[5]
+	if amendEv.Resumo != "amendment delivered" || amendEv.Refs["seq_ref"] != "1" {
+		t.Fatalf("amend_received = %+v", amendEv)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"seq"}) {
+		t.Fatalf("pending control = %v, want only seq", got)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"amend-000001.md"}) {
+		t.Fatalf("retired control = %v", got)
+	}
+	// At most one friction line about the request: the held one (the
+	// deduplicated ticks write no event and no friction).
+	heldFriction := 0
+	for _, line := range friction {
+		if strings.Contains(line, "amend-000001") {
+			heldFriction++
+		}
+	}
+	if heldFriction > 1 {
+		t.Fatalf("friction = %v, want at most one line about the request", friction)
+	}
+	if st := supState(t, store); st.Status != StatusDone {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+// The hold also covers the question state: a business question blocks the
+// orchestrator the same way (the Herdr refuses the prompt before any
+// input), so the amend is held while the reads are question, lands one
+// control_held, and is delivered after the working read.
+func TestSuperviseControlAmendHeldWhileQuestion(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := ctlSup(t, 10*time.Second, &friction)
+	// The dispatcher's amend lands while the orchestrator is in a
+	// question: the supervisor holds it instead of re-sending it into the
+	// refusal.
+	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
+	var amendPath string
+	clock.onSleep = func() {
+		if clock.sleeps == 1 {
+			item, err := store.RequestAmend("job-1", []byte("the answer to the question"))
+			if err != nil {
+				panic(err)
+			}
+			amendPath = item.Path
+		}
+	}
+	// The status reads, in order: tick 1 (check: working, the amend is
+	// not pending yet); tick 2 (hold: question, check: question); tick 3
+	// (hold: question, check: working); tick 4 (hold: working, check:
+	// done).
+	team.statusScript = []fakeStatus{
+		{State: "working"},
+		{State: "question"}, {State: "question"},
+		{State: "question"}, {State: "working"},
+		{State: "working"}, {State: "done", Report: report},
+	}
+
+	exit, err := sup.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	// No amend dispatch while the reads are question: the single delivery
+	// happens once the orchestrator works again, with the request's path,
+	// and the request retires once.
+	if len(team.dispatches) != 2 || team.dispatches[1] != (fakeDispatch{Name: "orch-1", Path: amendPath, Amend: true}) {
+		t.Fatalf("dispatches = %+v", team.dispatches)
+	}
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"accepted", "worker_spawned", "control_held", "blocked", "unblocked", "amend_received", "worker_done", "terminal", "cleanup"}
+	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("event types = %v, want %v", got, want)
+	}
+	// The block is the question one (motivo question, distinct from the
+	// blocked-state hold's dialog motivo), and exactly one control_held
+	// lands, with the request's counter and the fixed resumo.
+	if events[3].Refs["motivo"] != "question" {
+		t.Fatalf("blocked event = %+v, want the question motivo", events[3])
+	}
+	held := events[2]
+	if held.Refs["seq_ref"] != "1" || held.Resumo != "held: the job orchestrator is blocked" {
+		t.Fatalf("control_held = %+v", held)
+	}
+	amendEv := events[5]
+	if amendEv.Resumo != "amendment delivered" || amendEv.Refs["seq_ref"] != "1" {
+		t.Fatalf("amend_received = %+v", amendEv)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control")); !reflect.DeepEqual(got, []string{"seq"}) {
+		t.Fatalf("pending control = %v, want only seq", got)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"amend-000001.md"}) {
+		t.Fatalf("retired control = %v", got)
+	}
+	heldFriction := 0
+	for _, line := range friction {
+		if strings.Contains(line, "amend-000001") {
+			heldFriction++
+		}
+	}
+	if heldFriction > 1 {
+		t.Fatalf("friction = %v, want at most one line about the request", friction)
+	}
+	if st := supState(t, store); st.Status != StatusDone {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+// The control_held mark survives a supervisor restart: a second process
+// over the same held request writes no second event and no second
+// friction line, and delivers the request once, on the first tick the
+// orchestrator is not blocked anymore.
+func TestSuperviseControlHeldSurvivesRestart(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := ctlSup(t, 10*time.Second, &friction)
+	// The state after a crash: the orchestrator is recorded and
+	// dispatched, and the amend is still pending, not retired.
+	if _, err := store.Record("job-1", func(st *State) {
+		st.Orchestrator = "orch-1"
+		st.DispatchedAt = "2026-10-09T09:00:00-03:00"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	amend, err := store.RequestAmend("job-1", []byte("tighten the scope"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
+	// Process 1: the hold read and the check read both see the blocked
+	// orchestrator; the control_held lands and the process dies while
+	// the job is still blocked and the amend still pending.
+	team.statusScript = []fakeStatus{{State: "blocked"}, {State: "blocked"}}
+	clock.stopAfter = 1
+	clock.stop = errors.New("stop the watch loop")
+	runUntilStop(t, sup, clock.stop)
+
+	if st := supState(t, store); st.Status != StatusBlocked {
+		t.Fatalf("state after process 1 = %+v, want still blocked", st)
+	}
+	if len(team.dispatches) != 0 {
+		t.Fatalf("process 1 dispatches = %+v, want none (the amend is held)", team.dispatches)
+	}
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countTipe(events, "control_held"); n != 1 {
+		t.Fatalf("control_held after process 1 = %d, want 1", n)
+	}
+	if len(friction) != 1 || !strings.Contains(friction[0], "amend-000001") {
+		t.Fatalf("friction after process 1 = %v, want the single held line", friction)
+	}
+
+	// Process 2: a new supervisor over the same blocked job (a new
+	// monotonic origin). Its first tick stays blocked; the log already
+	// carries the mark, so no second event and no second friction line.
+	clock2 := &fakeClock{now: clock.now}
+	team2 := &fakeTeam{spawnName: "orch-1"}
+	team2.statusScript = []fakeStatus{
+		{State: "blocked"}, {State: "blocked"},
+		{State: "working"}, {State: "done", Report: report},
+	}
+	sup2 := &Supervisor{
+		Store:    store,
+		ID:       "job-1",
+		Ops:      team2,
+		Clock:    clock2,
+		Friction: func(message string) { friction = append(friction, message) },
+	}
+	sup2.Poll = 10 * time.Second
+
+	exit, err := sup2.Run()
+	if err != nil {
+		t.Fatalf("process 2 Run: %v", err)
+	}
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	// The delivery happens once, on the first tick the orchestrator
+	// works again; the delivered amend unblocks the job.
+	if len(team2.dispatches) != 1 || team2.dispatches[0] != (fakeDispatch{Name: "orch-1", Path: amend.Path, Amend: true}) {
+		t.Fatalf("process 2 dispatches = %+v", team2.dispatches)
+	}
+	events, err = readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"accepted", "control_held", "blocked", "amend_received", "unblocked", "worker_done", "terminal", "cleanup"}
+	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("event types = %v, want %v (one control_held, across the restart)", got, want)
+	}
+	held := events[1]
+	if held.Refs["seq_ref"] != "1" || held.Resumo != "held: the job orchestrator is blocked" {
+		t.Fatalf("control_held = %+v", held)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"amend-000001.md"}) {
+		t.Fatalf("retired control = %v", got)
+	}
+	if len(friction) != 1 {
+		t.Fatalf("friction = %v, want the single held line (no second after the restart)", friction)
+	}
+	if st := supState(t, store); st.Status != StatusDone {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+// The hold applies to the send too, and the delivered send never
+// unblocks the job: the job goes straight from blocked to the terminal
+// outcome, with no unblocked event.
+func TestSuperviseControlSendHeldWhileBlocked(t *testing.T) {
+	var friction []string
+	store, jobDir, clock, team, sup := ctlSup(t, 10*time.Second, &friction)
+	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
+	var sendPath string
+	clock.onSleep = func() {
+		if clock.sleeps == 1 {
+			item, err := store.RequestSend("job-1", []byte("a note from the dispatcher"))
+			if err != nil {
+				panic(err)
+			}
+			sendPath = item.Path
+		}
+	}
+	// The status reads, in order: tick 1 (check: working, the send is
+	// not pending yet); tick 2 (hold: blocked, check: blocked); tick 3
+	// (hold: blocked, check: blocked); tick 4 (hold: working, check:
+	// done).
+	team.statusScript = []fakeStatus{
+		{State: "working"},
+		{State: "blocked"}, {State: "blocked"},
+		{State: "blocked"}, {State: "blocked"},
+		{State: "working"}, {State: "done", Report: report},
+	}
+
+	exit, err := sup.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	// Exactly one send, with the request's path, on the first tick the
+	// orchestrator works again.
+	if len(team.sends) != 1 || team.sends[0] != (fakeSend{Name: "orch-1", Path: sendPath}) {
+		t.Fatalf("sends = %+v", team.sends)
+	}
+	// The delivered send never unblocks the job: no unblocked event; the
+	// job goes from blocked straight to done.
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"accepted", "worker_spawned", "control_held", "blocked", "amend_received", "worker_done", "terminal", "cleanup"}
+	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("event types = %v, want %v (no unblocked by the send)", got, want)
+	}
+	if n := countTipe(events, "control_held"); n != 1 {
+		t.Fatalf("control_held = %d, want 1", n)
+	}
+	held := events[2]
+	if held.Refs["seq_ref"] != "1" || held.Resumo != "held: the job orchestrator is blocked" {
+		t.Fatalf("control_held = %+v", held)
+	}
+	if got := dirNames(t, filepath.Join(jobDir, "control", "done")); !reflect.DeepEqual(got, []string{"send-000001.md"}) {
+		t.Fatalf("retired control = %v", got)
+	}
+	heldFriction := 0
+	for _, line := range friction {
+		if strings.Contains(line, "send-000001") {
+			heldFriction++
+		}
+	}
+	if heldFriction > 1 {
+		t.Fatalf("friction = %v, want at most one line about the request", friction)
+	}
+	if st := supState(t, store); st.Status != StatusDone {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+// A failed status read never holds the request: the delivery is
+// attempted exactly as before.
+func TestSuperviseControlStatusErrorDeliversAsBefore(t *testing.T) {
+	var friction []string
+	store, jobDir, _, team, sup := ctlSup(t, 10*time.Second, &friction)
+	amend, err := store.RequestAmend("job-1", []byte("tighten the scope"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
+	// The hold's status read fails; the check reads the orchestrator
+	// working, and the done read ends the job.
+	team.statusScript = []fakeStatus{
+		{Err: errors.New("status read failed")},
+		{State: "working"},
+		{State: "done", Report: report},
+	}
+
+	exit, err := sup.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	// The failed read did not keep the request: it is delivered once, on
+	// the first tick.
+	if len(team.dispatches) != 2 || team.dispatches[1] != (fakeDispatch{Name: "orch-1", Path: amend.Path, Amend: true}) {
+		t.Fatalf("dispatches = %+v", team.dispatches)
+	}
+	events, err := readEvents(jobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"accepted", "worker_spawned", "amend_received", "worker_done", "terminal", "cleanup"}
+	if got := eventTipes(events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("event types = %v, want %v (no hold on a failed read)", got, want)
+	}
+	if len(friction) != 0 {
+		t.Fatalf("friction = %v, want none (the delivery succeeded)", friction)
+	}
+}
+
 func TestSuperviseControlDispatchFailureRetries(t *testing.T) {
 	store, jobDir, clock, team := supFixture(t)
 	var friction []string
 	sup := supSupervisor(store, clock, team, &friction)
 	sup.Poll = 10 * time.Second
 	// The first dispatch (the brief) succeeds; the first control delivery
-	// fails once, the retry succeeds.
+	// fails once, the retry succeeds. The hold reads (one per tick with the
+	// pending amend: the fail tick and the retry tick) see the working
+	// orchestrator and change nothing.
 	flaky := &flakyDispatch{fakeTeam: team, failCall: 2}
 	sup.Ops = flaky
 
@@ -387,7 +785,7 @@ func TestSuperviseControlDispatchFailureRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
-	team.statusScript = []fakeStatus{{State: "working"}, {State: "working"}, {State: "done", Report: report}}
+	team.statusScript = []fakeStatus{{State: "working"}, {State: "working"}, {State: "working"}, {State: "working"}, {State: "done", Report: report}}
 
 	exit, err := sup.Run()
 	if err != nil {
@@ -442,7 +840,8 @@ func TestSuperviseControlRestartRedeliversPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
-	team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}
+	// The hold read of the delivery tick sees the working orchestrator.
+	team.statusScript = []fakeStatus{{State: "working"}, {State: "working"}, {State: "done", Report: report}}
 
 	exit, err := sup.Run()
 	if err != nil {
@@ -502,7 +901,8 @@ func TestSuperviseControlRetireOnlyAfterEvent(t *testing.T) {
 	}
 	t.Cleanup(func() { appendEventFn = original })
 	report := writeOrchestratorReport(t, "# Report — job\n\n- Item 1 [done] did the thing\n")
-	team.statusScript = []fakeStatus{{State: "working"}, {State: "done", Report: report}}
+	// The hold reads of the two runs see the working orchestrator.
+	team.statusScript = []fakeStatus{{State: "working"}, {State: "working"}, {State: "working"}, {State: "done", Report: report}}
 
 	// First run: the delivery succeeds, the event fails, and the request
 	// must stay pending (no retire before the event).

@@ -32,7 +32,15 @@ import (
 // delivery_uncertain event (refs.seq_ref the request's counter) and is
 // never re-sent, across restarts; the request stays pending in control/.
 // A common failure without a cut keeps the retry: friction and a new
-// attempt on the next tick.
+// attempt on the next tick. The hold (DJA-262) is the blocked-orchestrator
+// case: before any delivery attempt the supervisor reads the orchestrator's
+// current state (the same read checkOrchestrator uses) and, while it is
+// blocked or in a question, keeps the request in control/ instead of
+// re-sending it into the Herdr's refusal, landing at most one control_held
+// event per request (the log deduplicates by tipo and seq_ref, across
+// restarts) with one friction line; the request is delivered on the first
+// tick the orchestrator is neither blocked nor in a question anymore (the
+// human answered in the pane).
 
 // stopAmendBody is the exact body of the stop amendment the stop path
 // writes and dispatches (contract "Cancel and timeout").
@@ -91,20 +99,37 @@ func (s *Supervisor) deliverControl() (int, bool, error) {
 }
 
 // deliverControlBody delivers one amend or send request to the job
-// orchestrator: on success the amend_received event lands (refs.seq_ref the
-// request's counter), an amend unblocks a blocked job, and the request
-// retires. A delivery failure keeps the request for the next tick and
-// writes one friction line naming the request — unless the failure is the
-// cut of the cancel, which records the delivery_uncertain mark instead (no
-// friction, no retry). Outside the stop the delivery runs under the
-// context the observer cancels when a pending cancel appears in flight;
-// during the stop it is bounded to the remaining grace, and with no time
-// left it is not attempted at all: the request stays in control/ and the
-// stop ends the job.
+// orchestrator. First the hold: the orchestrator's current state is read
+// (the same read checkOrchestrator uses), and a blocked or question read
+// skips every delivery attempt — the Herdr refuses a prompt to an agent
+// that is blocked or in a question before any input — so the request stays
+// in control/ and lands, at most once per request, the control_held event
+// (refs.seq_ref the request's counter) with one friction line; the log
+// deduplicates by tipo and seq_ref, so the mark survives a restart and the
+// request is delivered on the first tick the orchestrator is neither
+// blocked nor in a question anymore. A read of any other state, or a failed
+// read, delivers exactly as before: on success the amend_received event
+// lands (refs.seq_ref the request's counter), an amend unblocks a blocked
+// job, and the request retires. A delivery failure keeps the request for
+// the next tick and writes one friction line naming the request — unless
+// the failure is the cut of the cancel, which records the
+// delivery_uncertain mark instead (no friction, no retry). Outside the stop
+// the delivery runs under the context the observer cancels when a pending
+// cancel appears in flight; during the stop it is bounded to the remaining
+// grace, and with no time left it is not attempted at all: the request stays
+// in control/ and the stop ends the job.
 func (s *Supervisor) deliverControlBody(item ControlItem, amend bool) error {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
 		return err
+	}
+	// The hold: before any delivery attempt, read the orchestrator's
+	// current state — the same read checkOrchestrator uses. A blocked or
+	// question read keeps the request pending (no Dispatch, no Send): the
+	// Herdr would refuse the prompt before any input. A read of any other
+	// state, or a failed read, delivers exactly as before.
+	if state, _, err := s.Ops.Status(snap.State.Orchestrator); err == nil && (state == "blocked" || state == "question") {
+		return s.holdControlHeld(item)
 	}
 	ops := s.Ops
 	var deliveryCtx context.Context
@@ -176,6 +201,41 @@ func (s *Supervisor) deliverControlBody(item ControlItem, amend bool) error {
 		}
 	}
 	return s.Store.RetireControl(s.ID, item)
+}
+
+// holdControlHeld records the control_held event of a held request, at
+// most one per request: the log deduplicates by tipo and seq_ref, the
+// delivery_uncertain pattern, so the mark survives a supervisor restart and
+// the friction line lands once too. It records no amend_received, unblocks
+// nothing and retires nothing: the request stays pending in control/ until
+// the orchestrator is neither blocked nor in a question anymore, and the
+// delivery then runs the ordinary path (a delivered amend still unblocks a
+// blocked job).
+func (s *Supervisor) holdControlHeld(item ControlItem) error {
+	dir, err := s.Store.readDir(s.ID)
+	if err != nil {
+		return err
+	}
+	events, err := readEvents(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range events {
+		if e.Tipo == "control_held" && e.Refs["seq_ref"] == strconv.Itoa(item.Seq) {
+			return nil
+		}
+	}
+	if _, err := s.Store.Append(s.ID, EventIn{
+		Tipo:   "control_held",
+		Resumo: "held: the job orchestrator is blocked",
+		Refs:   map[string]string{"seq_ref": strconv.Itoa(item.Seq)},
+	}); err != nil {
+		return err
+	}
+	if s.Friction != nil {
+		s.Friction("job: the job orchestrator is blocked: holding the control request " + item.Name)
+	}
+	return nil
 }
 
 // boundedOps is s.Ops with its command bound lowered to at most d when the

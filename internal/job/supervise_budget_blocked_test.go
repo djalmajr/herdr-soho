@@ -515,9 +515,11 @@ func TestSuperviseBlockedCeilingRestartOncePerProcess(t *testing.T) {
 			amendPath = item.Path
 		}
 	}
-	// question at t0 (the block), t10..t50 (the no-ops), t60 (the stop's
-	// own read) and t70 (the stop's read after the unblock).
-	team.statusScript = fillScript(nil, 8, "question")
+	// question at t0 (the block), t10..t50 (the no-ops) and t60 (the stop's
+	// own read); at t70 the orchestrator has left the question (the hold
+	// read before the delivery sees working, so the amend is delivered),
+	// and the last entry stays for the stop's read after the unblock.
+	team.statusScript = append(fillScript(nil, 7, "question"), fakeStatus{State: "working"})
 	clock.stopAfter = 8
 	clock.stop = errors.New("the first supervisor dies inside the ceiling grace")
 	runUntilStop(t, sup, clock.stop)
@@ -1987,8 +1989,9 @@ func TestSuperviseAmendUnblockCrashLeavesPreCrossingState(t *testing.T) {
 	}
 	// question at t0 (the block crossing, the 0 s active interval settles
 	// at the job-start anchor), then the dispatcher's amend (requested
-	// between t0 and t10) unblocks the job at t10 — the crash.
-	team.statusScript = fillScript(nil, 2, "question")
+	// between t0 and t10) is delivered at t10, once the hold read sees the
+	// orchestrator out of the question, and unblocks the job — the crash.
+	team.statusScript = []fakeStatus{{State: "question"}, {State: "working"}}
 	clock.onSleep = func() {
 		if clock.sleeps == 1 {
 			if _, err := store.RequestAmend("job-1", []byte("the answer")); err != nil {
