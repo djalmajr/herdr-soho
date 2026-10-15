@@ -2,6 +2,7 @@ package plugin
 
 import (
 	contextpkg "context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -297,7 +298,9 @@ func TestBoardTeamViewFooterDisclosesIShortcut(t *testing.T) {
 // local agent pane whose cwd is the fixture directory (the view's target
 // must be valid for the loop to start the load).
 func boardTeamLoopSnapshot(cwd string) string {
-	return `{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1","label":"alpha"}],"tabs":[{"tab_id":"w1:t1"}],"agents":[{"pane_id":"w1:p1","name":"orchestrator","agent":"codex","agent_status":"working","title":"orchestrator: run"}],"panes":[{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1","cwd":"` + cwd + `"}]}}}`
+	// The cwd is JSON-encoded: a Windows path carries backslashes.
+	quoted, _ := json.Marshal(cwd)
+	return `{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1","label":"alpha"}],"tabs":[{"tab_id":"w1:t1"}],"agents":[{"pane_id":"w1:p1","name":"orchestrator","agent":"codex","agent_status":"working","title":"orchestrator: run"}],"panes":[{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1","cwd":` + string(quoted) + `}]}}}`
 }
 
 // TestBoardTeamViewLoopOpensLoadsAndReturns drives the one production

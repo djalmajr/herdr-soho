@@ -111,7 +111,8 @@ func pickerTeamLoadAndApply(t *testing.T, s *PickerState, env platform.Env, cli 
 // a missing log means the fake was never called.
 func pickerTeamCalls(t *testing.T, bin string) []fakecli.Call {
 	t.Helper()
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(bin), filepath.Base(bin)+".json"))
+	// fakecli names the config after the binary without its .exe suffix.
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(bin), strings.TrimSuffix(filepath.Base(bin), ".exe")+".json"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
