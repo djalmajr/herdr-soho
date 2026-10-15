@@ -193,7 +193,8 @@ func TestSuperviseCancelRestartKeepsPersistedDeadline(t *testing.T) {
 
 	// Process two starts with the wall clock one second past the persisted
 	// deadline (T0+61 s): the first check must end the stop without
-	// crossing a tick boundary, no fresh grace measured.
+	// crossing a tick boundary, no fresh grace measured, and no stop
+	// amendment dispatched (no time left: no attempt).
 	clock2 := &nsClock{now: t0.Add(61 * time.Second)}
 	team.statusScript = []fakeStatus{{State: "working"}}
 	sup2 := &Supervisor{Store: store, ID: "job-1", Ops: team, Clock: clock2, Poll: 10 * time.Second, Friction: sup.Friction}
@@ -212,8 +213,10 @@ func TestSuperviseCancelRestartKeepsPersistedDeadline(t *testing.T) {
 	if clock2.sleeps != 0 {
 		t.Fatalf("restart sleeps = %d, want 0 (the persisted deadline beat the restart, no fresh grace)", clock2.sleeps)
 	}
-	// One stop amendment per supervisor process (two in total), nothing
-	// else.
+	// The stop amendment dispatched exactly once: process one started the
+	// stop inside the grace. Process two starts after the persisted
+	// deadline, so there is no time left and no stop amendment dispatch —
+	// the first check ends the stop.
 	stopPath := filepath.Join(jobDir, "stop-amend.md")
 	stops := 0
 	for _, d := range team.dispatches {
@@ -221,8 +224,8 @@ func TestSuperviseCancelRestartKeepsPersistedDeadline(t *testing.T) {
 			stops++
 		}
 	}
-	if len(team.dispatches) != 3 || stops != 2 {
-		t.Fatalf("dispatches = %+v, want the brief and one stop amendment per process (2 in total)", team.dispatches)
+	if len(team.dispatches) != 2 || stops != 1 {
+		t.Fatalf("dispatches = %+v, want the brief and the single stop amendment of process one", team.dispatches)
 	}
 	assertStopAmend(t, jobDir)
 	// The cancel retired exactly once, after the terminal outcome.

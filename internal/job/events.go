@@ -38,7 +38,7 @@ var eventTypes = map[string]bool{
 	"review_verdict": true, "question": true, "blocked": true, "unblocked": true,
 	"amend_received": true, "decision": true, "decision_acked": true,
 	"timeout_warning": true, "blocked_warning": true, "failure": true, "note": true, "terminal": true,
-	"cleanup": true,
+	"cleanup": true, "delivery_uncertain": true,
 }
 
 var refKeys = map[string]bool{

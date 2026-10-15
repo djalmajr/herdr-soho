@@ -649,9 +649,10 @@ func TestCancelGraceZeroEndsOnFirstCheck(t *testing.T) {
 	if clock.sleeps != 0 {
 		t.Fatalf("sleeps = %d, want 0 (the first checkBudget check ends the stop)", clock.sleeps)
 	}
-	// One stop amendment with the stop amendment, nothing else.
-	if len(team.dispatches) != 2 || team.dispatches[1] != (fakeDispatch{Name: "orch-1", Path: filepath.Join(jobDir, "stop-amend.md"), Amend: true}) {
-		t.Fatalf("dispatches = %+v", team.dispatches)
+	// A zero grace leaves no time for the stop amendment: it is written
+	// but never dispatched, so the brief is the only dispatch.
+	if len(team.dispatches) != 1 || team.dispatches[0].Amend {
+		t.Fatalf("dispatches = %+v, want only the brief (no time, no stop amendment)", team.dispatches)
 	}
 	assertStopAmend(t, jobDir)
 	if terminal := eventsLast(t, jobDir); terminal.Refs["exit"] != "21" || terminal.Refs["motivo"] != "cancelado" {

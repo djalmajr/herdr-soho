@@ -1,6 +1,8 @@
 package job
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -22,7 +24,15 @@ import (
 // checkpoint only asks for another (no-op) push. A cancel is the stop path's
 // delivery: it stays pending through the grace and retires only after the
 // stop's terminal outcome is recorded, so a supervisor that restarts inside
-// the grace finds it and starts the stop once more.
+// the grace finds it and starts the stop once more. A delivery cut by the
+// cancel is uncertain, not a retry: outside the stop the delivery runs
+// under a context a background observer cancels the moment the pending
+// cancel appears, and during the stop it is bounded to the remaining grace
+// — a delivery that fails because of the cut records one
+// delivery_uncertain event (refs.seq_ref the request's counter) and is
+// never re-sent, across restarts; the request stays pending in control/.
+// A common failure without a cut keeps the retry: friction and a new
+// attempt on the next tick.
 
 // stopAmendBody is the exact body of the stop amendment the stop path
 // writes and dispatches (contract "Cancel and timeout").
@@ -67,6 +77,11 @@ func (s *Supervisor) deliverControl() (int, bool, error) {
 				return 0, false, err
 			}
 		case "amend", "send":
+			// A request whose delivery was already recorded uncertain is
+			// never re-sent: the mark lives in the log, across restarts.
+			if s.deliveryUncertain(item.Seq) {
+				continue
+			}
 			if err := s.deliverControlBody(item, item.Kind == "amend"); err != nil {
 				return 0, false, err
 			}
@@ -79,19 +94,58 @@ func (s *Supervisor) deliverControl() (int, bool, error) {
 // orchestrator: on success the amend_received event lands (refs.seq_ref the
 // request's counter), an amend unblocks a blocked job, and the request
 // retires. A delivery failure keeps the request for the next tick and
-// writes one friction line naming the request.
+// writes one friction line naming the request — unless the failure is the
+// cut of the cancel, which records the delivery_uncertain mark instead (no
+// friction, no retry). Outside the stop the delivery runs under the
+// context the observer cancels when a pending cancel appears in flight;
+// during the stop it is bounded to the remaining grace, and with no time
+// left it is not attempted at all: the request stays in control/ and the
+// stop ends the job.
 func (s *Supervisor) deliverControlBody(item ControlItem, amend bool) error {
 	snap, err := s.Store.Snapshot(s.ID)
 	if err != nil {
 		return err
 	}
+	ops := s.Ops
+	var deliveryCtx context.Context
+	stopWatching := func() {}
+	if s.stopping != "" {
+		// During the stop the delivery is limited to the remaining grace
+		// (the bounded adapter); with no time left there is no attempt —
+		// the request stays in control/ and the stop ends the job.
+		remaining := time.Duration(s.stopDeadline - s.Clock.Monotonic())
+		if remaining <= 0 {
+			return nil
+		}
+		ops = s.boundedOps(remaining)
+	} else {
+		// Outside the stop the delivery runs under the context the
+		// observer cancels when a pending cancel arrives in flight: the
+		// in-flight subprocess the adapter opened is the one that ends.
+		deliveryCtx, stopWatching = s.watchForCancel()
+		ops = s.interruptibleOps(deliveryCtx)
+	}
 	var deliverErr error
 	if amend {
-		deliverErr = s.Ops.Dispatch(snap.State.Orchestrator, item.Path, true)
+		deliverErr = ops.Dispatch(snap.State.Orchestrator, item.Path, true)
 	} else {
-		deliverErr = s.Ops.Send(snap.State.Orchestrator, item.Path)
+		deliverErr = ops.Send(snap.State.Orchestrator, item.Path)
 	}
+	// Read the cut before stopping the watch: stopWatching cancels the
+	// context, which would look like a cancel of the delivery.
+	cut := deliveryCtx != nil && deliveryCtx.Err() != nil
+	stopWatching()
 	if deliverErr != nil {
+		// The cut is the cancel ending the in-flight delivery: the context
+		// was cancelled (outside the stop) or the grace deadline already
+		// passed (during it). A common failure without a cut keeps the
+		// retry: friction and a new attempt on the next tick.
+		if !cut && s.stopping != "" && s.Clock.Monotonic() >= s.stopDeadline {
+			cut = true
+		}
+		if cut {
+			return s.markDeliveryUncertain(item)
+		}
 		if s.Friction != nil {
 			s.Friction("job: cannot deliver the control request " + item.Name)
 		}
@@ -124,6 +178,111 @@ func (s *Supervisor) deliverControlBody(item ControlItem, amend bool) error {
 	return s.Store.RetireControl(s.ID, item)
 }
 
+// boundedOps is s.Ops with its command bound lowered to at most d when the
+// adapter can bound it (the production adapter and the fakes); the other
+// adapters run as is. Callers only bound with a positive remainder.
+func (s *Supervisor) boundedOps(d time.Duration) teamOps {
+	if b, ok := s.Ops.(interface{ bounded(time.Duration) teamOps }); ok {
+		return b.bounded(d)
+	}
+	return s.Ops
+}
+
+// interruptibleOps is s.Ops with its commands running under the delivery
+// context when the adapter can take one (the production adapter and the
+// fakes); the other adapters run as is.
+func (s *Supervisor) interruptibleOps(ctx context.Context) teamOps {
+	if i, ok := s.Ops.(interface{ interruptible(context.Context) teamOps }); ok {
+		return i.interruptible(ctx)
+	}
+	return s.Ops
+}
+
+// watchForCancel returns a context a background observer cancels the moment
+// a pending cancel (control/cancel.json) appears: the observer stats the
+// file every poll (250 ms when the poll is zero) on the real clock, touches
+// nothing else, and stops when cancel is called — the delivery ended. A
+// cancel of the context ends only the subprocesses the delivery adapter
+// opened (the platform context), never another process tree.
+func (s *Supervisor) watchForCancel() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dir, err := s.Store.readDir(s.ID)
+	if err != nil {
+		// The job directory is unreadable: nothing can arrive, so the
+		// context stays live and the delivery runs to its own bound.
+		return ctx, cancel
+	}
+	poll := s.Poll
+	if poll <= 0 {
+		poll = 250 * time.Millisecond
+	}
+	path := filepath.Join(dir, "control", "cancel.json")
+	go func() {
+		ticker := time.NewTicker(poll)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := os.Stat(path); err == nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ctx, cancel
+}
+
+// deliveryUncertain reports whether the request's counter already carries a
+// delivery_uncertain event in the log: the mark that keeps the request from
+// being re-sent, across restarts. An unreadable log reports false and the
+// delivery is attempted: a redelivered note or amendment is applied
+// idempotently, while skipping the delivery would lose the request.
+func (s *Supervisor) deliveryUncertain(seq int) bool {
+	dir, err := s.Store.readDir(s.ID)
+	if err != nil {
+		return false
+	}
+	events, err := readEvents(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range events {
+		if e.Tipo == "delivery_uncertain" && e.Refs["seq_ref"] == strconv.Itoa(seq) {
+			return true
+		}
+	}
+	return false
+}
+
+// markDeliveryUncertain records the delivery_uncertain event of a cut
+// delivery, at most one per request: the log deduplicates by tipo and
+// seq_ref, the timeout_warning pattern. It records no amend_received,
+// unblocks nothing and retires nothing: the request stays pending.
+func (s *Supervisor) markDeliveryUncertain(item ControlItem) error {
+	dir, err := s.Store.readDir(s.ID)
+	if err != nil {
+		return err
+	}
+	events, err := readEvents(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range events {
+		if e.Tipo == "delivery_uncertain" && e.Refs["seq_ref"] == strconv.Itoa(item.Seq) {
+			return nil
+		}
+	}
+	_, err = s.Store.Append(s.ID, EventIn{
+		Tipo:   "delivery_uncertain",
+		Resumo: "delivery interrupted by the cancel",
+		Refs:   map[string]string{"seq_ref": strconv.Itoa(item.Seq)},
+	})
+	return err
+}
+
 // beginStop starts the stop path shared by cancel and timeout: it writes
 // the stop amendment (atomic, 0600, the exact contract body), dispatches it
 // to the job orchestrator as an amendment (a failure goes to friction and
@@ -139,7 +298,16 @@ func (s *Supervisor) deliverControlBody(item ControlItem, amend bool) error {
 // persisted deadline replaces: the request's full grace measured on this
 // process's own monotonic clock, with one friction line. The timeout and
 // the blocked ceiling have no persisted anchor and always measure their
-// grace on the process's own monotonic clock.
+// grace on the process's own monotonic clock. The deadline is computed
+// before the stop amendment dispatches: with time remaining that dispatch
+// runs limited to it (the bounded adapter), and a cut dispatch only goes
+// to friction; with no time remaining (a persisted deadline already spent,
+// for example a restart after the grace) the stop amendment is not
+// dispatched at all and writes no friction for it either — dispatching
+// under the adapter's own bound would hold the job up to that bound before
+// the first check ends the stop, and the first check is what ends it. The
+// stop amendment is not a queue request, so it records no
+// delivery_uncertain mark.
 func (s *Supervisor) beginStop(kind string, grace time.Duration) {
 	snap, snapErr := s.Store.Snapshot(s.ID)
 	if snapErr != nil {
@@ -151,23 +319,6 @@ func (s *Supervisor) beginStop(kind string, grace time.Duration) {
 	if snapErr == nil {
 		name = snap.State.Orchestrator
 	}
-	jobDir, err := s.Store.readDir(s.ID)
-	if err != nil {
-		if s.Friction != nil {
-			s.Friction("job: the supervisor cannot find the job directory to stop the job")
-		}
-	} else {
-		path := filepath.Join(jobDir, "stop-amend.md")
-		if err := writeAtomic0600(path, []byte(stopAmendBody)); err != nil && s.Friction != nil {
-			s.Friction("job: the supervisor cannot write the stop amendment")
-		}
-		// The stop continues even when the dispatch fails.
-		if err := s.Ops.Dispatch(name, path, true); err != nil && s.Friction != nil {
-			s.Friction("job: the supervisor cannot dispatch the stop amendment")
-		}
-		s.askCollaborations()
-	}
-	s.stopping = kind
 	monoNow := s.Clock.Monotonic()
 	deadline := monoNow + int64(grace.Nanoseconds())
 	if kind == "canceled" && snapErr == nil {
@@ -190,7 +341,30 @@ func (s *Supervisor) beginStop(kind string, grace time.Duration) {
 	if deadline < monoNow {
 		deadline = monoNow
 	}
+	s.stopping = kind
 	s.stopDeadline = deadline
+	jobDir, err := s.Store.readDir(s.ID)
+	if err != nil {
+		if s.Friction != nil {
+			s.Friction("job: the supervisor cannot find the job directory to stop the job")
+		}
+		return
+	}
+	path := filepath.Join(jobDir, "stop-amend.md")
+	if err := writeAtomic0600(path, []byte(stopAmendBody)); err != nil && s.Friction != nil {
+		s.Friction("job: the supervisor cannot write the stop amendment")
+	}
+	// The stop continues even when the dispatch fails. The dispatch is
+	// limited to the grace remaining from the deadline computed above, and
+	// with no time remaining it is not attempted at all: no friction for
+	// the skip, the first check ends the stop.
+	remaining := time.Duration(deadline - s.Clock.Monotonic())
+	if remaining > 0 {
+		if err := s.boundedOps(remaining).Dispatch(name, path, true); err != nil && s.Friction != nil {
+			s.Friction("job: the supervisor cannot dispatch the stop amendment")
+		}
+	}
+	s.askCollaborations()
 }
 
 // checkBudget applies the job's time budgets and decides the stop path's
