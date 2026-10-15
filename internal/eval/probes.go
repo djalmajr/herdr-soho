@@ -49,6 +49,12 @@ const (
 	// diagnosticTailLimit bounds how much runner output a failure message
 	// carries.
 	diagnosticTailLimit = 4096
+	// tempRemovalRetryWindow bounds the final removal of the owned probe
+	// temporary directory: on Windows a drained owned job can finish before
+	// the kernel releases the last inherited capture handle, so the first
+	// removal can meet a sharing violation; on Unix the first removal
+	// passes and the bounded loop ends at once.
+	tempRemovalRetryWindow = 2 * time.Second
 )
 
 // defaultModuleRE matches fixture directory names that are safe as the
@@ -197,7 +203,7 @@ func listProbeFiles(probeRoot string) ([]string, error) {
 // a tampered toolchain or build configuration is a scope violation that must
 // not reach the compiler. The worker copy is never modified and the
 // temporary directory is removed on every path.
-func runHiddenProbes(ctx context.Context, o Options, fixture Fixture, dest string, worker []WorkerEntry, probeFiles []string, owned map[string]bool) (ProbeSummary, error) {
+func runHiddenProbes(ctx context.Context, o Options, fixture Fixture, dest string, worker []WorkerEntry, probeFiles []string, owned map[string]bool) (summary ProbeSummary, err error) {
 	tempRoot := o.TempRoot
 	if tempRoot == "" {
 		tempRoot = os.TempDir()
@@ -206,8 +212,18 @@ func runHiddenProbes(ctx context.Context, o Options, fixture Fixture, dest strin
 	if err != nil {
 		return ProbeSummary{}, fmt.Errorf("could not create probe temporary directory: %v", err)
 	}
+	// Bounded final cleanup on every path: the removal repeats for the
+	// bounded window while the directory still exists (on Windows a drained
+	// owned job can finish before the kernel releases the last inherited
+	// capture handle, so the first removal can meet a sharing violation;
+	// on Unix the first removal passes and the loop ends at once). A
+	// directory that survives the window is an honest cleanup failure, the
+	// error joined into the returned error — the package's friction
+	// channel — never a silently claimed clean scratch.
 	defer func() {
-		_ = os.RemoveAll(temporary)
+		if cleanupErr := removeBoundedTempDir(temporary); cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
 	}()
 	tempReal, err := filepath.EvalSymlinks(temporary)
 	if err != nil {
@@ -292,6 +308,29 @@ func runHiddenProbes(ctx context.Context, o Options, fixture Fixture, dest strin
 		return ProbeSummary{}, err
 	}
 	return runGoTests(ctx, o, temporary, modulePath, expected)
+}
+
+// removeBoundedTempDir removes the owned probe temporary directory and
+// repeats the removal for the bounded window while the directory still
+// exists: on Windows the last inherited capture handle can be released
+// asynchronously after the drain proof, so the first removal can meet a
+// sharing violation; on Unix the first removal passes and the loop ends at
+// once. The final failure is returned with the removal error that kept the
+// directory present, never a nil over a still-present directory.
+func removeBoundedTempDir(path string) error {
+	deadline := time.Now().Add(tempRemovalRetryWindow)
+	for {
+		removeErr := os.RemoveAll(path)
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+			return nil
+		} else if statErr != nil {
+			return fmt.Errorf("probe temporary directory %s: %v", path, statErr)
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("probe temporary directory %s still present after the bounded %s removal retry: %v", path, tempRemovalRetryWindow, removeErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // copyFile copies src to dst, creating intermediate directories of dst only

@@ -51,6 +51,12 @@ const (
 	winJobDrainTimeout    = 10 * time.Second
 	winQueryPollInterval  = 20 * time.Millisecond
 	winSuspendedRootDrain = 5 * time.Second
+	// winCaptureRemovalRetryWindow bounds the path-based removal retry of
+	// the owned output captures after a drained run: the kernel can release
+	// the last inherited capture handle asynchronously after the
+	// ActiveProcesses==0 drain proof, so the bounded retry stays limited,
+	// with the final failure returned and never an unbounded wait.
+	winCaptureRemovalRetryWindow = 2 * time.Second
 )
 
 // The owned output capture file names: regular files inside the
@@ -105,6 +111,41 @@ type winJobObjectExtendedLimit struct {
 	PeakJobMemory      uintptr
 }
 
+// winCaptureShareMode is the sharing of the owned output captures: the
+// stdlib os.OpenFile sharing (FILE_SHARE_READ|FILE_SHARE_WRITE) widened
+// with FILE_SHARE_DELETE. The capture handles are inherited by the go root,
+// whose teardown is asynchronous after the ActiveProcesses==0 drain proof;
+// with FILE_SHARE_DELETE the path-based removal passes as a pending delete
+// even while that dying root still holds the inherited handle, so the
+// removal no longer loses the race to the kernel's handle release.
+const winCaptureShareMode = syscall.FILE_SHARE_READ | syscall.FILE_SHARE_WRITE | syscall.FILE_SHARE_DELETE
+
+// openOwnedCapture opens one owned output capture with the same access and
+// creation semantics the stdlib os.OpenFile(name, os.O_CREATE|os.O_WRONLY|
+// os.O_TRUNC, 0o644) call used to resolve to — GENERIC_WRITE access,
+// create-and-truncate, FILE_ATTRIBUTE_NORMAL, no template file — with only
+// the sharing widened to winCaptureShareMode. The stdlib itself uses
+// OPEN_ALWAYS plus a post-open truncate and avoids CREATE_ALWAYS only for
+// the read-only-perm edge case (go.dev/issue/38225), which does not apply
+// to a writable 0o644 capture: CREATE_ALWAYS here is the atomic
+// create-and-truncate for these flags. The handle is created the way the
+// stdlib open creates it (os.OpenFile passes O_CLOEXEC on Windows, a nil
+// security attributes); the caller marks it inheritable only across the
+// locked CreateProcess window.
+func openOwnedCapture(dir, name string) (*os.File, error) {
+	path := filepath.Join(dir, name)
+	path16, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	h, err := syscall.CreateFile(path16, syscall.GENERIC_WRITE, winCaptureShareMode,
+		nil, syscall.CREATE_ALWAYS, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(h), path), nil
+}
+
 // runOwnedGoProcess runs the go test command under a native job object that
 // kills the entire tree when the job handle closes: the go process is
 // created suspended, assigned to the KILL_ON_JOB_CLOSE job before its
@@ -141,7 +182,11 @@ func runOwnedGoProcess(ctx context.Context, goExecutable string, dir string, arg
 	// pipes, no pipe-copy goroutines, no read-Close join. File.Close is
 	// idempotent, so every owned end closes exactly once through its
 	// owning file: no raw CloseHandle on a borrowed numeric handle, no
-	// double close after the OS may have reused the number.
+	// double close after the OS may have reused the number. The captures
+	// are opened with winCaptureShareMode (FILE_SHARE_DELETE included), so
+	// the path-based removal passes as a pending delete even while the
+	// dying child still holds the inherited handle across the kernel's
+	// asynchronous teardown after the drain proof.
 	var outF, errF *os.File
 	var captureCleaned bool
 	// Central owning cleanup: after the first create, every exit path
@@ -162,12 +207,12 @@ func runOwnedGoProcess(ctx context.Context, goExecutable string, dir string, arg
 	defer func() {
 		_ = captureCleanup()
 	}()
-	outF, err = os.OpenFile(filepath.Join(dir, winStdoutFileName), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	outF, err = openOwnedCapture(dir, winStdoutFileName)
 	if err != nil {
 		syscall.ForkLock.Unlock()
 		return fmt.Errorf("create stdout capture file: %v", err)
 	}
-	errF, err = os.OpenFile(filepath.Join(dir, winStderrFileName), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	errF, err = openOwnedCapture(dir, winStderrFileName)
 	if err != nil {
 		syscall.ForkLock.Unlock()
 		return errors.Join(fmt.Errorf("create stderr capture file: %v", err), captureCleanup())
@@ -456,9 +501,13 @@ func removeOwnedOutput(files ...*os.File) error {
 // A drained Windows job can finish before the kernel releases the last
 // inherited file handle. Retry only the sharing/lock violation for these
 // already-owned output paths; every other error remains immediate and a
-// persistent lock remains an explicit cleanup failure.
+// persistent lock remains an explicit cleanup failure. With
+// winCaptureShareMode the removal normally passes as a pending delete
+// during that window; the bounded retry covers the kernel's asynchronous
+// release for any handle that does not carry delete sharing, and the final
+// failure is returned, not swallowed.
 func removeDrainedOwnedOutput(path string) error {
-	deadline := time.Now().Add(150 * time.Millisecond)
+	deadline := time.Now().Add(winCaptureRemovalRetryWindow)
 	for {
 		err := os.Remove(path)
 		if err == nil || os.IsNotExist(err) {

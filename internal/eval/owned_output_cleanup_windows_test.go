@@ -63,7 +63,10 @@ func TestOwnedOutputCleanupReportsAPersistentNativeSharingLock(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "remove owned output file .herdr-eval-stdout") {
 		t.Fatalf("missing cleanup failure: %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
+	// The persistent lock runs the removal to the bounded window
+	// (winCaptureRemovalRetryWindow) and returns the error, never an
+	// unbounded wait: the bound is the designed window plus margin.
+	if elapsed := time.Since(start); elapsed > winCaptureRemovalRetryWindow+2*time.Second {
 		t.Fatalf("sharing retry exceeded the bounded return: %v", elapsed)
 	}
 	if _, err := os.Stat(file.Name()); err != nil {
@@ -88,5 +91,39 @@ func TestOwnedOutputCleanupTreatsAlreadyMissingOwnedFilesAsClean(t *testing.T) {
 	}
 	if err := removeOwnedOutput(nil, file); err != nil {
 		t.Fatalf("already removed owned output: %v", err)
+	}
+}
+
+// The source fix for the post-cancel capture race: the owned output capture
+// must be opened with FILE_SHARE_DELETE so the path-based removal passes —
+// as a pending delete — while the handle is still held, exactly the window
+// in which a dying child's inherited handle used to block the removal after
+// the ActiveProcesses==0 drain proof. A capture opened with the old stdlib
+// sharing (FILE_SHARE_READ|FILE_SHARE_WRITE) fails the removal below with
+// the native sharing violation, so this test is the deterministic guard of
+// the sharing flag, not of the rare kernel-timing race.
+func TestOwnedCaptureOpensWithDeleteSharing(t *testing.T) {
+	scratch := t.TempDir()
+	file, err := openOwnedCapture(scratch, winStdoutFileName)
+	if err != nil {
+		t.Fatalf("open the owned capture: %v", err)
+	}
+	// The capture is a writable stream: write through it before the
+	// removal.
+	if _, err := file.Write([]byte("captured output")); err != nil {
+		t.Fatalf("write through the owned capture: %v", err)
+	}
+	// Path-based removal while the handle is still held: FILE_SHARE_DELETE
+	// makes this a pending delete that passes; without delete sharing it
+	// fails here with the native sharing violation.
+	if err := os.Remove(file.Name()); err != nil {
+		t.Fatalf("removal with the owned handle still held: %v (the capture sharing lacks FILE_SHARE_DELETE)", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close the owned capture: %v", err)
+	}
+	// After the last handle closes the pending-delete entry is gone.
+	if _, err := os.Stat(file.Name()); !os.IsNotExist(err) {
+		t.Fatalf("owned capture still present after the last handle closed: %v", err)
 	}
 }
