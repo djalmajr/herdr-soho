@@ -59,6 +59,24 @@ func TestDispatchBaseDefinitionOwnedAssignment(t *testing.T) {
 			}
 		}
 	})
+	t.Run("ownedPaths: the ASCII tail of a non-ASCII token is not an identifier", func(t *testing.T) {
+		for _, token := range []string{"ÁB", "BÁC", "ñ_base", "B٣C"} {
+			for _, body := range []string{
+				"## Owned files\n" + token + " = `/work/base`\n",
+				"## Owned files\n" + token + " =\n`/work/base`\n",
+			} {
+				if got, want := ownedPaths(body, nil), []string{"/work/base"}; !reflect.DeepEqual(got, want) {
+					t.Fatalf("token %q suppressed real ownership in %q: %v", token, body, got)
+				}
+			}
+		}
+	})
+	t.Run("ownedPaths: an ASCII identifier after non-ASCII prose and a space is still an assignment", func(t *testing.T) {
+		body := "## Owned files\nDefinição: B = `/work/base`\n- `internal/h.go`\n"
+		if got, want := ownedPaths(body, nil), []string{"internal/h.go"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("owned paths=%v, want %v", got, want)
+		}
+	})
 	t.Run("ownedPaths: a quoted filename with = as the assignment value is the value", func(t *testing.T) {
 		body := "## Owned files\nbase B = `a=b.go`\n- `internal/f.go`\n"
 		if got, want := ownedPaths(body, nil), []string{"internal/f.go"}; !reflect.DeepEqual(got, want) {

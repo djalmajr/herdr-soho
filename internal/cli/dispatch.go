@@ -1351,11 +1351,13 @@ var ownershipExclusions = map[string]bool{"nenhum": true, "nenhuma": true, "nao"
 
 // ownedSpanRE matches a backtick-quoted span with its contents; ownedAssignRE
 // matches a bare ASCII identifier right before "=" with optional whitespace
-// in between. Callers blank the backtick spans first, so an "=" inside a
-// backtick-quoted filename (for example `a=b.go`) is never seen as
-// assignment syntax.
+// in between. The character before the identifier must not be a letter,
+// digit or underscore in any script, so the ASCII tail of a longer token
+// ("ÁB", "BÁC") is never taken for an identifier. Callers blank the
+// backtick spans first, so an "=" inside a backtick-quoted filename (for
+// example `a=b.go`) is never seen as assignment syntax.
 var ownedSpanRE = regexp.MustCompile("`([^`]+)`")
-var ownedAssignRE = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)[ \t\r]*=`)
+var ownedAssignRE = regexp.MustCompile(`(?:^|[^\p{L}\p{N}_])([A-Za-z_][A-Za-z0-9_]*)[ \t\r]*=`)
 
 // ownedAssignmentValues reports, for each backtick span on the line, whether
 // it is the value of an explicit bare ASCII identifier assignment, and
