@@ -430,17 +430,18 @@ func TestNowriteRejectsPortedCommandsBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestNowriteRejectsConfigWithoutSubcommand(t *testing.T) {
-	// Mutation captured: allowing bare config through HERDR_SOHO_NOWRITE emits config instead of the read-only error.
+func TestNowriteRejectsConfigSetWithTheNewMessage(t *testing.T) {
+	// DJA-331: the exact config is now an accepted NOWRITE read; config set stays
+	// refused with the message that lists the accepted reads (config and roles included).
 	env, cwd := commandFixture(t)
 	env["HERDR_SOHO_NOWRITE"] = "1"
-	code, out, errOut := runIn(t, []string{"config"}, env, cwd)
-	wantErr := "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: config — unset HERDR_SOHO_NOWRITE to write\n"
+	code, out, errOut := runIn(t, []string{"config", "set", "panes", "3"}, env, cwd)
+	wantErr := "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: config (3 extra arguments not allowed) — unset HERDR_SOHO_NOWRITE to write\n"
 	if code != 2 || out != "" || errOut != wantErr {
-		t.Fatalf("bare config under NOWRITE code=%d out=%q err=%q", code, out, errOut)
+		t.Fatalf("config set under NOWRITE code=%d out=%q err=%q", code, out, errOut)
 	}
 	if _, err := os.Stat(filepath.Join(cwd, ".agents", "herdr-soho.conf")); !os.IsNotExist(err) {
-		t.Fatalf("bare config under NOWRITE wrote project config: %v", err)
+		t.Fatalf("NOWRITE created project config: %v", err)
 	}
 }
 

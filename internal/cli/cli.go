@@ -178,7 +178,7 @@ func Run(args []string, env platform.Env) (code int) {
 			}
 			extra = fmt.Sprintf(" (%d extra %s not allowed)", count, noun)
 		}
-		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
+		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
 	}
 	if command == "help" || command == "-h" || command == "--help" || command == "" {
 		_, _ = io.WriteString(platform.Stdout, usage)
@@ -374,9 +374,9 @@ func Run(args []string, env platform.Env) (code int) {
 
 // nowriteReadInvocation decides, from the shape of the invocation alone, what
 // runs under HERDR_SOHO_NOWRITE=1: the exact doctor/roster (the plugin's
-// actions, unchanged), the exact explain and copies, friction with only the
-// read options, collect <agent> with its options, status with agent names,
-// and gc without --yes.
+// actions, unchanged), the exact explain, config, roles and copies, friction
+// with only the read options, collect <agent> with its options, status with
+// agent names, and gc without --yes.
 // Every other shape is rejected before any command runs, so a rejected
 // invocation writes nothing (not even a friction line).
 func nowriteReadInvocation(args []string) bool {
@@ -395,7 +395,7 @@ func nowriteReadInvocation(args []string) bool {
 	case "roster":
 		_, ok := rosterScope(args[1:])
 		return ok
-	case "doctor", "explain", "copies", "procs":
+	case "doctor", "explain", "config", "roles", "copies", "procs":
 		return len(args) == 1
 	case "status":
 		for _, agent := range args[1:] {

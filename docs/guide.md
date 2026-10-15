@@ -85,6 +85,8 @@ To change a brief a worker already has, busy or finished, write the amendment to
 - the exact `doctor`, so `doctor --fix` cannot write;
 - `roster` with an optional `--scope workspace|server` (the default is workspace; `--scope server` is still a read);
 - the exact `explain`;
+- the exact `config`, but not `config set` or `config --project`;
+- the exact `roles`, but not `role <name>`;
 - `friction` with its reading options, but not `friction add`;
 - `collect <agent> [--lines N] [--verify]`;
 - the exact `copies`, but not `copies add`;
