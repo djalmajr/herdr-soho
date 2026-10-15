@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const (
@@ -76,6 +77,17 @@ type State struct {
 	// that predates it, which uses the built-in 10 minutes at read time and
 	// is never rewritten.
 	FinishingTimeoutMin int `json:"finishing_timeout_min,omitempty"`
+	// AutoCleanup is the job's job_auto_cleanup setting ("on"/"off"),
+	// resolved from the job checkout's configuration at start in the same
+	// write as BlockedTimeoutMin and immutable for the job's life; "" on a
+	// state that predates it, which AutoCleanupOn reads as "on".
+	AutoCleanup string `json:"auto_cleanup,omitempty"`
+	// HumanInputMin is the job's job_human_input_minutes setting in
+	// minutes (1..1440), resolved at start in the same write as
+	// BlockedTimeoutMin and immutable for the job's life; 0 on a state
+	// that predates it, which HumanInputWait reads as the built-in 5
+	// minutes.
+	HumanInputMin int `json:"human_input_min,omitempty"`
 	// Equipe is the team resolution the job ran with (the report's
 	// equipe field), recorded with the run facts: the source file and the
 	// brief override keys, an empty non-nil list when there are none.
@@ -116,6 +128,23 @@ type State struct {
 	// them serializes byte for byte as before.
 	CancelRequestedAt string `json:"cancel_requested_at,omitempty"`
 	CancelDeadline    string `json:"cancel_deadline,omitempty"`
+}
+
+// AutoCleanupOn reports whether the job's automatic close is on: the
+// recorded job_auto_cleanup setting, or "on" on a state that predates the
+// field.
+func (st State) AutoCleanupOn() bool {
+	return st.AutoCleanup == "" || st.AutoCleanup == "on"
+}
+
+// HumanInputWait is the human input wait the recorded
+// job_human_input_minutes setting gives, or the built-in 5 minutes on a
+// state that predates the field.
+func (st State) HumanInputWait() time.Duration {
+	if st.HumanInputMin > 0 {
+		return time.Duration(st.HumanInputMin) * time.Minute
+	}
+	return 5 * time.Minute
 }
 
 // TerminalIntent is the terminal outcome a supervisor process committed to
