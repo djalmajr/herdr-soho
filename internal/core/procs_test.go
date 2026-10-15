@@ -140,7 +140,7 @@ func installFakePs(t *testing.T, dir string, rules []fakecli.Rule) platform.Env 
 	if _, err := fakecli.Install(t, dir, "ps", rules); err != nil {
 		t.Fatal(err)
 	}
-	return platform.Env{"PATH": dir + ":" + psOnlyDir(t), "HERDR_SOHO_FAKECLI_CONFIG": dir}
+	return platform.Env{"PATH": dir + ":" + psOnlyDir(t), "SOHO_FAKECLI_CONFIG": dir}
 }
 
 // TestReview92RootStartChangedDuringCollection: the consumer's registered

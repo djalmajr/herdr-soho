@@ -24,6 +24,9 @@ func RoleDirs(env platform.Env, cwd string) []string {
 	if isDir(project) {
 		dirs = append(dirs, project)
 	}
+	if extra := env.Get("SOHO_ROLES"); extra != "" && isDir(extra) {
+		dirs = append(dirs, extra)
+	}
 	if extra := env.Get("HERDR_SOHO_ROLES"); extra != "" && isDir(extra) {
 		dirs = append(dirs, extra)
 	}

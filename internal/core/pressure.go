@@ -15,7 +15,7 @@ import (
 // (never stdout, never the friction log) when the state dir's disk or the
 // swap passed the configured limits. Every measurement failure is
 // silent, the command's stdout and exit code never change, and under
-// HERDR_SOHO_NOWRITE nothing is written and no warning goes out.
+// SOHO_NOWRITE nothing is written and no warning goes out.
 
 const (
 	pressureDiskKey = "pressure_disk_free_percent"

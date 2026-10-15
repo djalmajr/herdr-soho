@@ -145,15 +145,15 @@ var currentExecutable = os.Executable
 
 func UserConfigPath(platform string, env Env) string {
 	if xdg := env.Get("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "herdr-soho", "config")
+		return filepath.Join(xdg, "soho", "config")
 	}
 	if platform == "win32" {
 		if appdata := env.Get("APPDATA"); appdata != "" {
-			return filepath.Join(appdata, "herdr-soho", "config")
+			return filepath.Join(appdata, "soho", "config")
 		}
-		return filepath.Join(HomeDir(platform, env), "AppData", "Roaming", "herdr-soho", "config")
+		return filepath.Join(HomeDir(platform, env), "AppData", "Roaming", "soho", "config")
 	}
-	return filepath.Join(HomeDir(platform, env), ".config", "herdr-soho", "config")
+	return filepath.Join(HomeDir(platform, env), ".config", "soho", "config")
 }
 
 func ReadTextFile(file string) (string, error) {
@@ -370,7 +370,7 @@ func SkillDir(env Env) string {
 	return dir
 }
 
-// SkillDirSource returns the skill directory and its origin: "HERDR_SOHO_SKILL_DIR"
+// SkillDirSource returns the skill directory and its origin: "SOHO_SKILL_DIR"
 // for the configured value, "executable" for a skill tree beside the executable,
 // "home" for <home>/.agents/skills/herdr-soho or <home>/.claude/skills/herdr-soho
 // (tried in that order; <home> is HOME, USERPROFILE on Windows), "bundled" for
@@ -382,12 +382,12 @@ func SkillDirSource(env Env) (string, string) {
 	if dir != "" {
 		return dir, source
 	}
-	if env.Get("HERDR_SOHO_NOWRITE") != "1" && env.Get("HERDR_AGENTS_NOWRITE") != "1" {
+	if env.Get("SOHO_NOWRITE") != "1" && env.Get("HERDR_SOHO_NOWRITE") != "1" {
 		if dir, err := skill.Materialize(bundledSkillCacheBase(env)); err == nil {
 			return dir, "bundled"
 		}
 	}
-	Die("cannot find skill directory; set HERDR_SOHO_SKILL_DIR", 2)
+	Die("cannot find skill directory; set SOHO_SKILL_DIR", 2)
 	return "", ""
 }
 
@@ -396,6 +396,9 @@ func SkillDirSource(env Env) (string, string) {
 // without an installed skill. It is strictly read-only: the bundled lookup
 // finds a completed bundle but never creates or repairs the cache.
 func SkillDirSourceOrEmpty(env Env) (string, string) {
+	if configured := env.Get("SOHO_SKILL_DIR"); configured != "" {
+		return configured, "SOHO_SKILL_DIR"
+	}
 	if configured := env.Get("HERDR_SOHO_SKILL_DIR"); configured != "" {
 		return configured, "HERDR_SOHO_SKILL_DIR"
 	}
@@ -462,7 +465,7 @@ func bundledSkillCacheBase(env Env) string {
 }
 
 // LauncherPath is the native herdr-soho executable the worker runs from:
-// the absolute HERDR_SOHO_BIN override when one is configured, otherwise the
+// the absolute SOHO_BIN override when one is configured, otherwise the
 // currently running executable. It never returns the skill scripts launcher
 // (scripts/herdr-soho or scripts/herdr-soho.cmd) and never searches or
 // executes Node, Bun or Bash; the dispatch instruction's "launcher" phrase
@@ -474,12 +477,15 @@ func bundledSkillCacheBase(env Env) string {
 // falling back. Symlinks are resolved before validation, and candidates are
 // validated by stat and header bytes only: they are never executed.
 func LauncherPath(env Env) string {
+	if bin := strings.TrimSpace(env.Get("SOHO_BIN")); bin != "" {
+		return validatedNativeBinary(bin)
+	}
 	if bin := strings.TrimSpace(env.Get("HERDR_SOHO_BIN")); bin != "" {
 		return validatedNativeBinary(bin)
 	}
 	executable, err := currentExecutable()
 	if err != nil {
-		Die("cannot resolve the current executable; set HERDR_SOHO_BIN", 2)
+		Die("cannot resolve the current executable; set SOHO_BIN", 2)
 	}
 	return executable
 }
@@ -489,7 +495,7 @@ func LauncherPath(env Env) string {
 // fail-closed code 2 error; there is no fallback.
 func validatedNativeBinary(bin string) string {
 	if !filepath.IsAbs(bin) {
-		Die("HERDR_SOHO_BIN must be an absolute path: "+bin, 2)
+		Die("SOHO_BIN must be an absolute path: "+bin, 2)
 	}
 	resolved := bin
 	if target, err := filepath.EvalSymlinks(bin); err == nil {
@@ -497,14 +503,14 @@ func validatedNativeBinary(bin string) string {
 	}
 	info, err := os.Stat(resolved)
 	if err != nil || !info.Mode().IsRegular() {
-		Die("HERDR_SOHO_BIN is missing or not a regular file: "+bin, 2)
+		Die("SOHO_BIN is missing or not a regular file: "+bin, 2)
 	}
 	if Current() != "win32" && info.Mode()&0o111 == 0 {
-		Die("HERDR_SOHO_BIN is not executable: "+bin, 2)
+		Die("SOHO_BIN is not executable: "+bin, 2)
 	}
 	header, err := readNativeBinaryHeader(resolved)
 	if err != nil || !isNativeExecutableHeader(header) {
-		Die("HERDR_SOHO_BIN is not a native binary (script, shebang or unknown format): "+bin, 2)
+		Die("SOHO_BIN is not a native binary (script, shebang or unknown format): "+bin, 2)
 	}
 	return resolved
 }

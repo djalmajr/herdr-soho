@@ -124,7 +124,7 @@ func CmdSessionSet(argv []string, ctx *Config, env platform.Env, cwd string) {
 		platform.Die(fmt.Sprintf("session set: could not rewrite %s (file left untouched)", sessionFile), 4)
 	}
 	configWritePair(sessionFile, key, value, env, cwd, "session set")
-	fmt.Fprintf(platform.Stdout, "set %s=%s in %s (session: this Herdr workspace only; above project and user, below flags and HERDR_SOHO_*)\n", key, value, sessionFile)
+	fmt.Fprintf(platform.Stdout, "set %s=%s in %s (session: this Herdr workspace only; above project and user, below flags and SOHO_*)\n", key, value, sessionFile)
 }
 
 func CmdSessionClear(argv []string, ctx *Config, env platform.Env, cwd string) {

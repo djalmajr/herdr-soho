@@ -276,7 +276,7 @@ func TestDoctorWarnsWhenOfficialSkillDiffersFromHerdr(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HOME": home, "USERPROFILE": home, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": root, "PATH": bin, "HERDR_ENV": "1"}
+	env := platform.Env{"HOME": home, "USERPROFILE": home, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": root, "PATH": bin, "HERDR_ENV": "1"}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	var out strings.Builder
 	DoctorCheck(&ctx, env, root, &out)
@@ -335,7 +335,7 @@ func TestDoctorReadsHerdrVersionAndLargeSkillFromPath(t *testing.T) { // Mutatio
 	if _, err := fakecli.Install(t, bin, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HOME": home, "USERPROFILE": home, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": root, "PATH": bin, "HERDR_ENV": "1"}
+	env := platform.Env{"HOME": home, "USERPROFILE": home, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": root, "PATH": bin, "HERDR_ENV": "1"}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	var out strings.Builder
 	DoctorCheck(&ctx, env, root, &out)
@@ -360,8 +360,8 @@ func TestDoctorRecognizesNativeAndOldSessionStartHooks(t *testing.T) { // JS: "d
 		"the recognized previous herdr-soho shell hook warns for the setup replacement", setuptext.PreviousHookDoctor(),
 		"old herdr-soho shell hooks in .claude/settings.json: run '",
 	}, {
-		"the exact pre-rename herdr-agents hook warns for the setup replacement", setuptext.LegacyHookDoctor(),
-		"legacy herdr-agents hooks in .claude/settings.json: run '",
+		"the exact pre-rename legacy hook warns for the setup replacement", setuptext.LegacyHookDoctor(),
+		"an older version of the hooks in .claude/settings.json: run '",
 	}, {
 		"a foreign command that only mentions herdr-soho is not a herdr-soho hook", "sh -c herdr-soho doctor",
 		"warn   no herdr-soho hooks in .claude/settings.json",
@@ -398,7 +398,7 @@ func TestDoctorRecognizesNativeAndOldSessionStartHooks(t *testing.T) { // JS: "d
 func TestDoctorWarnsWhenNativeAndPreviousHooksCoexist(t *testing.T) {
 	for _, obsolete := range []struct{ name, command, warning string }{
 		{"previous", setuptext.PreviousHookDoctor(), "old herdr-soho shell hooks"},
-		{"legacy", setuptext.LegacyHookDoctor(), "legacy herdr-agents hooks"},
+		{"legacy", setuptext.LegacyHookDoctor(), "an older version of the hooks"},
 	} {
 		for _, nativeFirst := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/native-first=%v", obsolete.name, nativeFirst), func(t *testing.T) {
@@ -521,7 +521,7 @@ func TestDoctorCodexUIWarningsFollowNetworkToken(t *testing.T) {
 func TestDoctorWarnsAboutLegacyProjectConfig(t *testing.T) { // JS: "doctor: the legacy config warns about the missing panes and the cap"
 	root := t.TempDir()
 	env := platform.Env{"HOME": root, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
-	legacy := filepath.Join(root, ".agents", "herdr-agents.conf")
+	legacy := filepath.Join(root, ".agents", "herdr-soho.conf")
 	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -665,8 +665,8 @@ func TestDoctorSortsOrphanLaneWarnings(t *testing.T) { // Mutation captured: usi
 }
 
 func TestDoctorNamesSeparateClaudeMdWithLegacyBlock(t *testing.T) { // JS: "setup + doctor (launcher): a separate CLAUDE.md that keeps the legacy block is named"
-	legacy := "<!-- herdr-agents:start -->\nold\n<!-- herdr-agents:end -->\n"
-	current := "<!-- herdr-soho:start -->\nnew\n<!-- herdr-soho:end -->\n"
+	legacy := setuptext.LegacySetupStart + "\nold\n" + setuptext.LegacySetupEnd + "\n"
+	current := setuptext.SetupStart + "\nnew\n" + setuptext.SetupEnd + "\n"
 	for _, tc := range []struct {
 		name, agents, claude string
 		want                 bool

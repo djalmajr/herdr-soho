@@ -172,7 +172,7 @@ func TestTM10RosterGitProcessBound(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chdir(old) })
 		env["PATH"] = fakeDir
-		env["HERDR_SOHO_FAKECLI_CONFIG"] = fakeDir
+		env["SOHO_FAKECLI_CONFIG"] = fakeDir
 		env["HERDR_SOCKET_PATH"] = filepath.Join(t.TempDir(), "missing.sock")
 		env["HERDR_ENV"], env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = "1", filepath.Join(t.TempDir(), "state"), "ws"
 		oldOut, oldErr := platform.Stdout, platform.Stderr

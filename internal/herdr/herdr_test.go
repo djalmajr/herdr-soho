@@ -99,7 +99,7 @@ func TestAgentStateSequenceAndRetries(t *testing.T) {
 		if got.State != "working" {
 			t.Fatalf("got %#v", got)
 		}
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -236,7 +236,7 @@ func TestHerdrArgumentContracts(t *testing.T) {
 		t.Fatalf("caller name %q", got)
 	}
 	NotificationShow("title", "body", env)
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestPaneSendTextAndSendKeysContracts(t *testing.T) {
 	if PaneSendText("p1", "other", env) {
 		t.Fatal("PaneSendText ok=true for an argv the fake has no rule for")
 	}
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestAgentStateSignalMessagesAndStructuredErrorRetry(t *testing.T) {
 		if got.State != "gone" {
 			t.Fatalf("structured agent_not_found: %#v", got)
 		}
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err != nil || len(calls) != 1 {
 			t.Fatalf("calls=%d err=%v", len(calls), err)
 		}
@@ -371,7 +371,7 @@ func TestAgentStateDefaultRetryPauses(t *testing.T) {
 	if got := AgentState("x", env, fakeTimeout(time.Second), nil); got.State != "working" {
 		t.Fatalf("got %#v", got)
 	}
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil || len(calls) != 2 {
 		t.Fatalf("calls=%d err=%v", len(calls), err)
 	}
@@ -487,7 +487,7 @@ func TestRequireEnv(t *testing.T) {
 		payload := `{"result":{"snapshot":{"panes":[{"pane_id":"w:p1","agent":"codex"}]}}}`
 		env := newFake(t, "herdr", []fakecli.Rule{{Argv: []string{"api", "snapshot"}, Stdout: payload}, {Argv: []string{"pane", "process-info", "--pane", "w:p1"}, Stdout: `{"result":{"process_info":{"foreground_processes":[{"pid":3000}]}}}`}})
 		defer catchDie(t, 2, "this command runs under Codex in Herdr pane local/w:p1")
-		RequireEnv(platform.Env{"PATH": env["PATH"], "HERDR_ENV": "", "HERDR_SOHO_FAKECLI_CONFIG": env["HERDR_SOHO_FAKECLI_CONFIG"]}, "darwin", 5000, []codexenv.Process{{PID: 3000, Name: "codex"}})
+		RequireEnv(platform.Env{"PATH": env["PATH"], "HERDR_ENV": "", "SOHO_FAKECLI_CONFIG": env["SOHO_FAKECLI_CONFIG"]}, "darwin", 5000, []codexenv.Process{{PID: 3000, Name: "codex"}})
 	})
 }
 

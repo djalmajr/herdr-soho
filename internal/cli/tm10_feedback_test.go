@@ -144,7 +144,7 @@ func TestTM10FeedbackCases(t *testing.T) {
 		base["HOME"], base["USERPROFILE"], base["XDG_CONFIG_HOME"] = root, root, filepath.Join(root, "config")
 		base["HERDR_SOHO_DIR"], base["HERDR_SOHO_SKILL_DIR"], base["HERDR_WORKSPACE_ID"] = stateDir, testSkillDir(t), "ws"
 		base["HERDR_ENV"], base["PATH"] = "1", fakeDir
-		base["HERDR_SOHO_FAKECLI_CONFIG"] = filepath.Join(fakeDir, "herdr.json")
+		base["SOHO_FAKECLI_CONFIG"] = filepath.Join(fakeDir, "herdr.json")
 		base["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing.sock")
 		base["HERDR_SOHO_FEEDBACK"], base["HERDR_SOHO_FEEDBACK_DIR"], base["HERDR_SOHO_FEEDBACK_TO"] = "local", feedbackDir, "w9:p2"
 		var out, stderr bytes.Buffer
@@ -184,7 +184,7 @@ func TestTM10FeedbackCases(t *testing.T) {
 		if _, err := fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
 			t.Fatal(err)
 		}
-		configEnv := platform.Env{"HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "XDG_CONFIG_HOME": filepath.Join(t.TempDir(), "config"), "HERDR_SOHO_SKILL_DIR": testSkillDir(t), "HERDR_SOHO_DIR": filepath.Join(t.TempDir(), "state"), "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1", "PATH": fakeDir, "HERDR_SOHO_FAKECLI_CONFIG": filepath.Join(fakeDir, "herdr.json"), "HERDR_SOCKET_PATH": filepath.Join(t.TempDir(), "missing.sock")}
+		configEnv := platform.Env{"HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "XDG_CONFIG_HOME": filepath.Join(t.TempDir(), "config"), "HERDR_SOHO_SKILL_DIR": testSkillDir(t), "HERDR_SOHO_DIR": filepath.Join(t.TempDir(), "state"), "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1", "PATH": fakeDir, "SOHO_FAKECLI_CONFIG": filepath.Join(fakeDir, "herdr.json"), "HERDR_SOCKET_PATH": filepath.Join(t.TempDir(), "missing.sock")}
 		for _, args := range [][]string{{"config", "set", "feedback_dir", env.Get("HERDR_SOHO_FEEDBACK_DIR")}, {"config", "set", "feedback_to", "w9:p2"}} {
 			oldOut, oldErr := platform.Stdout, platform.Stderr
 			var out, stderr bytes.Buffer

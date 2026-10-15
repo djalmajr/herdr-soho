@@ -38,7 +38,7 @@ func TestCleanHeldRosterLockRecordsFriction(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"HERDR_ENV": "1", "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_FAKECLI_CONFIG": bin,
+		"HERDR_ENV": "1", "HERDR_SOHO_DIR": filepath.Join(root, "state"), "SOHO_FAKECLI_CONFIG": bin,
 		"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": root, "PATH": bin, "TMPDIR": root,
 	}
 	oldOut, oldErr := platform.Stdout, platform.Stderr

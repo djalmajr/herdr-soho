@@ -62,7 +62,7 @@ func newJobFix(t *testing.T) *jobFix {
 func (f *jobFix) checkout(t *testing.T, org, repo string) string {
 	t.Helper()
 	dir := filepath.Join(f.repos, org, repo)
-	if err := os.MkdirAll(filepath.Join(dir, ".herdr-soho", "jobs"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".soho", "jobs"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -70,7 +70,7 @@ func (f *jobFix) checkout(t *testing.T, org, repo string) string {
 
 func (f *jobFix) store(t *testing.T, checkout string) *job.Store {
 	t.Helper()
-	return job.Open(filepath.Join(checkout, ".herdr-soho"))
+	return job.Open(filepath.Join(checkout, ".soho"))
 }
 
 const jobTestBrief = `{"schema":1,"id":"job-1","origem":{"tipo":"card","ref":"CARD-1"},"repo":"example-org/example-repo","objetivo":"Ship the change.","aceite":[{"criterio":"tests pass","prova":"go test ./internal/cli"}]}`
@@ -86,7 +86,7 @@ func (f *jobFix) startJob(t *testing.T, checkout string) {
 func (f *jobFix) setStatus(t *testing.T, checkout, id, status string) {
 	t.Helper()
 	body := fmt.Sprintf(`{"schema":1,"id":%q,"status":%q,"brief_sha256":"x","decisions_acked_seq":0,"motivo":null}`, id, status)
-	if err := os.WriteFile(filepath.Join(checkout, ".herdr-soho", "jobs", id, "state.json"), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(checkout, ".soho", "jobs", id, "state.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -232,7 +232,7 @@ func TestJobStatusPrintsTheSnapshotLine(t *testing.T) {
 	// disk) prints the empty partial values, and the read stays
 	// write-free: the state file's bytes and mtime stand through the
 	// status line.
-	statePath := filepath.Join(co, ".herdr-soho", "jobs", "job-1", "state.json")
+	statePath := filepath.Join(co, ".soho", "jobs", "job-1", "state.json")
 	before, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +270,7 @@ func TestJobStatusLineHeldControls(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 
 	// No held request: the field is present and empty, last in the line.
 	code, out, errOut := f.run(t, "status", "--id", "job-1")
@@ -314,7 +314,7 @@ func TestJobWaitExitByState(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 
 	// A blocked job needs a person: exit 7.
 	f.setStatus(t, co, "job-1", "blocked")
@@ -428,7 +428,7 @@ func TestJobCollect(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 
 	// No report.json yet.
 	code, out, errOut := f.run(t, "collect", "--id", "job-1")
@@ -669,7 +669,7 @@ func TestJobControlAmendSendWriteRequests(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	ctl := filepath.Join(co, ".herdr-soho", "jobs", "job-1", "control")
+	ctl := filepath.Join(co, ".soho", "jobs", "job-1", "control")
 	bodyFile := filepath.Join(t.TempDir(), "body.md")
 	if err := os.WriteFile(bodyFile, []byte("amend body\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -762,7 +762,7 @@ func TestJobControlCancelCheckpoint(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	ctl := filepath.Join(co, ".herdr-soho", "jobs", "job-1", "control")
+	ctl := filepath.Join(co, ".soho", "jobs", "job-1", "control")
 	f.setStatus(t, co, "job-1", "running")
 
 	code, out, errOut := f.run(t, "cancel", "--id", "job-1")
@@ -839,7 +839,7 @@ func TestJobControlCancelCheckpoint(t *testing.T) {
 	co2 := f2.checkout(t, "example-org", "example-repo")
 	f2.startJob(t, co2)
 	f2.setStatus(t, co2, "job-1", "done")
-	ctl2 := filepath.Join(co2, ".herdr-soho", "jobs", "job-1", "control")
+	ctl2 := filepath.Join(co2, ".soho", "jobs", "job-1", "control")
 	bodyFile := filepath.Join(t.TempDir(), "body.md")
 	if err := os.WriteFile(bodyFile, []byte("amend body\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -870,7 +870,7 @@ func TestJobControlCancelCheckpoint(t *testing.T) {
 		f3 := newJobFix(t)
 		co3 := f3.checkout(t, "example-org", "example-repo")
 		f3.startJob(t, co3)
-		ctl3 := filepath.Join(co3, ".herdr-soho", "jobs", "job-1", "control")
+		ctl3 := filepath.Join(co3, ".soho", "jobs", "job-1", "control")
 
 		for _, sub := range []string{"cancel", "checkpoint"} {
 			code, out, errOut := f3.run(t, sub, "--id", "job-1", "stray")
@@ -908,7 +908,7 @@ func TestJobCancelRecoversTheCrashedStart(t *testing.T) {
 	if !strings.Contains(out, `"status":"failed"`) || !strings.Contains(out, `"motivo":"job: start interrupted"`) {
 		t.Fatalf("status line = %q", out)
 	}
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 	if _, err := os.Stat(filepath.Join(jobDir, "report.json")); err != nil {
 		t.Fatalf("report.json: %v", err)
 	}
@@ -957,7 +957,7 @@ func TestJobNowrite(t *testing.T) {
 
 	for _, sub := range []string{"start", "supervise", "amend", "send", "ack", "cancel", "close", "checkpoint", "note"} {
 		code, out, errOut := f.runEnv(t, env, sub, "--id", "job-1")
-		want := "herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: job " + sub + " writes; only job status, wait, events, collect and list run\n"
+		want := "herdr-soho: SOHO_NOWRITE=1 is read-only: job " + sub + " writes; only job status, wait, events, collect and list run\n"
 		if code != 2 || out != "" || errOut != want {
 			t.Fatalf("%s code=%d out=%q err=%q", sub, code, out, errOut)
 		}
@@ -1451,7 +1451,7 @@ func TestJobSuperviseCLIRefusals(t *testing.T) {
 	}
 	nowrite["HERDR_SOHO_NOWRITE"] = "1"
 	code, out, errOut = f.runEnv(t, nowrite, "supervise", "--id", "job-1")
-	if code != 2 || out != "" || !strings.Contains(errOut, "HERDR_SOHO_NOWRITE=1 is read-only: job supervise writes") {
+	if code != 2 || out != "" || !strings.Contains(errOut, "SOHO_NOWRITE=1 is read-only: job supervise writes") {
 		t.Fatalf("NOWRITE code=%d out=%q err=%q", code, out, errOut)
 	}
 }
@@ -1522,7 +1522,7 @@ func TestJobSuperviseRunsTheSupervisor(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 
 	// The start slice's run facts: a running job with its worktree dir.
 	body := fmt.Sprintf(`{"schema":1,"id":"job-1","status":"running","brief_sha256":"x","decisions_acked_seq":0,"motivo":null,"dir":%q}`+"\n", co)
@@ -1724,7 +1724,7 @@ func TestJobCollectLegacyPartialView(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 	reportFile := filepath.Join(jobDir, "report.json")
 
 	// The legacy report: no partial fields at all.
@@ -1821,7 +1821,7 @@ func TestJobReportMissingLegacyTerminal(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 
 	// The legacy terminal states without a report: the marker stands in
 	// the wait and status lines and in the collect missing line, the

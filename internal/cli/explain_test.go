@@ -21,7 +21,7 @@ func TestExplainTextAndRecommendation(t *testing.T) {
 		}
 		writeExplain := func(conf string) {
 			t.Helper()
-			if err := os.WriteFile(filepath.Join(repo, ".agents", "herdr-soho.conf"), []byte(conf), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(repo, ".agents", "soho.conf"), []byte(conf), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -64,7 +64,7 @@ func TestExplainTextAndRecommendation(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(repo, ".agents"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(repo, ".agents", "herdr-soho.conf"), []byte("panes=4\nlane.build.kind=grok\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(repo, ".agents", "soho.conf"), []byte("panes=4\nlane.build.kind=grok\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		ctx := core.LoadConfig(env, repo)
@@ -101,7 +101,7 @@ func TestExplainCommandRosterActivity(t *testing.T) {
 			t.Fatal(err)
 		}
 		env = withFakeCLI(env, bin)
-		sd := filepath.Join(env.Get("HERDR_SOHO_DIR"), env.Get("HERDR_WORKSPACE_ID"))
+		sd := filepath.Join(env.Get("SOHO_DIR"), env.Get("HERDR_WORKSPACE_ID"))
 		check := func(want ...string) {
 			t.Helper()
 			code, out, stderr := runIn(t, []string{"explain"}, env, cwd)

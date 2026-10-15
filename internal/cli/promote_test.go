@@ -42,7 +42,7 @@ func promoteFixture(t *testing.T, liveName, liveStatus string, extra ...fakecli.
 	if _, err := fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	f.env["HERDR_SOHO_FAKECLI_CONFIG"] = fakeDir
+	f.env["SOHO_FAKECLI_CONFIG"] = fakeDir
 	f.env["PATH"] = fakeDir + string(os.PathListSeparator) + f.env.Get("PATH")
 	f.env["HERDR_PANE_ID"] = promotePane
 	// Production state initialization (creates the subdirs and the roster
@@ -116,7 +116,7 @@ func runPromote(t *testing.T, f *copiesFixture, env platform.Env, argv ...string
 // calls case (the handler probed nothing).
 func promoteCalls(t *testing.T, env platform.Env) []fakecli.Call {
 	t.Helper()
-	calls, err := fakecli.ReadCalls(filepath.Join(env.Get("HERDR_SOHO_FAKECLI_CONFIG"), "herdr.calls.jsonl"))
+	calls, err := fakecli.ReadCalls(filepath.Join(env.Get("SOHO_FAKECLI_CONFIG"), "herdr.calls.jsonl"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -567,7 +567,7 @@ func staleFixture(t *testing.T, agentGetTemplate string) *copiesFixture {
 	if _, err := fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	f.env["HERDR_SOHO_FAKECLI_CONFIG"] = fakeDir
+	f.env["SOHO_FAKECLI_CONFIG"] = fakeDir
 	f.env["PATH"] = fakeDir + string(os.PathListSeparator) + f.env.Get("PATH")
 	f.env["HERDR_PANE_ID"] = promotePane
 	ctx := core.LoadConfig(f.env, f.cwd)

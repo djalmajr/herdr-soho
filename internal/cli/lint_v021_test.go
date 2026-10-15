@@ -76,7 +76,7 @@ func TestLintCommandPortugueseDefault(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, ".agents"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, ".agents", "herdr-soho.conf"), []byte("brief_lint_aliases=Goal=Task\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, ".agents", "soho.conf"), []byte("brief_lint_aliases=Goal=Task\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		env["HERDR_SOHO_BRIEF_LINT"] = "warn"
@@ -130,7 +130,7 @@ func TestLintCommandUnfilledPlaceholder(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, ".agents"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, ".agents", "herdr-soho.conf"), []byte("brief_lint_placeholders=MY_SLOT\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, ".agents", "soho.conf"), []byte("brief_lint_placeholders=MY_SLOT\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		env["HERDR_SOHO_BRIEF_LINT"] = "strict"

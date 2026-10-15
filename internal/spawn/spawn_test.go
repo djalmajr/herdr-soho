@@ -46,7 +46,7 @@ func TestSpawnMapsConfiguredArgumentsAndWritesRoster(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"PATH": bin, "HOME": root, "TMPDIR": root, "HERDR_SOHO_FAKECLI_CONFIG": bin,
+		"PATH": bin, "HOME": root, "TMPDIR": root, "SOHO_FAKECLI_CONFIG": bin,
 		"HERDR_SOHO_SKILL_DIR": filepath.Join(root, "skill"), "HERDR_SOHO_ROLES": roles,
 		"HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1",
 		"HERDR_PANE_ID": "p1", "HERDR_SOHO_LANES": "off", "HERDR_SOHO_LAYOUT": "split",
@@ -225,7 +225,7 @@ func TestChangedNativeArgsDeclineOtherwiseReusableWorker(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"idle"}}}`}}); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": skill, "HERDR_SOHO_ROLE_WORKER_ARGS": "--new-arg"}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": skill, "HERDR_SOHO_ROLE_WORKER_ARGS": "--new-arg"}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	name, unavailable, blocked := FindReusable("worker", "grok", cwd, "", "", "ask", ctx, env, cwd)
 	if name != "" || unavailable != "" || blocked {
@@ -239,7 +239,7 @@ func TestUniqueNameAddsSuffixForLiveAgent(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{Argv: []string{"agent", "list"}, Stdout: `{"result":{"agents":[{"name":"worker"},{"name":"worker-2"}]}}`}}); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "HERDR_SOHO_FAKECLI_CONFIG": bin}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin}
 	if got := UniqueName("worker", env); got != "worker-3" {
 		t.Fatalf("UniqueName()=%q", got)
 	}
@@ -251,7 +251,7 @@ func TestAgentNameTakenPreservesLiveAgentsFriction(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{Argv: []string{"agent", "list"}, Stdout: `{"result":{}}`}}); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "HERDR_SOHO_FAKECLI_CONFIG": bin}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin}
 	var recovered any
 	func() {
 		defer func() { recovered = recover() }()
@@ -284,7 +284,7 @@ func TestBlockedTrustStartupKeepsPaneAndExitsSeven(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "HERDR_SOHO_FAKECLI_CONFIG": bin, "HOME": root, "TMPDIR": root, "HERDR_SOHO_SKILL_DIR": skill, "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1", "HERDR_SOHO_LANES": "off", "HERDR_SOHO_NOWRITE": "0"}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HOME": root, "TMPDIR": root, "HERDR_SOHO_SKILL_DIR": skill, "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1", "HERDR_SOHO_LANES": "off", "HERDR_SOHO_NOWRITE": "0"}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	oldOut, oldErr := platform.Stdout, platform.Stderr
 	var out, stderr bytes.Buffer

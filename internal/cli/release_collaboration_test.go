@@ -55,7 +55,7 @@ func newReleaseCollaborationFixture(t *testing.T, withWorker bool, authorGet age
 		{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"working"}}}`},
 		{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
 	}
-	fakeDir := f.env["HERDR_SOHO_FAKECLI_CONFIG"]
+	fakeDir := f.env["SOHO_FAKECLI_CONFIG"]
 	for _, entry := range []string{"herdr", "herdr.exe"} {
 		if err := os.Remove(filepath.Join(fakeDir, entry)); err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
@@ -144,7 +144,7 @@ func (rc *releaseCollaborationFixture) run(t *testing.T, argv ...string) (int, s
 
 func (rc *releaseCollaborationFixture) herdrCalls(t *testing.T) []fakecli.Call {
 	t.Helper()
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(rc.f.env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(rc.f.env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []fakecli.Call{}

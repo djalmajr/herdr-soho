@@ -194,7 +194,7 @@ func TestWorkerMessagesLoadsCurrentWorkspaceSessionOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	env["PATH"] = bin + string(os.PathListSeparator) + env["PATH"]
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+	env["SOHO_FAKECLI_CONFIG"] = bin
 	writePolicy(t, filepath.Join(env["HERDR_SOHO_DIR"], "probe-ws", "session.conf"), "layout=stack\n")
 	ctx := core.LoadConfig(env, cwd)
 	if core.Cfg(&ctx, "layout", "", env) != "stack" {

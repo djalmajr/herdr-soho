@@ -334,7 +334,7 @@ func TestInstallCommandNowriteRefusedBeforeEffects(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code=%d, want 2 (err=%q)", code, errOut)
 	}
-	if !strings.Contains(errOut, "HERDR_SOHO_NOWRITE") {
+	if !strings.Contains(errOut, "SOHO_NOWRITE") {
 		t.Fatalf("stderr %q does not name the read-only refusal", errOut)
 	}
 	assertZeroRequests(t, reqs)
@@ -784,11 +784,11 @@ func nativeArtifactServer(t *testing.T, rules []fakecli.Rule, captureEnv []strin
 func TestInstallCommandVerifyVersionOptIn(t *testing.T) {
 	srv, reqs, binDir, artifact := nativeArtifactServer(t, []fakecli.Rule{
 		{Argv: []string{"--version"}, Stdout: "herdr-soho v1.2.3-fixture\n"},
-	}, []string{"HERDR_SOHO_BIN"})
+	}, []string{"SOHO_BIN"})
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
 	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = binDir
+	env["SOHO_FAKECLI_CONFIG"] = binDir
 	code, out, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir, "--verify-version")
 	if code != 0 {
 		t.Fatalf("code=%d err=%q", code, errOut)
@@ -813,8 +813,8 @@ func TestInstallCommandVerifyVersionOptIn(t *testing.T) {
 	if len(calls[0].Argv) != 1 || calls[0].Argv[0] != "--version" {
 		t.Fatalf("probe argv = %v, want exactly [--version]", calls[0].Argv)
 	}
-	if calls[0].Env["HERDR_SOHO_BIN"] != filepath.Join(dir, installBinaryName()) {
-		t.Fatalf("probe env HERDR_SOHO_BIN = %q, want the installed destination", calls[0].Env["HERDR_SOHO_BIN"])
+	if calls[0].Env["SOHO_BIN"] != filepath.Join(dir, installBinaryName()) {
+		t.Fatalf("probe env SOHO_BIN = %q, want the installed destination", calls[0].Env["SOHO_BIN"])
 	}
 }
 
@@ -827,7 +827,7 @@ func TestInstallCommandVerifyVersionNotRunByDefault(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
 	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = binDir
+	env["SOHO_FAKECLI_CONFIG"] = binDir
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
 	if code != 0 {
 		t.Fatalf("code=%d err=%q", code, errOut)
@@ -846,7 +846,7 @@ func TestInstallCommandVerifyVersionNonZeroExitKeepsBinary(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
 	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = binDir
+	env["SOHO_FAKECLI_CONFIG"] = binDir
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir, "--verify-version")
 	if code != 1 {
 		t.Fatalf("code=%d, want 1 (err=%q)", code, errOut)
@@ -870,7 +870,7 @@ func TestInstallCommandVerifyVersionTimeoutKeepsBinary(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
 	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = binDir
+	env["SOHO_FAKECLI_CONFIG"] = binDir
 	code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir, "--verify-version")
 	if code != 1 {
 		t.Fatalf("code=%d, want 1 (err=%q)", code, errOut)
@@ -994,7 +994,7 @@ func TestInstallCommandVerifyVersionLargeOutputDrains(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bin")
 	env := installTestEnv(t, t.TempDir())
 	env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = binDir
+	env["SOHO_FAKECLI_CONFIG"] = binDir
 	code, out, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir, "--verify-version")
 	if code != 0 {
 		t.Fatalf("code=%d err=%q — the large output must drain to completion, not time out", code, errOut)

@@ -45,7 +45,7 @@ func TestSpawnShortTimeoutWarnsOnceAndKeepsTheValue(t *testing.T) { // --timeout
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"PATH": bin, "HOME": root, "TMPDIR": root, "HERDR_SOHO_FAKECLI_CONFIG": bin,
+		"PATH": bin, "HOME": root, "TMPDIR": root, "SOHO_FAKECLI_CONFIG": bin,
 		"HERDR_SOHO_SKILL_DIR": filepath.Join(root, "skill"), "HERDR_SOHO_ROLES": roles,
 		"HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1",
 		"HERDR_PANE_ID": "p1", "HERDR_SOHO_LANES": "off", "HERDR_SOHO_LAYOUT": "split",

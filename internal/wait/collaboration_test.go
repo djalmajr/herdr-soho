@@ -109,13 +109,13 @@ func newCollabFixture(t *testing.T, options collabFixtureOptions) collabFixture 
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"PATH":                      bin,
-		"HERDR_ENV":                 "1",
-		"HERDR_SOHO_DIR":            state,
-		"HERDR_SOHO_SKILL_DIR":      skill,
-		"HERDR_SOCKET_PATH":         filepath.Join(base, "none.sock"),
-		"HERDR_SOHO_FAKECLI_CONFIG": bin,
-		"HERDR_SOHO_WAIT_POLL_MS":   "5",
+		"PATH":                    bin,
+		"HERDR_ENV":               "1",
+		"HERDR_SOHO_DIR":          state,
+		"HERDR_SOHO_SKILL_DIR":    skill,
+		"HERDR_SOCKET_PATH":       filepath.Join(base, "none.sock"),
+		"SOHO_FAKECLI_CONFIG":     bin,
+		"HERDR_SOHO_WAIT_POLL_MS": "5",
 	}
 	if options.workspaceID != "" {
 		env["HERDR_WORKSPACE_ID"] = options.workspaceID

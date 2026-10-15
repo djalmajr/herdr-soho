@@ -35,7 +35,7 @@ func newTeamOpsFix(t *testing.T, rules []fakecli.Rule) *teamOpsFix {
 		pairs = append(pairs, item)
 	}
 	f.env = envFromPairs(t, pairs)
-	configDir := f.env["HERDR_SOHO_FAKECLI_CONFIG"]
+	configDir := f.env["SOHO_FAKECLI_CONFIG"]
 	f.calls = func() []fakecli.Call {
 		calls, err := fakecli.ReadCallsForConfig(filepath.Join(configDir, "herdr-soho.json"))
 		if err != nil {

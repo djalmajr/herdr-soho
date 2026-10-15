@@ -99,10 +99,18 @@ func newSetupTM7Fixture(t *testing.T) setupTM7Fixture {
 			fix.Env[key] = value
 		}
 	}
+	for key := range fix.Env {
+		if key == "SOHO_FAKECLI_CONFIG" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToUpper(key), "HERDR_") || strings.HasPrefix(key, "SOHO_") {
+			delete(fix.Env, key)
+		}
+	}
 	fix.Env["HOME"], fix.Env["USERPROFILE"] = fix.Home, fix.Home
-	fix.Env["XDG_CONFIG_HOME"], fix.Env["HERDR_SOHO_DIR"] = fix.Conf, fix.State
+	fix.Env["XDG_CONFIG_HOME"], fix.Env["SOHO_DIR"] = fix.Conf, fix.State
 	fix.Env["HERDR_WORKSPACE_ID"], fix.Env["TMPDIR"] = "ws", fix.Tmp
-	fix.Env["HERDR_SOHO_SKILL_DIR"] = setupTM7SkillDir(t)
+	fix.Env["SOHO_SKILL_DIR"] = setupTM7SkillDir(t)
 	return fix
 }
 
@@ -129,7 +137,7 @@ func readSetupTM7Golden[T any](t *testing.T, name string) T {
 	if err := json.Unmarshal(data, &tree); err != nil {
 		t.Fatal(err)
 	}
-	adapted, err := json.Marshal(testutil.ApplyPeerBlockOracle(testutil.ApplyHookOracle(tree)))
+	adapted, err := json.Marshal(testutil.ApplyPeerBlockOracle(testutil.ApplyHookOracle(testutil.ApplySohoNameOracle(tree))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +211,7 @@ func runSetupTM7Steps(t *testing.T, fix setupTM7Fixture, steps []setupTM7Step) [
 		code := Run(step.Args, env)
 		stdout := normalizeGoldenRoot(out.String(), fix.Root)
 		stderr := normalizeGoldenRoot(errOut.String(), fix.Root)
-		program := filepath.Join(env.Get("HERDR_SOHO_SKILL_DIR"), "scripts", "herdr-soho")
+		program := filepath.Join(env.Get("SOHO_SKILL_DIR"), "scripts", "herdr-soho")
 		if platform.Current() == "win32" {
 			program += ".cmd"
 		}
@@ -391,8 +399,8 @@ func TestSetupTM7ParityGoldens(t *testing.T) {
 		}
 		t.Log("Accepted difference per PLAN section 7: JS writes AGENTS.md before rc 4; Go refuses before writing.")
 	})
-	t.Run(`// JS: "parity: the state dir is git-ignored when it lives inside the repo (HERDR_SOHO_DIR empty)"`, func(t *testing.T) {
-		runSetupTM7Golden(t, "setup-gitignore", nil, []setupTM7Step{{Args: []string{"setup"}, Env: map[string]string{"HERDR_SOHO_DIR": ""}}})
+	t.Run(`// JS: "parity: the state dir is git-ignored when it lives inside the repo (SOHO_DIR empty)"`, func(t *testing.T) {
+		runSetupTM7Golden(t, "setup-gitignore", nil, []setupTM7Step{{Args: []string{"setup"}, Env: map[string]string{"SOHO_DIR": ""}}})
 	})
 	t.Run(`// JS: "parity: test-setup.sh scenario — the block embeds no absolute installer path (project-local skill resolves the hook)"`, func(t *testing.T) {
 		if runtime.GOOS == "windows" {
@@ -560,7 +568,7 @@ func TestSetupTM7PlanParityGoldens(t *testing.T) {
 		for k, v := range base {
 			files[k] = v
 		}
-		files[".agents/herdr-soho.conf"] = "panes=3\n"
+		files[".agents/soho.conf"] = "panes=3\n"
 		runSetupTM7PlanGolden(t, "parity: plan shows the before value of a key being set", files, nil, []setupTM7Step{setupTM7SetupStep([]string{"setup", "--plan", "--panes", "4"})})
 	})
 	t.Run(`// JS: "parity: plan with an invalid --lane dies 2"`, func(t *testing.T) {
@@ -577,7 +585,7 @@ func TestSetupTM7PlanParityGoldens(t *testing.T) {
 		for k, v := range base {
 			files[k] = v
 		}
-		files["user/herdr-soho/config"] = "model.pi.worker=other/model\n"
+		files["user/soho/config"] = "model.pi.worker=other/model\n"
 		runSetupTM7PlanGolden(t, "parity: plan --user-set over an existing user value", files, nil, []setupTM7Step{setupTM7SetupStep([]string{"setup", "--plan", "--user-set", "model.pi.worker", "new/model"})})
 	})
 	t.Run(`// JS: "parity: plan --session-set with no session file yet"`, func(t *testing.T) {
@@ -588,7 +596,7 @@ func TestSetupTM7PlanParityGoldens(t *testing.T) {
 		for k, v := range base {
 			files[k] = v
 		}
-		files[".agents/herdr-soho.conf"] = "role.planner.model=fable\n"
+		files[".agents/soho.conf"] = "role.planner.model=fable\n"
 		runSetupTM7PlanGolden(t, "parity: plan a key the real setup would delete", files, nil, []setupTM7Step{setupTM7SetupStep([]string{"setup", "--plan", "--panes", "4"})})
 	})
 	t.Run(`// JS: "parity: plan dies 2 on an invalid key or value"`, func(t *testing.T) {
@@ -608,15 +616,15 @@ func TestSetupTM7PlanParityGoldens(t *testing.T) {
 			files[k] = v
 		}
 		files[".gitignore"] = "*.log\n"
-		runSetupTM7PlanGolden(t, "parity: plan the .gitignore entry without writing it", files, nil, []setupTM7Step{{Args: []string{"setup", "--plan", "--session-set", "lane.build.kind", "pi"}, Env: map[string]string{"HERDR_SOHO_DIR": ""}}})
+		runSetupTM7PlanGolden(t, "parity: plan the .gitignore entry without writing it", files, nil, []setupTM7Step{{Args: []string{"setup", "--plan", "--session-set", "lane.build.kind", "pi"}, Env: map[string]string{"SOHO_DIR": ""}}})
 	})
 	t.Run(`// JS: "parity: no .gitignore section when the entry is already there"`, func(t *testing.T) {
 		files := map[string]string{}
 		for k, v := range base {
 			files[k] = v
 		}
-		files[".gitignore"] = "*.log\n.herdr-soho/\n"
-		runSetupTM7PlanGolden(t, "parity: no .gitignore section when the entry is already there", files, []string{".herdr-soho"}, []setupTM7Step{{Args: []string{"setup", "--plan", "--session-set", "lane.build.kind", "pi"}, Env: map[string]string{"HERDR_SOHO_DIR": ""}}})
+		files[".gitignore"] = "*.log\n.soho/\n"
+		runSetupTM7PlanGolden(t, "parity: no .gitignore section when the entry is already there", files, []string{".soho"}, []setupTM7Step{{Args: []string{"setup", "--plan", "--session-set", "lane.build.kind", "pi"}, Env: map[string]string{"SOHO_DIR": ""}}})
 	})
 	t.Run(`// JS: "parity: plan dies 2 when a flag is missing its value"`, func(t *testing.T) {
 		args := [][]string{{"setup", "--plan", "--set", "max_workers"}, {"setup", "--plan", "--lane"}, {"setup", "--plan", "--lane", "--panes", "4"}}
@@ -635,7 +643,7 @@ func TestSetupTM7PlanParityGoldens(t *testing.T) {
 		for k, v := range base {
 			files[k] = v
 		}
-		files[".agents/herdr-soho.conf"] = "max_workers=3\n"
+		files[".agents/soho.conf"] = "max_workers=3\n"
 		runSetupTM7PlanGolden(t, "parity: plan with --set, --user-set and --session-set together", files, nil, []setupTM7Step{setupTM7SetupStep([]string{"setup", "--plan", "--set", "max_workers", "5", "--user-set", "model.pi.worker", "p/m", "--session-set", "lane.build.kind", "pi"})})
 	})
 	t.Run(`// JS: "parity: plan --target on a file carrying the block"`, func(t *testing.T) {
@@ -677,7 +685,7 @@ func TestSetupTM7SetupPlanEndToEndCLI(t *testing.T) {
 	t.Run(`// JS: "e2e: setup --plan --panes prints the plan and writes nothing"`, func(t *testing.T) {
 		f := newSetupTM7Fixture(t)
 		baseFiles(t, f)
-		writeSetupTM7Seed(t, f.Repo, ".agents/herdr-soho.conf", "panes=3\n")
+		writeSetupTM7Seed(t, f.Repo, ".agents/soho.conf", "panes=3\n")
 		assertNoWrite(t, f, [][]string{{"setup", "--plan", "--panes", "4"}}, []int{0}, [][]string{{"plan (nothing is written):", "panes                3 → 4"}})
 	})
 	t.Run(`// JS: "e2e: --panes 2 plans the 2-pane preset (nothing written)"`, func(t *testing.T) {
@@ -725,7 +733,7 @@ func TestSetupTM7SetupPlanEndToEndCLI(t *testing.T) {
 		f := newSetupTM7Fixture(t)
 		writeSetupTM7Seed(t, f.Repo, ".gitignore", "*.log\n")
 		before := setupTM7TreeOf(t, f.Root)
-		got := runSetupTM7Steps(t, f, []setupTM7Step{{Args: []string{"setup", "--plan", "--session-set", "lane.build.kind", "pi"}, Env: map[string]string{"HERDR_SOHO_DIR": ""}}})[0]
+		got := runSetupTM7Steps(t, f, []setupTM7Step{{Args: []string{"setup", "--plan", "--session-set", "lane.build.kind", "pi"}, Env: map[string]string{"SOHO_DIR": ""}}})[0]
 		if got.RC != 0 || !strings.Contains(got.Out, ".gitignore") {
 			t.Fatalf("rc=%d out=%q err=%q", got.RC, got.Out, got.Err)
 		}
@@ -761,7 +769,7 @@ func TestSetupTM7PanesWriteCLI(t *testing.T) {
 	t.Run(`// JS: "setup --panes: 2 writes the 2-pane preset (no frozen roles/limits), 5 dies 2"`, func(t *testing.T) {
 		f := newSetupTM7Fixture(t)
 		got := runSetupTM7Steps(t, f, []setupTM7Step{setupTM7SetupStep([]string{"setup", "--panes", "2"})})[0]
-		content := setupTM7ReadRel(f.Repo, ".agents/herdr-soho.conf")
+		content := setupTM7ReadRel(f.Repo, ".agents/soho.conf")
 		if got.RC != 0 || content == nil || !strings.Contains(*content, "panes=2") || !strings.Contains(*content, "reuse_workers=on") || strings.Contains(*content, "lane.build.roles=") || strings.Contains(*content, "max_workers=") || strings.Contains(*content, "split_max_panes=") || strings.Contains(got.Err, "setup --panes 2|3|4") == false {
 			t.Fatalf("setup --panes 2 rc=%d out=%q err=%q config=%v", got.RC, got.Out, got.Err, content)
 		}

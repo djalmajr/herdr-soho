@@ -476,12 +476,12 @@ func newTM3bHarnessAt(t *testing.T, root, briefText string) tm3bHarness {
 		}
 	}
 	env["PATH"] = bin
-	// The user's own config (~/.config/herdr-soho/config) must not reach the
+	// The user's own config (~/.config/soho/config) must not reach the
 	// harness: a context_window.grok there changes the spawn's herdr calls.
 	env["HOME"] = filepath.Join(root, "home")
 	env["USERPROFILE"] = filepath.Join(root, "home")
 	env["XDG_CONFIG_HOME"] = filepath.Join(root, "xdg")
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = filepath.Join(bin, "herdr.json")
+	env["SOHO_FAKECLI_CONFIG"] = filepath.Join(bin, "herdr.json")
 	env["HERDR_SOHO_DIR"] = state
 	env["HERDR_WORKSPACE_ID"] = "ws"
 	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/herdr-soho"

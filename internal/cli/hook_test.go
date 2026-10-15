@@ -12,9 +12,9 @@ import (
 func TestNativeHookReminderAndOutsideHerdr(t *testing.T) {
 	env, cwd := commandFixture(t)
 	env["PATH"] = t.TempDir()
-	for _, nowrite := range []string{"", "HERDR_SOHO_NOWRITE", "HERDR_AGENTS_NOWRITE"} {
+	for _, nowrite := range []string{"", "HERDR_SOHO_NOWRITE", "SOHO_NOWRITE"} {
 		delete(env, "HERDR_SOHO_NOWRITE")
-		delete(env, "HERDR_AGENTS_NOWRITE")
+		delete(env, "SOHO_NOWRITE")
 		if nowrite != "" {
 			env[nowrite] = "1"
 		}
@@ -38,7 +38,7 @@ func TestNativeHookReminderAndOutsideHerdr(t *testing.T) {
 		}
 	}
 	delete(env, "HERDR_SOHO_NOWRITE")
-	delete(env, "HERDR_AGENTS_NOWRITE")
+	delete(env, "SOHO_NOWRITE")
 	env["HERDR_ENV"] = "1"
 	code, out, stderr := runIn(t, []string{"hook", "reminder"}, env, cwd)
 	if code != 0 || out != hookReminder+"\n" || stderr != "" {
@@ -58,7 +58,7 @@ func TestNativeDoctorHookUsesClaudeProject(t *testing.T) {
 	if err := os.Mkdir(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	configFile := filepath.Join(configDir, "herdr-soho.conf")
+	configFile := filepath.Join(configDir, "soho.conf")
 	const config = "panes=9\n"
 	if err := os.WriteFile(configFile, []byte(config), 0o600); err != nil {
 		t.Fatal(err)

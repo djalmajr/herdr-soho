@@ -97,18 +97,18 @@ func newCopiesFixture(t *testing.T, agentRules []fakecli.Rule) *copiesFixture {
 		}
 	}
 	env := platform.Env{
-		"HOME":                      home,
-		"USERPROFILE":               home,
-		"XDG_CONFIG_HOME":           filepath.Join(root, "conf"),
-		"TMPDIR":                    tmp,
-		"HERDR_ENV":                 "1",
-		"HERDR_WORKSPACE_ID":        "ws",
-		"HERDR_PANE_ID":             "p-worker",
-		"HERDR_SOHO_DIR":            state,
-		"HERDR_SOHO_SKILL_DIR":      skill,
-		"HERDR_SOHO_REGRID":         "off",
-		"HERDR_SOHO_FAKECLI_CONFIG": fakeDir,
-		"PATH":                      strings.Join([]string{fakeDir, gitBin, "/usr/bin", "/bin"}, string(os.PathListSeparator)),
+		"HOME":                 home,
+		"USERPROFILE":          home,
+		"XDG_CONFIG_HOME":      filepath.Join(root, "conf"),
+		"TMPDIR":               tmp,
+		"HERDR_ENV":            "1",
+		"HERDR_WORKSPACE_ID":   "ws",
+		"HERDR_PANE_ID":        "p-worker",
+		"HERDR_SOHO_DIR":       state,
+		"HERDR_SOHO_SKILL_DIR": skill,
+		"HERDR_SOHO_REGRID":    "off",
+		"SOHO_FAKECLI_CONFIG":  fakeDir,
+		"PATH":                 strings.Join([]string{fakeDir, gitBin, "/usr/bin", "/bin"}, string(os.PathListSeparator)),
 	}
 	// A race-instrumented fake child otherwise pauses for one second on
 	// exit; the fixture sets only GORACE and leaves the rest of the env as built.

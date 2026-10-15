@@ -25,14 +25,14 @@ func tm8CommandFixture(t *testing.T) (platform.Env, string) {
 	}
 	if _, err := fakecli.Install(t, bin, "git", []fakecli.Rule{
 		{Argv: []string{"-C", repo, "rev-parse", "--is-inside-work-tree"}, Stdout: "true\n"},
-		{Argv: []string{"-C", repo, "check-ignore", "-q", ".herdr-soho"}, Code: 1},
+		{Argv: []string{"-C", repo, "check-ignore", "-q", ".soho"}, Code: 1},
 		{AnyArgs: true},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	clean := envFrom(testutil.CleanEnv(t))
 	for key := range clean {
-		if strings.HasPrefix(strings.ToUpper(key), "HERDR_") || key == "PATH" {
+		if strings.HasPrefix(strings.ToUpper(key), "HERDR_") || strings.HasPrefix(key, "SOHO_") || key == "PATH" {
 			delete(clean, key)
 		}
 	}
@@ -55,8 +55,8 @@ func tm8CommandFixture(t *testing.T) (platform.Env, string) {
 	clean["USERPROFILE"] = clean["HOME"]
 	clean["XDG_CONFIG_HOME"] = filepath.Join(root, "conf")
 	clean["TMPDIR"] = tmp
-	clean["HERDR_SOHO_DIR"] = filepath.Join(root, "state")
-	clean["HERDR_SOHO_SKILL_DIR"] = skillDir
+	clean["SOHO_DIR"] = filepath.Join(root, "state")
+	clean["SOHO_SKILL_DIR"] = skillDir
 	clean["HERDR_WORKSPACE_ID"] = "ws"
 	clean["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing.sock")
 	clean["HERDR_ENV"] = "1"
@@ -100,7 +100,7 @@ func runTM8ConfigGolden(t *testing.T, name string) {
 	}
 	env, repo := tm8CommandFixture(t)
 	root := filepath.Dir(repo)
-	projectFile := filepath.Join(repo, ".agents", "herdr-soho.conf")
+	projectFile := filepath.Join(repo, ".agents", "soho.conf")
 	seed := ""
 	switch name {
 	case "config-set-dotted", "config-set-lane-roles", "config-set-verbatim":
@@ -119,7 +119,7 @@ func runTM8ConfigGolden(t *testing.T, name string) {
 		}
 	}
 	if name == "session-errors-seeded" {
-		path := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+		path := filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -141,8 +141,20 @@ func runTM8ConfigGolden(t *testing.T, name string) {
 			if want.Steps[i].Env == nil {
 				want.Steps[i].Env = map[string]string{}
 			}
-			want.Steps[i].Env["HERDR_SOHO_DIR"] = ""
+			want.Steps[i].Env["SOHO_DIR"] = ""
 		}
+	}
+	// The frozen golden predates the soho name layer; the exact-substitution
+	// name oracle adapts the expected output, error, file names and contents.
+	for i := range want.Files {
+		want.Files[i].Rel = testutil.RewriteSohoName(want.Files[i].Rel)
+		if want.Files[i].Content != nil {
+			*want.Files[i].Content = testutil.RewriteSohoName(*want.Files[i].Content)
+		}
+	}
+	for i := range want.Steps {
+		want.Steps[i].Out = testutil.RewriteSohoName(want.Steps[i].Out)
+		want.Steps[i].Err = testutil.RewriteSohoName(want.Steps[i].Err)
 	}
 	for i, step := range want.Steps {
 		stepEnv := env.Clone()
@@ -153,7 +165,7 @@ func runTM8ConfigGolden(t *testing.T, name string) {
 			stepEnv["HERDR_WORKSPACE_ID"] = ""
 		}
 		if name == "precedence" && i == 2 {
-			stepEnv["HERDR_SOHO_LANE_BUILD_KIND"] = "grok"
+			stepEnv["SOHO_LANE_BUILD_KIND"] = "grok"
 		}
 		code, out, errOut := runIn(t, step.Args, stepEnv, repo)
 		out = strings.ReplaceAll(out, root, "<ROOT>")
@@ -162,10 +174,10 @@ func runTM8ConfigGolden(t *testing.T, name string) {
 		errOut = normalizeGoldenRootPathSeparators(errOut)
 		wantErr := normalizeGoldenRootPathSeparators(strings.ReplaceAll(step.Err, root, "<ROOT>"))
 		if name == "roles-role" || name == "project-roles" {
-			out = strings.ReplaceAll(out, env.Get("HERDR_SOHO_SKILL_DIR"), "<SKILL>")
+			out = strings.ReplaceAll(out, env.Get("SOHO_SKILL_DIR"), "<SKILL>")
 			// The frozen golden predates the shipped job-orchestrator role;
 			// the exact-insertion role oracle adapts the expected table row.
-			wantOut := testutil.ApplyRoleOracleToRolesTable(strings.ReplaceAll(step.Out, env.Get("HERDR_SOHO_SKILL_DIR"), "<SKILL>"))
+			wantOut := testutil.ApplyRoleOracleToRolesTable(strings.ReplaceAll(step.Out, env.Get("SOHO_SKILL_DIR"), "<SKILL>"))
 			if code != step.RC || out != wantOut || errOut != wantErr {
 				t.Fatalf("step %d args=%v code=%d/%d stdout=%q want %q stderr=%q want %q", i, step.Args, code, step.RC, out, wantOut, errOut, wantErr)
 			}

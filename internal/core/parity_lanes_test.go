@@ -189,7 +189,7 @@ func TestApplyLaneFileGolden(t *testing.T) {
 				}
 				entries, _ := os.ReadDir(dir)
 				for _, entry := range entries {
-					if strings.HasPrefix(entry.Name(), "herdr-soho-conf.") || (strings.HasPrefix(entry.Name(), ".herdr-soho.conf.") && strings.HasSuffix(entry.Name(), ".tmp")) {
+					if strings.HasPrefix(entry.Name(), "soho-conf.") || (strings.HasPrefix(entry.Name(), ".soho.conf.") && strings.HasSuffix(entry.Name(), ".tmp")) {
 						temps = append(temps, filepath.Join(dir, entry.Name()))
 					}
 				}

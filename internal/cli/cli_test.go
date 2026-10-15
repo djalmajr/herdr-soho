@@ -26,7 +26,7 @@ func hostileRuntimeEnv(t *testing.T, override string) (platform.Env, []string) {
 	t.Helper()
 	bin := t.TempDir()
 	// Also poison probes that accidentally inherit the test process env.
-	t.Setenv("HERDR_SOHO_FAKECLI_CONFIG", bin)
+	t.Setenv("SOHO_FAKECLI_CONFIG", bin)
 	var records []string
 	var custom string
 	for _, name := range []string{"node", "bun", "custom-node"} {
@@ -43,13 +43,13 @@ func hostileRuntimeEnv(t *testing.T, override string) (platform.Env, []string) {
 		}
 	}
 	env := platform.Env{
-		"PATH":                      bin,
-		"PATHEXT":                   ".EXE;.CMD;.BAT;.COM",
-		"HERDR_SOHO_FAKECLI_CONFIG": bin,
-		"HERDR_SOHO_SKILL_DIR":      "/skill",
-		"HOME":                      t.TempDir(),
-		"XDG_CONFIG_HOME":           t.TempDir(),
-		"USERPROFILE":               t.TempDir(),
+		"PATH":                 bin,
+		"PATHEXT":              ".EXE;.CMD;.BAT;.COM",
+		"SOHO_FAKECLI_CONFIG":  bin,
+		"HERDR_SOHO_SKILL_DIR": "/skill",
+		"HOME":                 t.TempDir(),
+		"XDG_CONFIG_HOME":      t.TempDir(),
+		"USERPROFILE":          t.TempDir(),
 	}
 	if runtime.GOOS == "windows" {
 		env["SystemRoot"] = os.Getenv("SystemRoot")
@@ -201,12 +201,12 @@ func TestNowriteAndLegacyEnv(t *testing.T) {
 	var errOut bytes.Buffer
 	oldErr := platform.Stderr
 	platform.Stderr = &errOut
-	code := Run([]string{"kinds"}, platform.Env{"HERDR_SOHO_NOWRITE": "1", "HERDR_AGENTS_SOCKET_PATH": "legacy"})
+	code := Run([]string{"kinds"}, platform.Env{"HERDR_SOHO_NOWRITE": "1", "HERDR_SOHO_SOCKET_PATH": "legacy"})
 	platform.Stderr = oldErr
-	if code != 2 || !strings.Contains(errOut.String(), "HERDR_SOHO_NOWRITE=1 is read-only") || !strings.Contains(errOut.String(), "rejected: kinds") {
+	if code != 2 || !strings.Contains(errOut.String(), "SOHO_NOWRITE=1 is read-only") || !strings.Contains(errOut.String(), "rejected: kinds") {
 		t.Fatalf("code=%d err=%q", code, errOut.String())
 	}
-	if got := applyLegacyForTest(platform.Env{"HERDR_AGENTS_SOCKET_PATH": "legacy"}); got != "legacy" {
+	if got := applyLegacyForTest(platform.Env{"HERDR_SOHO_SOCKET_PATH": "legacy"}); got != "legacy" {
 		t.Fatalf("legacy mapped to %q", got)
 	}
 	for _, args := range [][]string{{"doctor", "--fix"}, {"roster", "extra"}} {
@@ -222,14 +222,14 @@ func TestNowriteAndLegacyEnv(t *testing.T) {
 	var stderr bytes.Buffer
 	oldErr = platform.Stderr
 	platform.Stderr = &stderr
-	got := Run([]string{"kinds"}, platform.Env{"HERDR_AGENTS_NOWRITE": "1"})
+	got := Run([]string{"kinds"}, platform.Env{"HERDR_SOHO_NOWRITE": "1"})
 	platform.Stderr = oldErr
-	if got != 2 || !strings.Contains(stderr.String(), "HERDR_SOHO_NOWRITE=1") {
+	if got != 2 || !strings.Contains(stderr.String(), "SOHO_NOWRITE=1") {
 		t.Errorf("legacy NOWRITE code=%d stderr=%q", got, stderr.String())
 	}
 }
 
 func applyLegacyForTest(env platform.Env) string {
 	applyLegacyEnv(env)
-	return env.Get("HERDR_SOHO_SOCKET_PATH")
+	return env.Get("SOHO_SOCKET_PATH")
 }

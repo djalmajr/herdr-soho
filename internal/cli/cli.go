@@ -147,7 +147,7 @@ func Run(args []string, env platform.Env) (code int) {
 		userSel = sel
 	}
 	var commandConfig *core.Config
-	readOnlyRejectedDoctor := command == "doctor" && decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && len(args) > 1
+	readOnlyRejectedDoctor := command == "doctor" && decisionEnv.Get("SOHO_NOWRITE") == "1" && len(args) > 1
 	if !readOnlyRejectedDoctor && (command == "config" || command == "session" || command == "roles" || command == "role" || command == "explain" || command == "layout-plan" || command == "regrid" || command == "promote" || command == "tab-label" || command == "stats" || command == "metrics" || command == "collect" || command == "setup" || command == "release" || command == "doctor" || command == "init" || command == "spawn" || command == "dispatch" || command == "run" || command == "lint" || command == "wait" || command == "status") {
 		ctx := core.LoadConfigFor(decisionEnv, commandCwd, userSel)
 		configCtx = &ctx
@@ -163,10 +163,10 @@ func Run(args []string, env platform.Env) (code int) {
 	// A writing job subcommand under NOWRITE dies with the job-specific
 	// message before the generic refusal; the five read subcommands (and
 	// their flags) pass through nowriteReadInvocation below.
-	if decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && command == "job" && len(args) > 1 && !nowriteJobRead(args[1:]) {
-		platform.Die("HERDR_SOHO_NOWRITE=1 is read-only: job "+args[1]+" writes; only job status, wait, events, collect and list run", 2)
+	if decisionEnv.Get("SOHO_NOWRITE") == "1" && command == "job" && len(args) > 1 && !nowriteJobRead(args[1:]) {
+		platform.Die("SOHO_NOWRITE=1 is read-only: job "+args[1]+" writes; only job status, wait, events, collect and list run", 2)
 	}
-	if decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && !nowriteReadInvocation(args) {
+	if decisionEnv.Get("SOHO_NOWRITE") == "1" && !nowriteReadInvocation(args) {
 		shown, extra := command, ""
 		if command == "" {
 			shown = "(none)"
@@ -178,7 +178,7 @@ func Run(args []string, env platform.Env) (code int) {
 			}
 			extra = fmt.Sprintf(" (%d extra %s not allowed)", count, noun)
 		}
-		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
+		platform.Die("herdr-soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset SOHO_NOWRITE to write", 2)
 	}
 	if command == "help" || command == "-h" || command == "--help" || command == "" {
 		_, _ = io.WriteString(platform.Stdout, usage)
@@ -373,7 +373,7 @@ func Run(args []string, env platform.Env) (code int) {
 }
 
 // nowriteReadInvocation decides, from the shape of the invocation alone, what
-// runs under HERDR_SOHO_NOWRITE=1: the exact doctor/roster (the plugin's
+// runs under SOHO_NOWRITE=1: the exact doctor/roster (the plugin's
 // actions, unchanged), the exact explain, config, roles and copies, friction
 // with only the read options, collect <agent> with its options, status with
 // agent names, and gc without --yes.

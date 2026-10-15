@@ -151,7 +151,7 @@ func CmdInit(ctx *core.Config, env platform.Env, cwd string) {
 
 func ProjectIsFirstRun(ctx *core.Config, env platform.Env, cwd string) bool {
 	root := platform.ProjectRoot(env, cwd)
-	file := filepath.Join(root, ".agents", "herdr-soho.conf")
+	file := filepath.Join(root, ".agents", "soho.conf")
 	if !isFile(file) {
 		file = core.LegacyProjectConfigPath(root)
 	}
@@ -172,8 +172,8 @@ var inlineComment = regexp.MustCompile(`[ \t]#.*$`)
 func isFile(p string) bool { st, e := os.Stat(p); return e == nil && st.Mode().IsRegular() }
 
 // entryScript is the native herdr-soho executable for the setup guidance
-// lines: the absolute HERDR_SOHO_BIN override or the currently running
-// binary (platform.LauncherPath), never the obsolete skill scripts launcher.
+// lines: the absolute SOHO_BIN override or the currently running binary
+// (platform.LauncherPath), never the obsolete skill scripts launcher.
 func entryScript(env platform.Env) string {
 	return platform.LauncherPath(env)
 }
@@ -201,7 +201,7 @@ func CmdDoctor(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	}
 	if fix {
 		doctorFix(where, panes, ctx, env, cwd)
-		if env.Get("HERDR_SOHO_LIB") == "1" {
+		if env.Get("SOHO_LIB") == "1" || env.Get("HERDR_SOHO_LIB") == "1" {
 			return
 		}
 		fresh := core.LoadConfig(env, cwd)
@@ -1087,9 +1087,9 @@ func checkSetup(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 		s.Ok("instruction block present in CLAUDE.local.md")
 	} else if tl || ll {
 		if ll || setupLocal {
-			s.Warning(fmt.Sprintf("legacy herdr-agents instruction block in CLAUDE.local.md: run '%s setup --local' to rename it in place (its text is kept)", entry))
+			s.Warning(fmt.Sprintf("an older instruction block in CLAUDE.local.md: run '%s setup --local' to rename it in place (its text is kept)", entry))
 		} else {
-			s.Warning(fmt.Sprintf("legacy herdr-agents instruction block in %s: run '%s setup' to rename it in place (its text is kept)", filepath.Base(target), entry))
+			s.Warning(fmt.Sprintf("an older instruction block in %s: run '%s setup' to rename it in place (its text is kept)", filepath.Base(target), entry))
 		}
 	} else if setupLocal {
 		s.Warning(fmt.Sprintf("no herdr-soho block in CLAUDE.local.md: run '%s setup --local' (writes the delegation rules between <!-- herdr-soho:start/end --> markers, kept unversioned)", entry))
@@ -1102,7 +1102,7 @@ func checkSetup(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 	if info, err := os.Lstat(claudeMd); err == nil && info.Mode().IsRegular() && claudeMd != target {
 		claudeRaw, _ := platform.ReadTextFile(claudeMd)
 		if strings.Contains(claudeRaw, setuptext.LegacySetupStart) && !strings.Contains(claudeRaw, setuptext.SetupStart) {
-			s.Warning(fmt.Sprintf("legacy herdr-agents instruction block in CLAUDE.md: run '%s setup --target CLAUDE.md' to rename it in place (its text is kept)", entry))
+			s.Warning(fmt.Sprintf("an older instruction block in CLAUDE.md: run '%s setup --target CLAUDE.md' to rename it in place (its text is kept)", entry))
 		}
 	}
 	settings := filepath.Join(root, ".claude", "settings.json")
@@ -1117,9 +1117,9 @@ func checkSetup(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 		}
 	} else if hook == "legacy" {
 		if ll || setupLocal {
-			s.Warning(fmt.Sprintf("legacy herdr-agents hooks in .claude/settings.json: run '%s setup --local' to replace them", entry))
+			s.Warning(fmt.Sprintf("an older version of the hooks in .claude/settings.json: run '%s setup --local' to replace them", entry))
 		} else {
-			s.Warning(fmt.Sprintf("legacy herdr-agents hooks in .claude/settings.json: run '%s setup' to replace them", entry))
+			s.Warning(fmt.Sprintf("an older version of the hooks in .claude/settings.json: run '%s setup' to replace them", entry))
 		}
 	} else if ln || setupLocal {
 		s.Warning(fmt.Sprintf("no herdr-soho hooks in .claude/settings.json: run '%s setup --local' (UserPromptSubmit reminder + SessionStart doctor)", entry))
@@ -1131,7 +1131,7 @@ func checkSetup(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 // settingsDoctorHook classifies the SessionStart hook the settings file
 // carries: "native" when the exact current native command is present,
 // "old" for the recognized previous herdr-soho shell command, "legacy" for
-// the exact pre-rename herdr-agents command, and "" for anything else.
+// the exact pre-rename legacy command, and "" for anything else.
 // Recognition is by exact command equality; a foreign command that merely
 // mentions herdr-soho is not a herdr-soho hook.
 func settingsDoctorHook(file string) string {

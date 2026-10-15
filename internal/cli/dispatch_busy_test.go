@@ -80,7 +80,7 @@ func newBusyDispatchFixture(t *testing.T) *busyDispatchFixture {
 		openReport: filepath.Join(state, "ws", "reports", "worker-20261003T100000.md"),
 		env: platform.Env{
 			"PATH":                             bin,
-			"HERDR_SOHO_FAKECLI_CONFIG":        bin,
+			"SOHO_FAKECLI_CONFIG":              bin,
 			"HERDR_ENV":                        "1",
 			"HERDR_SOHO_DIR":                   state,
 			"HERDR_WORKSPACE_ID":               "ws",

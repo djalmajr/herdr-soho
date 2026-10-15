@@ -95,8 +95,10 @@ func TestEnvPrintsTheSkillDirAndItsOrigin(t *testing.T) {
 	if dir == "" {
 		t.Fatal("the command fixture sets no HERDR_SOHO_SKILL_DIR")
 	}
+	// The fixture sets the legacy name; ApplyLegacyEnv copies it to
+	// SOHO_SKILL_DIR before Run, so the env line names the current variable.
 	out, stderr, code := runTM10Env(t, "", nil)
-	if code != 0 || stderr != "" || !strings.Contains(out, "\nskill dir: "+dir+" (HERDR_SOHO_SKILL_DIR)\n") {
+	if code != 0 || stderr != "" || !strings.Contains(out, "\nskill dir: "+dir+" (SOHO_SKILL_DIR)\n") {
 		t.Fatalf("code=%d out=%q err=%q", code, out, stderr)
 	}
 }

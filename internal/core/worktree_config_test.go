@@ -36,7 +36,7 @@ func linkedWorktreeRepo(t *testing.T) (platform.Env, string, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mainConf := filepath.Join(canonicalRepo, ".agents", "herdr-soho.conf")
+	mainConf := filepath.Join(canonicalRepo, ".agents", "soho.conf")
 	return env, canonicalRepo, canonicalWt, mainConf
 }
 
@@ -66,7 +66,7 @@ func TestA13LinkedWorktreeProjectConfig(t *testing.T) {
 		if err != nil || !strings.Contains(string(data), "max_workers=9") {
 			t.Fatalf("main checkout file = %q err=%v", data, err)
 		}
-		if _, err := os.Stat(filepath.Join(wt, ".agents", "herdr-soho.conf")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(wt, ".agents", "soho.conf")); !os.IsNotExist(err) {
 			t.Fatalf("config set created a file in the worktree: %v", err)
 		}
 		refreshed := LoadConfig(env, wt)
@@ -81,7 +81,7 @@ func TestA13LinkedWorktreeProjectConfig(t *testing.T) {
 	})
 	t.Run("file in both: the worktree's file wins in the worktree, the main file in the main checkout", func(t *testing.T) {
 		env, repo, wt, mainConf := linkedWorktreeRepo(t)
-		wtConf := filepath.Join(wt, ".agents", "herdr-soho.conf")
+		wtConf := filepath.Join(wt, ".agents", "soho.conf")
 		write(t, mainConf, "max_workers=7\n")
 		write(t, wtConf, "max_workers=5\n")
 		if got := ProjectConfigFileUsed(env, wt); got != wtConf {
@@ -121,7 +121,7 @@ func TestA13LinkedWorktreeProjectConfig(t *testing.T) {
 	})
 	t.Run("linked worktree falls back to the main checkout's legacy file", func(t *testing.T) {
 		env, _, wt, mainConf := linkedWorktreeRepo(t)
-		mainLegacy := strings.TrimSuffix(mainConf, "herdr-soho.conf") + "herdr-agents.conf"
+		mainLegacy := strings.TrimSuffix(mainConf, "soho.conf") + "herdr-soho.conf"
 		write(t, mainLegacy, "max_workers=11\n")
 		if got := ProjectConfigFileUsed(env, wt); got != mainLegacy {
 			t.Fatalf("project file used from the worktree = %q, want %q", got, mainLegacy)

@@ -816,7 +816,7 @@ func TestSend(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(project, ".agents"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(project, ".agents", "herdr-soho.conf"), []byte("inbound=off\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(project, ".agents", "soho.conf"), []byte("inbound=off\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		f := newFixtureAt(t, dir, []fakecli.Rule{{Argv: []string{"agent", "get", "w0test:p0a"}, Stdout: fmt.Sprintf(`{"result":{"agent":{"pane_id":"w0test:p0a","agent_status":"idle","cwd":%q,"workspace_id":""}}}`, project)}})
@@ -980,7 +980,7 @@ func TestSendAmendmentCases(t *testing.T) {
 			wantCode                       int
 		}{
 			{"sender-off-does-not-refuse", "HERDR_SOHO_INBOUND", "off", "", 0},
-			{"legacy-sender-off-does-not-refuse", "HERDR_AGENTS_INBOUND", "off", "", 0},
+			{"legacy-sender-off-does-not-refuse", "HERDR_SOHO_INBOUND", "off", "", 0},
 			{"target-project-off-wins", "HERDR_SOHO_INBOUND", "auto", "inbound=off\n", 18},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -997,7 +997,7 @@ func TestSendAmendmentCases(t *testing.T) {
 					if err := os.MkdirAll(configDir, 0o755); err != nil {
 						t.Fatal(err)
 					}
-					if err := os.WriteFile(filepath.Join(configDir, "herdr-soho.conf"), []byte(tc.policy), 0o600); err != nil {
+					if err := os.WriteFile(filepath.Join(configDir, "soho.conf"), []byte(tc.policy), 0o600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -1076,7 +1076,7 @@ func TestSendAmendmentCases(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, ".agents"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, ".agents", "herdr-soho.conf"), []byte("inbound=off\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, ".agents", "soho.conf"), []byte("inbound=off\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		oldCwd, err := os.Getwd()

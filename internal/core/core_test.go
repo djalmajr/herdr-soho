@@ -265,16 +265,16 @@ func TestLegacyEnvPrecedence(t *testing.T) {
 	// JS: "applyLegacyEnv: a non-empty HERDR_SOHO_* wins and nothing is copied"
 	// JS: "applyLegacyEnv: an empty HERDR_SOHO_* value is replaced; empty old values and other names are ignored"
 	env := platform.Env{
-		"HERDR_AGENTS_LAYOUT": "legacy", "HERDR_SOHO_LAYOUT": "current",
-		"HERDR_AGENTS_EMPTY": "", "HERDR_SOHO_EMPTY": "", "HERDR_AGENTSX_LAYOUT": "ignored",
+		"HERDR_SOHO_LAYOUT": "legacy", "SOHO_LAYOUT": "current",
+		"HERDR_SOHO_EMPTY": "", "SOHO_EMPTY": "", "HERDR_SOHOX_LAYOUT": "ignored",
 	}
 	copied := ApplyLegacyEnv(env)
-	if env.Get("HERDR_SOHO_LAYOUT") != "current" || env.Get("HERDR_SOHO_EMPTY") != "" || len(copied) != 0 {
+	if env.Get("SOHO_LAYOUT") != "current" || env.Get("SOHO_EMPTY") != "" || len(copied) != 0 {
 		t.Fatalf("non-empty new values should win: copied=%v env=%v", copied, env)
 	}
-	env["HERDR_SOHO_LAYOUT"] = ""
+	env["SOHO_LAYOUT"] = ""
 	copied = ApplyLegacyEnv(env)
-	if env.Get("HERDR_SOHO_LAYOUT") != "legacy" || len(copied) != 1 || copied[0] != "HERDR_AGENTS_LAYOUT" {
+	if env.Get("SOHO_LAYOUT") != "legacy" || len(copied) != 1 || copied[0] != "HERDR_SOHO_LAYOUT" {
 		t.Fatalf("empty new value should be replaced: copied=%v env=%v", copied, env)
 	}
 }
@@ -282,11 +282,11 @@ func TestLegacyEnvPrecedence(t *testing.T) {
 func TestLegacyEnvCopiedUsesUTF16Order(t *testing.T) {
 	// Mutation captured: byte sorting reverses the emoji and U+E000 variable names.
 	env := platform.Env{
-		"HERDR_AGENTS_\uE000": "private-use",
-		"HERDR_AGENTS_😀":      "emoji",
+		"HERDR_SOHO_\uE000": "private-use",
+		"HERDR_SOHO_😀":      "emoji",
 	}
 	got := ApplyLegacyEnv(env)
-	want := "HERDR_AGENTS_😀,HERDR_AGENTS_\uE000"
+	want := "HERDR_SOHO_😀,HERDR_SOHO_\uE000"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("ApplyLegacyEnv() copied = %q, want %q", strings.Join(got, ","), want)
 	}
@@ -295,33 +295,33 @@ func TestLegacyEnvCopiedUsesUTF16Order(t *testing.T) {
 func TestLegacyEnvCopiedWarningsRemainObservable(t *testing.T) {
 	// Mutation captured: forgetting the copied-variable list drops the compatibility warning from later doctor output.
 	env, cwd := fixture(t)
-	env["HERDR_AGENTS_LAYOUT"] = "columns"
+	env["HERDR_SOHO_LAYOUT"] = "columns"
 	ApplyLegacyEnv(env)
 	warnings := strings.Join(LegacyDoctorWarnings(env, cwd, platform.Current()), "\n")
-	if !strings.Contains(warnings, "legacy environment variable HERDR_AGENTS_LAYOUT is read as HERDR_SOHO_LAYOUT; rename it") {
+	if !strings.Contains(warnings, "legacy environment variable HERDR_SOHO_LAYOUT is read as SOHO_LAYOUT; rename it") {
 		t.Fatalf("legacy env warning missing: %q", warnings)
 	}
 }
 
 func TestLegacyPathAndDefaultStateSelection(t *testing.T) {
 	// JS: "legacy config paths: the old directory and file names next to the new ones"
-	// JS: "defaultStateDirName: .herdr-agents only while .herdr-soho is absent and .herdr-agents is a directory"
+	// JS: "defaultStateDirName: .herdr-soho only while .soho is absent and .herdr-soho is a directory"
 	env, cwd := fixture(t)
 	root := platform.ProjectRoot(env, cwd)
-	legacy := filepath.Join(root, ".herdr-agents")
+	legacy := filepath.Join(root, ".herdr-soho")
 	if err := os.MkdirAll(legacy, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if got := DefaultStateDirName(root); got != ".herdr-agents" {
+	if got := DefaultStateDirName(root); got != ".herdr-soho" {
 		t.Fatalf("legacy default = %q", got)
 	}
-	if err := os.MkdirAll(filepath.Join(root, ".herdr-soho"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".soho"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if got := DefaultStateDirName(root); got != ".herdr-soho" {
+	if got := DefaultStateDirName(root); got != ".soho" {
 		t.Fatalf("new default = %q", got)
 	}
-	if got := LegacyProjectConfigPath(root); got != filepath.Join(root, ".agents", "herdr-agents.conf") {
+	if got := LegacyProjectConfigPath(root); got != filepath.Join(root, ".agents", "herdr-soho.conf") {
 		t.Fatalf("legacy project config = %q", got)
 	}
 	if got := LegacyStatePath(root); got != legacy {
@@ -435,19 +435,25 @@ func TestEffectiveConfigFilePrefersNewThenLegacy(t *testing.T) {
 }
 
 func TestLegacyEnvironmentAndMigration(t *testing.T) {
-	// JS: "applyLegacyEnv: a lone HERDR_AGENTS_* is copied, the old name stays, and the list is remembered"
+	// JS: "applyLegacyEnv: a lone HERDR_SOHO_* is copied, the old name stays, and the list is remembered"
 	// JS: "applyLegacyEnv: a non-empty HERDR_SOHO_* wins and nothing is copied"
 	// JS: "migrateLegacyConfigFile: the user and project new paths copy byte for byte with the legacy mode"
 	env, cwd := fixture(t)
-	env["HERDR_AGENTS_LAYOUT"] = "legacy"
-	env["HERDR_SOHO_LAYOUT"] = ""
+	env["HERDR_SOHO_LAYOUT"] = "legacy"
+	env["SOHO_LAYOUT"] = ""
 	copied := ApplyLegacyEnv(env)
-	if env.Get("HERDR_SOHO_LAYOUT") != "legacy" || env.Get("HERDR_AGENTS_LAYOUT") != "legacy" || len(copied) != 1 {
+	found := false
+	for _, name := range copied {
+		if name == "HERDR_SOHO_LAYOUT" {
+			found = true
+		}
+	}
+	if env.Get("SOHO_LAYOUT") != "legacy" || env.Get("HERDR_SOHO_LAYOUT") != "legacy" || !found {
 		t.Fatalf("legacy env result: %#v copied=%v", env, copied)
 	}
 	root := platform.ProjectRoot(env, cwd)
 	oldPath := LegacyProjectConfigPath(root)
-	newPath := filepath.Join(root, ".agents", "herdr-soho.conf")
+	newPath := filepath.Join(root, ".agents", "soho.conf")
 	write(t, oldPath, "# legacy\nlayout=split\n")
 	if err := os.Chmod(oldPath, 0o640); err != nil {
 		t.Fatal(err)
@@ -532,7 +538,7 @@ func TestSessionPathUsesHerdrFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	env["PATH"] = bin + string(os.PathListSeparator) + env.Get("PATH")
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+	env["SOHO_FAKECLI_CONFIG"] = bin
 	ctx := LoadConfig(env, cwd)
 	want := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws-from-herdr", "session.conf")
 	if got := SessionConfPath(&ctx, env, cwd); got != want {
@@ -561,8 +567,8 @@ func TestConfigOutputUsesEffectiveStateAndUTF16Width(t *testing.T) {
 	delete(env, "HERDR_SOHO_DIR")
 	env["HERDR_SOHO_ARGS_CODEX"] = "-c a=b"
 	env["HERDR_SOHO_EFFORT_XHIGH"] = ""
-	write(t, filepath.Join(cwd, ".agents", "herdr-soho.conf"), "model.codex.worker=😀\n")
-	if err := os.MkdirAll(filepath.Join(cwd, ".herdr-agents"), 0o700); err != nil {
+	write(t, filepath.Join(cwd, ".agents", "soho.conf"), "model.codex.worker=😀\n")
+	if err := os.MkdirAll(filepath.Join(cwd, ".herdr-soho"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	ctx := LoadConfig(env, cwd)
@@ -571,7 +577,7 @@ func TestConfigOutputUsesEffectiveStateAndUTF16Width(t *testing.T) {
 	if !strings.Contains(out, wantValueRow) {
 		t.Fatalf("astral config row missing %q:\n%s", wantValueRow, out)
 	}
-	if !strings.Contains(out, "state_dir          .herdr-agents                  defaults") {
+	if !strings.Contains(out, "state_dir          .herdr-soho                    defaults") {
 		t.Fatalf("legacy-aware state_dir row missing:\n%s", out)
 	}
 	if !strings.Contains(out, "args.codex") || strings.Contains(out, "effort.xhigh") {
@@ -594,15 +600,15 @@ func TestStateRootGitignoreSideEffect(t *testing.T) {
 		env, cwd := fixture(t)
 		env["HERDR_SOHO_DIR"] = ""
 		ctx := LoadConfig(env, cwd)
-		want := filepath.Join(platform.StateProjectRoot(env, cwd), ".herdr-soho")
+		want := filepath.Join(platform.StateProjectRoot(env, cwd), ".soho")
 		if got := StateRoot(&ctx, env, cwd); got != want {
 			t.Fatalf("StateRoot()=%q want %q", got, want)
 		}
-		if got, err := os.ReadFile(filepath.Join(cwd, ".gitignore")); err != nil || string(got) != ".herdr-soho/\n" {
+		if got, err := os.ReadFile(filepath.Join(cwd, ".gitignore")); err != nil || string(got) != ".soho/\n" {
 			t.Fatalf("gitignore=%q err=%v", got, err)
 		}
 		StateRoot(&ctx, env, cwd)
-		if got, _ := os.ReadFile(filepath.Join(cwd, ".gitignore")); string(got) != ".herdr-soho/\n" {
+		if got, _ := os.ReadFile(filepath.Join(cwd, ".gitignore")); string(got) != ".soho/\n" {
 			t.Fatalf("duplicate gitignore entry: %q", got)
 		}
 	})
@@ -625,7 +631,7 @@ func TestStateRootGitignoreSideEffect(t *testing.T) {
 			t.Fatal("NOWRITE=0 was treated as read-only")
 		}
 		StateRoot(&ctx, env, cwd)
-		if got, err := os.ReadFile(filepath.Join(cwd, ".gitignore")); err != nil || string(got) != ".herdr-soho/\n" {
+		if got, err := os.ReadFile(filepath.Join(cwd, ".gitignore")); err != nil || string(got) != ".soho/\n" {
 			t.Fatalf("NOWRITE=0 ignore entry=%q err=%v", got, err)
 		}
 	})

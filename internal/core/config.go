@@ -161,7 +161,7 @@ func projectConfigProblem(env platform.Env, cwd string) *ConfigLayer {
 			continue
 		}
 		seen[root] = true
-		for _, file := range []string{filepath.Join(root, ".agents", "herdr-soho.conf"), LegacyProjectConfigPath(root)} {
+		for _, file := range []string{filepath.Join(root, ".agents", "soho.conf"), LegacyProjectConfigPath(root)} {
 			info, err := os.Lstat(file)
 			if os.IsNotExist(err) {
 				continue
@@ -295,6 +295,9 @@ func trimJSWhitespace(value string) string {
 }
 
 func Cfg(ctx *Config, key, fallback string, env platform.Env) string {
+	if value := env.Get("SOHO_" + strings.ToUpper(key)); value != "" {
+		return value
+	}
 	if value := env.Get("HERDR_SOHO_" + strings.ToUpper(key)); value != "" {
 		return value
 	}
@@ -305,7 +308,7 @@ func Cfg(ctx *Config, key, fallback string, env platform.Env) string {
 }
 
 func CfgSource(ctx *Config, key string, env platform.Env) string {
-	if env.Get("HERDR_SOHO_"+strings.ToUpper(key)) != "" {
+	if env.Get("SOHO_"+strings.ToUpper(key)) != "" || env.Get("HERDR_SOHO_"+strings.ToUpper(key)) != "" {
 		return "env"
 	}
 	if entry, ok := ctx.Entries[key]; ok {
@@ -461,9 +464,11 @@ func ContextWindowEntries(ctx *Config, env platform.Env) map[string]ConfigEntry 
 			kinds[strings.TrimPrefix(key, "context_window_")] = true
 		}
 	}
-	for name := range env {
-		if strings.HasPrefix(name, "HERDR_SOHO_CONTEXT_WINDOW_") {
-			kinds[strings.ToLower(NormalizeKey(strings.TrimPrefix(name, "HERDR_SOHO_CONTEXT_WINDOW_")))] = true
+	for _, prefix := range []string{"SOHO_CONTEXT_WINDOW_", "HERDR_SOHO_CONTEXT_WINDOW_"} {
+		for name := range env {
+			if strings.HasPrefix(name, prefix) {
+				kinds[strings.ToLower(NormalizeKey(strings.TrimPrefix(name, prefix)))] = true
+			}
 		}
 	}
 	out := make(map[string]ConfigEntry, len(kinds))
@@ -477,20 +482,20 @@ func ContextWindowEntries(ctx *Config, env platform.Env) map[string]ConfigEntry 
 }
 
 // ProjectConfigFileUsed returns the file the project layer reads for cwd: the
-// checkout's effective config (new, else legacy) when it exists, or, when
-// cwd is a linked worktree without one, the main checkout's (the
-// StateProjectRoot root's) effective config; "" when no project config
+// checkout's effective config (new, else the legacy herdr-soho one) when it
+// exists, or, when cwd is a linked worktree without one, the main checkout's
+// (the StateProjectRoot root's) effective config; "" when no project config
 // exists, so the layer contributes nothing.
 func ProjectConfigFileUsed(env platform.Env, cwd string) string {
 	root := platform.ProjectRoot(env, cwd)
-	if file := EffectiveConfigFile(filepath.Join(root, ".agents", "herdr-soho.conf"), LegacyProjectConfigPath(root)); isFile(file) {
+	if file := EffectiveConfigFile(filepath.Join(root, ".agents", "soho.conf"), LegacyProjectConfigPath(root)); isFile(file) {
 		return file
 	}
 	stateRoot := platform.StateProjectRoot(env, cwd)
 	if stateRoot == root {
 		return ""
 	}
-	main := EffectiveConfigFile(filepath.Join(stateRoot, ".agents", "herdr-soho.conf"), LegacyProjectConfigPath(stateRoot))
+	main := EffectiveConfigFile(filepath.Join(stateRoot, ".agents", "soho.conf"), LegacyProjectConfigPath(stateRoot))
 	if isFile(main) {
 		return main
 	}
@@ -502,7 +507,7 @@ func ConfigFileFor(where string, env platform.Env, cwd string) string {
 		return platform.UserConfigPath(platform.Current(), env)
 	}
 	root := platform.ProjectRoot(env, cwd)
-	newProject := filepath.Join(root, ".agents", "herdr-soho.conf")
+	newProject := filepath.Join(root, ".agents", "soho.conf")
 	if isFile(newProject) || isFile(LegacyProjectConfigPath(root)) {
 		return newProject
 	}
@@ -510,12 +515,15 @@ func ConfigFileFor(where string, env platform.Env, cwd string) string {
 	if stateRoot == root {
 		return newProject
 	}
-	return EffectiveConfigFile(filepath.Join(stateRoot, ".agents", "herdr-soho.conf"), LegacyProjectConfigPath(stateRoot))
+	return EffectiveConfigFile(filepath.Join(stateRoot, ".agents", "soho.conf"), LegacyProjectConfigPath(stateRoot))
 }
 
 func StateRootPath(ctx *Config, env platform.Env, cwd string) string {
 	root := platform.StateProjectRoot(env, cwd)
-	dir := env.Get("HERDR_SOHO_DIR")
+	dir := env.Get("SOHO_DIR")
+	if dir == "" {
+		dir = env.Get("HERDR_SOHO_DIR")
+	}
 	if dir == "" {
 		dir = StateDirSetting(ctx, env, cwd)
 	}
@@ -539,6 +547,9 @@ func SessionStateRootPath(env platform.Env, cwd string) string {
 }
 
 func StateDirSetting(ctx *Config, env platform.Env, cwd string) string {
+	if value := env.Get("SOHO_STATE_DIR"); value != "" {
+		return value
+	}
 	if value := env.Get("HERDR_SOHO_STATE_DIR"); value != "" {
 		return value
 	}
@@ -548,7 +559,12 @@ func StateDirSetting(ctx *Config, env platform.Env, cwd string) string {
 	return DefaultStateDirName(platform.StateProjectRoot(env, cwd))
 }
 
-func Nowrite(env platform.Env) bool { return env.Get("HERDR_SOHO_NOWRITE") == "1" }
+// Nowrite reads the read-only gate by both names: the current SOHO_NOWRITE
+// and the legacy HERDR_SOHO_NOWRITE (run copies the legacy name to the
+// current one before the commands, so the CLI surface sees one value).
+func Nowrite(env platform.Env) bool {
+	return env.Get("SOHO_NOWRITE") == "1" || env.Get("HERDR_SOHO_NOWRITE") == "1"
+}
 
 func RelativeStatePath(root, statePath string) string {
 	rel, err := filepath.Rel(root, statePath)
@@ -837,13 +853,15 @@ func CmdConfig(ctx *Config, env platform.Env, cwd string) {
 			dotted[key] = true
 		}
 	}
-	for name, value := range env {
-		if !strings.HasPrefix(name, "HERDR_SOHO_") || value == "" {
-			continue
-		}
-		key := strings.ToLower(NormalizeKey(strings.TrimPrefix(name, "HERDR_SOHO_")))
-		if isDottedNormalizedKey(key) {
-			dotted[key] = true
+	for _, prefix := range []string{"SOHO_", "HERDR_SOHO_"} {
+		for name, value := range env {
+			if !strings.HasPrefix(name, prefix) || value == "" {
+				continue
+			}
+			key := strings.ToLower(NormalizeKey(strings.TrimPrefix(name, prefix)))
+			if isDottedNormalizedKey(key) {
+				dotted[key] = true
+			}
 		}
 	}
 	keys := make([]string, 0, len(dotted))
@@ -877,7 +895,7 @@ func CmdConfig(ctx *Config, env platform.Env, cwd string) {
 	lines = append(lines, "user file:    "+userFile+legacy)
 	projectFile := ProjectConfigFileUsed(env, cwd)
 	if projectFile == "" {
-		projectFile = filepath.Join(platform.ProjectRoot(env, cwd), ".agents", "herdr-soho.conf")
+		projectFile = filepath.Join(platform.ProjectRoot(env, cwd), ".agents", "soho.conf")
 	}
 	legacy = ""
 	if projectFile == LegacyProjectConfigPath(platform.ProjectRoot(env, cwd)) || projectFile == LegacyProjectConfigPath(platform.StateProjectRoot(env, cwd)) {

@@ -8,7 +8,7 @@ import (
 
 // UserSelection is an explicit choice of the user configuration, handed
 // from the job supervisor to the commands it runs: Base is the directory
-// that holds herdr-soho/config and the legacy herdr-agents/config, and Home
+// that holds soho/config and the legacy herdr-soho/config, and Home
 // is the directory a home-relative job_repos_root expands from. The zero
 // value selects exactly what the environment selects. A selection never
 // changes the environment: the generic selectors stay as they are for
@@ -27,7 +27,7 @@ func (s UserSelection) IsZero() bool { return s.Base == "" && s.Home == "" }
 // base on every platform, so a base fixes both).
 func UserConfigFiles(platformName string, env platform.Env, sel UserSelection) (string, string) {
 	if sel.Base != "" {
-		return filepath.Join(sel.Base, "herdr-soho", "config"), filepath.Join(sel.Base, "herdr-agents", "config")
+		return filepath.Join(sel.Base, "soho", "config"), filepath.Join(sel.Base, "herdr-soho", "config")
 	}
 	return platform.UserConfigPath(platformName, env), LegacyUserConfigPath(platformName, env)
 }

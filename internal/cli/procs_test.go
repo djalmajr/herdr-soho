@@ -67,7 +67,7 @@ func runProcsHelperRole(role, childExe, kidFile string) (code int) {
 		items := os.Environ()
 		out := items[:0]
 		for _, item := range items {
-			if strings.HasPrefix(item, "HERDR_SOHO_FAKECLI_CONFIG=") {
+			if strings.HasPrefix(item, "SOHO_FAKECLI_CONFIG=") {
 				continue
 			}
 			out = append(out, item)
@@ -141,7 +141,7 @@ func helperExe(t *testing.T, dir, name string) string {
 		// bare name and may already have written name.json by the time a
 		// failed link returns (dir/name.exe itself does not exist then);
 		// both are harmless — spawnHelper and the tree role strip
-		// HERDR_SOHO_FAKECLI_CONFIG from the re-execution, so the
+		// SOHO_FAKECLI_CONFIG from the re-execution, so the
 		// fixture never dispatches as the fake.
 		exe, err := fakecli.Install(t, dir, name, nil)
 		if err != nil {
@@ -190,7 +190,7 @@ func spawnHelper(t *testing.T, env platform.Env, exe string, role string, args .
 	out := items[:0]
 	for _, item := range items {
 		// The re-executed test binary must not dispatch as the fake CLI.
-		if strings.HasPrefix(item, "HERDR_SOHO_FAKECLI_CONFIG=") {
+		if strings.HasPrefix(item, "SOHO_FAKECLI_CONFIG=") {
 			continue
 		}
 		out = append(out, item)

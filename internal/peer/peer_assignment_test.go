@@ -70,7 +70,7 @@ func assignedFixture(t *testing.T, additional []fakecli.Rule) (*fixture, collabo
 
 func assignmentPrompts(t *testing.T, f *fixture) []fakecli.Call {
 	t.Helper()
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.env.Get("HERDR_SOHO_FAKECLI_CONFIG"), "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.env.Get("SOHO_FAKECLI_CONFIG"), "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestAssignedSendRefusesBeforePrompt(t *testing.T) {
 				f.env["HERDR_SOHO_WORKER_MESSAGES"] = "off"
 			}
 			if kind == "inbound" {
-				file := filepath.Join(f.dir, ".agents", "herdr-soho.conf")
+				file := filepath.Join(f.dir, ".agents", "soho.conf")
 				if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
 					t.Fatal(err)
 				}
@@ -202,7 +202,7 @@ func TestAssignedSendRefusesUnreadableFreshDestinationPolicy(t *testing.T) {
 	config := core.LoadConfig(f.env, f.dir)
 	// Origin was read successfully. A destination policy becomes unreadable
 	// before sending, so defaults cannot silently replace its inbound setting.
-	file := filepath.Join(f.env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+	file := filepath.Join(f.env.Get("XDG_CONFIG_HOME"), "soho", "config")
 	if err := os.MkdirAll(file, 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -268,7 +268,7 @@ func TestWaitRemainingCapacityCases(t *testing.T) {
 		}
 		f.bin = bin
 		f.env["PATH"] = bin
-		f.env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+		f.env["SOHO_FAKECLI_CONFIG"] = bin
 		f.env["HERDR_SOHO_PROVIDER_RETRIES"] = "1"
 		f.env["HERDR_SOHO_PROVIDER_RETRY_DELAY"] = "0"
 		return f, bin
@@ -497,7 +497,7 @@ func TestWaitRemainingTaskCases(t *testing.T) {
 		if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{Argv: []string{"pane", "report-metadata", "pane-1", "--source", "herdr-soho", "--title", "Task title ✓"}}}); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"PATH": bin, "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock")}
+		env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock")}
 		if err := core.MarkTaskDone(sd, "worker", env); err != nil {
 			t.Fatal(err)
 		}

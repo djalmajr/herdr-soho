@@ -267,7 +267,7 @@ func newQueuedProbeFixtureWithSequences(t *testing.T, state string, sequences []
 	}
 	// Re-executed race test binaries retain detection without the detector's
 	// one-second exit sleep, which would consume the real wait deadline.
-	f.env = platform.Env{"PATH": f.bin, "GORACE": "atexit_sleep_ms=0", "HERDR_SOHO_FAKECLI_CONFIG": f.bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock"), "HERDR_SOHO_WAIT_POLL_MS": "1"}
+	f.env = platform.Env{"PATH": f.bin, "GORACE": "atexit_sleep_ms=0", "SOHO_FAKECLI_CONFIG": f.bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock"), "HERDR_SOHO_WAIT_POLL_MS": "1"}
 	return f
 }
 

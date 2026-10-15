@@ -29,7 +29,7 @@ func cmdHook(args []string, env platform.Env, cwd string) int {
 		cwd = project
 	}
 	readEnv := env.Clone()
-	readEnv["HERDR_SOHO_NOWRITE"] = "1"
+	readEnv["SOHO_NOWRITE"] = "1"
 	out := platform.Stdout
 	var captured bytes.Buffer
 	platform.Stdout = &captured

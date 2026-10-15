@@ -1025,7 +1025,7 @@ func TestStatsAndCollectWithHerdrInPathDoNotPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(previousCwd) })
-	state := filepath.Join(project, ".herdr-soho", f.workspace)
+	state := filepath.Join(project, ".soho", f.workspace)
 	reports := filepath.Join(state, "reports")
 	if err := os.MkdirAll(reports, 0o700); err != nil {
 		t.Fatal(err)

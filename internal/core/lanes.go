@@ -64,6 +64,17 @@ func laneRolesName(key, prefix, suffix string) (string, bool) {
 	return key[len(prefix) : len(key)-len(suffix)], true
 }
 
+// laneEnvName extracts the lane name from a SOHO_LANE_<n>_ROLES or
+// HERDR_SOHO_LANE_<n>_ROLES environment variable name; "" when k is neither.
+func laneEnvName(k string) string {
+	for _, prefix := range []string{"SOHO_LANE_", "HERDR_SOHO_LANE_"} {
+		if name, ok := laneRolesName(k, prefix, "_ROLES"); ok {
+			return name
+		}
+	}
+	return ""
+}
+
 func PresetLaneNamesFor(p, mode string) []string {
 	if mode == "flex" {
 		return []string{"build", "review", "docs"}
@@ -149,7 +160,7 @@ func CustomLanesPresent(ctx *Config, env platform.Env) bool {
 	}
 	for k, v := range env {
 		if shellNameRE.MatchString(k) && v != "" {
-			if _, ok := laneRolesName(k, "HERDR_SOHO_LANE_", "_ROLES"); ok {
+			if laneEnvName(k) != "" {
 				return true
 			}
 		}
@@ -174,12 +185,8 @@ func LaneNames(ctx *Config, env platform.Env) []string {
 		if !shellNameRE.MatchString(k) || v == "" {
 			continue
 		}
-		name, ok := laneRolesName(k, "HERDR_SOHO_LANE_", "_ROLES")
-		if !ok {
-			continue
-		}
-		n := strings.ToLower(name)
-		if Cfg(ctx, LaneKey(n, "roles"), "", env) != "" {
+		n := strings.ToLower(laneEnvName(k))
+		if n != "" && Cfg(ctx, LaneKey(n, "roles"), "", env) != "" {
 			names[n] = true
 		}
 	}
@@ -230,12 +237,14 @@ func EffectiveLaneSignature(ctx *Config, env platform.Env) string {
 		}
 	}
 	for k, v := range env {
-		if !shellNameRE.MatchString(k) || v == "" || !strings.HasPrefix(k, "HERDR_SOHO_LANE_") || !strings.HasSuffix(k, "_ROLES") {
+		if !shellNameRE.MatchString(k) || v == "" {
 			continue
 		}
-		n := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(k, "HERDR_SOHO_LANE_"), "_ROLES"))
-		if x := Cfg(ctx, LaneKey(n, "roles"), "", env); x != "" {
-			vals[n] = x
+		n := strings.ToLower(laneEnvName(k))
+		if n != "" {
+			if x := Cfg(ctx, LaneKey(n, "roles"), "", env); x != "" {
+				vals[n] = x
+			}
 		}
 	}
 	keys := make([]string, 0, len(vals))

@@ -21,7 +21,7 @@ func TestConfigAtomicWriteFailure(t *testing.T) {
 		// Mutation captured: swallowing the atomic-write error returns success instead of exit 4.
 		root := t.TempDir()
 		env := platform.Env{"HERDR_SOHO_DIR": filepath.Join(root, ".herdr-soho")}
-		project := filepath.Join(root, ".agents", "herdr-soho.conf")
+		project := filepath.Join(root, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(project), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +58,7 @@ func TestConfigAtomicWriteFailure(t *testing.T) {
 			t.Fatalf("stdout after failed writes=%q", stdout.String())
 		}
 		entries, err := os.ReadDir(filepath.Dir(project))
-		if err != nil || len(entries) != 1 || entries[0].Name() != "herdr-soho.conf" {
+		if err != nil || len(entries) != 1 || entries[0].Name() != "soho.conf" {
 			t.Fatalf("config directory after failed writes=%v err=%v", entries, err)
 		}
 	})

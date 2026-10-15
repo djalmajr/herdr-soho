@@ -42,7 +42,7 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 				t.Fatalf("set %s code=%d stderr=%q", pair[0], code, stderr)
 			}
 		}
-		data, err := os.ReadFile(filepath.Join(cwd, ".agents", "herdr-soho.conf"))
+		data, err := os.ReadFile(filepath.Join(cwd, ".agents", "soho.conf"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -55,14 +55,14 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 	t.Run("config set writes the role/lane/args keys with dash-led values", func(t *testing.T) { // JS: "config set writes the role/lane/args keys with dash-led values"
 		env, cwd := tm9CommandFixture(t)
 		code, _, stderr := runIn(t, []string{"config", "set", "role.reviewer.args", "-c", "a=b"}, env, cwd)
-		data, err := os.ReadFile(filepath.Join(cwd, ".agents", "herdr-soho.conf"))
+		data, err := os.ReadFile(filepath.Join(cwd, ".agents", "soho.conf"))
 		if code != 0 || stderr != "" || err != nil || string(data) != "role.reviewer.args=-c a=b\n" {
 			t.Fatalf("code=%d stderr=%q data=%q err=%v", code, stderr, data, err)
 		}
 	})
 	t.Run("unknown key / invalid value / empty value refuse with rc 2 and leave the file", func(t *testing.T) { // JS: "unknown key / invalid value / empty value refuse with rc 2 and leave the file"
 		env, cwd := tm9CommandFixture(t)
-		path := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		path := filepath.Join(cwd, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +82,7 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 	})
 	t.Run("config set --user writes the user file, not the project file", func(t *testing.T) { // JS: "config set --user writes the user file, not the project file"
 		env, cwd := tm9CommandFixture(t)
-		project := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		project := filepath.Join(cwd, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(project), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +90,7 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 			t.Fatal(err)
 		}
 		code, _, stderr := runIn(t, []string{"config", "set", "reuse_workers", "off", "--user"}, env, cwd)
-		user := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		user := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config")
 		gotUser, userErr := os.ReadFile(user)
 		gotProject, projectErr := os.ReadFile(project)
 		if code != 0 || stderr != "" || userErr != nil || projectErr != nil || string(gotUser) != "reuse_workers=off\n" || string(gotProject) != "reuse_workers=on\n" {
@@ -101,7 +101,7 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 		env, cwd := tm9CommandFixture(t)
 		value := `ok\nrole.reviewer.kind=grok`
 		code, _, stderr := runIn(t, []string{"config", "set", "herd_label", value}, env, cwd)
-		data, err := os.ReadFile(filepath.Join(cwd, ".agents", "herdr-soho.conf"))
+		data, err := os.ReadFile(filepath.Join(cwd, ".agents", "soho.conf"))
 		if code != 0 || stderr != "" || err != nil || string(data) != "herd_label="+value+"\n" {
 			t.Fatalf("code=%d stderr=%q data=%q err=%v", code, stderr, data, err)
 		}
@@ -112,7 +112,7 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 		}
 		env, cwd := tm9CommandFixture(t)
 		code, _, stderr := runIn(t, []string{"config", "set", "max_workers", "5"}, env, cwd)
-		path := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		path := filepath.Join(cwd, ".agents", "soho.conf")
 		info, err := os.Stat(path)
 		if code != 0 || stderr != "" || err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatalf("code=%d stderr=%q mode=%v err=%v", code, stderr, info, err)
@@ -157,7 +157,7 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 				t.Fatalf("args=%v code=%d stderr=%q", args, code, stderr)
 			}
 		}
-		for _, path := range []string{filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf"), filepath.Join(cwd, ".agents", "herdr-soho.conf")} {
+		for _, path := range []string{filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf"), filepath.Join(cwd, ".agents", "soho.conf")} {
 			if _, err := os.Stat(path); err != nil {
 				t.Errorf("expected file %s: %v", path, err)
 			}
@@ -189,11 +189,11 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 				t.Fatalf("args=%v code=%d stderr=%q", args, code, stderr)
 			}
 		}
-		user, err := os.ReadFile(filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config"))
+		user, err := os.ReadFile(filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config"))
 		if err != nil || string(user) != "layout=columns\n" {
 			t.Fatalf("user=%q err=%v", user, err)
 		}
-		project, err := os.ReadFile(filepath.Join(cwd, ".agents", "herdr-soho.conf"))
+		project, err := os.ReadFile(filepath.Join(cwd, ".agents", "soho.conf"))
 		if err != nil || string(project) != "layout=split\n" {
 			t.Fatalf("project=%q err=%v", project, err)
 		}

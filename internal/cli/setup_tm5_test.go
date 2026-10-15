@@ -50,6 +50,10 @@ func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 	// the Go doctor reports that context as invalid (PLAN §9 A2), where the frozen
 	// JS golden still says inside Herdr.
 	for i := range want.Steps {
+		// The frozen golden predates the soho name layer; the exact-substitution
+		// name oracle adapts the expected output and error.
+		want.Steps[i].Out = testutil.RewriteSohoName(want.Steps[i].Out)
+		want.Steps[i].Err = testutil.RewriteSohoName(want.Steps[i].Err)
 		if strings.Join(want.Steps[i].Args, " ") == "doctor" {
 			out := want.Steps[i].Out
 			if !strings.Contains(out, "ok     inside Herdr (HERDR_ENV=1)\n") {
@@ -70,15 +74,15 @@ func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 	skillDir := setupTM5SkillDir(t)
 	env["USERPROFILE"] = env.Get("HOME")
 	env["HERDR_ENV"] = "1"
-	env["HERDR_SOHO_SKILL_DIR"] = skillDir
+	env["SOHO_SKILL_DIR"] = skillDir
 	fakeDir := t.TempDir()
 	if _, err := fakecli.Install(t, fakeDir, "herdr", []fakecli.Rule{{Argv: []string{"--version"}, Stdout: "herdr 9.9.9\n"}, {AnyArgs: true, Stdout: "herdr 9.9.9\n"}}); err != nil {
 		t.Fatal(err)
 	}
 	withHerdr := withFakeCLI(env, fakeDir)
-	withHerdr["HERDR_SOHO_SKILL_DIR"] = skillDir
+	withHerdr["SOHO_SKILL_DIR"] = skillDir
 	if seedConfig {
-		conf := filepath.Join(repo, ".agents", "herdr-soho.conf")
+		conf := filepath.Join(repo, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -178,9 +182,17 @@ func setupTM5CommandFixture(t *testing.T) (platform.Env, string) {
 			env[key] = value
 		}
 	}
+	for key := range env {
+		if key == "SOHO_FAKECLI_CONFIG" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToUpper(key), "HERDR_") || strings.HasPrefix(key, "SOHO_") {
+			delete(env, key)
+		}
+	}
 	env["HOME"], env["USERPROFILE"] = home, home
-	env["XDG_CONFIG_HOME"], env["HERDR_SOHO_DIR"] = conf, state
-	env["HERDR_SOHO_SKILL_DIR"] = setupTM5SkillDir(t)
+	env["XDG_CONFIG_HOME"], env["SOHO_DIR"] = conf, state
+	env["SOHO_SKILL_DIR"] = setupTM5SkillDir(t)
 	env["HERDR_WORKSPACE_ID"], env["PATH"] = "ws", ""
 	return env, repo
 }
@@ -227,7 +239,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = os.Chdir(old) })
-		conf := filepath.Join(repo, ".agents", "herdr-soho.conf")
+		conf := filepath.Join(repo, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -277,7 +289,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 		if err := os.WriteFile(local, []byte("<!-- herdr-soho:start -->\n<!-- herdr-soho:end -->\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		conf := filepath.Join(repo, ".agents", "herdr-soho.conf")
+		conf := filepath.Join(repo, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 			t.Fatal(err)
 		}

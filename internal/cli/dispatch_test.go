@@ -47,7 +47,7 @@ func TestDispatchNoWaitWritesPromptAndTaskState(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", calls); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_ENV": "1", "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho", "HERDR_SOHO_PROMPT_CHECK_SECONDS": "0", "HERDR_SOHO_PROMPT_SETTLE_SECONDS": "0", "HERDR_SOHO_BRIEF_LINT": "off", "TMPDIR": root}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_ENV": "1", "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho", "HERDR_SOHO_PROMPT_CHECK_SECONDS": "0", "HERDR_SOHO_PROMPT_SETTLE_SECONDS": "0", "HERDR_SOHO_BRIEF_LINT": "off", "TMPDIR": root}
 	// A race-instrumented fake child otherwise pauses for one second on
 	// exit; the harness sets only GORACE and leaves the rest of the env as built.
 	env["GORACE"] = fakecli.RaceOptions(env.List())

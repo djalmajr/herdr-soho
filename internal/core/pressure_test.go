@@ -36,8 +36,8 @@ func pressureFixture(t *testing.T) (ctx *core.Config, env platform.Env, stateDir
 	env["HERDR_WORKSPACE_ID"] = "ws"
 	// Explicit limits: CleanEnv ships the machine-state warning disabled
 	// (0/0), so the tests that expect a warning set their limits themselves.
-	env["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "15"
-	env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "80"
+	env["SOHO_PRESSURE_DISK_FREE_PERCENT"] = "15"
+	env["SOHO_PRESSURE_SWAP_PERCENT"] = "80"
 	ctx = &core.Config{Entries: map[string]core.ConfigEntry{}}
 	return ctx, env, filepath.Join(state, "ws")
 }
@@ -128,8 +128,8 @@ func TestPressureWarnsWithThePartsThatPassedTheirLimits(t *testing.T) {
 		})
 		t.Run("zero thresholds disable the parts", func(t *testing.T) {
 			ctx, env, _ := pressureFixture(t)
-			env["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "0"
-			env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "0"
+			env["SOHO_PRESSURE_DISK_FREE_PERCENT"] = "0"
+			env["SOHO_PRESSURE_SWAP_PERCENT"] = "0"
 			dfree, dtotal := diskPressure()
 			sused, stotal := swapPressure()
 			fakeMachine(t, dfree, dtotal, true, sused, stotal, true)
@@ -159,7 +159,7 @@ func TestPressureWarnsWithThePartsThatPassedTheirLimits(t *testing.T) {
 
 	t.Run("an invalid threshold uses the default with the project warning", func(t *testing.T) {
 		ctx, env, stateDir := pressureFixture(t)
-		env["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "abc"
+		env["SOHO_PRESSURE_DISK_FREE_PERCENT"] = "abc"
 		free, total := diskPressure()
 		fakeMachine(t, free, total, true, 0, 0, false)
 		stderr := captureStderr(t, func() { core.PressureWarn(ctx, env, "") })
@@ -173,7 +173,7 @@ func TestPressureWarnsWithThePartsThatPassedTheirLimits(t *testing.T) {
 
 func TestPressureNegativeThresholdUsesTheDefault(t *testing.T) {
 	ctx, env, stateDir := pressureFixture(t)
-	env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "-1"
+	env["SOHO_PRESSURE_SWAP_PERCENT"] = "-1"
 	gb := int64(1024 * 1024 * 1024)
 	fakeMachine(t, 50*gb, 100*gb, true, 96*gb, 100*gb, true)
 	stderr := captureStderr(t, func() { core.PressureWarn(ctx, env, "") })
@@ -339,8 +339,8 @@ func TestPressureSpawnWarnsAndKeepsTheStdoutJSON(t *testing.T) {
 		env["HERDR_ENV"] = "1"
 		env["HERDR_PANE_ID"] = "p1"
 		env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
-		env["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "15"
-		env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "80"
+		env["SOHO_PRESSURE_DISK_FREE_PERCENT"] = "15"
+		env["SOHO_PRESSURE_SWAP_PERCENT"] = "80"
 		fakeMachine(t, diskFree, diskTotal, true, 0, 0, false)
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 		oldOut, oldErr := platform.Stdout, platform.Stderr

@@ -141,7 +141,7 @@ func partialPublicFix(t *testing.T, withCollab bool) (*jobFix, string, string) {
 		t.Fatal(err)
 	}
 	if withCollab {
-		wsDir := filepath.Join(co, ".herdr-soho", "w1")
+		wsDir := filepath.Join(co, ".soho", "w1")
 		cwd := t.TempDir()
 		if err := os.WriteFile(filepath.Join(cwd, "code.go"), []byte("package main\n"), 0o666); err != nil {
 			t.Fatal(err)
@@ -205,7 +205,7 @@ func partialPublicFix(t *testing.T, withCollab bool) (*jobFix, string, string) {
 	if exit != 0 {
 		t.Fatalf("supervisor exit = %d, want 0", exit)
 	}
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 	return f, jobDir, id
 }
 

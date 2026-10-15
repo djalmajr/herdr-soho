@@ -74,7 +74,7 @@ func TestBuildGridCallOrder(t *testing.T) {
 				if got := buildGrid("t1", cells, env); !got.Ok || len(got.Changes) != 0 {
 					t.Fatalf("buildGrid result: %#v", got)
 				}
-				calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+				calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 				if err != nil && !os.IsNotExist(err) {
 					t.Fatal(err)
 				}
@@ -102,7 +102,7 @@ func TestBuildGridNoopAndStopsOnMoveFailure(t *testing.T) {
 		if got := buildGrid("t1", []string{"p1", "p2", "p3"}, env); got.Ok {
 			t.Fatalf("failed move buildGrid()=%#v, want failure", got)
 		}
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -196,10 +196,10 @@ func TestCmdRegridSplitPullsAndRebuilds(t *testing.T) {
 		}
 		stored, err := os.ReadFile(file)
 		if err != nil || len(stored) != 0 {
-			calls, _ := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+			calls, _ := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 			t.Fatalf("herd-tab=%q err=%v calls=%#v", stored, err, calls)
 		}
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -251,7 +251,7 @@ func TestCmdRegridTabLayoutKeepsAndRebuilds(t *testing.T) {
 		if err != nil || string(stored) != "t1\tsolo\tmanual\nt-new\therd\tmanual\n" {
 			t.Fatalf("herd-tab=%q err=%v", stored, err)
 		}
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -337,7 +337,7 @@ func TestRestoreFocusReturnsToSource(t *testing.T) {
 		env, _, _, _ := layoutFake(t, rules)
 		env["HERDR_PANE_ID"] = "source"
 		RestoreFocusIfStolen("source", "stolen", "right", env)
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -361,7 +361,7 @@ func TestRestoreFocusReturnsToSource(t *testing.T) {
 					}
 					env, _, _, _ := layoutFake(t, rules)
 					RestoreFocusIfStolen(tc.previous, tc.stolen, "right", env)
-					calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+					calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 					if err != nil && !os.IsNotExist(err) {
 						t.Fatal(err)
 					}
@@ -499,7 +499,7 @@ func TestAutomaticRegridSpawnSuccessIsSilent(t *testing.T) {
 		platform.Stdout, platform.Stderr = &out, &stderr
 		AutoRegrid(ctx, env, cwd, "spawn regrid warning")
 		platform.Stdout, platform.Stderr = oldOut, oldErr
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err != nil || out.Len() != 0 || stderr.Len() != 0 || !hasLayoutCallPrefix(calls, "tab", "create") {
 			t.Fatalf("stdout=%q stderr=%q calls=%#v err=%v", out.String(), stderr.String(), calls, err)
 		}

@@ -76,7 +76,7 @@ func warmWakeImage(t *testing.T, env platform.Env) {
 	// Point the warm-up child at its own config dir: the inherited config
 	// env would make it dispatch the test's rules and log to the test's
 	// call log.
-	warm["HERDR_SOHO_FAKECLI_CONFIG"] = dir
+	warm["SOHO_FAKECLI_CONFIG"] = dir
 	hook := WakeHook{Cmd: "wakehook", JobID: "job-1", Env: warm, Delays: []time.Duration{}}
 	if attempts := hook.Run(wakeEvent("question", nil)); attempts != 1 {
 		t.Fatalf("warm-up run: attempts=%d, want 1", attempts)

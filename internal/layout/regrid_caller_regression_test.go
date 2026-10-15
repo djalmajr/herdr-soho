@@ -17,7 +17,7 @@ import (
 // "pane move" call in the recorded calls.
 func movedPanesOf(t *testing.T, env platform.Env) []string {
 	t.Helper()
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func movedPanesOf(t *testing.T, env platform.Env) []string {
 
 func hasCall(t *testing.T, env platform.Env, args ...string) bool {
 	t.Helper()
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func hasCall(t *testing.T, env platform.Env, args ...string) bool {
 
 func countCalls(t *testing.T, env platform.Env, args ...string) int {
 	t.Helper()
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -785,7 +785,7 @@ func TestCmdRegridCallerInOwnHerdTabIsNotPulledBack(t *testing.T) {
 
 func readMoves(t *testing.T, env platform.Env) []fakecli.Call {
 	t.Helper()
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +800,7 @@ func readMoves(t *testing.T, env platform.Env) []fakecli.Call {
 
 func readCalls(t *testing.T, env platform.Env) []fakecli.Call {
 	t.Helper()
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

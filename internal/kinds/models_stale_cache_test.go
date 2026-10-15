@@ -55,7 +55,7 @@ func TestModelStaleCopy(t *testing.T) {
 		}
 		tmp := t.TempDir()
 		freshCopy(t, tmp, "grok", "grok-1\n") // stale: lacks grok-2
-		env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "TMPDIR": tmp, "HERDR_SOHO_FAKECLI_CONFIG": bin}
+		env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "TMPDIR": tmp, "SOHO_FAKECLI_CONFIG": bin}
 		var warns []string
 		got, err := ResolveModel("grok", "grok-2", "", env, func(m string) { warns = append(warns, m) })
 		if err != nil || got != "grok-2" {
@@ -80,7 +80,7 @@ func TestModelStaleCopy(t *testing.T) {
 		}
 		tmp := t.TempDir()
 		freshCopy(t, tmp, "grok", "grok-1\n")
-		env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "TMPDIR": tmp, "HERDR_SOHO_FAKECLI_CONFIG": bin}
+		env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "TMPDIR": tmp, "SOHO_FAKECLI_CONFIG": bin}
 		var warns []string
 		got, err := ResolveModel("grok", "grok-9", "", env, func(m string) { warns = append(warns, m) })
 		if err != nil || got != "grok-9" {

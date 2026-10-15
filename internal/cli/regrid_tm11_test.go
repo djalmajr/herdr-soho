@@ -55,7 +55,7 @@ func TestTM11RegridFailureParity(t *testing.T) {
 		if code != want.RC || out.String() != want.Out || normalizeParityError(stderr.String()) != want.Err {
 			t.Fatalf("code=%d want=%d stdout=%q want=%q stderr=%q want=%q", code, want.RC, out.String(), want.Out, normalizeParityError(stderr.String()), want.Err)
 		}
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err != nil {
 			t.Fatal(err)
 		}

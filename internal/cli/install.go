@@ -116,7 +116,7 @@ func cmdInstall(args []string, env platform.Env) int {
 // verifyInstalledVersion runs the just-installed binary's --version once
 // and returns its bounded first-line output. The destination's path and
 // native header are validated through the shared platform.LauncherPath
-// with HERDR_SOHO_BIN pointed at it before anything executes (a bad
+// with SOHO_BIN pointed at it before anything executes (a bad
 // path/header Dies 2). The child inherits the explicit env clone (never
 // the process environment), runs with no shell, a bounded timeout and
 // WaitDelay, and bounded captured output: both stdout and stderr go
@@ -125,7 +125,7 @@ func cmdInstall(args []string, env platform.Env) int {
 // timeout) propagate clearly; the verified binary is never deleted.
 func verifyInstalledVersion(dest string, env platform.Env) (string, error) {
 	childEnv := env.Clone()
-	childEnv["HERDR_SOHO_BIN"] = dest
+	childEnv["SOHO_BIN"] = dest
 	resolved := platform.LauncherPath(childEnv)
 	argv := make([]string, 0, len(childEnv))
 	for k, v := range childEnv {

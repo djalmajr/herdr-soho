@@ -44,7 +44,7 @@ func TestSendWorkerLookupFailureOrIncompleteRegistrationNeverBypassesGuard(t *te
 			if code != 2 {
 				t.Fatalf("unverified worker was allowed: %d", code)
 			}
-			calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+			calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -259,7 +259,7 @@ func TestHerdTabSplitUsesRootWhenLastPaneIDIsMissing(t *testing.T) {
 	if !got.Ok || got.Pane != "rootp" {
 		t.Fatalf("HerdTabSplit()=%+v, want rootp", got)
 	}
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -547,7 +547,7 @@ func TestHerdTabsChooseSecondTabAfterMigration(t *testing.T) {
 		func() {
 			defer func() {
 				if value := recover(); value != nil {
-					calls, _ := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+					calls, _ := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 					t.Fatalf("HerdTabPane panic=%v calls=%#v", value, calls)
 				}
 			}()

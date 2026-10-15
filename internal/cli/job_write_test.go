@@ -118,7 +118,7 @@ func TestJobClosePendingForceAndRepeat(t *testing.T) {
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
 	store := f.store(t, co)
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 	f.setStatus(t, co, "job-1", "done")
 	if _, err := store.Note("job-1", job.EventIn{Tipo: "decision", Resumo: "route it", Escopo: "global"}); err != nil {
 		t.Fatal(err)
@@ -313,7 +313,7 @@ func TestJobStartDryRun(t *testing.T) {
 	}
 
 	// Dry run writes no job state and creates no state root.
-	if _, err := os.Stat(filepath.Join(f.repos, "example-org", "example-repo", ".herdr-soho")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(f.repos, "example-org", "example-repo", ".soho")); !os.IsNotExist(err) {
 		t.Fatalf("dry run created a state root: %v", err)
 	}
 }
@@ -463,7 +463,7 @@ func TestJobNowriteWritingSubcommands(t *testing.T) {
 	tree := treeSnapshot(t, f.root)
 	for _, args := range cases {
 		code, out, errOut := f.runEnv(t, env, args...)
-		want := "herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: job " + args[0] + " writes; only job status, wait, events, collect and list run\n"
+		want := "herdr-soho: SOHO_NOWRITE=1 is read-only: job " + args[0] + " writes; only job status, wait, events, collect and list run\n"
 		if code != 2 || out != "" || errOut != want {
 			t.Fatalf("%v code=%d out=%q err=%q", args, code, out, errOut)
 		}
@@ -556,7 +556,7 @@ func TestJobCleanLeavesPendingJobAlone(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	state := filepath.Join(co, ".herdr-soho")
+	state := filepath.Join(co, ".soho")
 	store := f.store(t, co)
 	if _, err := store.Note("job-1", job.EventIn{Tipo: "decision", Resumo: "route it", Escopo: "global"}); err != nil {
 		t.Fatal(err)

@@ -69,7 +69,7 @@ func TestTM11RegridCommandParity(t *testing.T) {
 			if code != want.RC || out.String() != want.Out {
 				t.Fatalf("code=%d want=%d stdout=%q want=%q", code, want.RC, out.String(), want.Out)
 			}
-			calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+			calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 			if err != nil {
 				t.Fatal(err)
 			}

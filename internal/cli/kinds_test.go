@@ -20,7 +20,7 @@ func commandFakeEnv(t *testing.T, rules map[string][]fakecli.Rule) platform.Env 
 			t.Fatal(err)
 		}
 	}
-	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": t.TempDir()}
 	env["GORACE"] = fakecli.RaceOptions(env.List())
 	return env
 }

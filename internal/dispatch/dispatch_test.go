@@ -456,8 +456,8 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 			bin  string
 			want string
 		}{
-			{name: "missing binary", bin: filepath.Join(t.TempDir(), "missing"), want: "HERDR_SOHO_BIN is missing or not a regular file"},
-			{name: "relative binary", bin: "herdr-soho", want: "HERDR_SOHO_BIN must be an absolute path"},
+			{name: "missing binary", bin: filepath.Join(t.TempDir(), "missing"), want: "SOHO_BIN is missing or not a regular file"},
+			{name: "relative binary", bin: "herdr-soho", want: "SOHO_BIN must be an absolute path"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				var prompt string

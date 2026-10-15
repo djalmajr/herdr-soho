@@ -326,16 +326,19 @@ func inboundPolicy(targetCwd, targetWorkspace string, env platform.Env) string {
 
 func inboundConfiguration(targetCwd, targetWorkspace string, env platform.Env) (core.Config, platform.Env) {
 	policyEnv := env.Clone()
-	skillDir := env.Get("HERDR_SOHO_SKILL_DIR")
+	skillDir := env.Get("SOHO_SKILL_DIR")
+	if skillDir == "" {
+		skillDir = env.Get("HERDR_SOHO_SKILL_DIR")
+	}
 	for key := range policyEnv {
-		if strings.HasPrefix(key, "HERDR_SOHO_") || strings.HasPrefix(key, "HERDR_AGENTS_") {
+		if strings.HasPrefix(key, "SOHO_") || strings.HasPrefix(key, "HERDR_SOHO_") {
 			delete(policyEnv, key)
 		}
 	}
 	// This runtime locator is not a configuration value, but Go needs it to
 	// read the shared defaults file after the sender configuration is stripped.
 	if skillDir != "" {
-		policyEnv["HERDR_SOHO_SKILL_DIR"] = skillDir
+		policyEnv["SOHO_SKILL_DIR"] = skillDir
 	}
 	if targetWorkspace != "" {
 		policyEnv["HERDR_WORKSPACE_ID"] = targetWorkspace

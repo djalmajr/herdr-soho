@@ -383,7 +383,7 @@ func TestWaitTM4RemainingRetryAndApprovalCases(t *testing.T) {
 		}
 		failedEnv := failed.env.Clone()
 		failedEnv["PATH"] = failedBin
-		failedEnv["HERDR_SOHO_FAKECLI_CONFIG"] = failedBin
+		failedEnv["SOHO_FAKECLI_CONFIG"] = failedBin
 		failedEnv["HERDR_SOHO_AUTO_APPROVE"] = "on"
 		if TryAutoApprove(failed.sd, "worker", failed.ctx, failedEnv) {
 			t.Fatal("failed key send was reported as approved")
@@ -445,7 +445,7 @@ func TestWaitTM4ApprovalDialogHistoryCases(t *testing.T) {
 		f.bin = bin
 		env := f.env.Clone()
 		env["PATH"] = bin
-		env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+		env["SOHO_FAKECLI_CONFIG"] = bin
 		env["HERDR_SOHO_AUTO_APPROVE"] = "on"
 		f.env = env
 		return f

@@ -20,7 +20,7 @@ func TestTM10InitGoldenMirrors(t *testing.T) {
 	})
 	t.Run(`JS: "init: first_run false with a roster row and no config (comments and max_workers do not count)"`, func(t *testing.T) {
 		seed := func(repo, state string, roster string) {
-			conf := filepath.Join(repo, ".agents", "herdr-soho.conf")
+			conf := filepath.Join(repo, ".agents", "soho.conf")
 			if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 				t.Fatal(err)
 			}

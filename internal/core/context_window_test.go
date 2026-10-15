@@ -26,7 +26,7 @@ func TestContextWindowValueOk(t *testing.T) {
 
 func TestContextWindowKeyAndEnv(t *testing.T) {
 	env, cwd := fixture(t)
-	project := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+	project := filepath.Join(cwd, ".agents", "soho.conf")
 	write(t, project, "context_window.grok=256000\n")
 	ctx := LoadConfig(env, cwd)
 	if got := Cfg(&ctx, ContextWindowKey("grok"), "", env); got != "256000" {
@@ -45,9 +45,9 @@ func TestContextWindowKeyAndEnv(t *testing.T) {
 	}
 	// Legacy env spelling lands on the same key, like the other keys.
 	legacy := platform.Env{}
-	legacy["HERDR_AGENTS_CONTEXT_WINDOW_GROK"] = "500k"
+	legacy["HERDR_SOHO_CONTEXT_WINDOW_GROK"] = "500k"
 	ApplyLegacyEnv(legacy)
-	if got := legacy.Get("HERDR_SOHO_CONTEXT_WINDOW_GROK"); got != "500k" {
+	if got := legacy.Get("SOHO_CONTEXT_WINDOW_GROK"); got != "500k" {
 		t.Fatalf("legacy env=%q", got)
 	}
 }
@@ -80,7 +80,7 @@ func TestContextWindowConfigKeyOkAndDottedName(t *testing.T) {
 	if errOut != "" {
 		t.Fatalf("config set stderr=%q", errOut)
 	}
-	data, err := os.ReadFile(filepath.Join(cwd, ".agents", "herdr-soho.conf"))
+	data, err := os.ReadFile(filepath.Join(cwd, ".agents", "soho.conf"))
 	if err != nil || string(data) != "context_window.grok=500k\n" {
 		t.Fatalf("config file=%q err=%v", data, err)
 	}
@@ -88,7 +88,7 @@ func TestContextWindowConfigKeyOkAndDottedName(t *testing.T) {
 
 func TestConfigListsContextWindowLikeTheOtherDottedKeys(t *testing.T) {
 	env, cwd := fixture(t)
-	project := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+	project := filepath.Join(cwd, ".agents", "soho.conf")
 	write(t, project, "effort.grok=xhigh\ncontext_window.grok=500k\n")
 	ctx := LoadConfig(env, cwd)
 	out, _ := capture(t, func() { CmdConfig(&ctx, env, cwd) })

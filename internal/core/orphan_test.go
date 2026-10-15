@@ -46,7 +46,7 @@ func orphanFixture(t *testing.T, rosterRows, releasedRows []string, agentsJSON, 
 		t.Fatal(err)
 	}
 	env["PATH"] = bin
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+	env["SOHO_FAKECLI_CONFIG"] = bin
 	ctx := LoadConfig(env, cwd)
 	state := StateDir(&ctx, env, cwd)
 	roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\n"
@@ -160,7 +160,7 @@ func TestOrphansOfFailedPaneListClassifiesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	env["PATH"] = bin
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+	env["SOHO_FAKECLI_CONFIG"] = bin
 	ctx := LoadConfig(env, cwd)
 	state := StateDir(&ctx, env, cwd)
 	if err := os.WriteFile(filepath.Join(state, "released-panes.tsv"), []byte("# name\tpane\tkind\treleased\nreview\tws:p1\tgrok\t20261001T000000\n"), 0o600); err != nil {
@@ -206,7 +206,7 @@ func releasedPanesWriteFixture(t *testing.T, okPanes, gonePanes []string) (platf
 		t.Fatal(err)
 	}
 	env["PATH"] = bin
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+	env["SOHO_FAKECLI_CONFIG"] = bin
 	oldNow := platform.Now
 	platform.Now = func() time.Time { return time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC) }
 	t.Cleanup(func() { platform.Now = oldNow })

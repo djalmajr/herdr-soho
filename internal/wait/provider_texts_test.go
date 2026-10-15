@@ -28,7 +28,7 @@ func newProviderTextsFixture(t *testing.T, capacityText string) *queuedProbeFixt
 	}
 	f.bin = bin
 	f.env["PATH"] = bin
-	f.env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+	f.env["SOHO_FAKECLI_CONFIG"] = bin
 	f.env["HERDR_SOHO_PROVIDER_RETRIES"] = "1"
 	f.env["HERDR_SOHO_PROVIDER_RETRY_DELAY"] = "0"
 	if capacityText != "" {

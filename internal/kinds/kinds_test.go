@@ -22,7 +22,7 @@ func fakeEnv(t *testing.T, rules map[string][]fakecli.Rule) (platform.Env, strin
 			t.Fatal(err)
 		}
 	}
-	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "HERDR_SOHO_FAKECLI_CONFIG": bin}
+	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "SOHO_FAKECLI_CONFIG": bin}
 	return env, bin
 }
 func TestKindRules(t *testing.T) {

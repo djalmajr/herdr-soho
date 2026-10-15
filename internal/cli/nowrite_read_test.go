@@ -14,7 +14,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
 )
 
-// HERDR_SOHO_NOWRITE read contract (the plugin's reads): every accepted
+// SOHO_NOWRITE read contract (the plugin's reads): every accepted
 // invocation runs read-only — no file or directory in the project or the
 // state tree is created or changed (paths, sizes and mtimes), no friction
 // line is recorded, and a state dir that does not exist appears empty.
@@ -156,7 +156,7 @@ func nowriteTreeSnapshot(t *testing.T, root string) map[string]nowriteTreeEntry 
 	return snap
 }
 
-// runNowrite runs argv with HERDR_SOHO_NOWRITE=1 and proves the whole fixture
+// runNowrite runs argv with SOHO_NOWRITE=1 and proves the whole fixture
 // tree (paths, sizes, mtimes) is identical before and after.
 func (nr *nowriteReads) runNowrite(t *testing.T, argv ...string) (int, string, string) {
 	t.Helper()
@@ -165,7 +165,7 @@ func (nr *nowriteReads) runNowrite(t *testing.T, argv ...string) (int, string, s
 	for k, v := range nr.f.env {
 		env[k] = v
 	}
-	env["HERDR_SOHO_NOWRITE"] = "1"
+	env["SOHO_NOWRITE"] = "1"
 	code, out, errOut := nr.f.run(t, env, argv...)
 	after := nowriteTreeSnapshot(t, nr.f.root)
 	if !reflect.DeepEqual(before, after) {
@@ -180,7 +180,7 @@ func (nr *nowriteReads) runNowrite(t *testing.T, argv ...string) (int, string, s
 				changed = append(changed, path+" (removed)")
 			}
 		}
-		t.Fatalf("%v under HERDR_SOHO_NOWRITE=1 changed the tree: %v", argv, changed)
+		t.Fatalf("%v under SOHO_NOWRITE=1 changed the tree: %v", argv, changed)
 	}
 	return code, out, errOut
 }
@@ -275,8 +275,8 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 // command runs (nothing is written).
 func TestNowriteRejectsWritingInvocations(t *testing.T) {
 	nr := newNowriteReads(t, true)
-	const messagePrefix = "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "
-	const messageTail = " — unset HERDR_SOHO_NOWRITE to write\n"
+	const messagePrefix = "herdr-soho: herdr-soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "
+	const messageTail = " — unset SOHO_NOWRITE to write\n"
 	cases := []struct {
 		name     string
 		argv     []string
@@ -314,7 +314,7 @@ func TestNowriteRejectsWritingInvocations(t *testing.T) {
 }
 
 // TestNowriteAcceptsExactConfigAndRoles proves the exact config and the exact
-// roles run under HERDR_SOHO_NOWRITE=1 (exit 0, non-empty output) and write
+// roles run under SOHO_NOWRITE=1 (exit 0, non-empty output) and write
 // nothing: the whole fixture tree — project and user config tree included —
 // keeps the same paths, sizes and mtimes, starting from a project without a
 // state dir and without a .gitignore line; a project that has only the legacy
@@ -328,7 +328,7 @@ func TestNowriteAcceptsExactConfigAndRoles(t *testing.T) {
 		t.Run(flavor, func(t *testing.T) {
 			nr := newNowriteReads(t, false)
 			if legacy {
-				legacyConf := filepath.Join(nr.f.repo, ".agents", "herdr-agents.conf")
+				legacyConf := filepath.Join(nr.f.repo, ".agents", "herdr-soho.conf")
 				if err := os.MkdirAll(filepath.Dir(legacyConf), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -345,17 +345,17 @@ func TestNowriteAcceptsExactConfigAndRoles(t *testing.T) {
 					if out == "" {
 						t.Fatalf("empty stdout; err=%q", errOut)
 					}
-					if _, err := os.Stat(filepath.Join(nr.f.repo, ".herdr-soho")); !os.IsNotExist(err) {
-						t.Fatalf(".herdr-soho/ appeared in the project: %v", err)
+					if _, err := os.Stat(filepath.Join(nr.f.repo, ".soho")); !os.IsNotExist(err) {
+						t.Fatalf(".soho/ appeared in the project: %v", err)
 					}
 					if _, err := os.Stat(filepath.Join(nr.f.repo, ".gitignore")); !os.IsNotExist(err) {
 						t.Fatalf(".gitignore appeared in the project: %v", err)
 					}
-					if _, err := os.Stat(filepath.Join(nr.f.repo, ".agents", "herdr-soho.conf")); !os.IsNotExist(err) {
+					if _, err := os.Stat(filepath.Join(nr.f.repo, ".agents", "soho.conf")); !os.IsNotExist(err) {
 						t.Fatalf("the legacy config was migrated: %v", err)
 					}
 					if legacy {
-						legacyConf := filepath.Join(nr.f.repo, ".agents", "herdr-agents.conf")
+						legacyConf := filepath.Join(nr.f.repo, ".agents", "herdr-soho.conf")
 						data, err := os.ReadFile(legacyConf)
 						if err != nil || string(data) != "panes=4\n" {
 							t.Fatalf("legacy config changed: %q err=%v", data, err)
@@ -428,7 +428,7 @@ func TestGcShowsThePressureLine(t *testing.T) {
 			for k, v := range nr.f.env {
 				env[k] = v
 			}
-			env["HERDR_SOHO_NOWRITE"] = "1"
+			env["SOHO_NOWRITE"] = "1"
 			for k, v := range c.env {
 				env[k] = v
 			}
@@ -439,7 +439,7 @@ func TestGcShowsThePressureLine(t *testing.T) {
 				t.Fatalf("code=%d want 0; err=%q out=%q", code, errOut, out)
 			}
 			if !reflect.DeepEqual(before, after) {
-				t.Fatalf("gc under HERDR_SOHO_NOWRITE=1 changed the tree")
+				t.Fatalf("gc under SOHO_NOWRITE=1 changed the tree")
 			}
 			i := strings.IndexByte(out, '\n')
 			if i < 0 {
