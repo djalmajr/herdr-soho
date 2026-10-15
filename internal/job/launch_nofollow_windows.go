@@ -17,7 +17,7 @@ const fileFlagOpenReparsePoint = 0x00200000
 // the opened handle's own attributes, before any read or lock. No
 // FILE_FLAG_BACKUP_SEMANTICS is passed, so a directory does not open at
 // all, and a filesystem path names no pipe, so the open cannot block on
-// one. The sharing mode admits the other herdr-soho processes' handles.
+// one. The sharing mode admits the other soho processes' handles.
 // Read-only, or read-write when write is set. Not proven natively yet.
 func openNoFollow(path string, write bool) (*os.File, error) {
 	name, err := syscall.UTF16PtrFromString(path)

@@ -46,7 +46,7 @@ func TestTeam(t *testing.T) {
 		f := newTeamFix(t)
 		f.writeProject(t, "panes=4\nlane.review.roles=reviewer\n")
 		got := f.must(t, nil)
-		if got.Source != ".agents/herdr-soho.conf" || value(t, got, "lane.review.roles") != "reviewer" || value(t, got, "panes") != "4" {
+		if got.Source != ".agents/soho.conf" || value(t, got, "lane.review.roles") != "reviewer" || value(t, got, "panes") != "4" {
 			t.Fatalf("got %+v", got)
 		}
 		if _, ok := pair(got, "lane.build.roles"); ok {
@@ -62,7 +62,7 @@ func TestTeam(t *testing.T) {
 
 	t.Run("legacy project config is not a team", func(t *testing.T) {
 		f := newTeamFix(t)
-		writeTeamFile(t, filepath.Join(f.repo, ".agents", "herdr-agents.conf"), "lane.build.roles=implementer\n")
+		writeTeamFile(t, filepath.Join(f.repo, ".agents", "herdr-soho.conf"), "lane.build.roles=implementer\n")
 		f.wantCode(t, nil, 2)
 	})
 
@@ -184,9 +184,9 @@ func TestTeam(t *testing.T) {
 			"APPDATA": appdata, "USERPROFILE": home, "HOME": home,
 			"HERDR_SOHO_SKILL_DIR": skillDir(t), "PATH": filepath.Join(root, "bin"),
 		}
-		file := filepath.Join(appdata, "herdr-soho", "teams", teamOrg, teamRepo+".conf")
+		file := filepath.Join(appdata, "soho", "teams", teamOrg, teamRepo+".conf")
 		writeTeamFile(t, file, "panes=3\nlane.build.roles=implementer\n")
-		writeTeamFile(t, filepath.Join(home, ".config", "herdr-soho", "teams", teamOrg, teamRepo+".conf"), "panes=4\nlane.build.roles=implementer\n")
+		writeTeamFile(t, filepath.Join(home, ".config", "soho", "teams", teamOrg, teamRepo+".conf"), "panes=4\nlane.build.roles=implementer\n")
 		got, err := ResolveTeam("win32", env, repo, teamOrg, teamRepo, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -194,7 +194,7 @@ func TestTeam(t *testing.T) {
 		if got.File != file || got.Source != "teams/example-org/example-repo.conf" || value(t, got, "panes") != "3" {
 			t.Fatalf("got file %q source %q pairs %#v", got.File, got.Source, got.Pairs)
 		}
-		if filepath.Dir(platform.UserConfigPath("win32", env)) != filepath.Join(appdata, "herdr-soho") {
+		if filepath.Dir(platform.UserConfigPath("win32", env)) != filepath.Join(appdata, "soho") {
 			t.Fatalf("user config dir = %s", platform.UserConfigPath("win32", env))
 		}
 	})
@@ -215,7 +215,7 @@ func TestTeam(t *testing.T) {
 		f = newTeamFix(t)
 		f.writeProject(t, "\uFEFFlane.build.roles=implementer\n")
 		got = f.must(t, nil)
-		if got.Source != ".agents/herdr-soho.conf" || value(t, got, "lane.build.roles") != "implementer" {
+		if got.Source != ".agents/soho.conf" || value(t, got, "lane.build.roles") != "implementer" {
 			t.Fatalf("bom project: got %+v", got)
 		}
 	})
@@ -291,7 +291,7 @@ func (f teamFix) writeTeam(t *testing.T, which, body string) {
 
 func (f teamFix) writeProject(t *testing.T, body string) {
 	t.Helper()
-	writeTeamFile(t, filepath.Join(f.repo, ".agents", "herdr-soho.conf"), body)
+	writeTeamFile(t, filepath.Join(f.repo, ".agents", "soho.conf"), body)
 }
 
 func (f teamFix) resolve(overrides map[string]string) (Team, error) {
@@ -358,7 +358,7 @@ func skillDir(t *testing.T) string {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	dir := filepath.Join(filepath.Dir(file), "..", "..", "skills", "herdr-soho")
+	dir := filepath.Join(filepath.Dir(file), "..", "..", "skills", "soho")
 	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
 		t.Fatalf("skill directory %q: %v", dir, err)
 	}

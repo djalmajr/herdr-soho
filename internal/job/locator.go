@@ -16,19 +16,19 @@ import (
 // file (current or legacy) and the same job_repos_root as the starter did,
 // whatever the Herdr server's own environment holds.
 //
-// The two names are private to herdr-soho and are not a configuration
+// The two names are private to soho and are not a configuration
 // interface: no generic selector (XDG_CONFIG_HOME, HOME, USERPROFILE,
 // APPDATA) is forwarded or rewritten, so the supervisor's external tools
 // (git, gh, herdr, the wake command) keep the server's own environment.
 // Each value is an absolute path only: no other variable, no configuration
 // content and no machine-policy value travels. Only the supervisor and the
-// team commands it runs and binds (managed.go) use them; every herdr-soho
+// team commands it runs and binds (managed.go) use them; every soho
 // command drops them from the environment it hands to anything else.
 
 const (
 	// launchConfigBaseVar carries the base directory of the starter's own
 	// user-configuration selection: the directory that holds
-	// herdr-soho/config and the legacy herdr-agents/config.
+	// soho/config and the legacy herdr-soho/config.
 	launchConfigBaseVar = "_SOHO_LAUNCH_CONFIG_BASE"
 	// launchHomeVar carries the home the starter expands a home-relative
 	// job_repos_root from; it is sent only for such a root.
@@ -114,7 +114,7 @@ func absLocator(value string) (string, error) {
 	return filepath.Clean(out), nil
 }
 
-// LaunchLocators is what a herdr-soho process found under the two private
+// LaunchLocators is what a soho process found under the two private
 // names when it started: Present is true when either name was set (even to
 // an unusable value), and Selection is the validated selection, zero when
 // the values are absent or unusable.
@@ -153,7 +153,7 @@ func usableLocator(value string) bool {
 }
 
 // WithoutLaunchLocators returns a copy of env without the two private
-// names: the environment every herdr-soho command uses for itself and hands
+// names: the environment every soho command uses for itself and hands
 // to external processes. env is not changed.
 func WithoutLaunchLocators(env platform.Env) platform.Env {
 	out := env.Clone()

@@ -11,7 +11,7 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/platform"
 )
 
-// prepare.go is the preparation step of `herdr-soho job start`: it admits
+// prepare.go is the preparation step of `soho job start`: it admits
 // the organization, checks gh authentication, clones a missing checkout,
 // fetches, resolves the base, and creates (or reuses) the job worktree —
 // or validates the checkout for workspace mode — then dry-runs the push.
@@ -198,10 +198,12 @@ func (p Preparer) isGitCheckout(checkout string, timeout time.Duration, env plat
 }
 
 // jobExcludeLines are the checkout paths the job family writes: the job
-// state root and the job worktrees. They go to the checkout's local
-// info/exclude (never a tracked .gitignore), so they never show as
-// untracked changes, in particular to a later workspace-mode job.
-var jobExcludeLines = []string{"/.herdr-soho/", "/.worktrees/"}
+// state root — both the current .soho and the legacy .herdr-soho, excluded
+// together for the length of the rename window — and the job worktrees.
+// They go to the checkout's local info/exclude (never a tracked
+// .gitignore), so they never show as untracked changes, in particular to a
+// later workspace-mode job.
+var jobExcludeLines = []string{"/.soho/", "/.worktrees/", "/.herdr-soho/"}
 
 // excludeJobDirs appends each missing jobExcludeLines entry to
 // <git-common-dir>/info/exclude; a retry adds nothing.

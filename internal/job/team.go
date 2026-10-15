@@ -41,7 +41,7 @@ type teamCandidate struct {
 }
 
 // ResolveTeam reads teams/<org>/<repo>.conf, then teams/default.conf, then
-// <repoRoot>/.agents/herdr-soho.conf when that file sets lane.*.roles.
+// <repoRoot>/.agents/soho.conf when that file sets lane.*.roles.
 // osName is the platform name platform.UserConfigPath expects.
 // overrides is the brief equipe map; nil means none. Keys and values are
 // checked with core.ConfigKeyOk and core.ConfigValueOk, the session set
@@ -58,7 +58,7 @@ func ResolveTeam(osName string, env platform.Env, repoRoot, org, repo string, ov
 	candidates := []teamCandidate{
 		{source: "teams/" + org + "/" + repo + ".conf", file: filepath.Join(userDir, "teams", org, repo+".conf")},
 		{source: "teams/default.conf", file: filepath.Join(userDir, "teams", "default.conf")},
-		{source: ".agents/herdr-soho.conf", file: filepath.Join(repoRoot, ".agents", "herdr-soho.conf"), roles: true},
+		{source: ".agents/soho.conf", file: filepath.Join(repoRoot, ".agents", "soho.conf"), roles: true},
 	}
 	var chosen teamCandidate
 	var pairs []TeamPair

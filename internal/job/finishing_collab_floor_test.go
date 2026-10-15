@@ -12,7 +12,7 @@ import (
 // millisecond is a one-millisecond deadline, not the "no timeout" a zero
 // would mean to the platform runner.
 
-// floorHang is how long the fake herdr-soho sleeps: far beyond the bound the
+// floorHang is how long the fake soho sleeps: far beyond the bound the
 // regressions allow, short enough that the unfixed code ends the test on its
 // own instead of hanging the suite.
 const floorHang = 20000

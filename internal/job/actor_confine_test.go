@@ -42,7 +42,7 @@ func newAcf(t *testing.T) *acfFix {
 	if err != nil {
 		t.Fatal(err)
 	}
-	skill, err := filepath.Abs("../../skills/herdr-soho")
+	skill, err := filepath.Abs("../../skills/soho")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,14 +88,14 @@ func (f *acfFix) git(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// userBase writes <root>/<name>/herdr-soho/config and returns the base.
+// userBase writes <root>/<name>/soho/config and returns the base.
 func (f *acfFix) userBase(t *testing.T, name, body string) string {
 	t.Helper()
 	base := filepath.Join(f.root, name)
-	if err := os.MkdirAll(filepath.Join(base, "herdr-soho"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(base, "soho"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(base, "herdr-soho", "config"), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(base, "soho", "config"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return base
@@ -160,7 +160,7 @@ func TestActorConfineStateRootMatrix(t *testing.T) {
 						abs := filepath.Join(f.root, strings.Replace(s.abs, "%s", who, 1))
 						return abs, "state_dir=" + abs + "\n"
 					}
-					return filepath.Join(f.co, ".herdr-soho"), ""
+					return filepath.Join(f.co, ".soho"), ""
 				}
 				storeRoot, starterLine := root(starter, "starter")
 				agentRoot, agentLine := root(agent, "agent")
@@ -475,14 +475,14 @@ func TestActorConfineExclude(t *testing.T) {
 	t.Run("an existing file without a final newline", func(t *testing.T) {
 		co := newCheckout(t)
 		mustMkdir(t, filepath.Join(co, ".git", "info"))
-		if err := os.WriteFile(filepath.Join(co, ".git", "info", "exclude"), []byte("/.herdr-soho/"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(co, ".git", "info", "exclude"), []byte("/.soho/"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if !appendExclude(co, "/x/w7/") {
 			t.Fatal("refused")
 		}
 		got, _ := os.ReadFile(filepath.Join(co, ".git", "info", "exclude"))
-		if string(got) != "/.herdr-soho/\n/x/w7/\n" {
+		if string(got) != "/.soho/\n/x/w7/\n" {
 			t.Fatalf("exclude = %q", got)
 		}
 	})
@@ -558,7 +558,7 @@ func TestActorConfineExclude(t *testing.T) {
 // case-sensitive file system the variant is another (missing) path.
 func TestActorConfineCaseVariant(t *testing.T) {
 	f := newAcf(t)
-	storeRoot := filepath.Join(f.co, ".herdr-soho")
+	storeRoot := filepath.Join(f.co, ".soho")
 	f.job(t, storeRoot, f.wt, "lane.build.roles=implementer\n")
 	variant := filepath.Join(filepath.Dir(f.co), strings.ToUpper(filepath.Base(f.co)))
 	_, statErr := os.Stat(variant)
@@ -604,7 +604,7 @@ func assertEmptyDir(t *testing.T, dir string) {
 // continuing after it, spawns); a pin that succeeds writes the workspace
 // environment's session file and then spawns.
 func TestActorConfineRunPinsBeforeTheOrchestrator(t *testing.T) {
-	skill, err := filepath.Abs("../../skills/herdr-soho")
+	skill, err := filepath.Abs("../../skills/soho")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,8 +622,8 @@ func TestActorConfineRunPinsBeforeTheOrchestrator(t *testing.T) {
 			}
 		}
 		base := filepath.Join(t.TempDir(), "starter")
-		mustMkdir(t, filepath.Join(base, "herdr-soho"))
-		if err := os.WriteFile(filepath.Join(base, "herdr-soho", "config"), []byte("state_dir="+root+"\n"), 0o600); err != nil {
+		mustMkdir(t, filepath.Join(base, "soho"))
+		if err := os.WriteFile(filepath.Join(base, "soho", "config"), []byte("state_dir="+root+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		home := t.TempDir()
@@ -669,7 +669,7 @@ func TestActorConfineRunPinsBeforeTheOrchestrator(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		pin, err := os.ReadFile(filepath.Join(real, ".herdr-soho", "w1", "session.conf"))
+		pin, err := os.ReadFile(filepath.Join(real, ".soho", "w1", "session.conf"))
 		if err != nil || !strings.Contains(string(pin), "state_dir=\""+root+"\"") {
 			t.Fatalf("workspace pin = %q, %v", pin, err)
 		}

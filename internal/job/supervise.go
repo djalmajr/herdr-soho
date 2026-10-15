@@ -873,8 +873,8 @@ func (s *Supervisor) ensureDispatched(name string) (int, bool, error) {
 // job orchestrator, with the job id filled in.
 func orchestratorBriefSection(id string) []byte {
 	return []byte("\n## Job\n\n- Job id: " + id +
-		"\n- Publish decisions, questions, checkpoints and notes with `herdr-soho job note --id " + id + " --tipo <type> ...`." +
-		"\n- Ask for an immediate push after a commit with `herdr-soho job checkpoint --id " + id + "`.\n")
+		"\n- Publish decisions, questions, checkpoints and notes with `soho job note --id " + id + " --tipo <type> ...`." +
+		"\n- Ask for an immediate push after a commit with `soho job checkpoint --id " + id + "`.\n")
 }
 
 // tick runs one watch iteration: the wake queue first (it only enqueues),

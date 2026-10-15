@@ -363,7 +363,7 @@ func TestSuperviseHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantBrief := append(append([]byte{}, brief...), []byte("\n## Job\n\n- Job id: job-1\n- Publish decisions, questions, checkpoints and notes with `herdr-soho job note --id job-1 --tipo <type> ...`.\n- Ask for an immediate push after a commit with `herdr-soho job checkpoint --id job-1`.\n")...)
+	wantBrief := append(append([]byte{}, brief...), []byte("\n## Job\n\n- Job id: job-1\n- Publish decisions, questions, checkpoints and notes with `soho job note --id job-1 --tipo <type> ...`.\n- Ask for an immediate push after a commit with `soho job checkpoint --id job-1`.\n")...)
 	gotBrief, err := os.ReadFile(filepath.Join(jobDir, "orchestrator-brief.md"))
 	if err != nil {
 		t.Fatalf("orchestrator brief: %v", err)
@@ -1004,7 +1004,7 @@ func TestSuperviseUnknownStateFriction(t *testing.T) {
 
 func TestSuperviseNewSupervisor(t *testing.T) {
 	store, _, _, _ := supFixture(t)
-	sup, err := NewSupervisor(store, "job-1", platform.Env{}, "/opt/bin/herdr-soho", nil)
+	sup, err := NewSupervisor(store, "job-1", platform.Env{}, "/opt/bin/soho", nil)
 	if err != nil {
 		t.Fatalf("NewSupervisor: %v", err)
 	}
@@ -1016,7 +1016,7 @@ func TestSuperviseNewSupervisor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cli.Exe != "/opt/bin/herdr-soho" || cli.Dir != snap.State.Dir {
+	if cli.Exe != "/opt/bin/soho" || cli.Dir != snap.State.Dir {
 		t.Fatalf("selfCLI = %+v, want the state dir as working directory", cli)
 	}
 	if sup.Store != store || sup.ID != "job-1" {
@@ -1027,13 +1027,13 @@ func TestSuperviseNewSupervisor(t *testing.T) {
 	if _, err := store.Start("job-2", []byte(strings.Replace(supTestBrief, "job-1", "job-2", 1))); err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewSupervisor(store, "job-2", platform.Env{}, "/opt/bin/herdr-soho", nil)
+	_, err = NewSupervisor(store, "job-2", platform.Env{}, "/opt/bin/soho", nil)
 	if err == nil {
 		t.Fatal("NewSupervisor accepted a job without a worktree")
 	}
 	wantExit(t, err, ExitUsage, "job: the job has no worktree directory")
 
-	if _, err := NewSupervisor(store, "nope", platform.Env{}, "/opt/bin/herdr-soho", nil); err == nil {
+	if _, err := NewSupervisor(store, "nope", platform.Env{}, "/opt/bin/soho", nil); err == nil {
 		t.Fatal("NewSupervisor accepted an unknown id")
 	}
 }

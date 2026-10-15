@@ -568,7 +568,7 @@ func (r collabEvidenceRoot) path() string {
 func collabEvidenceRoots(st State, stateDir string) []collabEvidenceRoot {
 	roots := []collabEvidenceRoot{
 		{base: stateDir, suffix: "reports"},
-		{base: os.TempDir(), suffix: filepath.Join("herdr-soho", st.WorkspaceID, "reports")},
+		{base: os.TempDir(), suffix: filepath.Join("soho", st.WorkspaceID, "reports")},
 	}
 	if filepath.IsAbs(st.Dir) {
 		roots = append(roots, collabEvidenceRoot{base: st.Dir})

@@ -458,7 +458,8 @@ func (c confinedDir) open(create bool, check string) (*os.Root, bool) {
 
 // pinExclude adds the git-local exclude line the workspace session at
 // <actorRoot>/<ws> needs, before it is written. Outside the checkout, or
-// under the checkout's .herdr-soho (the job prepare excludes it), none;
+// under the checkout's state directory, .soho or the legacy .herdr-soho
+// (the job prepare excludes both), none;
 // under the checkout's .worktrees it is refused (a worktree has its own
 // root, which a checkout exclude line does not reach); elsewhere in the
 // checkout the line /<path from the checkout>/<ws>/ goes to the checkout's
@@ -496,7 +497,8 @@ func (s *Supervisor) pinExclude(actorRoot, workspace, dir string) bool {
 	}
 	rel := append(above, c.rel...)
 	first := filepath.Join(checkout, rel[0])
-	if rel[0] == ".herdr-soho" || sameEntryPath(first, filepath.Join(checkout, ".herdr-soho")) {
+	// Both state directory names are excluded by the job prepare.
+	if rel[0] == ".soho" || rel[0] == ".herdr-soho" || sameEntryPath(first, filepath.Join(checkout, ".soho")) || sameEntryPath(first, filepath.Join(checkout, ".herdr-soho")) {
 		return true
 	}
 	if rel[0] == ".worktrees" || sameEntryPath(first, filepath.Join(checkout, ".worktrees")) {

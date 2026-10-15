@@ -1253,7 +1253,7 @@ func TestCleanupRetriedOverClosedWorkspace(t *testing.T) {
 func TestSuperviseNewSupervisorGitWiring(t *testing.T) {
 	t.Run("a worktree-mode job wires the git sync", func(t *testing.T) {
 		store, _, _, _ := supFixture(t)
-		sup, err := NewSupervisor(store, "job-1", platform.Env{}, "/opt/bin/herdr-soho", nil)
+		sup, err := NewSupervisor(store, "job-1", platform.Env{}, "/opt/bin/soho", nil)
 		if err != nil {
 			t.Fatalf("NewSupervisor: %v", err)
 		}
@@ -1281,7 +1281,7 @@ func TestSuperviseNewSupervisorGitWiring(t *testing.T) {
 		if _, err := store.Record("job-1", func(st *State) { st.Modo = "workspace" }); err != nil {
 			t.Fatal(err)
 		}
-		sup, err := NewSupervisor(store, "job-1", platform.Env{}, "/opt/bin/herdr-soho", nil)
+		sup, err := NewSupervisor(store, "job-1", platform.Env{}, "/opt/bin/soho", nil)
 		if err != nil {
 			t.Fatalf("NewSupervisor: %v", err)
 		}

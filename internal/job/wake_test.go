@@ -178,13 +178,17 @@ func TestWakeEmptyCmd(t *testing.T) {
 	}
 }
 
-// TestWakeInput: stdin carries the exact events.jsonl line and the four
-// HERDR_SOHO_JOB_* vars hold the exact values.
+// TestWakeInput: stdin carries the exact events.jsonl line and the eight
+// wake vars hold the exact values: the four SOHO_JOB_* vars and the legacy
+// HERDR_SOHO_JOB_* set with identical values.
 func TestWakeInput(t *testing.T) {
 	fakeDir := t.TempDir()
 	if _, err := fakecli.InstallWithOptions(t, fakeDir, "wakehook", []fakecli.Rule{{AnyArgs: true}}, fakecli.InstallOptions{
 		CaptureStdin: true,
-		CaptureEnv:   []string{"HERDR_SOHO_JOB_ID", "HERDR_SOHO_JOB_SEQ", "HERDR_SOHO_JOB_EVENT", "HERDR_SOHO_JOB_IDEMPOTENCY_KEY"},
+		CaptureEnv: []string{
+			"SOHO_JOB_ID", "SOHO_JOB_SEQ", "SOHO_JOB_EVENT", "SOHO_JOB_IDEMPOTENCY_KEY",
+			"HERDR_SOHO_JOB_ID", "HERDR_SOHO_JOB_SEQ", "HERDR_SOHO_JOB_EVENT", "HERDR_SOHO_JOB_IDEMPOTENCY_KEY",
+		},
 	}); err != nil {
 		t.Fatalf("install the capturing fake wake hook: %v", err)
 	}
@@ -244,6 +248,10 @@ func TestWakeInput(t *testing.T) {
 		t.Fatalf("stdin = %q, want %q", calls[0].Stdin, string(marshaled)+"\n")
 	}
 	wantEnv := map[string]string{
+		"SOHO_JOB_ID":                    "job-1",
+		"SOHO_JOB_SEQ":                   "2",
+		"SOHO_JOB_EVENT":                 "question",
+		"SOHO_JOB_IDEMPOTENCY_KEY":       "job-1:2",
 		"HERDR_SOHO_JOB_ID":              "job-1",
 		"HERDR_SOHO_JOB_SEQ":             "2",
 		"HERDR_SOHO_JOB_EVENT":           "question",

@@ -1,7 +1,8 @@
 // wake.go is the generic, argv-only wake hook of the job contract
 // ("Waking (best effort)"): for an event type that wakes the dispatcher it
 // runs the machine's job_wake_cmd without a shell, with the event JSON on
-// stdin and the four HERDR_SOHO_JOB_* variables, bounded per attempt,
+// stdin and the wake variables — the four SOHO_JOB_* variables and the
+// legacy HERDR_SOHO_JOB_* set with the same values — bounded per attempt,
 // retried at most three times, and logs the final failure to friction. It
 // never fails the job and never touches job state.
 package job
@@ -89,10 +90,19 @@ func (h WakeHook) Run(ev Event) (attempts int) {
 		timeout = defaultWakeTimeout
 	}
 	env := h.Env.Clone()
+	// Both sets of the wake vars, with identical values: the current
+	// SOHO_JOB_* names and the legacy HERDR_SOHO_JOB_* set, so a receiver
+	// on either generation reads the same job identity.
+	seq := strconv.Itoa(ev.Seq)
+	key := h.JobID + ":" + seq
+	env["SOHO_JOB_ID"] = h.JobID
+	env["SOHO_JOB_SEQ"] = seq
+	env["SOHO_JOB_EVENT"] = ev.Tipo
+	env["SOHO_JOB_IDEMPOTENCY_KEY"] = key
 	env["HERDR_SOHO_JOB_ID"] = h.JobID
-	env["HERDR_SOHO_JOB_SEQ"] = strconv.Itoa(ev.Seq)
+	env["HERDR_SOHO_JOB_SEQ"] = seq
 	env["HERDR_SOHO_JOB_EVENT"] = ev.Tipo
-	env["HERDR_SOHO_JOB_IDEMPOTENCY_KEY"] = h.JobID + ":" + strconv.Itoa(ev.Seq)
+	env["HERDR_SOHO_JOB_IDEMPOTENCY_KEY"] = key
 	// The event line is the same json.Marshal + "\n" format events.jsonl
 	// uses, so the receiver sees the stored line verbatim.
 	line, err := json.Marshal(ev)

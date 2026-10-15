@@ -585,12 +585,12 @@ func TestPrepareWorkspaceMode(t *testing.T) {
 		assertNoJobRefs(t, f)
 	})
 	t.Run("job state and worktrees in the checkout are excluded, not dirty", func(t *testing.T) {
-		// The job state root (<checkout>/.herdr-soho) and the job worktrees
-		// (<checkout>/.worktrees) live inside the checkout; a later
-		// workspace-mode job must not see them as untracked changes.
+		// The job state roots (.soho and the legacy .herdr-soho) and the
+		// job worktrees (<checkout>/.worktrees) live inside the checkout; a
+		// later workspace-mode job must not see them as untracked changes.
 		f := newPrepareFixture(t, []fakecli.Rule{{Argv: []string{"auth", "status"}}})
 		checkout := f.cloneCheckout()
-		for _, dir := range []string{".herdr-soho/jobs/other", ".worktrees/job-other"} {
+		for _, dir := range []string{".soho/jobs/other", ".herdr-soho/jobs/other", ".worktrees/job-other"} {
 			if err := os.MkdirAll(filepath.Join(checkout, dir), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -605,7 +605,7 @@ func TestPrepareWorkspaceMode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, line := range []string{"/.herdr-soho/", "/.worktrees/"} {
+		for _, line := range []string{"/.soho/", "/.worktrees/", "/.herdr-soho/"} {
 			if strings.Count(string(exclude), line+"\n") != 1 {
 				t.Fatalf("info/exclude = %q, want %s once", exclude, line)
 			}

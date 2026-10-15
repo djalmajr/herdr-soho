@@ -92,7 +92,7 @@ func confirmedFixture(t *testing.T, pid int, started string, edit func(*launchRe
 	editState(t, f.dir, func(s *State) { s.Status = StatusRunning })
 	rec := recordState(t, f.dir)
 	rec.State = launchConfirmed
-	rec.PID, rec.Started, rec.Exe = pid, started, "/prior/herdr-soho"
+	rec.PID, rec.Started, rec.Exe = pid, started, "/prior/soho"
 	rec.ConfigBase = f.base
 	if edit != nil {
 		edit(&rec)

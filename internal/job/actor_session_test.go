@@ -211,10 +211,10 @@ func asrBase(t *testing.T, root string) (env platform.Env, conf string) {
 
 // asrWriteUserConfig sets one user configuration under base (an XDG
 // config dir for the actors' environment, or the starter's launch
-// selection base: base/herdr-soho/config).
+// selection base: base/soho/config).
 func asrWriteUserConfig(t *testing.T, base, body string) {
 	t.Helper()
-	file := filepath.Join(base, "herdr-soho", "config")
+	file := filepath.Join(base, "soho", "config")
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func asrWriteStartSession(t *testing.T, storeRoot, body string) {
 // asrPinPath is the pin the default actor environment resolves: the
 // workspace's session file under the checkout's default state directory.
 func asrPinPath(co string) string {
-	return filepath.Join(co, ".herdr-soho", asrWS, "session.conf")
+	return filepath.Join(co, ".soho", asrWS, "session.conf")
 }
 
 // asrAbs canonicalizes the temp root: git reports real paths, so every
@@ -355,7 +355,7 @@ func asrScenario(t *testing.T, storeRel, actorUser, selBody string) (sup *Superv
 	env, conf := asrBase(t, root)
 	co = asrCheckout(t, env, root, "co")
 	if storeRel == "" {
-		storeRoot = filepath.Join(co, ".herdr-soho")
+		storeRoot = filepath.Join(co, ".soho")
 	} else {
 		storeRoot = filepath.Join(root, storeRel)
 	}
@@ -376,7 +376,7 @@ func asrScenario(t *testing.T, storeRel, actorUser, selBody string) (sup *Superv
 // asrHashScenario is a job whose store root holds '#': the checkout's
 // path is "<root>/re#po" and the starter's selection names the relative
 // state_dir "store" (the store <checkout>/store), while the agents'
-// environment resolves its own default <checkout>/.herdr-soho. No state
+// environment resolves its own default <checkout>/.soho. No state
 // locator variable is involved on either side.
 func asrHashScenario(t *testing.T) (sup *Supervisor, friction *[]string, co, storeRoot string) {
 	t.Helper()
@@ -549,7 +549,7 @@ func TestActorSession(t *testing.T) {
 		root := asrAbs(t, t.TempDir())
 		env, _ := asrBase(t, root)
 		co := asrCheckout(t, env, root, "co")
-		storeRoot := filepath.Join(co, ".herdr-soho")
+		storeRoot := filepath.Join(co, ".soho")
 		sel := core.UserSelection{Base: filepath.Join(root, "starter")}
 		asrWriteUserConfig(t, sel.Base, asrStarterUser)
 		store, clock, team := asrJob(t, storeRoot, co)
@@ -897,7 +897,7 @@ func TestActorSession(t *testing.T) {
 				co := asrCheckout(t, env, root, "check out")
 				var storeRoot string
 				if tc.storeRel == "" {
-					storeRoot = filepath.Join(co, ".herdr-soho")
+					storeRoot = filepath.Join(co, ".soho")
 				} else {
 					storeRoot = filepath.Join(root, tc.storeRel)
 				}
@@ -986,7 +986,7 @@ func TestActorSession(t *testing.T) {
 		root := asrAbs(t, t.TempDir())
 		env, conf := asrBase(t, root)
 		co := asrCheckout(t, env, root, "co")
-		storeRoot := filepath.Join(co, ".herdr-soho")
+		storeRoot := filepath.Join(co, ".soho")
 		sel := core.UserSelection{Base: filepath.Join(root, "starter")}
 		asrWriteUserConfig(t, sel.Base, asrStarterUser)
 		asrWriteUserConfig(t, conf, "lane.build.kind=codex\n")
@@ -1026,7 +1026,7 @@ func TestActorSession(t *testing.T) {
 		root := asrAbs(t, t.TempDir())
 		env, conf := asrBase(t, root)
 		co := asrCheckout(t, env, root, "co")
-		storeRoot := filepath.Join(co, ".herdr-soho")
+		storeRoot := filepath.Join(co, ".soho")
 		sel := core.UserSelection{Base: filepath.Join(root, "starter")}
 		asrWriteUserConfig(t, sel.Base, asrStarterTwoRoles)
 		asrWriteUserConfig(t, conf, "lane.build.kind=pi\nlane.build.model=model-b\nlane.build.effort=medium\n")
@@ -1069,7 +1069,7 @@ func TestActorSession(t *testing.T) {
 		root := asrAbs(t, t.TempDir())
 		env, conf := asrBase(t, root)
 		co := asrCheckout(t, env, root, "co")
-		storeRoot := filepath.Join(co, ".herdr-soho")
+		storeRoot := filepath.Join(co, ".soho")
 		sel := core.UserSelection{Base: filepath.Join(root, "starter")}
 		asrWriteUserConfig(t, sel.Base, asrStarterTwoKinds)
 		asrWriteUserConfig(t, conf, "lane.build.kind=pi\n")
@@ -1115,7 +1115,7 @@ func TestActorSession(t *testing.T) {
 				co := asrCheckout(t, env, root, "check out")
 				var storeRoot string
 				if tc.storeRel == "" {
-					storeRoot = filepath.Join(co, ".herdr-soho")
+					storeRoot = filepath.Join(co, ".soho")
 				} else {
 					storeRoot = filepath.Join(root, tc.storeRel)
 				}

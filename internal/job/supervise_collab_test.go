@@ -8,8 +8,11 @@ package job
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2158,4 +2161,54 @@ func quoteJSON(s string) string {
 		panic(err)
 	}
 	return string(raw)
+}
+
+// TestSuperviseCollabCollectsReportFromTempSohoRoutingDir: the supervisor's
+// evidence collection accepts a report recorded at the routing reports
+// directory of the job workspace, os.TempDir()/soho/<workspace>/reports
+// (the location the workers outside the job worktree publish their reports
+// to), with the fresh sha256 of the file; the retired
+// os.TempDir()/herdr-soho/<workspace>/reports is refused with the same
+// outside-roots rejection.
+func TestSuperviseCollabCollectsReportFromTempSohoRoutingDir(t *testing.T) {
+	// A workspace id unique per process and time, so the real temp routing
+	// dir never aliases another test's.
+	ws := fmt.Sprintf("w-c2a-%d-%d", os.Getpid(), time.Now().UnixNano())
+	// A unique state dir so the store root and the routing dir never alias
+	// the same path.
+	stateDir := t.TempDir()
+	body := "# report\n\n- [done] item\n"
+	routing := writeEvidenceTarget(t,
+		filepath.Join(os.TempDir(), "soho", ws, "reports", "report.md"), body)
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(os.TempDir(), "soho", ws)) })
+	stale := writeEvidenceTarget(t,
+		filepath.Join(os.TempDir(), "herdr-soho", ws, "reports", "report.md"), "stale\n")
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(os.TempDir(), "herdr-soho", ws)) })
+	sup := &Supervisor{}
+	st := State{WorkspaceID: ws, Dir: stateDir}
+	a := collaboration.Assignment{
+		ID: "c1",
+		Events: []collaboration.Event{{
+			Type: "final", Actor: "impl-1", Report: routing, ReportHash: "x", Delivery: "d1",
+		}},
+	}
+	out := sup.collaborationEvidence(a, st, stateDir, collabOutcomeFinished, "accept")
+	if out.ReportCheck != "" || out.ReportSHA256 == "" {
+		t.Fatalf("routing report = %+v, want it accepted with a fresh hash", out)
+	}
+	want := sha256.Sum256([]byte(body))
+	if out.ReportSHA256 != hex.EncodeToString(want[:]) {
+		t.Fatalf("sha256 = %s, want %s", out.ReportSHA256, hex.EncodeToString(want[:]))
+	}
+	// The retired herdr-soho routing dir is refused.
+	aStale := collaboration.Assignment{
+		ID: "c2",
+		Events: []collaboration.Event{{
+			Type: "final", Actor: "impl-1", Report: stale, ReportHash: "x", Delivery: "d1",
+		}},
+	}
+	outStale := sup.collaborationEvidence(aStale, st, stateDir, collabOutcomeFinished, "accept")
+	if outStale.ReportCheck != "rejected" || outStale.ReportSHA256 != "" {
+		t.Fatalf("retired routing report = %+v, want the rejection and no fresh hash", outStale)
+	}
 }

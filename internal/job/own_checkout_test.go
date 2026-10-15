@@ -48,7 +48,7 @@ func ownEnv(t *testing.T) platform.Env {
 		"XDG_CONFIG_HOME":      conf,
 		"GIT_CONFIG_GLOBAL":    global,
 		"GIT_CONFIG_SYSTEM":    system,
-		"HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho",
+		"HERDR_SOHO_SKILL_DIR": "../../skills/soho",
 	}
 }
 
@@ -132,9 +132,9 @@ func newOwnWorktreeFixture(t *testing.T, id string) *ownFixture {
 	return f
 }
 
-// storeRoot is the default state root: <checkout>/.herdr-soho.
+// storeRoot is the default state root: <checkout>/.soho.
 func (f *ownFixture) storeRoot() string {
-	return filepath.Join(f.checkout, ".herdr-soho")
+	return filepath.Join(f.checkout, ".soho")
 }
 
 // ownStateValues is the state.json body the brief names: schema 1, the id,
@@ -550,7 +550,7 @@ func TestOwnCheckout(t *testing.T) {
 			f := newOwnWorktreeFixture(t, "j1")
 			custom := filepath.Join(f.tmp, "custom-state")
 			f.installStore(t, custom)
-			confDir := filepath.Join(f.env["XDG_CONFIG_HOME"], "herdr-soho")
+			confDir := filepath.Join(f.env["XDG_CONFIG_HOME"], "soho")
 			if err := os.MkdirAll(confDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -559,7 +559,7 @@ func TestOwnCheckout(t *testing.T) {
 			}
 			// StateDirSetting: the user layer's state_dir names the store
 			// root under the caller's own configuration; a hard-coded
-			// <checkout>/.herdr-soho would find nothing here.
+			// <checkout>/.soho would find nothing here.
 			f.expectStore(t, f.env, f.top, filepath.Clean(custom))
 		})
 
@@ -579,7 +579,7 @@ func TestOwnCheckout(t *testing.T) {
 			env := f.env.Clone()
 			env["HERDR_SOHO_DIR"] = filepath.Join(f.tmp, "absent-state")
 			// StateRootPath: a pinned root is used as is; the valid default
-			// store at <checkout>/.herdr-soho is not a fallback.
+			// store at <checkout>/.soho is not a fallback.
 			f.expectNil(t, env, f.top)
 		})
 	})

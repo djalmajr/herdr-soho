@@ -397,7 +397,7 @@ func startStarter(t *testing.T, f *prepareFixture, fake *fakeHerdr, stateRoot st
 		Preparer:  Preparer{Machine: f.machine, Env: f.env, Clone: f.gitClone()},
 		Herdr:     fake,
 		Panes:     fake,
-		SelfExe:   "/opt/bin/herdr-soho",
+		SelfExe:   "/opt/bin/soho",
 		StateRoot: func(checkout string) string { return stateRoot },
 		Friction:  func(message string) { *friction = append(*friction, message) },
 	}
@@ -510,7 +510,7 @@ func TestStartSuccess(t *testing.T) {
 	if fake.RunCalls[0].PaneID != "w9:p1" {
 		t.Fatalf("Run pane = %q", fake.RunCalls[0].PaneID)
 	}
-	if want := []string{"/opt/bin/herdr-soho", "job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo"}; !reflect.DeepEqual(fake.RunCalls[0].Argv, want) {
+	if want := []string{"/opt/bin/soho", "job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo"}; !reflect.DeepEqual(fake.RunCalls[0].Argv, want) {
 		t.Fatalf("Run argv = %v", fake.RunCalls[0].Argv)
 	}
 	// The workspace: exactly one create, cwd = worktree, label job-<id>.
