@@ -41,6 +41,18 @@ type SessionRenderOptions struct {
 	Board         bool   // board flavor: r Refresh in the footer, task title in the detail
 	Scope         string // scope filter disclosed in the footer (always, incl. all)
 	Status        string // status filter disclosed in the footer (always, incl. all)
+	// TeamKey discloses the "i Team" shortcut in the footer's action
+	// line: the board-derived session runtime binds i to the read-only
+	// team view in the enhanced list focus, so
+	// the unified frame discloses it - the legacy frames (non-enhanced
+	// picker and board) leave it off, and the footer never advertises a
+	// key the frame does not bind.
+	TeamKey bool
+	// TeamView is the session popup's open read-only team view (shared
+	// by the picker's and the board's states):
+	// when it is set, renderSessionPopup replaces the row window with
+	// the view inside the same frame.
+	TeamView *pickerTeamView
 }
 
 func (o *SessionRenderOptions) normalize() {
@@ -179,10 +191,14 @@ func sessionFooterSegments(o *SessionRenderOptions, avail int) [][]string {
 		nav = withPage
 	}
 	filters := []string{"p Pane", "w Workspace", "s Status", "f " + sessionScopeLabel(o.Scope), "t " + sessionStatusLabel(o.Status)}
+	actions := []string{"c Copy", "Enter Focus", "Esc Close"}
+	if o.TeamKey {
+		actions = append([]string{"i Team"}, actions...)
+	}
 	return [][]string{
 		nav,
 		filters,
-		{"c Copy", "Enter Focus", "Esc Close"},
+		actions,
 	}
 }
 
@@ -889,6 +905,12 @@ func renderSessionPopup(o SessionRenderOptions, width, height int) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
+	if o.TeamView != nil {
+		// The picker's read-only team view replaces the row window inside
+		// the same frame; the list is drawn by the
+		// caller only while the view is closed.
+		return renderPickerTeamFrame(&o, width, height)
+	}
 	o.normalize()
 	pad := 0
 	if width >= 6 {
@@ -1095,4 +1117,184 @@ func sessionRowsWindow(o *SessionRenderOptions, avail, rowsCap int) []string {
 	lines = append(lines, header)
 	lines = append(lines, window...)
 	return lines
+}
+
+// pickerTeamViewOptions builds the picker's frame options with the
+// read-only team view attached: the same unified
+// session options the picker's list frame uses, with the "i Team"
+// shortcut disclosed in the footer and the open view attached so
+// renderSessionPopup draws it in the row window's place.
+func pickerTeamViewOptions(state *PickerState, notice string) SessionRenderOptions {
+	o := pickerEnhancedOptions(state, notice)
+	o.TeamKey = true
+	o.TeamView = state.TeamView
+	return o
+}
+
+// pickerTeamTitle is the view's frame title: "TEAM  <workspace> ·
+// <machine>", sanitized like every display value; an empty workspace
+// label reads "-" (the modal fields' convention).
+func pickerTeamTitle(v *pickerTeamView) string {
+	label := StripPickerControls(v.workspaceLabel)
+	if label == "" {
+		label = "-"
+	}
+	return fmt.Sprintf("TEAM  %s · %s", label, StripPickerControls(v.machine))
+}
+
+// pickerTeamContent is the team view's unscrolled content at avail
+// display columns: the title, and - for a valid local target - the ROSTER
+// block and the ROLES block. A failed call shows one "<name>: <cause>"
+// line (the description teamCall returns) in its own block and the other
+// block keeps its content; an empty roster shows "no soho team in this
+// workspace". A remote row shows the remote-machine message and an invalid cwd
+// its cause. Every line is cut to the width with the team panel's text
+// helpers (teamCut/teamWrap).
+func pickerTeamContent(v *pickerTeamView, avail int) []string {
+	var content []string
+	title := pickerTeamTitle(v)
+	if displayWidth(title) > avail {
+		title = teamCut(title, avail)
+	}
+	content = append(content, sessionStyleBold+title+sessionStyleReset)
+	if v.remote {
+		content = append(content, teamCut("team view: not available yet for remote machines", avail))
+		return content
+	}
+	if v.targetErr != "" {
+		content = append(content, teamCut(StripPickerControls(v.targetErr), avail))
+		return content
+	}
+	if !v.loaded {
+		content = append(content, teamCut("loading team…", avail))
+		return content
+	}
+	content = append(content, "ROSTER")
+	content = append(content, pickerTeamBlock("roster", v.rosterLines, v.rosterFailure, "no soho team in this workspace", avail)...)
+	content = append(content, "")
+	content = append(content, "ROLES")
+	content = append(content, pickerTeamBlock("roles", v.rolesLines, v.rolesFailure, "(sem saída)", avail)...)
+	return content
+}
+
+// pickerTeamBlock is one team block's lines: one "<name>: <cause>" line
+// when the call failed (the other block keeps its content), the empty
+// placeholder when the call returned nothing, and the output lines
+// wrapped to the width otherwise.
+func pickerTeamBlock(name string, lines []string, failure, empty string, avail int) []string {
+	if failure != "" {
+		return []string{teamCut(name+": "+StripPickerControls(failure), avail)}
+	}
+	if len(lines) == 0 {
+		return []string{teamCut(empty, avail)}
+	}
+	var out []string
+	for _, line := range lines {
+		out = append(out, teamWrap(StripPickerControls(line), avail)...)
+	}
+	return out
+}
+
+// renderPickerTeamFrame draws the picker's read-only team view inside
+// the picker's own modal frame: the frame chrome (the
+// meta header, the search row, the footer with the "i Team" shortcut and
+// the fixed status strip) is the picker's, and the row window (the list
+// area) is replaced by the view. The blocks are cut to the width with the
+// team panel's text helpers, the whole content scrolls with scrollLines
+// (the arrow and page keys) and the frame stays exactly height lines,
+// like the popup.
+func renderPickerTeamFrame(o *SessionRenderOptions, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	o.normalize()
+	v := o.TeamView
+	pad := 0
+	if width >= 6 {
+		pad = 1
+	}
+	avail := width - pad
+	lineAt := func(content string) string {
+		if displayWidth(content) > avail {
+			content = displaySlice(content, avail)
+		}
+		if pad > 0 {
+			content = strings.Repeat(" ", pad) + content
+		}
+		return content
+	}
+	styled := func(style, visible string) string {
+		if displayWidth(visible) > avail {
+			visible = displaySlice(visible, avail)
+		}
+		if pad > 0 {
+			return strings.Repeat(" ", pad) + style + visible + sessionStyleReset
+		}
+		return style + visible + sessionStyleReset
+	}
+	blank := strings.Repeat(" ", pad)
+	separator := styled(sessionStyleDim, strings.Repeat("─", avail))
+
+	header := styled(sessionStyleDim, sessionHeaderLine(o))
+	searchVisible, searchPlaceholder := sessionSearchParts(o)
+	var search string
+	if o.SearchFocused {
+		search = blank + sessionHighlightBand(searchVisible, avail)
+	} else if searchPlaceholder {
+		search = styled(sessionStyleDim, searchVisible)
+	} else {
+		search = lineAt(searchVisible)
+	}
+	footerLines := make([]string, 0, 3)
+	for _, seg := range sessionFooterSegments(o, avail) {
+		footerLines = append(footerLines, lineAt(modalFooterLine(seg, avail)))
+	}
+
+	content := scrollLines(pickerTeamContent(v, avail), v.scroll)
+
+	lines := make([]string, 0, height)
+	top := sessionTopRows(height)
+	if top >= 2 {
+		lines = append(lines, header)
+	}
+	if height >= 2 {
+		lines = append(lines, search)
+	}
+	middle := height - top
+	if middle < 0 {
+		middle = 0
+	}
+	f := sessionFooterRows(height)
+	strip := sessionStatusStripRows(height)
+	cap := middle - f - strip
+	if cap < 0 {
+		cap = 0
+	}
+	// The view takes the whole row window: one dim separator when there is
+	// room, then the content from the top (the scroll offset already
+	// applied by scrollLines) and blank rows filling the rest, so the
+	// frame stays exactly height lines, like the popup.
+	windowCap := cap
+	if cap >= 2 {
+		lines = append(lines, separator)
+		windowCap = cap - 1
+	}
+	shown := content
+	if len(shown) > windowCap {
+		shown = shown[:windowCap]
+	}
+	for _, line := range shown {
+		lines = append(lines, blank+line)
+	}
+	for i := len(shown); i < windowCap; i++ {
+		lines = append(lines, blank)
+	}
+	lines = append(lines, footerLines[len(footerLines)-f:]...)
+	if strip >= 2 {
+		lines = append(lines, separator)
+	}
+	if strip >= 1 {
+		lines = append(lines, sessionStatusStripLine(o, avail, pad))
+	}
+	return strings.Join(lines, "\n") + "\n"
 }

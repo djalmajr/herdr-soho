@@ -236,7 +236,10 @@ func pickerModalDetail(entry PickerEntry, width int) string {
 // options from the shared runtime state: every pane - the unknown/empty/
 // "-" kinds as terminals - the scope/status/text filters, the pinned
 // selection (no cursor at all when the pin is missing), the counts and
-// the board totals over the visible unified sessions.
+// the board totals over the visible unified sessions. The "i Team"
+// shortcut is disclosed in the footer (the runtime binds it in the
+// enhanced list focus), and the open team view
+// replaces the row window in the same frame.
 func unifiedSessionOptions(state *BoardState, notice string) SessionRenderOptions {
 	sel := state.Selected
 	if state.refreshing && state.selectedRef != "" {
@@ -261,6 +264,8 @@ func unifiedSessionOptions(state *BoardState, notice string) SessionRenderOption
 		Board:         true,
 		Scope:         state.ViewState.Scope,
 		Status:        state.ViewState.Status,
+		TeamKey:       true,
+		TeamView:      state.TeamView,
 	}
 }
 

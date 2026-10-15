@@ -44,6 +44,16 @@ type BoardState struct {
 	NavPending bool
 	NavTarget  PickerEntry
 	NavFailure *PickerFailure // action feedback survives refresh publications
+	// TeamView is the open read-only team view of the selected row
+	// (the same type and rules as the picker's):
+	// nil while the list has the frame. While it is open the list's keys
+	// never move the selection, so Esc and i return to the same row, by
+	// the full ref, like the picker's selection rule.
+	TeamView *pickerTeamView
+	// teamLoadSeq counts team-view opens: every open (a re-open
+	// included) bumps it, so a late result of a superseded open is
+	// discarded.
+	teamLoadSeq int
 	// CopyNotice is the last c-copy confirmation ("Copied <ref>") shown in
 	// the modal's bottom status area: it is set only after the copy
 	// operation returned, it survives the progressive refresh
@@ -416,6 +426,28 @@ func RenderBoard(state *BoardState, width int) string {
 }
 
 func (s *BoardState) ApplyKey(key string) string {
+	// The read-only team view overlays the list: while
+	// it is open, Esc and i go back to the list with the same selection,
+	// the arrow and page keys scroll its content, Ctrl-C closes the modal
+	// as before, and the list keys and the search text never reach the
+	// list underneath (the view is read-only and the selection is frozen
+	// for it).
+	if s.TeamView != nil {
+		switch key {
+		case "esc", "i":
+			s.TeamView = nil
+			return ""
+		case "ctrl-c":
+			if s.Exit == "" {
+				s.Exit = "esc"
+			}
+			return s.Exit
+		case "up", "down", "page-up", "page-down":
+			teamViewScrollMove(s.TeamView, key)
+			return ""
+		}
+		return ""
+	}
 	switch key {
 	case "enter", "ctrl-enter":
 		// Enter navigates and focuses the selected pane (Ctrl+Enter stays
@@ -463,6 +495,28 @@ func (s *BoardState) ApplyKey(key string) string {
 		s.LastEntry = entry
 		s.Copied = &payload
 		return "copy"
+	case "i":
+		// i opens the read-only team view of the selected row in the
+		// enhanced list focus; in the enhanced search
+		// focus the same key is ordinary search text, as c already is, and
+		// the legacy input keeps it as query text (frozen contract).
+		if s.NavPending || s.Exit != "" {
+			return ""
+		}
+		if !s.ViewState.Enabled || s.ViewState.SearchFocused {
+			s.applyBoardChar("i")
+			return ""
+		}
+		if s.pinnedMissing() {
+			// The pinned ref left the visible list while the load is
+			// still running: there is no target row to open the view on.
+			return ""
+		}
+		if s.openBoardTeamView() {
+			// A local row with a valid target: the loop starts the load.
+			return "team"
+		}
+		return ""
 	case "esc", "ctrl-c":
 		if s.Exit == "" {
 			s.Exit = "esc"
@@ -574,6 +628,37 @@ func (s *BoardState) startNavigation() string {
 	s.NavPending = true
 	s.NavTarget = entry
 	return "navigate"
+}
+
+// openBoardTeamView opens the read-only team view on the selected row
+// (the board runtime's i key): the row's workspace_id,
+// pane_id and cwd build the team target and the cwd is validated like
+// resolveTeamTarget does; a row of another machine opens the view with
+// the remote-machine message and no CLI call at all. During a refresh the
+// selection resolves by the pinned ref, like Enter and c do. Every open
+// starts a new load sequence, so a late result of the previous open (or
+// of another row) is discarded. It reports whether a load is needed - a
+// local row with a valid target only (a remote or invalid row shows its
+// message and the loop runs no CLI call).
+func (s *BoardState) openBoardTeamView() bool {
+	list := s.visible()
+	if len(list) == 0 {
+		return false
+	}
+	idx := visibleIndex(len(list), s.Selected)
+	if s.refreshing && s.selectedRef != "" {
+		// Resolve the pinned ref by ref, never by the numeric index.
+		for i, entry := range list {
+			if pickerString(entry["ref"]) == s.selectedRef {
+				idx = i
+				break
+			}
+		}
+	}
+	entry := list[idx]
+	s.teamLoadSeq++
+	s.TeamView = openTeamView(s.teamLoadSeq, entry)
+	return !s.TeamView.remote && s.TeamView.targetErr == ""
 }
 
 // applyBoardChar applies one printable character. r refreshes the board
@@ -690,6 +775,47 @@ func (s *BoardState) FeedChunk(chunk string) string {
 		}
 	}
 	return s.Exit
+}
+
+// boardTeamLoad is the session loop's one in-flight team-view load: the
+// cancel of its reads and the sequence of the open it belongs to.
+type boardTeamLoad struct {
+	cancel contextpkg.CancelFunc
+	seq    int
+}
+
+// start supersedes the in-flight load (its reads are cancelled) and
+// returns the context of the new load for the open with sequence seq.
+func (l *boardTeamLoad) start(seq int) contextpkg.Context {
+	l.stop()
+	ctx, cancel := contextpkg.WithCancel(contextpkg.Background())
+	l.cancel, l.seq = cancel, seq
+	return ctx
+}
+
+// finish retires the cancel only for the current load's result: a late
+// result of a superseded open must not drop the cancel of the load that
+// replaced it, or closing the modal would leave that load running.
+func (l *boardTeamLoad) finish(res pickerTeamViewResult) {
+	if res.seq == l.seq {
+		l.stop()
+	}
+}
+
+// stop cancels the in-flight load, if any (the loop's exit).
+func (l *boardTeamLoad) stop() {
+	if l.cancel != nil {
+		l.cancel()
+		l.cancel = nil
+	}
+}
+
+// shutdown ends the modal the way Esc on the list does, closing an open
+// team view first: EOF and a shutdown signal end the popup, never only
+// the team view over it.
+func (s *BoardState) shutdown() {
+	s.TeamView = nil
+	s.ApplyKey("esc")
 }
 
 func (s *BoardState) FlushEsc() string {
@@ -1022,6 +1148,13 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 			navCancelActive()
 		}
 	}()
+	// One in-flight team-view load at a time: a new
+	// open cancels the previous in-flight load, and the loop's exit - for
+	// any reason - cancels the current one, so a closed modal never
+	// leaves a CLI read in flight.
+	teamResults := make(chan pickerTeamViewResult, 1)
+	var teamLoad boardTeamLoad
+	defer teamLoad.stop()
 	var escTimer <-chan time.Time
 	var resize <-chan time.Time
 	lastWidth, lastHeight := modalDimensions(stdout, width)
@@ -1043,7 +1176,7 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 				redrawSession(stdout, state, width)
 			}
 		case <-shutdownSignals:
-			state.ApplyKey("esc")
+			state.shutdown()
 		case <-refresh.C:
 			requestBoardUpdate(updateReq)
 		case update, ok := <-updateChannel:
@@ -1058,8 +1191,9 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 				if item.err == io.EOF {
 					if state.EscPending {
 						state.FlushEsc()
-					} else {
-						state.ApplyKey("esc")
+					}
+					if state.Exit == "" {
+						state.shutdown()
 					}
 					break
 				}
@@ -1106,6 +1240,27 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 					}
 				}()
 			}
+			if action == "team" {
+				// i opened the team view on a local row:
+				// the loop's worker runs the two NOWRITE reads off the key
+				// path (the discovery-load pattern) and only the finished
+				// result comes back to the loop's goroutine, which applies
+				// it - a late result of another row or of a superseded open
+				// is discarded there. A new open supersedes the in-flight
+				// load: it is cancelled, so the closed row's reads stop
+				// running.
+				view := state.TeamView
+				teamCtx := teamLoad.start(view.loadSeq)
+				redrawSession(stdout, state, width)
+				go func() {
+					runPickerTeamViewLoad(teamCtx, executable, env, platformName, view, func(res pickerTeamViewResult) {
+						select {
+						case teamResults <- res:
+						case <-teamCtx.Done():
+						}
+					})
+				}()
+			}
 			if action == "update" {
 				requestBoardUpdate(updateReq)
 				redrawSession(stdout, state, width)
@@ -1144,6 +1299,10 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 				_ = pickerRun(contextpkg.Background(), bin, []string{"notification", "show", "herdr-soho", "--body", res.Note, "--sound", "none"}, env, platformName, 30_000, "")
 			}
 			boardNavApplyResult(state, res)
+			redrawSession(stdout, state, width)
+		case res := <-teamResults:
+			teamLoad.finish(res)
+			boardApplyTeamResult(state, res)
 			redrawSession(stdout, state, width)
 		}
 		if state.Exit != "" {
@@ -1192,4 +1351,12 @@ func boardNavApplyResult(state *BoardState, res NavigationResult) {
 	}
 	state.NavFailure = &PickerFailure{Label: machine, Cause: res.Cause}
 	state.Failures = append(state.Failures, *state.NavFailure)
+}
+
+// boardApplyTeamResult folds one finished team-view load into the board
+// state on the loop's goroutine: the loop's worker
+// published the result and only the loop touches the live state; a
+// result of another row or of a superseded open is discarded.
+func boardApplyTeamResult(state *BoardState, res pickerTeamViewResult) bool {
+	return applyTeamView(state.TeamView, res)
 }
