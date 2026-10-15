@@ -452,7 +452,7 @@ func (s *Supervisor) finalize(status string) {
 	released := true
 	if snap.State.WorkspaceID != "" {
 		if snap.State.Orchestrator != "" {
-			if err := s.Ops.Release(snap.State.Orchestrator); err != nil {
+			if err := s.releaseOrchestrator(snap.State.Orchestrator, snap.State.WorkspaceClosed); err != nil {
 				s.frictionf(err.Error())
 				released = false
 			}
@@ -523,6 +523,38 @@ func (s *Supervisor) finalize(status string) {
 			s.frictionf("job: finalize: " + err.Error())
 		}
 	}
+}
+
+// releaseOrchestrator releases the job orchestrator, counting a release of
+// an agent that no longer exists as done — but only on a pass over a job
+// whose workspace is already recorded closed: its pane closed with the
+// workspace, and the release CLI answers such a name with its "not in the
+// roster" refusal (exit 3, the fixed message of the roster check the
+// release runs first), so nothing is left to release. The release runs as
+// today first; on a failure over a closed workspace, the answer is read
+// back from the roster line the refusal consults (the same state dir and
+// working dir this adapter runs from): a row for the name means the agent
+// still exists and the failure still blocks the cleanup, and an
+// unreadable roster blocks it as well. On a pass whose workspace is not
+// closed yet, every failure blocks exactly as today.
+func (s *Supervisor) releaseOrchestrator(name string, workspaceClosed bool) error {
+	err := s.Ops.Release(name)
+	if err == nil || !workspaceClosed {
+		return err
+	}
+	rows, rerr := s.Ops.Roster()
+	if rerr != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.Name == name {
+			return err
+		}
+	}
+	// No roster row for the agent over a closed workspace: the release's
+	// "not in the roster" refusal stands — the agent is gone, and the
+	// release counts as done.
+	return nil
 }
 
 // reportFacts is the finalize report facts: the git facts and commits with

@@ -468,9 +468,33 @@ func (s *Supervisor) Run() (int, error) {
 		// A job that already ended may not have finished its release (a
 		// crash before the workspace close): finalize again; it skips the
 		// steps already done. A job without a recorded workspace has no
-		// release to finish.
+		// release to finish. A workspace whose close is already recorded
+		// but whose log still lacks the cleanup event finalizes again as
+		// well: the first pass's release failed and the close never
+		// depended on the release, so the cleanup stayed pending behind a
+		// closed workspace — finalize re-evaluates the release (a release
+		// of an agent that no longer exists counts as done), appends the
+		// pending cleanup and skips the close the flag already records.
 		if snap, snapErr := s.Store.Snapshot(s.ID); snapErr == nil && isTerminalOutcome(snap.State.Status) {
-			if snap.State.WorkspaceID != "" && !snap.State.WorkspaceClosed {
+			finalizePass := snap.State.WorkspaceID != "" && !snap.State.WorkspaceClosed
+			if snap.State.WorkspaceID != "" && snap.State.WorkspaceClosed {
+				// The log is the marker of the pending cleanup; an
+				// unreadable log or directory retries the pass (finalize
+				// re-reads, and the log check is its own append gate).
+				cleanupDone := false
+				if dir, dirErr := s.Store.readDir(s.ID); dirErr == nil {
+					if events, evErr := readEvents(dir); evErr == nil {
+						for _, event := range events {
+							if event.Tipo == "cleanup" {
+								cleanupDone = true
+								break
+							}
+						}
+					}
+				}
+				finalizePass = !cleanupDone
+			}
+			if finalizePass {
 				s.finishWakes()
 				s.finalize(snap.State.Status)
 			}

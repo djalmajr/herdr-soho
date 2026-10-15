@@ -289,24 +289,37 @@ func (s *Supervisor) markDeliveryUncertain(item ControlItem) error {
 // the stop continues), and records the kind and its monotonic deadline.
 // checkBudget decides the stop's end from here on. The deadline of a cancel
 // is the acceptance's persisted CancelDeadline converted once to this
-// process's monotonic clock (the same idiom as ensureIntervalBase and
-// ensureFinishingBase): a supervisor that restarts and finds the
-// still-pending cancel starts the stop once more — one stop amendment per
-// process — and ends the grace on the same wall instant; a restart never
-// restarts the grace. A state without the fields (a job accepted by a
-// binary before them) or with an unreadable deadline keeps the bound the
-// persisted deadline replaces: the request's full grace measured on this
-// process's own monotonic clock, with one friction line. The timeout and
-// the blocked ceiling have no persisted anchor and always measure their
-// grace on the process's own monotonic clock. The deadline is computed
-// before the stop amendment dispatches: with time remaining that dispatch
-// runs limited to it (the bounded adapter), and a cut dispatch only goes
-// to friction; with no time remaining (a persisted deadline already spent,
-// for example a restart after the grace) the stop amendment is not
-// dispatched at all and writes no friction for it either — dispatching
-// under the adapter's own bound would hold the job up to that bound before
-// the first check ends the stop, and the first check is what ends it. The
-// stop amendment is not a queue request, so it records no
+// process's monotonic clock and limited to the accepted grace (the
+// deadline minus the persisted acceptance instant, the same idiom as
+// ensureIntervalBase and ensureFinishingBase): a supervisor that restarts
+// and finds the still-pending cancel starts the stop once more — one stop
+// amendment per process — and ends the grace on the same wall instant; a
+// restart never restarts the grace. The wall clock is compared only at
+// this conversion, so from then on the stop runs on the monotonic clock
+// only: a backwards Now that rewound to before the acceptance grants at
+// most the grace that was accepted (the upper limit), and a clock that
+// passed the deadline grants zero (the lower limit and the monoNow floor
+// below). A state without the fields (a job accepted by a binary before
+// them) or with an unreadable deadline or acceptance instant keeps the
+// bound the persisted deadline replaces: the request's full grace measured
+// on this process's own monotonic clock, with one friction line. The
+// timeout and the blocked ceiling have no persisted anchor and always
+// measure their grace on the process's own monotonic clock. The deadline
+// is computed before the stop amendment dispatches: with time remaining
+// that dispatch runs limited to it (the bounded adapter), and a cut
+// dispatch only goes to friction; with no time remaining (a persisted
+// deadline already spent, for example a restart after the grace) the stop
+// amendment is not dispatched at all and writes no friction for it either
+// — dispatching under the adapter's own bound would hold the job up to
+// that bound before the first check ends the stop, and the first check is
+// what ends it. The collaboration stop request runs under the stop's own
+// deadline through askDeadline (the collabOps of supervise_collab.go):
+// each of its commands is bounded to what is left of the stop, and with
+// no time left not one of its commands starts — no friction for the skip
+// (the first check ends the stop), the process's single ask is consumed
+// anyway, and a command that finds the deadline already spent mid-ask
+// gets the exhaustion friction.
+// The stop amendment is not a queue request, so it records no
 // delivery_uncertain mark.
 func (s *Supervisor) beginStop(kind string, grace time.Duration) {
 	snap, snapErr := s.Store.Snapshot(s.ID)
@@ -324,11 +337,32 @@ func (s *Supervisor) beginStop(kind string, grace time.Duration) {
 	if kind == "canceled" && snapErr == nil {
 		if anchor := snap.State.CancelDeadline; anchor != "" {
 			if dl, parseErr := time.Parse(time.RFC3339Nano, anchor); parseErr == nil {
-				// The persisted acceptance deadline converted to this
-				// process's monotonic clock: the wall clock is compared only
-				// here, so from then on the stop runs on the monotonic clock
-				// only, and a backwards Now never extends the grace.
-				deadline = monoNow + int64(dl.Sub(s.Clock.Now()))
+				converted := false
+				if reqAnchor := snap.State.CancelRequestedAt; reqAnchor != "" {
+					if reqAt, reqErr := time.Parse(time.RFC3339Nano, reqAnchor); reqErr == nil {
+						// The persisted acceptance deadline converted to this
+						// process's monotonic clock, limited to the accepted
+						// grace: a wall clock that rewound to before the
+						// acceptance grants at most the grace that was
+						// accepted (the upper limit), and a clock that passed
+						// the deadline grants zero (the lower limit). From
+						// here the stop runs on the monotonic clock only.
+						remainder := dl.Sub(s.Clock.Now())
+						if remainder < 0 {
+							remainder = 0
+						}
+						if accepted := dl.Sub(reqAt); remainder > accepted {
+							remainder = accepted
+						}
+						deadline = monoNow + int64(remainder.Nanoseconds())
+						converted = true
+					}
+				}
+				// The acceptance instant missing or unreadable keeps the
+				// legacy bound: the full grace from this process.
+				if !converted && s.Friction != nil {
+					s.Friction("job: the persisted cancel deadline is absent or unreadable: the stop measures the full grace from this process")
+				}
 			} else if s.Friction != nil {
 				s.Friction("job: the persisted cancel deadline is absent or unreadable: the stop measures the full grace from this process")
 			}
@@ -364,7 +398,24 @@ func (s *Supervisor) beginStop(kind string, grace time.Duration) {
 			s.Friction("job: the supervisor cannot dispatch the stop amendment")
 		}
 	}
-	s.askCollaborations()
+	// The collaboration stop request runs under the stop's own deadline:
+	// askDeadline bounds each of its commands to what is left of the stop
+	// (collabOps) and returns to zero after the call (the terminal path's
+	// capture sets its own bound). The stop spent before the ask — with or
+	// without a dispatch in between — starts none of its commands: no
+	// friction for the skip, the first check ends the stop, and it still
+	// consumes the process's single ask (collabAsked), so the terminal
+	// path's capture asks nothing either: with the grace spent there is no
+	// time to ask, and the enumeration settles the still-active
+	// collaborations with the supervisor's reject. A command that finds
+	// the deadline already spent mid-ask gets the exhaustion friction.
+	if s.Clock.Monotonic() < s.stopDeadline {
+		s.askDeadline = s.stopDeadline
+		s.askCollaborations()
+		s.askDeadline = 0
+	} else {
+		s.collabAsked = true
+	}
 }
 
 // checkBudget applies the job's time budgets and decides the stop path's
