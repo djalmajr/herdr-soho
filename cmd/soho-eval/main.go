@@ -1,4 +1,4 @@
-// Command herdr-soho-eval is the native Go port of the legacy evaluation kit
+// Command soho-eval is the native Go port of the legacy evaluation kit
 // entry points evals/prepare.mjs and evals/run-probes.mjs. It prints one JSON
 // object per run on stdout and exits 0 for measured results (including
 // failed probes and scope violations) or 2 for usage, manifest, path-safety
@@ -15,8 +15,8 @@ import (
 	"github.com/djalmajr/herdr-soho/internal/eval"
 )
 
-const usage = "usage: herdr-soho-eval [--repo <path>] prepare <fixture> <destination>\n" +
-	"       herdr-soho-eval [--repo <path>] probes <fixture> <destination>"
+const usage = "usage: soho-eval [--repo <path>] prepare <fixture> <destination>\n" +
+	"       soho-eval [--repo <path>] probes <fixture> <destination>"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -85,11 +85,11 @@ func fail(subcommand string, err error) int {
 func printJSON(value any) int {
 	payload, err := json.Marshal(value)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "herdr-soho-eval: %v\n", err)
+		fmt.Fprintf(os.Stderr, "soho-eval: %v\n", err)
 		return 2
 	}
 	if _, err := fmt.Fprintf(os.Stdout, "%s\n", payload); err != nil {
-		fmt.Fprintf(os.Stderr, "herdr-soho-eval: %v\n", err)
+		fmt.Fprintf(os.Stderr, "soho-eval: %v\n", err)
 		return 2
 	}
 	return 0

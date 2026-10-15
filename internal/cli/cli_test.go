@@ -191,7 +191,7 @@ func TestHelpAndUnknown(t *testing.T) {
 			t.Fatalf("code=%d err=%q", code, errOut.String())
 		}
 	})
-	if !strings.Contains(usage, "herdr-soho — role-agent layer") {
+	if !strings.Contains(usage, "soho — role-agent layer") {
 		t.Fatal("missing usage text")
 	}
 }

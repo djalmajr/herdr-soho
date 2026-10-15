@@ -1,4 +1,4 @@
-// Command herdr-soho-release builds the six release binaries and publishes
+// Command soho-release builds the six release binaries and publishes
 // them with the native gh CLI, replacing the Node/Bash release workflow.
 // Standard library only: go and gh are external Go CLIs invoked by argv,
 // never through a shell, and no credential is ever printed or passed on
@@ -64,13 +64,13 @@ func run() int {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `herdr-soho-release builds and publishes the herdr-soho release assets.
+	fmt.Fprint(os.Stderr, `soho-release builds and publishes the soho release assets.
 
 usage:
-  herdr-soho-release build [--version V] [--dest DIR] [--repo DIR]
-  herdr-soho-release publish --version V --repo OWNER/REPO [--dest DIR]
-  herdr-soho-release ci-build [--dest DIR] [--repo DIR]
-  herdr-soho-release ci-publish [--dest DIR]
+  soho-release build [--version V] [--dest DIR] [--repo DIR]
+  soho-release publish --version V --repo OWNER/REPO [--dest DIR]
+  soho-release ci-build [--dest DIR] [--repo DIR]
+  soho-release ci-publish [--dest DIR]
 
 build stages the six exact assets (darwin/linux/windows x amd64/arm64) plus
 SHA256SUMS into a fresh sibling directory and moves them into --dest,

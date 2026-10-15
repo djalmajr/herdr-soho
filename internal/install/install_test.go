@@ -26,7 +26,7 @@ import (
 // arbitrary bytes, not a program: the core installs these bytes exactly and
 // has no path to execute them (the core never launches the downloaded
 // file, and the tests never do either).
-const fakeBinary = "herdr-soho fake release payload\n"
+const fakeBinary = "soho fake release payload\n"
 
 // hermeticTransport refuses every host other than the exact httptest
 // listener. Environment proxies do not constrain the httptest clients, so
@@ -71,7 +71,7 @@ func sha256Hex(data []byte) string {
 }
 
 func artifactNameFor(osName, arch string) string {
-	name := "herdr-soho_" + osName + "_" + arch
+	name := "soho_" + osName + "_" + arch
 	if osName == "windows" {
 		name += ".exe"
 	}
@@ -79,6 +79,16 @@ func artifactNameFor(osName, arch string) string {
 }
 
 func destinationName(osName string) string {
+	if osName == "windows" {
+		return "soho.exe"
+	}
+	return "soho"
+}
+
+// legacyDestinationName is the compatibility-window copy installed next to
+// the primary binary: the same verified bytes under the old name, as its
+// own regular file (not a link), with the .exe suffix on windows.
+func legacyDestinationName(osName string) string {
 	if osName == "windows" {
 		return "herdr-soho.exe"
 	}
@@ -201,7 +211,7 @@ func runCore(t *testing.T, options fixtureOptions) coreResult {
 	}
 }
 
-// assertNoTempFiles fails if the installer left a .herdr-soho.* file in dir
+// assertNoTempFiles fails if the installer left a .soho.* temp file in dir
 // (a missing dir is fine: nothing was created at all).
 func assertNoTempFiles(t *testing.T, dir string) {
 	t.Helper()
@@ -213,7 +223,7 @@ func assertNoTempFiles(t *testing.T, dir string) {
 		t.Fatalf("reading %s: %v", dir, err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".herdr-soho.") {
+		if strings.HasPrefix(entry.Name(), ".soho.") {
 			t.Fatalf("installer left temporary file %q in %s", entry.Name(), dir)
 		}
 	}
@@ -246,13 +256,16 @@ func assertDirExact(t *testing.T, dir string, names ...string) {
 // Port of TestInstallSHappyPathAndInstallDir: the core installs the exact
 // served bytes into the requested directory under the latest release path
 // and records the resulting path, digest, and URL. Empty OS/Architecture
-// prove the host defaults.
+// prove the host defaults. The install writes the soho binary and the
+// herdr-soho compatibility copy (its own file, the same verified bytes)
+// into the same directory.
 func TestInstallHappyPathInstallsLatestRelease(t *testing.T) {
 	got := runCore(t, fixtureOptions{})
 	if got.err != nil {
 		t.Fatalf("install: %v", got.err)
 	}
 	destination := filepath.Join(got.installDir, destinationName(runtime.GOOS))
+	legacyDestination := filepath.Join(got.installDir, legacyDestinationName(runtime.GOOS))
 	wantPaths := []string{"/latest/download/" + got.artifact, "/latest/download/SHA256SUMS"}
 	if len(got.requests) != len(wantPaths) || got.requests[0] != wantPaths[0] || got.requests[1] != wantPaths[1] {
 		t.Fatalf("download paths=%v want %v", got.requests, wantPaths)
@@ -261,13 +274,24 @@ func TestInstallHappyPathInstallsLatestRelease(t *testing.T) {
 	if err != nil || string(installed) != fakeBinary {
 		t.Fatalf("installed binary=%q err=%v", installed, err)
 	}
+	// The compatibility copy is its own file with the identical verified
+	// bytes, not a link to the primary binary.
+	copyBytes, err := os.ReadFile(legacyDestination)
+	if err != nil || string(copyBytes) != fakeBinary {
+		t.Fatalf("installed compatibility copy=%q err=%v", copyBytes, err)
+	}
 	if runtime.GOOS != "windows" {
-		fi, err := os.Stat(destination)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if fi.Mode().Perm() != 0o755 {
-			t.Fatalf("destination mode=%v want 0755", fi.Mode().Perm())
+		for _, p := range []string{destination, legacyDestination} {
+			fi, err := os.Stat(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fi.Mode().Perm() != 0o755 {
+				t.Fatalf("%s mode=%v want 0755", p, fi.Mode().Perm())
+			}
+			if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+				t.Fatalf("%s is not a regular file: %v", p, fi.Mode())
+			}
 		}
 	}
 	if got.res.Artifact != got.artifact {
@@ -276,13 +300,16 @@ func TestInstallHappyPathInstallsLatestRelease(t *testing.T) {
 	if got.res.Destination != destination {
 		t.Errorf("result destination=%q want %q", got.res.Destination, destination)
 	}
+	if got.res.LegacyCopy != legacyDestination {
+		t.Errorf("result legacy copy=%q want %q", got.res.LegacyCopy, legacyDestination)
+	}
 	if got.res.Digest != sha256Hex([]byte(fakeBinary)) {
 		t.Errorf("result digest=%q want %q", got.res.Digest, sha256Hex([]byte(fakeBinary)))
 	}
 	if got.res.ReleaseURL != got.base+"/latest/download" {
 		t.Errorf("result release URL=%q", got.res.ReleaseURL)
 	}
-	assertDirExact(t, got.installDir, destinationName(runtime.GOOS))
+	assertDirExact(t, got.installDir, legacyDestinationName(runtime.GOOS), destinationName(runtime.GOOS))
 }
 
 // Port of TestInstallSExplicitVersionUsesMatchingRelease: an explicit
@@ -323,6 +350,10 @@ func TestInstallRejectsWrongShaWithoutReplacingExistingBinary(t *testing.T) {
 	if err != nil || string(after) != string(old) {
 		t.Fatalf("existing binary changed: %q err=%v", after, err)
 	}
+	// A verification failure writes neither file: no compatibility copy.
+	if _, err := os.Stat(filepath.Join(dir, legacyDestinationName(runtime.GOOS))); !os.IsNotExist(err) {
+		t.Fatalf("failed verification wrote the compatibility copy: %v", err)
+	}
 	if fi, statErr := os.Stat(destination); statErr != nil {
 		t.Fatal(statErr)
 	} else if fi.Mode() != beforeInfo.Mode() {
@@ -357,6 +388,9 @@ func TestInstallRejectsMissingDownloads(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(got.installDir, destinationName(hostOS))); !os.IsNotExist(err) {
 				t.Fatalf("failed install left destination: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(got.installDir, legacyDestinationName(hostOS))); !os.IsNotExist(err) {
+				t.Fatalf("failed install left the compatibility copy: %v", err)
 			}
 			assertNoTempFiles(t, got.installDir)
 		})
@@ -395,8 +429,12 @@ func TestInstallDigestEntryRules(t *testing.T) {
 		{name: "digest too long", sums: digest + "a" + "  " + artifact + "\n", want: "no unique entry"},
 		{name: "non-hex digest", sums: "z" + digest[1:] + "  " + artifact + "\n", want: "no unique entry"},
 		{name: "extra field", sums: digest + "  " + artifact + " extra\n", want: "no unique entry"},
-		{name: "wrong filename", sums: digest + "  herdr-soho_other\n", want: "no unique entry"},
-		{name: "other file lines ignored", sums: "not-a-digest  herdr-soho_other\n" + digest + "  " + artifact + "\n"},
+		{name: "wrong filename", sums: digest + "  soho_other\n", want: "no unique entry"},
+		{name: "other file lines ignored", sums: "not-a-digest  soho_other\n" + digest + "  " + artifact + "\n"},
+		// A row naming the compatibility copy (not the release artifact) is
+		// ignored: the copy is not a published artifact and is never
+		// verified against its own row.
+		{name: "legacy copy line ignored", sums: digest + "  herdr-soho\n" + digest + "  " + artifact + "\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := runCore(t, fixtureOptions{sumsBody: test.sums})
@@ -414,6 +452,9 @@ func TestInstallDigestEntryRules(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(got.installDir, destinationName(hostOS))); !os.IsNotExist(err) {
 				t.Fatalf("failed install left destination: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(got.installDir, legacyDestinationName(hostOS))); !os.IsNotExist(err) {
+				t.Fatalf("failed install left the compatibility copy: %v", err)
 			}
 			assertNoTempFiles(t, got.installDir)
 		})
@@ -558,12 +599,17 @@ func TestInstallTargetsRequestedPlatform(t *testing.T) {
 			if want := "/latest/download/" + artifact; got.requests[0] != want {
 				t.Fatalf("download paths=%v want %v", got.requests, want)
 			}
-			installed, err := os.ReadFile(filepath.Join(got.installDir, destinationName(test.os)))
-			if err != nil || string(installed) != fakeBinary {
-				t.Fatalf("installed=%q err=%v", installed, err)
+			for _, name := range []string{destinationName(test.os), legacyDestinationName(test.os)} {
+				installed, err := os.ReadFile(filepath.Join(got.installDir, name))
+				if err != nil || string(installed) != fakeBinary {
+					t.Fatalf("installed %s=%q err=%v", name, installed, err)
+				}
 			}
 			if got.res.Artifact != artifact {
 				t.Errorf("result artifact=%q want %q", got.res.Artifact, artifact)
+			}
+			if want := filepath.Join(got.installDir, legacyDestinationName(test.os)); got.res.LegacyCopy != want {
+				t.Errorf("result legacy copy=%q want %q", got.res.LegacyCopy, want)
 			}
 		})
 	}
@@ -585,29 +631,36 @@ func TestInstallInstallDirMayContainSpaces(t *testing.T) {
 
 // Replacement of a pre-existing destination: the old installers replaced
 // the installed binary in place (mv -f / File.Replace); the core must do
-// the same and carry the POSIX executable mode over.
+// the same and carry the POSIX executable mode over, for the primary
+// binary and the compatibility copy alike.
 func TestInstallReplacesExistingDestination(t *testing.T) {
 	dir := t.TempDir()
 	old := []byte("old installed binary")
 	destination := filepath.Join(dir, destinationName(runtime.GOOS))
+	legacyDestination := filepath.Join(dir, legacyDestinationName(runtime.GOOS))
 	if err := os.WriteFile(destination, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyDestination, old, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got := runCore(t, fixtureOptions{installDir: dir})
 	if got.err != nil {
 		t.Fatalf("install: %v", got.err)
 	}
-	installed, err := os.ReadFile(destination)
-	if err != nil || string(installed) != fakeBinary {
-		t.Fatalf("installed=%q err=%v", installed, err)
-	}
-	if runtime.GOOS != "windows" {
-		fi, err := os.Stat(destination)
-		if err != nil {
-			t.Fatal(err)
+	for _, p := range []string{destination, legacyDestination} {
+		installed, err := os.ReadFile(p)
+		if err != nil || string(installed) != fakeBinary {
+			t.Fatalf("installed %s=%q err=%v", p, installed, err)
 		}
-		if fi.Mode().Perm() != 0o755 {
-			t.Fatalf("destination mode=%v want 0755", fi.Mode().Perm())
+		if runtime.GOOS != "windows" {
+			fi, err := os.Stat(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fi.Mode().Perm() != 0o755 {
+				t.Fatalf("%s mode=%v want 0755", p, fi.Mode().Perm())
+			}
 		}
 	}
 	assertNoTempFiles(t, dir)
@@ -666,6 +719,9 @@ func TestInstallCancellationCleansUpTempFiles(t *testing.T) {
 		}
 		if _, statErr := os.Stat(filepath.Join(installDir, destinationName(hostOS))); !os.IsNotExist(statErr) {
 			t.Fatalf("cancel left destination: %v", statErr)
+		}
+		if _, statErr := os.Stat(filepath.Join(installDir, legacyDestinationName(hostOS))); !os.IsNotExist(statErr) {
+			t.Fatalf("cancel left the compatibility copy: %v", statErr)
 		}
 		assertNoTempFiles(t, installDir)
 	})

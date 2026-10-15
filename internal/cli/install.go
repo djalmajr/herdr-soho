@@ -41,7 +41,7 @@ var userPathStoreFactory = install.DefaultUserPathStore
 // internal/install core (the only checksum/download implementation) and
 // owns what the core leaves to the root CLI — flag parsing and
 // pre-effect refusal, environment resolution (--dir first, then
-// HERDR_SOHO_INSTALL_DIR, then the OS default), the bounded
+// SOHO_INSTALL_DIR, then the OS default), the bounded
 // context/client, and the PATH advice. The default install never edits a
 // shell profile or the registry and never executes the installed bytes;
 // the optional flags opt in explicitly: --add-to-path appends the install
@@ -52,7 +52,7 @@ func cmdInstall(args []string, env platform.Env) int {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	version := fs.String("version", "", "release tag to install (v-prefixed); empty installs the latest release")
-	dir := fs.String("dir", "", "install directory; default: $HERDR_SOHO_INSTALL_DIR, or $HOME/.local/bin on POSIX / %LOCALAPPDATA%/Programs/herdr-soho on Windows")
+	dir := fs.String("dir", "", "install directory; default: $SOHO_INSTALL_DIR, or $HOME/.local/bin on POSIX / %LOCALAPPDATA%/Programs/soho on Windows")
 	addToPath := fs.Bool("add-to-path", false, "append the install directory to the Windows user PATH (opt-in, like the old -AddToPath; refused on other OSes before any effect)")
 	verifyVersion := fs.Bool("verify-version", false, "run the installed binary's --version once and print the result (opt-in; the default install never executes it)")
 	if err := fs.Parse(args); err != nil {
@@ -83,6 +83,7 @@ func cmdInstall(args []string, env platform.Env) int {
 		platform.Die(err.Error(), 1)
 	}
 	fmt.Fprintf(platform.Stdout, "installed %s\n", res.Destination)
+	fmt.Fprintf(platform.Stdout, "installed %s\n", res.LegacyCopy)
 	fmt.Fprintf(platform.Stdout, "sha256 %s\n", res.Digest)
 	fmt.Fprintf(platform.Stdout, "release %s\n", res.ReleaseURL)
 	if !pathContains(env.Get("PATH"), abs) {

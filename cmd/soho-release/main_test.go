@@ -1,5 +1,5 @@
 // Native actual-CLI signal/cancellation contract for the release tool.
-// The real herdr-soho-release binary (built from this package's source by
+// The real soho-release binary (built from this package's source by
 // the trusted absolute go toolchain) runs a real `build` against a native
 // fake slow `go` child — the running test binary re-executed via a PATH
 // shim, no script engine. The child's identity is the exact original
@@ -125,7 +125,7 @@ func startSignalCase(t *testing.T) *signalCase {
 	// The real CLI, built from this package's source by the trusted
 	// absolute go executable (resolved from this process's own PATH, never
 	// the child's) with a bounded context.
-	hsr := filepath.Join(root, "herdr-soho-release")
+	hsr := filepath.Join(root, "soho-release")
 	goPath, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatalf("resolving the trusted go toolchain: %v", err)
@@ -238,7 +238,7 @@ func (c *signalCase) waitFakeGoReady(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Logf("fake go child verified: pid=%d started=%q name=%q", c.goPID, c.goStart, c.goName)
-	staging, _ := filepath.Glob(filepath.Join(c.root, ".herdr-soho-release-*"))
+	staging, _ := filepath.Glob(filepath.Join(c.root, ".soho-release-*"))
 	if len(staging) != 1 {
 		t.Fatalf("expected exactly one owned staging directory before the signal, got %v", staging)
 	}
@@ -286,7 +286,7 @@ func (c *signalCase) waitCLIExit(t *testing.T, sig os.Signal) {
 	if exitErr.ExitCode() != 1 {
 		t.Fatalf("CLI exit code=%d, want 1 (the build error path); stdout=%q stderr=%q", exitErr.ExitCode(), c.out.String(), c.errOut.String())
 	}
-	if !strings.Contains(c.errOut.String(), "release: building herdr-soho_darwin_amd64") {
+	if !strings.Contains(c.errOut.String(), "release: building soho_darwin_amd64") {
 		t.Fatalf("stderr does not name the cancelled first build: %q", c.errOut.String())
 	}
 	if !strings.Contains(c.errOut.String(), "signal: killed") {
@@ -306,7 +306,7 @@ func (c *signalCase) verifyPostState(t *testing.T) {
 	if live != platform.ProcGone {
 		t.Fatalf("the fake go child is not proven gone (liveness=%v, started=%q)", live, started)
 	}
-	if rest, _ := filepath.Glob(filepath.Join(c.root, ".herdr-soho-release-*")); len(rest) != 0 {
+	if rest, _ := filepath.Glob(filepath.Join(c.root, ".soho-release-*")); len(rest) != 0 {
 		t.Fatalf("the owned staging survived the signal: %v", rest)
 	}
 	if _, err := os.Stat(c.dest); !os.IsNotExist(err) {

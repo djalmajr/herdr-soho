@@ -33,7 +33,7 @@ import (
 const installFixtureTag = "v1.2.3"
 
 func installFixtureName() string {
-	name := "herdr-soho_" + runtime.GOOS + "_" + runtime.GOARCH
+	name := "soho_" + runtime.GOOS + "_" + runtime.GOARCH
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -41,6 +41,17 @@ func installFixtureName() string {
 }
 
 func installBinaryName() string {
+	name := "soho"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return name
+}
+
+// legacyInstallBinaryName is the compatibility-window copy the install
+// writes next to the primary binary: the same verified bytes under the
+// old name, as its own file (not a link).
+func legacyInstallBinaryName() string {
 	name := "herdr-soho"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -53,7 +64,7 @@ func installBinaryName() string {
 func hermeticReleaseServer(t *testing.T, tag, osName, arch string, payload []byte) (*httptest.Server, *int32) {
 	t.Helper()
 	var reqs int32
-	name := "herdr-soho_" + osName + "_" + arch
+	name := "soho_" + osName + "_" + arch
 	if osName == "windows" {
 		name += ".exe"
 	}
@@ -118,11 +129,11 @@ func assertNoDir(t *testing.T, dir string) {
 }
 
 // TestInstallCommandInstallsFromHermeticRelease drives the real CLI to a
-// hermetic release: exact bytes at the destination, exactly two requests,
-// the exact installed path/digest/release lines, PATH advice, and no temp
-// residue.
+// hermetic release: exact bytes at both installed files (soho and the
+// herdr-soho compatibility copy), exactly two requests, the exact
+// installed path/digest/release lines, PATH advice, and no temp residue.
 func TestInstallCommandInstallsFromHermeticRelease(t *testing.T) {
-	payload := []byte("herdr-soho native fixture binary " + installFixtureTag + "\n")
+	payload := []byte("soho native fixture binary " + installFixtureTag + "\n")
 	srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, payload)
 	home := t.TempDir()
 	dir := filepath.Join(t.TempDir(), "bin") // does not exist yet
@@ -133,13 +144,13 @@ func TestInstallCommandInstallsFromHermeticRelease(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d err=%q", code, errOut)
 	}
-	name := "herdr-soho"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	got, err := os.ReadFile(filepath.Join(dir, name))
-	if err != nil || string(got) != string(payload) {
-		t.Fatalf("installed bytes = %q err=%v", got, err)
+	name := installBinaryName()
+	legacyName := legacyInstallBinaryName()
+	for _, n := range []string{name, legacyName} {
+		got, err := os.ReadFile(filepath.Join(dir, n))
+		if err != nil || string(got) != string(payload) {
+			t.Fatalf("installed %s bytes = %q err=%v", n, got, err)
+		}
 	}
 	if n := atomic.LoadInt32(reqs); n != 2 {
 		t.Fatalf("requests = %d, want exactly 2 (artifact + SHA256SUMS)", n)
@@ -147,6 +158,7 @@ func TestInstallCommandInstallsFromHermeticRelease(t *testing.T) {
 	sum := sha256.Sum256(payload)
 	for _, line := range []string{
 		"installed " + filepath.Join(dir, name),
+		"installed " + filepath.Join(dir, legacyName),
 		"sha256 " + hex.EncodeToString(sum[:]),
 		"release " + srv.URL + "/releases/download/" + installFixtureTag,
 		"PATH: " + dir + " is not in PATH; add it to your shell profile (no automatic edits)",
@@ -155,12 +167,23 @@ func TestInstallCommandInstallsFromHermeticRelease(t *testing.T) {
 			t.Fatalf("stdout missing %q:\n%s", line, out)
 		}
 	}
+	// The output lists the two installed paths, primary first.
+	if first := strings.Index(out, "installed "); first < 0 || !strings.HasPrefix(out[first:], "installed "+filepath.Join(dir, name)) {
+		t.Fatalf("the first installed line must name the soho path:\n%s", out)
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != name {
-		t.Fatalf("dir entries = %v, want only %s (no temp residue)", entries, name)
+	if len(entries) != 2 {
+		t.Fatalf("dir entries = %v, want only the binary and its compatibility copy (no temp residue)", entries)
+	}
+	gotNames := map[string]bool{}
+	for _, e := range entries {
+		gotNames[e.Name()] = true
+	}
+	if !gotNames[name] || !gotNames[legacyName] {
+		t.Fatalf("dir entries = %v, want %s and %s", entries, name, legacyName)
 	}
 }
 
@@ -174,7 +197,7 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 	t.Run("flag beats env var", func(t *testing.T) {
 		srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, payload)
 		env := installTestEnv(t, t.TempDir())
-		env["HERDR_SOHO_INSTALL_DIR"] = filepath.Join(t.TempDir(), "env-dir")
+		env["SOHO_INSTALL_DIR"] = filepath.Join(t.TempDir(), "env-dir")
 		env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 		dir := filepath.Join(t.TempDir(), "flag-dir")
 		code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag, "--dir", dir)
@@ -184,7 +207,7 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, installBinaryName())); err != nil {
 			t.Fatalf("binary in --dir dir: %v", err)
 		}
-		if _, err := os.Lstat(env["HERDR_SOHO_INSTALL_DIR"]); !os.IsNotExist(err) {
+		if _, err := os.Lstat(env["SOHO_INSTALL_DIR"]); !os.IsNotExist(err) {
 			t.Fatalf("env-var dir was created: %v", err)
 		}
 		if n := atomic.LoadInt32(reqs); n != 2 {
@@ -205,9 +228,9 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("code=%d err=%q", code, errOut)
 		}
-		// the documented native default is %LOCALAPPDATA%\Programs\herdr-soho
+		// the documented native default is %LOCALAPPDATA%\Programs\soho
 		// plus the native binary name (expected path built independently)
-		if _, err := os.Stat(filepath.Join(local, "Programs", "herdr-soho", installBinaryName())); err != nil {
+		if _, err := os.Stat(filepath.Join(local, "Programs", "soho", installBinaryName())); err != nil {
 			t.Fatalf("binary in the LOCALAPPDATA default dir: %v", err)
 		}
 		if n := atomic.LoadInt32(reqs); n != 2 {
@@ -220,7 +243,7 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 		home := t.TempDir()
 		env := installTestEnv(t, home)
 		dir := filepath.Join(t.TempDir(), "env-dir")
-		env["HERDR_SOHO_INSTALL_DIR"] = dir
+		env["SOHO_INSTALL_DIR"] = dir
 		env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
 		code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag)
 		if code != 0 {
@@ -253,9 +276,31 @@ func TestInstallCommandDefaultDirResolution(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("code=%d err=%q", code, errOut)
 		}
-		want := filepath.Join(home, ".local", "bin", "herdr-soho")
+		want := filepath.Join(home, ".local", "bin", "soho")
 		if _, err := os.Stat(want); err != nil {
 			t.Fatalf("binary at the HOME default: %v", err)
+		}
+		if n := atomic.LoadInt32(reqs); n != 2 {
+			t.Fatalf("requests = %d, want 2", n)
+		}
+	})
+
+	t.Run("legacy HERDR_SOHO_INSTALL_DIR is honored through Run", func(t *testing.T) {
+		// The compatibility window: the legacy variable is copied to
+		// SOHO_INSTALL_DIR at the start of Run (slice A), so an install
+		// configured only with the old name still lands in that directory.
+		srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, payload)
+		home := t.TempDir()
+		env := installTestEnv(t, home)
+		dir := filepath.Join(t.TempDir(), "legacy-env-dir")
+		env["HERDR_SOHO_INSTALL_DIR"] = dir
+		env["HERDR_SOHO_RELEASE_BASE"] = srv.URL + "/releases"
+		code, _, errOut := runInstallCLI(t, env, "--version", installFixtureTag)
+		if code != 0 {
+			t.Fatalf("code=%d err=%q", code, errOut)
+		}
+		if _, err := os.Stat(filepath.Join(dir, installBinaryName())); err != nil {
+			t.Fatalf("binary in the legacy env dir: %v", err)
 		}
 		if n := atomic.LoadInt32(reqs); n != 2 {
 			t.Fatalf("requests = %d, want 2", n)
@@ -366,12 +411,14 @@ func TestInstallCommandVersionValidationIsTheSharedRunRule(t *testing.T) {
 
 // TestInstallCommandReplacesExistingDestination checks the core's update
 // path through the CLI: the existing binary is replaced by the verified
-// bytes, the sibling file is untouched, and no temp file leaks.
+// bytes, the compatibility copy gets the same verified bytes, the sibling
+// file is untouched, and no temp file leaks.
 func TestInstallCommandReplacesExistingDestination(t *testing.T) {
 	payload := []byte("new fixture bytes\n")
 	srv, reqs := hermeticReleaseServer(t, installFixtureTag, runtime.GOOS, runtime.GOARCH, payload)
 	dir := t.TempDir()
 	name := installBinaryName()
+	legacyName := legacyInstallBinaryName()
 	old := []byte("old installed binary\n")
 	if err := os.WriteFile(filepath.Join(dir, name), old, 0o755); err != nil {
 		t.Fatal(err)
@@ -385,9 +432,11 @@ func TestInstallCommandReplacesExistingDestination(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d, want 0 (err=%q)", code, errOut)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, name))
-	if err != nil || string(got) != string(payload) {
-		t.Fatalf("destination not replaced: %q err=%v", got, err)
+	for _, n := range []string{name, legacyName} {
+		got, err := os.ReadFile(filepath.Join(dir, n))
+		if err != nil || string(got) != string(payload) {
+			t.Fatalf("%s not replaced with the verified bytes: %q err=%v", n, got, err)
+		}
 	}
 	if n := atomic.LoadInt32(reqs); n != 2 {
 		t.Fatalf("requests = %d, want 2", n)
@@ -396,23 +445,28 @@ func TestInstallCommandReplacesExistingDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("dir entries = %v, want the binary and keep.txt (no temp leak)", entries)
+	if len(entries) != 3 {
+		t.Fatalf("dir entries = %v, want the binary, its compatibility copy and keep.txt (no temp leak)", entries)
 	}
 }
 
 // TestInstallCommandPreservesExistingDestinationOnBadSum checks the
 // preserve-on-failure contract through the CLI: a corrupted SHA256SUMS
-// entry fails the run and the old binary keeps its exact old bytes.
+// entry fails the run and neither installed file is written — the
+// existing binary and the existing compatibility copy keep their exact
+// old bytes.
 func TestInstallCommandPreservesExistingDestinationOnBadSum(t *testing.T) {
 	payload := []byte("new fixture bytes\n")
-	name := "herdr-soho_" + runtime.GOOS + "_" + runtime.GOARCH
+	name := "soho_" + runtime.GOOS + "_" + runtime.GOARCH
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
 	dir := t.TempDir()
 	old := []byte("old installed binary\n")
 	if err := os.WriteFile(filepath.Join(dir, installBinaryName()), old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, legacyInstallBinaryName()), old, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	var reqs int32
@@ -440,12 +494,16 @@ func TestInstallCommandPreservesExistingDestinationOnBadSum(t *testing.T) {
 	if err != nil || string(got) != string(old) {
 		t.Fatalf("old binary changed on failed verification: %q err=%v", got, err)
 	}
+	gotCopy, err := os.ReadFile(filepath.Join(dir, legacyInstallBinaryName()))
+	if err != nil || string(gotCopy) != string(old) {
+		t.Fatalf("old compatibility copy changed on failed verification: %q err=%v", gotCopy, err)
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("dir entries = %v, want only the old binary (no temp leak)", entries)
+	if len(entries) != 2 {
+		t.Fatalf("dir entries = %v, want only the two old files (no temp leak)", entries)
 	}
 }
 
@@ -584,7 +642,7 @@ func TestInstallCommandHelpDocumentsThePortableUsage(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d err=%q", code, errOut)
 	}
-	if !strings.Contains(out, "herdr-soho install [--version vTAG] [--dir PATH]") {
+	if !strings.Contains(out, "soho install [--version vTAG] [--dir PATH]") {
 		t.Fatalf("help output missing the install usage line:\n%s", out)
 	}
 }
@@ -765,7 +823,10 @@ func TestInstallCommandDefaultInstallDoesNotTouchUserPath(t *testing.T) {
 func nativeArtifactServer(t *testing.T, rules []fakecli.Rule, captureEnv []string) (*httptest.Server, *int32, string, []byte) {
 	t.Helper()
 	binDir := t.TempDir()
-	nativePath, err := fakecli.InstallWithOptions(t, binDir, "herdr-soho", rules, fakecli.InstallOptions{CaptureEnv: captureEnv})
+	// The fake resolves its config <name>.json from its own argv[0] once
+	// installed, so the fixture identity is the installed binary's base
+	// name (no .exe suffix), not the old name.
+	nativePath, err := fakecli.InstallWithOptions(t, binDir, "soho", rules, fakecli.InstallOptions{CaptureEnv: captureEnv})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -803,7 +864,7 @@ func TestInstallCommandVerifyVersionOptIn(t *testing.T) {
 	if n := atomic.LoadInt32(reqs); n != 2 {
 		t.Fatalf("requests = %d, want 2", n)
 	}
-	calls, err := fakecli.ReadCalls(filepath.Join(binDir, "herdr-soho.calls.jsonl"))
+	calls, err := fakecli.ReadCalls(filepath.Join(binDir, "soho.calls.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -832,7 +893,7 @@ func TestInstallCommandVerifyVersionNotRunByDefault(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d err=%q", code, errOut)
 	}
-	if _, err := os.Stat(filepath.Join(binDir, "herdr-soho.calls.jsonl")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(binDir, "soho.calls.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("the installed binary was executed on the default install (err=%v)", err)
 	}
 }
