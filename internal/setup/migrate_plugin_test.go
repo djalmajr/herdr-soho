@@ -364,68 +364,98 @@ func TestMigratePlugin(t *testing.T) {
 			})
 		}
 	})
-	t.Run(`Herdr config not found: the manual line and the removal still run`, func(t *testing.T) { // The brief's step 3 keeps going to step 4.
-		for _, tc := range []struct {
-			name     string
-			code     int
-			noConfig bool
-		}{
-			{"config-dir succeeds but config.toml is absent", 0, true},
-			{"config-dir fails", 1, false},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				env, _, bin, configToml, configDir := migratePluginFixture(t)
-				if tc.noConfig {
-					// The file existed and was removed: the migration must take
-					// the manual line, not crash on the absent path.
-					if err := os.WriteFile(configToml, []byte(mpConfigOneShortcut), 0o600); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.Remove(configToml); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{
-					{Argv: []string{"plugin", "list", "--json"}, Stdout: mpListJSON(mpFormerLocal + "," + mpSohoPlugin)},
-					{Argv: []string{"plugin", "config-dir", "djalmajr.soho"}, Stdout: configDir, Code: tc.code, Stderr: "no such plugin\n"},
-					{Argv: []string{"plugin", "unlink", "djalmajr.herdr-soho"}},
-				}); err != nil {
-					t.Fatal(err)
-				}
-				lines := migratePlugin(env, "v0.3.0", false)
-				want := []string{
-					"migrate: plugin: Herdr config not found; replace djalmajr.herdr-soho. with djalmajr.soho. in your Herdr config.toml by hand",
-					"migrate: plugin: removed the former djalmajr.herdr-soho (unlink)",
-				}
-				if !reflect.DeepEqual(lines, want) {
-					t.Fatalf("lines=%v", lines)
-				}
-				if got := mpCalls(t, bin); !reflect.DeepEqual(got, [][]string{
-					{"plugin", "list", "--json"},
-					{"plugin", "config-dir", "djalmajr.soho"},
-					{"plugin", "unlink", "djalmajr.herdr-soho"},
-				}) {
-					t.Fatalf("calls=%#v", got)
-				}
-			})
-		}
-	})
-	t.Run(`reload-config failure is only a warning line; the migration completes`, func(t *testing.T) {
+	t.Run(`no Herdr config file: no shortcut to move, the removal runs`, func(t *testing.T) {
 		env, _, bin, configToml, configDir := migratePluginFixture(t)
-		if err := os.WriteFile(configToml, []byte(mpConfigOneShortcut), 0o600); err != nil {
+		if err := os.Remove(configToml); err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
 		}
 		if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{
 			{Argv: []string{"plugin", "list", "--json"}, Stdout: mpListJSON(mpFormerLocal + "," + mpSohoPlugin)},
 			{Argv: []string{"plugin", "config-dir", "djalmajr.soho"}, Stdout: configDir},
-			{Argv: []string{"server", "reload-config"}, Code: 1, Stderr: "server down\n"},
 			{Argv: []string{"plugin", "unlink", "djalmajr.herdr-soho"}},
 		}); err != nil {
 			t.Fatal(err)
 		}
 		lines := migratePlugin(env, "v0.3.0", false)
-		if len(lines) != 3 || lines[0] != "migrate: plugin: warning: herdr server reload-config failed: exit 1" || !strings.Contains(lines[1], "1 shortcut(s) now call djalmajr.soho") || lines[2] != "migrate: plugin: removed the former djalmajr.herdr-soho (unlink)" {
+		if want := []string{"migrate: plugin: removed the former djalmajr.herdr-soho (unlink)"}; !reflect.DeepEqual(lines, want) {
 			t.Fatalf("lines=%v", lines)
+		}
+		if got := mpCalls(t, bin); !reflect.DeepEqual(got, [][]string{
+			{"plugin", "list", "--json"},
+			{"plugin", "config-dir", "djalmajr.soho"},
+			{"plugin", "unlink", "djalmajr.herdr-soho"},
+		}) {
+			t.Fatalf("calls=%#v", got)
+		}
+	})
+	t.Run(`the shortcuts cannot be confirmed: the former plugin is kept`, func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			rules  func(configDir string) []fakecli.Rule
+			config func(t *testing.T, configToml string)
+			want   []string
+			calls  [][]string
+		}{
+			{
+				name: "config-dir fails",
+				rules: func(configDir string) []fakecli.Rule {
+					return []fakecli.Rule{{Argv: []string{"plugin", "config-dir", "djalmajr.soho"}, Code: 1, Stderr: "no such plugin\n"}}
+				},
+				config: func(t *testing.T, configToml string) { mustWritePluginConfig(t, configToml, mpConfigOneShortcut) },
+				want:   []string{"migrate: plugin: could not locate the Herdr config (herdr plugin config-dir failed); the former plugin is kept"},
+				calls:  [][]string{{"plugin", "list", "--json"}, {"plugin", "config-dir", "djalmajr.soho"}},
+			},
+			{
+				name: "the config path cannot be read",
+				rules: func(configDir string) []fakecli.Rule {
+					return []fakecli.Rule{{Argv: []string{"plugin", "config-dir", "djalmajr.soho"}, Stdout: configDir}}
+				},
+				config: func(t *testing.T, configToml string) {
+					if err := os.Remove(configToml); err != nil && !os.IsNotExist(err) {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(configToml, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				},
+				want:  nil,
+				calls: [][]string{{"plugin", "list", "--json"}, {"plugin", "config-dir", "djalmajr.soho"}},
+			},
+			{
+				name: "reload-config fails after the shortcuts are written",
+				rules: func(configDir string) []fakecli.Rule {
+					return []fakecli.Rule{
+						{Argv: []string{"plugin", "config-dir", "djalmajr.soho"}, Stdout: configDir},
+						{Argv: []string{"server", "reload-config"}, Code: 1, Stderr: "server down\n"},
+					}
+				},
+				config: func(t *testing.T, configToml string) { mustWritePluginConfig(t, configToml, mpConfigOneShortcut) },
+				calls:  [][]string{{"plugin", "list", "--json"}, {"plugin", "config-dir", "djalmajr.soho"}, {"server", "reload-config"}},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				env, _, bin, configToml, configDir := migratePluginFixture(t)
+				tc.config(t, configToml)
+				rules := append([]fakecli.Rule{{Argv: []string{"plugin", "list", "--json"}, Stdout: mpListJSON(mpFormerLocal + "," + mpSohoPlugin)}}, tc.rules(configDir)...)
+				rules = append(rules, fakecli.Rule{Argv: []string{"plugin", "unlink", "djalmajr.herdr-soho"}})
+				if _, err := fakecli.Install(t, bin, "herdr", rules); err != nil {
+					t.Fatal(err)
+				}
+				lines := migratePlugin(env, "v0.3.0", false)
+				last := ""
+				if len(lines) > 0 {
+					last = lines[len(lines)-1]
+				}
+				if !strings.HasSuffix(last, "the former plugin is kept") && !strings.Contains(last, "the former plugin is kept until Herdr loads the new shortcuts") {
+					t.Fatalf("lines=%v: the last line must say the former plugin is kept", lines)
+				}
+				if tc.want != nil && !reflect.DeepEqual(lines, tc.want) {
+					t.Fatalf("lines=%v want %v", lines, tc.want)
+				}
+				if got := mpCalls(t, bin); !reflect.DeepEqual(got, tc.calls) {
+					t.Fatalf("calls=%#v want %#v (no unlink or uninstall)", got, tc.calls)
+				}
+			})
 		}
 	})
 	t.Run(`config without former shortcuts: no rename line, no reload, no backup`, func(t *testing.T) {
@@ -466,4 +496,11 @@ func mustReadDir(t *testing.T, dir string) []os.DirEntry {
 		t.Fatal(err)
 	}
 	return entries
+}
+
+func mustWritePluginConfig(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

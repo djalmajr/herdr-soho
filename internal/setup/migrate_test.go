@@ -127,8 +127,8 @@ func TestMigrateNamesUserConfig(t *testing.T) {
 		ctx := core.LoadConfig(env, cwd)
 		lines := migrateNames(&ctx, env, cwd, false)
 		want := []string{
-			"migrate: moved " + old + "/config to " + novo + "/config",
-			"migrate: moved " + old + "/teams to " + novo + "/teams",
+			"migrate: moved " + filepath.Join(old, "config") + " to " + filepath.Join(novo, "config"),
+			"migrate: moved " + filepath.Join(old, "teams") + " to " + filepath.Join(novo, "teams"),
 			"migrate: removed the empty " + old,
 		}
 		if !reflect.DeepEqual(lines, want) {
@@ -160,9 +160,9 @@ func TestMigrateNamesUserConfig(t *testing.T) {
 		ctx := core.LoadConfig(env, cwd)
 		lines := migrateNames(&ctx, env, cwd, false)
 		want := []string{
-			"migrate: moved " + oldSo + "/config to " + novo + "/config",
+			"migrate: moved " + filepath.Join(oldSo, "config") + " to " + filepath.Join(novo, "config"),
 			"migrate: removed the empty " + oldSo,
-			"migrate: moved " + oldAg + "/teams to " + novo + "/teams",
+			"migrate: moved " + filepath.Join(oldAg, "teams") + " to " + filepath.Join(novo, "teams"),
 			"migrate: removed the empty " + oldAg,
 		}
 		if !reflect.DeepEqual(lines, want) {
@@ -182,7 +182,7 @@ func TestMigrateNamesUserConfig(t *testing.T) {
 		ctx := core.LoadConfig(env, cwd)
 		lines := migrateNames(&ctx, env, cwd, false)
 		want := []string{
-			"migrate: kept " + old + "/config: " + novo + "/config already exists; merge by hand",
+			"migrate: kept " + filepath.Join(old, "config") + ": " + filepath.Join(novo, "config") + " already exists; merge by hand",
 		}
 		if !reflect.DeepEqual(lines, want) {
 			t.Fatalf("lines = %v, want %v", lines, want)
@@ -350,8 +350,8 @@ func TestMigrateNamesDryRun(t *testing.T) {
 			mustWriteFile(t, filepath.Join(old, "teams", "default.conf"), "lanes=2\n")
 		})
 		want := []string{
-			"migrate: would move " + fx.old + "/config to " + fx.novo + "/config",
-			"migrate: would move " + fx.old + "/teams to " + fx.novo + "/teams",
+			"migrate: would move " + filepath.Join(fx.old, "config") + " to " + filepath.Join(fx.novo, "config"),
+			"migrate: would move " + filepath.Join(fx.old, "teams") + " to " + filepath.Join(fx.novo, "teams"),
 			"migrate: would remove the empty " + fx.old,
 		}
 		if !reflect.DeepEqual(fx.lines, want) {
@@ -367,7 +367,7 @@ func TestMigrateNamesDryRun(t *testing.T) {
 			mustWriteFile(t, filepath.Join(novo, "config"), "new=1\n")
 		})
 		want := []string{
-			"migrate: kept " + fx.old + "/config: " + fx.novo + "/config already exists; merge by hand",
+			"migrate: kept " + filepath.Join(fx.old, "config") + ": " + filepath.Join(fx.novo, "config") + " already exists; merge by hand",
 		}
 		if !reflect.DeepEqual(fx.lines, want) {
 			t.Fatalf("lines = %v, want %v", fx.lines, want)

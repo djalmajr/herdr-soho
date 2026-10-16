@@ -137,7 +137,7 @@ func (f *prepareFixture) envFor(fakeDir string) platform.Env {
 	// configuration (the auto-close settings), whose defaults come from
 	// the skill; without it the Windows lookup (USERPROFILE, LOCALAPPDATA)
 	// finds none in this isolated env.
-	env["HERDR_SOHO_SKILL_DIR"] = skillDir(t)
+	env["SOHO_SKILL_DIR"] = skillDir(t)
 	env["GIT_CONFIG_NOSYSTEM"] = "1"
 	env["GIT_AUTHOR_NAME"] = "fixture"
 	env["GIT_AUTHOR_EMAIL"] = "fixture@example.org"

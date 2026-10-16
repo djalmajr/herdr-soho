@@ -57,7 +57,7 @@ func newAcf(t *testing.T) *acfFix {
 	f := &acfFix{root: root, id: "j1", env: platform.Env{
 		"PATH": filepath.Dir(gitPath), "HOME": home, "USERPROFILE": home,
 		"GIT_CONFIG_GLOBAL": gitConf, "GIT_CONFIG_NOSYSTEM": "1",
-		"HERDR_SOHO_SKILL_DIR": skill,
+		"SOHO_SKILL_DIR": skill,
 	}}
 	f.co = filepath.Join(root, "repos", "org", "re po")
 	if err := os.MkdirAll(f.co, 0o755); err != nil {
@@ -630,7 +630,7 @@ func TestActorConfineRunPinsBeforeTheOrchestrator(t *testing.T) {
 		var friction []string
 		sup := supSupervisor(store, clock, team, &friction)
 		sup.PrivateLaunch = true
-		sup.actorEnv = platform.Env{"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": filepath.Join(home, "xdg"), "HERDR_SOHO_SKILL_DIR": skill}
+		sup.actorEnv = platform.Env{"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": filepath.Join(home, "xdg"), "SOHO_SKILL_DIR": skill}
 		sup.launchSel = core.UserSelection{Base: base}
 		return sup, store, team, root, &friction
 	}

@@ -192,8 +192,8 @@ func TestSupervisorLocator(t *testing.T) {
 			"HOME":                  home,
 			"GH_TOKEN":              "gh-secret",
 			"AWS_SECRET_ACCESS_KEY": "aws-secret",
-			"HERDR_SOHO_DIR":        "/state/soho",
-			"HERDR_SOHO_STATE_DIR":  "/state/soho2",
+			"SOHO_DIR":              "/state/soho",
+			"SOHO_STATE_DIR":        "/state/soho2",
 			"APPDATA":               `C:\appdata`,
 			"PATH":                  "/usr/bin:/bin",
 			"SSH_AUTH_SOCK":         "/run/user/1000/ssh-agent.sock",
@@ -214,8 +214,8 @@ func TestSupervisorLocator(t *testing.T) {
 				}
 			}
 			for _, secret := range []string{
-				env["GH_TOKEN"], env["AWS_SECRET_ACCESS_KEY"], env["HERDR_SOHO_DIR"],
-				env["HERDR_SOHO_STATE_DIR"], env["APPDATA"], env["PATH"], env["SSH_AUTH_SOCK"],
+				env["GH_TOKEN"], env["AWS_SECRET_ACCESS_KEY"], env["SOHO_DIR"],
+				env["SOHO_STATE_DIR"], env["APPDATA"], env["PATH"], env["SSH_AUTH_SOCK"],
 			} {
 				for _, value := range got {
 					if value == secret {

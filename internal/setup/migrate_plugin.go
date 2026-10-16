@@ -84,23 +84,31 @@ func migratePlugin(env platform.Env, version string, dry bool) []string {
 			return []string{fmt.Sprintf("migrate: plugin: install of djalmajr.soho failed: %s; the former plugin is kept", herdrCallReason(install))}
 		}
 	}
+	// The former plugin is removed only once its shortcuts are known to be
+	// moved: an unknown config, an unreadable one or a reload that fails
+	// keeps it, so no shortcut is left pointing at a missing plugin.
 	config := herdrConfigToml(env)
+	if config == "" {
+		return append(lines, "migrate: plugin: could not locate the Herdr config (herdr plugin config-dir failed); the former plugin is kept")
+	}
 	data, readErr := os.ReadFile(config)
-	if config == "" || readErr != nil {
-		lines = append(lines, "migrate: plugin: Herdr config not found; replace djalmajr.herdr-soho. with djalmajr.soho. in your Herdr config.toml by hand")
-	} else if updated, count := replaceFormerShortcuts(string(data)); count > 0 {
-		if dry {
-			lines = append(lines, fmt.Sprintf("migrate: plugin: would replace %d shortcut(s) in %s", count, config))
-			lines = append(lines, "migrate: plugin: would run: herdr server reload-config")
-		} else if backup := writeFormerConfigBackup(config, data); backup == "" || platform.AtomicWrite(config, updated) != nil {
-			// The shortcuts must keep working: while the config could not be
-			// updated the former plugin stays registered.
-			return append(lines, fmt.Sprintf("migrate: plugin: could not update %s; the former plugin is kept", config))
-		} else {
-			if reload := herdrPluginCall(env, "server", "reload-config"); !herdrCallOK(reload) {
-				lines = append(lines, fmt.Sprintf("migrate: plugin: warning: herdr server reload-config failed: %s", herdrCallReason(reload)))
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return append(lines, fmt.Sprintf("migrate: plugin: could not read %s; the former plugin is kept", config))
+	}
+	// Without a config file Herdr has no custom shortcut to move.
+	if readErr == nil {
+		if updated, count := replaceFormerShortcuts(string(data)); count > 0 {
+			if dry {
+				lines = append(lines, fmt.Sprintf("migrate: plugin: would replace %d shortcut(s) in %s", count, config))
+				lines = append(lines, "migrate: plugin: would run: herdr server reload-config")
+			} else if backup := writeFormerConfigBackup(config, data); backup == "" || platform.AtomicWrite(config, updated) != nil {
+				return append(lines, fmt.Sprintf("migrate: plugin: could not update %s; the former plugin is kept", config))
+			} else {
+				lines = append(lines, fmt.Sprintf("migrate: plugin: %d shortcut(s) now call djalmajr.soho (backup %s)", count, backup))
+				if reload := herdrPluginCall(env, "server", "reload-config"); !herdrCallOK(reload) {
+					return append(lines, fmt.Sprintf("migrate: plugin: herdr server reload-config failed: %s; the former plugin is kept until Herdr loads the new shortcuts: restart Herdr and run soho setup again", herdrCallReason(reload)))
+				}
 			}
-			lines = append(lines, fmt.Sprintf("migrate: plugin: %d shortcut(s) now call djalmajr.soho (backup %s)", count, backup))
 		}
 	}
 	verb := "uninstall"

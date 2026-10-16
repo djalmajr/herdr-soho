@@ -14,7 +14,6 @@ import (
 
 	"github.com/djalmajr/soho/internal/core"
 	"github.com/djalmajr/soho/internal/platform"
-	"github.com/djalmajr/soho/internal/testutil"
 )
 
 //go:linkname platformRenameFile github.com/djalmajr/soho/internal/platform.renameFile
@@ -50,14 +49,7 @@ func localPlanFixture(t *testing.T) (string, platform.Env, *core.Config) {
 	}
 	home := t.TempDir()
 	tmp := t.TempDir()
-	env := platform.Env{}
-	for _, item := range testutil.CleanEnv(t) {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
-			env[key] = value
-		}
-	}
-	env["PATH"] = filepath.Dir(git) + string(os.PathListSeparator) + env.Get("PATH")
+	env := isolatedHerdrEnv(t, git)
 	env["HOME"] = home
 	env["XDG_CONFIG_HOME"] = filepath.Join(home, ".config")
 	env["TMPDIR"] = tmp

@@ -15,6 +15,7 @@ import (
 	"github.com/djalmajr/soho/internal/platform"
 	"github.com/djalmajr/soho/internal/setuptext"
 	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func setupWriteFixture(t *testing.T) (string, platform.Env, *core.Config) {
@@ -28,14 +29,7 @@ func setupWriteFixture(t *testing.T) (string, platform.Env, *core.Config) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
-	env := platform.Env{}
-	for _, item := range testutil.CleanEnv(t) {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
-			env[key] = value
-		}
-	}
-	env["PATH"] = filepath.Dir(git) + string(os.PathListSeparator) + env.Get("PATH")
+	env := isolatedHerdrEnv(t, git)
 	env["HOME"] = t.TempDir()
 	env["XDG_CONFIG_HOME"] = filepath.Join(env["HOME"], ".config")
 	env["SOHO_DIR"] = ".soho"
@@ -736,4 +730,26 @@ func TestSetupPresetCreatesConfigWithDefaultFileMode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// isolatedHerdrEnv is the clean test environment with a fake herdr that
+// answers every call with no output in front of PATH, then git's
+// directory, then the rest of PATH: setup's plugin migration must never
+// reach the machine's real Herdr from a test.
+func isolatedHerdrEnv(t *testing.T, git string) platform.Env {
+	t.Helper()
+	bin := t.TempDir()
+	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{AnyArgs: true}}); err != nil {
+		t.Fatal(err)
+	}
+	env := platform.Env{}
+	for _, item := range fakecli.Env(testutil.CleanEnv(t), bin, fakecli.EnvOptions{IncludeBasePath: true}) {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	sep := string(os.PathListSeparator)
+	env["PATH"] = bin + sep + filepath.Dir(git) + sep + strings.TrimPrefix(env.Get("PATH"), bin+sep)
+	return env
 }
