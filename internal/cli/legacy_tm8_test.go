@@ -74,18 +74,21 @@ func TestTM8FormerCLI(t *testing.T) {
 			t.Fatalf("doctor fix code=%d new=%q legacy=%q/%v err=%q; the former file must stay unread and intact", code, newData, legacy, oldErr, errOut)
 		}
 	})
-	t.Run(`setup: a team choice in the former project file does not count`, func(t *testing.T) {
+	t.Run(`setup: the former project file is moved to the soho name before it is read`, func(t *testing.T) {
 		env, repo := tm8CommandFixture(t)
 		old := filepath.Join(repo, ".agents", "herdr-soho.conf")
 		newPath := filepath.Join(repo, ".agents", "soho.conf")
 		tm8File(t, old, "lane.build.kind=codex\n")
-		code, _, errOut := runIn(t, []string{"setup", "--no-hooks"}, env, repo)
-		if code != 0 || strings.Contains(errOut, "copied") {
-			t.Fatalf("setup with former team code=%d err=%q", code, errOut)
+		code, out, errOut := runIn(t, []string{"setup", "--no-hooks"}, env, repo)
+		if code != 0 || !strings.Contains(out, "migrate: moved "+old+" to "+newPath) {
+			t.Fatalf("setup with former team code=%d out=%q err=%q", code, out, errOut)
+		}
+		if _, err := os.Lstat(old); !os.IsNotExist(err) {
+			t.Fatalf("the former project file is still there: %v", err)
 		}
 		newData, _ := os.ReadFile(newPath)
-		if strings.Contains(string(newData), "lane.build.kind=codex") {
-			t.Fatalf("setup read the former project config: %q", newData)
+		if !strings.Contains(string(newData), "lane.build.kind=codex") {
+			t.Fatalf("the moved project config lost its team choice: %q", newData)
 		}
 	})
 	t.Run(`config set: a symlinked former config is not read through the link`, func(t *testing.T) {
@@ -138,13 +141,13 @@ func TestTM8FormerCLI(t *testing.T) {
 			t.Fatalf("doctor code=%d out=%q err=%q", code, out, errOut)
 		}
 	})
-	t.Run(`doctor: the former user config is named as a leftover with the move destination`, func(t *testing.T) {
+	t.Run(`doctor: the former user config dir is named as a leftover with the move destination`, func(t *testing.T) {
 		env, repo := tm8CommandFixture(t)
-		oldPath := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
-		newPath := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config")
-		tm8File(t, oldPath, "herd_label=crew\n")
+		oldDir := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho")
+		newDir := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho")
+		tm8File(t, filepath.Join(oldDir, "config"), "herd_label=crew\n")
 		code, out, errOut := runIn(t, []string{"doctor"}, env, repo)
-		if code != 0 || errOut != "" || !strings.Contains(out, "former user config "+oldPath+" is no longer read: run 'soho setup' to move it to "+newPath) {
+		if code != 0 || errOut != "" || !strings.Contains(out, "former user config dir "+oldDir+" is still there: run 'soho setup' to move it to "+newDir) {
 			t.Fatalf("doctor code=%d out=%q err=%q", code, out, errOut)
 		}
 	})
