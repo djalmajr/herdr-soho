@@ -164,15 +164,22 @@ func StateDirPath(ctx *Config, env platform.Env, cwd string) string {
 	return filepath.Join(StateRoot(ctx, env, cwd), WorkspaceID(ctx, env, cwd))
 }
 
-// StateDir decides with StateInSkill/StateRootPath — neither writes nor calls
-// the herdr CLI — before touching StateDirPath/StateRoot/WorkspaceID, so the
-// refusal leaves no side effect (no .gitignore append, no pane current).
-// The path named in the message is the state root (StateRootPath), not the
-// full state dir.
+// StateDir decides with StateInSkill and FormerStateWaiting — both use only
+// StateRootPath — before touching StateDirPath/StateRoot/WorkspaceID, so a
+// refusal leaves no side effect (no .gitignore append, no pane current, no
+// mkdir). The paths named in the messages are the state root and the
+// former/target dirs, not the full state dir.
 func StateDir(ctx *Config, env platform.Env, cwd string) string {
 	if !Nowrite(env) {
 		if skill := StateInSkill(ctx, env, cwd); skill != "" {
 			platform.Die(fmt.Sprintf("the state dir '%s' would be inside the soho skill ('%s'); run soho from the project's directory (nothing was written)", StateRootPath(ctx, env, cwd), skill), 2)
+		}
+		// The former state dir waiting for the setup move is refused before
+		// any side effect: creating .soho/<ws> would block the migration's
+		// empty-target rule, and the .gitignore append would point at a dir
+		// setup has not created yet.
+		if former, target, waiting := FormerStateWaiting(ctx, env, cwd); waiting {
+			platform.Die(fmt.Sprintf("the former state dir '%s' is waiting for 'soho setup': run 'soho setup' first; it moves it to '%s' (nothing was written)", former, target), 2)
 		}
 	}
 	dir := StateDirPath(ctx, env, cwd)

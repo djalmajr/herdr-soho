@@ -289,7 +289,7 @@ func SenderRefOf(env platform.Env) string {
 	return sessionref.FormatRef(sessionref.Ref{Machine: sessionref.LocalMachine, PaneID: pane})
 }
 
-func SenderInfo(ctx *core.Config, env platform.Env, cwd string) (ref, name, kind, role, model string) {
+func SenderInfo(ctx *core.Config, env platform.Env, cwd string, skipRosterLookup bool) (ref, name, kind, role, model string) {
 	pane := env.Get("HERDR_PANE_ID")
 	if pane == "" {
 		return sessionref.LocalMachine + "/-", "-", "-", "-", "-"
@@ -312,7 +312,10 @@ func SenderInfo(ctx *core.Config, env platform.Env, cwd string) (ref, name, kind
 			}
 		}
 	}
-	if name != "-" {
+	// skipRosterLookup keeps the send from resolving the state dir while the
+	// former state waits for the setup migration: the roster is absent then,
+	// so the lookup would change nothing but the .gitignore could move.
+	if name != "-" && !skipRosterLookup {
 		line := core.RosterLine(core.StateDirPath(ctx, env, cwd), name)
 		fields := strings.Split(line, "\t")
 		if len(fields) > 3 && fields[3] != "" {
@@ -607,7 +610,7 @@ func readScreen(machine, pane, source string, lines int, env platform.Env, timeo
 // state dir's gitignore already covers — its content never reaches stderr
 // (but the path in the message), the peer log or the friction.
 func SaveStalledScreen(stateDir, id, screen string, env platform.Env) string {
-	if core.Nowrite(env) || screen == "" {
+	if core.Nowrite(env) || stateDir == "" || screen == "" {
 		return ""
 	}
 	waitDir := filepath.Join(stateDir, "wait")
@@ -902,27 +905,37 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
 		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the soho skill ('%s'); run soho from the project's directory (nothing was sent)", core.StateRootPath(ctx, env, cwd), skill), 2)
 	}
-	senderRef, senderName, senderKind, senderRole, senderModel := SenderInfo(ctx, env, cwd)
-	if _, err := os.ReadFile(filepath.Join(core.StateDirPath(ctx, env, cwd), "agents.tsv")); err != nil && !os.IsNotExist(err) {
-		platform.Die("send: worker registration is unreadable; nothing was sent", 4)
-	}
-	// The pane registration remains authoritative if the best-effort name
-	// lookup failed: an unavailable worker cannot bypass the default refusal.
-	for _, row := range core.RosterRows(core.StateDirPath(ctx, env, cwd)) {
-		parts := strings.Split(row, "\t")
-		if len(parts) > 1 && parts[1] != "" && parts[1] == env.Get("HERDR_PANE_ID") {
-			senderName, senderRole = parts[0], "unknown"
-			if senderName == "" || senderName == "-" {
-				senderName = "registered-worker"
+	// The former state dir waiting for the setup migration keeps the send from
+	// resolving the state dir at all: no StateDirPath (no .gitignore append,
+	// no pane current), no peer-messages.tsv and no friction.log. The roster
+	// is absent while it waits, so skipping the reads changes no identity or
+	// exit code. The send itself, the stdout and the exit codes are
+	// unchanged; the short-timeout warning still goes to stderr, only
+	// without the log file.
+	_, _, formerWaiting := core.FormerStateWaiting(ctx, env, cwd)
+	senderRef, senderName, senderKind, senderRole, senderModel := SenderInfo(ctx, env, cwd, formerWaiting)
+	if !formerWaiting {
+		if _, err := os.ReadFile(filepath.Join(core.StateDirPath(ctx, env, cwd), "agents.tsv")); err != nil && !os.IsNotExist(err) {
+			platform.Die("send: worker registration is unreadable; nothing was sent", 4)
+		}
+		// The pane registration remains authoritative if the best-effort name
+		// lookup failed: an unavailable worker cannot bypass the default refusal.
+		for _, row := range core.RosterRows(core.StateDirPath(ctx, env, cwd)) {
+			parts := strings.Split(row, "\t")
+			if len(parts) > 1 && parts[1] != "" && parts[1] == env.Get("HERDR_PANE_ID") {
+				senderName, senderRole = parts[0], "unknown"
+				if senderName == "" || senderName == "-" {
+					senderName = "registered-worker"
+				}
+				if len(parts) > 3 {
+					senderRole = parts[3]
+				}
+				// Column 9 (index 8) of agents.tsv is the model.
+				if len(parts) > 8 {
+					senderModel = parts[8]
+				}
+				break
 			}
-			if len(parts) > 3 {
-				senderRole = parts[3]
-			}
-			// Column 9 (index 8) of agents.tsv is the model.
-			if len(parts) > 8 {
-				senderModel = parts[8]
-			}
-			break
 		}
 	}
 	// A rostered worker reports through its report file, not by message: refuse
@@ -931,13 +944,26 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	if senderName != "-" && senderRole != "-" && senderRole != "sub-orchestrator" {
 		platform.Die(fmt.Sprintf("send: '%s' is a worker of this team (role %s): a worker reports through its report file, not by message (nothing was sent)", senderName, senderRole), 2)
 	}
-	stateDir := core.StateDirPath(ctx, env, cwd)
-	// The short-timeout warning logs under the state dir, so it comes after the
-	// skill refusal above, which must leave no side effect.
-	if timeoutGiven {
-		core.WarnShortTimeout("send", filepath.Join(stateDir, "friction.log"), int64(timeoutMS))
+	stateDir := ""
+	if !formerWaiting {
+		stateDir = core.StateDirPath(ctx, env, cwd)
 	}
-	log := func(from, to, result string) { appendPeerLog(stateDir, from, to, result, utf16Length(body), id, env) }
+	// The short-timeout warning logs under the state dir, so it comes after the
+	// skill refusal above, which must leave no side effect. An empty log file
+	// keeps the warning on screen only (core.Warn writes nothing for it).
+	if timeoutGiven {
+		frictionLog := ""
+		if stateDir != "" {
+			frictionLog = filepath.Join(stateDir, "friction.log")
+		}
+		core.WarnShortTimeout("send", frictionLog, int64(timeoutMS))
+	}
+	log := func(from, to, result string) {
+		if stateDir == "" {
+			return
+		}
+		appendPeerLog(stateDir, from, to, result, utf16Length(body), id, env)
+	}
 	t := resolveTarget(target, env)
 	if !t.OK {
 		result := "error"

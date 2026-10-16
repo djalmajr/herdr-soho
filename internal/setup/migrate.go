@@ -132,7 +132,7 @@ func migrateNames(ctx *core.Config, env platform.Env, cwd string, dry bool) []st
 	if info, err := os.Stat(antigoState); err == nil && info.IsDir() {
 		efetivo := core.StateRootPath(ctx, env, cwd)
 		switch {
-		case stateDirExplicitlyPinned(ctx, env) || efetivo != novoState:
+		case core.StateDirExplicitlyPinned(ctx, env) || efetivo != novoState:
 			lines = append(lines, fmt.Sprintf("migrate: kept %s: the state dir is set to %s", antigoState, efetivo))
 		case lstatExists(novoState) && !emptyDir(novoState):
 			lines = append(lines, fmt.Sprintf("migrate: kept %s: %s already exists; remove %s once its reports are no longer needed", antigoState, novoState, antigoState))
@@ -186,21 +186,6 @@ func emptyDir(path string) bool {
 	}
 	entries, err := os.ReadDir(path)
 	return err == nil && len(entries) == 0
-}
-
-// stateDirExplicitlyPinned reports whether the state dir was fixed by the
-// environment or the configuration, even when the pin resolves to the
-// default <root>/.soho: an explicit pin must not be overridden by the
-// migration.
-func stateDirExplicitlyPinned(ctx *core.Config, env platform.Env) bool {
-	if env.Get("SOHO_DIR") != "" {
-		return true
-	}
-	if env.Get("SOHO_STATE_DIR") != "" {
-		return true
-	}
-	entry, ok := ctx.Entries["state_dir"]
-	return ok && entry.Source != "defaults" && entry.Value != ""
 }
 
 // formerRosterInspection inspects the agents.tsv of every workspace under
