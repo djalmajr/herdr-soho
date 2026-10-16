@@ -11,9 +11,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/dispatch"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/dispatch"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 var (
@@ -279,7 +279,7 @@ func canonicalJSON(value any) ([]byte, error) {
 }
 
 // renderBrief converts the supplied brief into the standard Markdown brief
-// (skills/herdr-soho/templates/brief.md sections). Absent optional fields
+// (skills/soho/templates/brief.md sections). Absent optional fields
 // produce no empty section.
 func renderBrief(objetivo, contexto, idioma string, items []aceiteItem, decisoes, restricoes, naoObjetivos []string) string {
 	var buf strings.Builder

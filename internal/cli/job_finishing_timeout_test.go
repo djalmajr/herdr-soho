@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // setFinishingTimeout appends job_finishing_timeout to the user file the
@@ -31,7 +31,7 @@ func TestJobStartInvalidFinishingTimeoutExitsTwoBeforeAnySpawn(t *testing.T) {
 			ee := newJobStartEE(t)
 			setFinishingTimeout(t, ee, raw)
 			code, out, errOut := ee.start(t, ee.f.briefFile(t, jobStartBrief))
-			want := "herdr-soho: job: invalid job_finishing_timeout '" + raw + "'"
+			want := "soho: job: invalid job_finishing_timeout '" + raw + "'"
 			if code != 2 || out != "" || strings.TrimSpace(errOut) != want {
 				t.Fatalf("code=%d out=%q err=%q, want exit 2 with exactly %q", code, out, errOut, want)
 			}
@@ -41,7 +41,7 @@ func TestJobStartInvalidFinishingTimeoutExitsTwoBeforeAnySpawn(t *testing.T) {
 			if _, err := os.Stat(ee.checkout + "/.worktrees/job-job-1"); err == nil {
 				t.Errorf("a worktree was created before the refusal")
 			}
-			if _, err := os.Stat(ee.checkout + "/.herdr-soho/jobs/job-1"); err == nil {
+			if _, err := os.Stat(ee.checkout + "/.soho/jobs/job-1"); err == nil {
 				t.Errorf("job state was created before the refusal")
 			}
 		})

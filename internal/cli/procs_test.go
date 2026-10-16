@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // procsFixture is the command fixture with a fake herdr (worker and other
@@ -67,7 +67,7 @@ func runProcsHelperRole(role, childExe, kidFile string) (code int) {
 		items := os.Environ()
 		out := items[:0]
 		for _, item := range items {
-			if strings.HasPrefix(item, "HERDR_SOHO_FAKECLI_CONFIG=") {
+			if strings.HasPrefix(item, "SOHO_FAKECLI_CONFIG=") {
 				continue
 			}
 			out = append(out, item)
@@ -141,7 +141,7 @@ func helperExe(t *testing.T, dir, name string) string {
 		// bare name and may already have written name.json by the time a
 		// failed link returns (dir/name.exe itself does not exist then);
 		// both are harmless — spawnHelper and the tree role strip
-		// HERDR_SOHO_FAKECLI_CONFIG from the re-execution, so the
+		// SOHO_FAKECLI_CONFIG from the re-execution, so the
 		// fixture never dispatches as the fake.
 		exe, err := fakecli.Install(t, dir, name, nil)
 		if err != nil {
@@ -190,7 +190,7 @@ func spawnHelper(t *testing.T, env platform.Env, exe string, role string, args .
 	out := items[:0]
 	for _, item := range items {
 		// The re-executed test binary must not dispatch as the fake CLI.
-		if strings.HasPrefix(item, "HERDR_SOHO_FAKECLI_CONFIG=") {
+		if strings.HasPrefix(item, "SOHO_FAKECLI_CONFIG=") {
 			continue
 		}
 		out = append(out, item)
@@ -230,8 +230,8 @@ func newProcsFixture(t *testing.T) *procsFixture {
 	rules := []fakecli.Rule{
 		{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`},
 		{Argv: []string{"agent", "get", "other"}, Stdout: `{"result":{"agent":{"name":"other","agent_status":"idle"}}}`},
-		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
-		{Argv: []string{"pane", "report-metadata", "p-other", "--source", "herdr-soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
+		{Argv: []string{"pane", "report-metadata", "p-other", "--source", "soho", "--clear-title"}},
 		{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
 		{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
 		{Argv: []string{"tab", "rename", "t1", "herd"}},
@@ -471,8 +471,8 @@ func TestProcsAddRefusals(t *testing.T) {
 		cause string
 	}{
 		{"pid 1", "1", "pid 1 is the system init process"},
-		{"this process", "self", "that is this herdr-soho process"},
-		{"the invoking process", "parent", "that is the process that invoked herdr-soho"},
+		{"this process", "self", "that is this soho process"},
+		{"the invoking process", "parent", "that is the process that invoked soho"},
 		{"a dead pid", "dead", "no process with that pid is running"},
 		{"not a number", "abc", "not a positive integer pid"},
 		{"a negative pid", "-5", "not a positive integer pid"},
@@ -685,7 +685,7 @@ func TestGcListAndStopOrphanProcesses(t *testing.T) {
 		}
 		want := "resource pressure: none (disk 60% free, swap 30% used)\norphan processes:\n" +
 			strconv.Itoa(orphan) + "  " + orphanName + "  ghost  0m\n" +
-			"run 'herdr-soho gc --yes' to stop them\n"
+			"run 'soho gc --yes' to stop them\n"
 		if out != want {
 			t.Fatalf("output = %q; want %q", out, want)
 		}
@@ -772,7 +772,7 @@ func TestProcsLockHeld(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("release must never fail for the lock: code=%d out=%q", code, out)
 		}
-		if !strings.Contains(errOut, "the processes of 'worker' were not stopped") || !strings.Contains(errOut, "procs: registry is locked by another herdr-soho") {
+		if !strings.Contains(errOut, "the processes of 'worker' were not stopped") || !strings.Contains(errOut, "procs: registry is locked by another soho") {
 			t.Fatalf("stderr = %q; want the lock warning", errOut)
 		}
 		if !procAlive(t, f.env, pid) {
@@ -798,7 +798,7 @@ func TestProcsLockHeld(t *testing.T) {
 		if code != 4 {
 			t.Fatalf("gc --yes: code=%d out=%q; want 4", code, out)
 		}
-		if !strings.Contains(errOut, "procs: registry is locked by another herdr-soho") {
+		if !strings.Contains(errOut, "procs: registry is locked by another soho") {
 			t.Fatalf("stderr = %q; want the lock error", errOut)
 		}
 		if strings.Contains(out, "stopped process") {
@@ -835,8 +835,8 @@ func TestProcsLockHeld(t *testing.T) {
 		rules := []fakecli.Rule{
 			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"name":"worker","agent_status":"idle"}}}`, Delay: 2000},
 			{Argv: []string{"agent", "get", "other"}, Stdout: `{"result":{"agent":{"name":"other","agent_status":"idle"}}}`},
-			{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "herdr-soho", "--clear-title"}},
-			{Argv: []string{"pane", "report-metadata", "p-other", "--source", "herdr-soho", "--clear-title"}},
+			{Argv: []string{"pane", "report-metadata", "p-worker", "--source", "soho", "--clear-title"}},
+			{Argv: []string{"pane", "report-metadata", "p-other", "--source", "soho", "--clear-title"}},
 			{Argv: []string{"pane", "list", "--workspace", "ws"}, Stdout: `{"result":{"panes":[]}}`},
 			{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":"old"}}}`},
 			{Argv: []string{"tab", "rename", "t1", "herd"}},
@@ -855,7 +855,7 @@ func TestProcsLockHeld(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("release must never fail for the lock: code=%d out=%q", code, out)
 		}
-		if !strings.Contains(errOut, "the processes of 'worker' were not stopped") || !strings.Contains(errOut, "procs: registry is locked by another herdr-soho") {
+		if !strings.Contains(errOut, "the processes of 'worker' were not stopped") || !strings.Contains(errOut, "procs: registry is locked by another soho") {
 			t.Fatalf("stderr = %q; want the lock warning", errOut)
 		}
 		if !procAlive(t, f.env, pid) {

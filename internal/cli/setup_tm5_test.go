@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 type setupTM5GoldenStep struct {
@@ -50,6 +50,11 @@ func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 	// the Go doctor reports that context as invalid (PLAN §9 A2), where the frozen
 	// JS golden still says inside Herdr.
 	for i := range want.Steps {
+		// The frozen golden predates the soho name layer; the exact-substitution
+		// name oracle adapts the expected output and error, and the DJA-318
+		// rename oracle adapts the herdr-soho → soho generation change.
+		want.Steps[i].Out = testutil.ApplySohoRenameOracle(testutil.ApplyHookOracle(testutil.RewriteSohoName(want.Steps[i].Out))).(string)
+		want.Steps[i].Err = testutil.ApplySohoRenameOracle(testutil.ApplyHookOracle(testutil.RewriteSohoName(want.Steps[i].Err))).(string)
 		if strings.Join(want.Steps[i].Args, " ") == "doctor" {
 			out := want.Steps[i].Out
 			if !strings.Contains(out, "ok     inside Herdr (HERDR_ENV=1)\n") {
@@ -70,15 +75,15 @@ func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 	skillDir := setupTM5SkillDir(t)
 	env["USERPROFILE"] = env.Get("HOME")
 	env["HERDR_ENV"] = "1"
-	env["HERDR_SOHO_SKILL_DIR"] = skillDir
+	env["SOHO_SKILL_DIR"] = skillDir
 	fakeDir := t.TempDir()
 	if _, err := fakecli.Install(t, fakeDir, "herdr", []fakecli.Rule{{Argv: []string{"--version"}, Stdout: "herdr 9.9.9\n"}, {AnyArgs: true, Stdout: "herdr 9.9.9\n"}}); err != nil {
 		t.Fatal(err)
 	}
 	withHerdr := withFakeCLI(env, fakeDir)
-	withHerdr["HERDR_SOHO_SKILL_DIR"] = skillDir
+	withHerdr["SOHO_SKILL_DIR"] = skillDir
 	if seedConfig {
-		conf := filepath.Join(repo, ".agents", "herdr-soho.conf")
+		conf := filepath.Join(repo, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -120,7 +125,7 @@ func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 		stderrText = strings.ReplaceAll(stderrText, program, "PROG")
 		stdoutText = normalizeGoldenRootPathSeparators(stdoutText)
 		stderrText = normalizeGoldenRootPathSeparators(stderrText)
-		stderrText = strings.ReplaceAll(stderrText, "herdr-soho: ", "PROG: ")
+		stderrText = strings.ReplaceAll(stderrText, "soho: ", "PROG: ")
 		gotSteps = append(gotSteps, setupTM5GoldenStep{Args: args, RC: rc, Out: stdoutText, Err: stderrText})
 	}
 	platform.Stdout, platform.Stderr = oldOut, oldErr
@@ -178,16 +183,24 @@ func setupTM5CommandFixture(t *testing.T) (platform.Env, string) {
 			env[key] = value
 		}
 	}
+	for key := range env {
+		if key == "SOHO_FAKECLI_CONFIG" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToUpper(key), "HERDR_") || strings.HasPrefix(key, "SOHO_") {
+			delete(env, key)
+		}
+	}
 	env["HOME"], env["USERPROFILE"] = home, home
-	env["XDG_CONFIG_HOME"], env["HERDR_SOHO_DIR"] = conf, state
-	env["HERDR_SOHO_SKILL_DIR"] = setupTM5SkillDir(t)
+	env["XDG_CONFIG_HOME"], env["SOHO_DIR"] = conf, state
+	env["SOHO_SKILL_DIR"] = setupTM5SkillDir(t)
 	env["HERDR_WORKSPACE_ID"], env["PATH"] = "ws", ""
 	return env, repo
 }
 
 func setupTM5SkillDir(t *testing.T) string {
 	t.Helper()
-	dir, err := filepath.Abs(filepath.Join("..", "..", "skills", "herdr-soho"))
+	dir, err := filepath.Abs(filepath.Join("..", "..", "skills", "soho"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +240,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = os.Chdir(old) })
-		conf := filepath.Join(repo, ".agents", "herdr-soho.conf")
+		conf := filepath.Join(repo, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -246,14 +259,14 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			return out.String()
 		}
 		missing := run()
-		if !strings.Contains(missing, "no herdr-soho block in CLAUDE.local.md") || !strings.Contains(missing, "setup --local") || strings.Contains(missing, "no herdr-soho block in AGENTS.md/CLAUDE.md") {
+		if !strings.Contains(missing, "no soho block in CLAUDE.local.md") || !strings.Contains(missing, "setup --local") || strings.Contains(missing, "no soho block in AGENTS.md/CLAUDE.md") {
 			t.Fatalf("local setup target warning=%s", missing)
 		}
-		if err := os.WriteFile(filepath.Join(repo, "CLAUDE.local.md"), []byte("<!-- herdr-soho:start -->\n<!-- herdr-soho:end -->\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(repo, "CLAUDE.local.md"), []byte("<!-- soho:start -->\n<!-- soho:end -->\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		valid := run()
-		if !strings.Contains(valid, "instruction block present in CLAUDE.local.md") || strings.Contains(valid, "no herdr-soho block") {
+		if !strings.Contains(valid, "instruction block present in CLAUDE.local.md") || strings.Contains(valid, "no soho block") {
 			t.Fatalf("valid local block status=%s", valid)
 		}
 	})
@@ -274,10 +287,10 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		local := filepath.Join(repo, "CLAUDE.local.md")
-		if err := os.WriteFile(local, []byte("<!-- herdr-soho:start -->\n<!-- herdr-soho:end -->\n"), 0o600); err != nil {
+		if err := os.WriteFile(local, []byte("<!-- soho:start -->\n<!-- soho:end -->\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		conf := filepath.Join(repo, ".agents", "herdr-soho.conf")
+		conf := filepath.Join(repo, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -302,7 +315,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			return out.String()
 		}
 		localOutput := run()
-		localWant := "warn   no herdr-soho hooks in .claude/settings.json: run '" + entry + " setup --local' (UserPromptSubmit reminder + SessionStart doctor)"
+		localWant := "warn   no soho hooks in .claude/settings.json: run '" + entry + " setup --local' (UserPromptSubmit reminder + SessionStart doctor)"
 		if !strings.Contains(normalizeGoldenRootPathSeparators(localOutput), normalizeGoldenRootPathSeparators(localWant)) {
 			t.Fatalf("missing local hooks warning %q in %s", localWant, localOutput)
 		}
@@ -313,7 +326,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		canonicalOutput := run()
-		canonicalWant := "warn   no herdr-soho hooks in .claude/settings.json: run '" + entry + " setup' (UserPromptSubmit reminder + SessionStart doctor)"
+		canonicalWant := "warn   no soho hooks in .claude/settings.json: run '" + entry + " setup' (UserPromptSubmit reminder + SessionStart doctor)"
 		if !strings.Contains(normalizeGoldenRootPathSeparators(canonicalOutput), normalizeGoldenRootPathSeparators(canonicalWant)) {
 			t.Fatalf("missing canonical hooks warning %q in %s", canonicalWant, canonicalOutput)
 		}

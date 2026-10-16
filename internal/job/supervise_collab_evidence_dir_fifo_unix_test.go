@@ -96,8 +96,8 @@ func TestSuperviseCollabEvidenceFifoBaseRefused(t *testing.T) {
 func TestSuperviseCollabEvidenceFifoComponentRefused(t *testing.T) {
 	// Catches the mutation "a component is opened with Root.OpenRoot" (no
 	// non-blocking open first): the open would wait for a writer.
-	suffix := filepath.Join("herdr-soho", "w1", "reports")
-	for _, depth := range []string{"herdr-soho", filepath.Join("herdr-soho", "w1"), suffix} {
+	suffix := filepath.Join("soho", "w1", "reports")
+	for _, depth := range []string{"soho", filepath.Join("soho", "w1"), suffix} {
 		depth := depth
 		t.Run(depth, func(t *testing.T) {
 			base := t.TempDir()
@@ -130,13 +130,13 @@ func TestSuperviseCollabEvidenceSymlinkToFifoRefused(t *testing.T) {
 	}{
 		{"reports to an in-base FIFO", true, "reports", "pipe"},
 		{"reports to an outside FIFO", false, "reports", ""},
-		{"herdr-soho to an in-base FIFO", true, "herdr-soho", "pipe"},
-		{"w1 to a FIFO in the base, outside its parent", true, filepath.Join("herdr-soho", "w1"), filepath.Join("..", "pipe")},
+		{"soho to an in-base FIFO", true, "soho", "pipe"},
+		{"w1 to a FIFO in the base, outside its parent", true, filepath.Join("soho", "w1"), filepath.Join("..", "pipe")},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			base := t.TempDir()
-			suffix := filepath.Join("herdr-soho", "w1", "reports")
+			suffix := filepath.Join("soho", "w1", "reports")
 			if tc.depth == "reports" {
 				suffix = "reports"
 			}
@@ -170,15 +170,15 @@ func TestSuperviseCollabEvidenceDirectoryRacedToFifoRefused(t *testing.T) {
 	// Catches the mutation "a component is opened with Root.OpenRoot": the
 	// FIFO swapped in after the parent's open would hold the next open.
 	for _, tc := range []struct{ after, swap string }{
-		{"herdr-soho", "w1"},
+		{"soho", "w1"},
 		{"w1", "reports"},
 	} {
 		tc := tc
 		t.Run(tc.swap, func(t *testing.T) {
 			base := t.TempDir()
-			suffix := filepath.Join("herdr-soho", "w1", "reports")
+			suffix := filepath.Join("soho", "w1", "reports")
 			path := writeEvidenceTarget(t, filepath.Join(base, suffix, "report.md"), "inside\n")
-			parent := filepath.Join(base, "herdr-soho")
+			parent := filepath.Join(base, "soho")
 			if tc.after == "w1" {
 				parent = filepath.Join(parent, "w1")
 			}
@@ -214,7 +214,7 @@ func TestSuperviseCollabEvidenceFifoSafeOpenKeepsTheContract(t *testing.T) {
 	// real directory not promoted to a root): the genuine report would be
 	// refused.
 	base := t.TempDir()
-	suffix := filepath.Join("herdr-soho", "w1", "reports")
+	suffix := filepath.Join("soho", "w1", "reports")
 	path := writeEvidenceTarget(t, filepath.Join(base, suffix, "report.md"), "real\n")
 	roots := []collabEvidenceRoot{{base: base, suffix: suffix}}
 	if r := hashEvidenceWithin(t, roots, path); r.err != nil || r.accepted != path || r.sum != evidenceSum("real\n") {
@@ -249,7 +249,7 @@ func TestSuperviseCollabEvidenceFifoSafeOpenKeepsTheContract(t *testing.T) {
 	other := t.TempDir()
 	writeEvidenceTarget(t, filepath.Join(other, "w1", "reports", "report.md"), "outside\n")
 	escBase := t.TempDir()
-	if err := os.Symlink(other, filepath.Join(escBase, "herdr-soho")); err != nil {
+	if err := os.Symlink(other, filepath.Join(escBase, "soho")); err != nil {
 		t.Fatal(err)
 	}
 	requireEvidenceRefused(t, hashEvidenceWithin(t, []collabEvidenceRoot{{base: escBase, suffix: suffix}}, filepath.Join(escBase, suffix, "report.md")), "component symlink leaving the base")

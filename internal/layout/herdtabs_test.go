@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func parityTabFixture(t *testing.T, withTab bool) (platform.Env, *core.Config, string, string, string) {
@@ -159,7 +159,7 @@ func TestParityTabLabelGoldenScenarios(t *testing.T) {
 
 func labelContext(t *testing.T, env platform.Env) *core.Config {
 	t.Helper()
-	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/herdr-soho"
+	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/soho"
 	ctx := core.LoadConfig(env, ".")
 	return &ctx
 }
@@ -259,7 +259,7 @@ func TestHerdTabSplitUsesRootWhenLastPaneIDIsMissing(t *testing.T) {
 	if !got.Ok || got.Pane != "rootp" {
 		t.Fatalf("HerdTabSplit()=%+v, want rootp", got)
 	}
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -547,7 +547,7 @@ func TestHerdTabsChooseSecondTabAfterMigration(t *testing.T) {
 		func() {
 			defer func() {
 				if value := recover(); value != nil {
-					calls, _ := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+					calls, _ := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 					t.Fatalf("HerdTabPane panic=%v calls=%#v", value, calls)
 				}
 			}()

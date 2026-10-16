@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 const retainedWarning = "; existing session context is retained"
@@ -22,7 +22,7 @@ const retainedWarning = "; existing session context is retained"
 // trailing newline) and that the historical brief claim is gone.
 func reuseWarn(t *testing.T, stderr, want string) {
 	t.Helper()
-	line := "herdr-soho: warning: " + want + "\n"
+	line := "soho: warning: " + want + "\n"
 	if !strings.Contains(stderr, line) {
 		t.Fatalf("stderr=%q want line %q", stderr, line)
 	}

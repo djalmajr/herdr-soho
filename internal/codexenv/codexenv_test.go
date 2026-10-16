@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // Mutation captured: accepting duplicate policy keys changes the parsed result.
@@ -128,7 +128,7 @@ func TestTM11WindowsCodexAncestorShortCircuit(t *testing.T) {
 		if got != base {
 			t.Fatalf("message=%q want base %q", got, base)
 		}
-		if _, err := os.Stat(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.calls.jsonl")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.calls.jsonl")); !os.IsNotExist(err) {
 			t.Fatalf("Windows short-circuit recorded a Herdr invocation: %v", err)
 		}
 	})
@@ -419,7 +419,7 @@ func TestDiagnosePaneFiltersAndAncestorCase(t *testing.T) {
 	}
 	t.Run("win32 returns before Herdr probing", func(t *testing.T) {
 		env := diagnosisEnvWithRules(t, []fakecli.Rule{{Argv: []string{"api", "snapshot"}, Stdout: `{}`}})
-		dir := env["HERDR_SOHO_FAKECLI_CONFIG"]
+		dir := env["SOHO_FAKECLI_CONFIG"]
 		if runtime.GOOS != "windows" {
 			if err := os.Symlink(filepath.Join(dir, "herdr"), filepath.Join(dir, "herdr.exe")); err != nil {
 				t.Fatal(err)
@@ -431,7 +431,7 @@ func TestDiagnosePaneFiltersAndAncestorCase(t *testing.T) {
 		if got := DiagnoseOutsideHerdr(base, env, "win32", 5000, []Process{{3000, "codex"}}); got != base {
 			t.Fatalf("message %q", got)
 		}
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err == nil && len(calls) != 0 {
 			t.Fatalf("Herdr was probed: %#v", calls)
 		}
@@ -463,7 +463,7 @@ func TestDiagnoseOutsideHerdr(t *testing.T) {
 			if got := DiagnoseOutsideHerdr(base, env, "win32", 5000, []Process{{4000, "codex"}}); got != base {
 				t.Fatal(got)
 			}
-			calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+			calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 			if err != nil && !os.IsNotExist(err) {
 				t.Fatal(err)
 			}
@@ -478,7 +478,7 @@ func TestDiagnoseOutsideHerdr(t *testing.T) {
 		if got := DiagnoseOutsideHerdr(base, env, "darwin", 5000, []Process{{4000, "bash"}}); got != base {
 			t.Fatal(got)
 		}
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
 		}

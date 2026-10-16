@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // composeEnv is the env the CLI always has when it composes a prompt: the
@@ -222,7 +222,7 @@ func TestDispatchJavaScriptHelperCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho"}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/soho"}
 		roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\nex\tp1\tgrok\tscouter\txai\t1\t/tmp/work\tnow\tgrok-4.7\ttask\timplementer,scouter\nother\tp2\tcodex\timplementer\topenai\t1\t/tmp/work\tnow\tgpt-5\ttask\timplementer\nplain\tp3\tgrok\tscouter\txai\t1\t/tmp/work\tnow\tgrok-4.7\ttask\tscouter\n"
 		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
@@ -254,7 +254,7 @@ func TestDispatchJavaScriptHelperCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := FamilyConflicts(sd, "xai", platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho"}, cwd); len(got) != 1 || got[0] != "ex (grok)" {
+		if got := FamilyConflicts(sd, "xai", platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/soho"}, cwd); len(got) != 1 || got[0] != "ex (grok)" {
 			t.Fatalf("conflicts=%v", got)
 		}
 	})
@@ -264,7 +264,7 @@ func TestDispatchJavaScriptHelperCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho"}
+		env := platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/soho"}
 		roster := "doc\tp1\tcodex\tdocumenter\topenai\t1\t/tmp/work\tnow\tgpt-5\ttask\timplementer,documenter\n"
 		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
@@ -324,7 +324,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": "../../skills/herdr-soho"}
+		env := platform.Env{"HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": "../../skills/soho"}
 		got := FamilyConflicts(dir, "openai", env, cwd)
 		if len(got) != 1 || got[0] != "doc (codex)" {
 			t.Fatalf("project edit-role history conflicts=%v", got)
@@ -415,7 +415,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 	})
 	t.Run("compose: the prompt names the native launcher binary instead of PATH", func(t *testing.T) {
 		role := filepath.Join(t.TempDir(), "implementer.md")
-		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRun `herdr-soho mutation-guard <copy>` before mutating that copy.\n"), 0o600); err != nil {
+		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRun `soho mutation-guard <copy>` before mutating that copy.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		exe, err := os.Executable()
@@ -431,7 +431,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 		// The configured override is the native test binary; the skill
 		// directory in the env must play no part in the path.
 		p := ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"HERDR_SOHO_BIN": exe, "HERDR_SOHO_SKILL_DIR": t.TempDir()}, "codex", "", false)
-		want := "- Run every `herdr-soho` command this prompt names through the launcher at `" + resolved + "`, not through PATH.\n"
+		want := "- Run every `soho` command this prompt names through the launcher at `" + resolved + "`, not through PATH.\n"
 		if !strings.Contains(p, want) {
 			t.Fatalf("composed prompt missed the launcher line:\n%s", p)
 		}
@@ -442,7 +442,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 		if !strings.HasPrefix(after, "- Only you write this report,") {
 			t.Fatalf("launcher line must sit right before the standing rules:\n%s", after)
 		}
-		if strings.Contains(p, "scripts/herdr-soho") || strings.Contains(p, "scripts\\herdr-soho") {
+		if strings.Contains(p, "scripts/soho") || strings.Contains(p, "scripts\\soho") {
 			t.Fatalf("composed prompt names a skill scripts launcher:\n%s", p)
 		}
 	})
@@ -456,8 +456,8 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 			bin  string
 			want string
 		}{
-			{name: "missing binary", bin: filepath.Join(t.TempDir(), "missing"), want: "HERDR_SOHO_BIN is missing or not a regular file"},
-			{name: "relative binary", bin: "herdr-soho", want: "HERDR_SOHO_BIN must be an absolute path"},
+			{name: "missing binary", bin: filepath.Join(t.TempDir(), "missing"), want: "SOHO_BIN is missing or not a regular file"},
+			{name: "relative binary", bin: "soho", want: "SOHO_BIN must be an absolute path"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				var prompt string

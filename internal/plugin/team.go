@@ -14,7 +14,7 @@ import (
 
 	contextpkg "context"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // teamCallTimeoutMs is the deadline for every CLI call the panel makes.
@@ -203,7 +203,7 @@ func resolveTeamTarget(env platform.Env, platformName string) (teamTarget, strin
 
 // teamCall runs one CLI call (the panel's own executable in production) in
 // the target's cwd with the target's HERDR_* ids. Reads carry
-// HERDR_SOHO_NOWRITE=1; writes run only after an on-screen confirmation
+// SOHO_NOWRITE=1; writes run only after an on-screen confirmation
 // and never carry it. A failure (non-zero exit, timeout, spawn error) is
 // returned as a description for the view - the panel never crashes on it.
 func teamCall(ctx contextpkg.Context, exe string, env platform.Env, platformName string, target teamTarget, args []string, nowrite bool) ([]string, string) {
@@ -216,8 +216,11 @@ func teamCall(ctx contextpkg.Context, exe string, env platform.Env, platformName
 		delete(childEnv, "HERDR_TAB_ID")
 	}
 	if nowrite {
-		childEnv["HERDR_SOHO_NOWRITE"] = "1"
+		childEnv["SOHO_NOWRITE"] = "1"
 	} else {
+		// A write must run ungated: strip the current gate name and the
+		// legacy HERDR_SOHO_NOWRITE inherited from the environment.
+		delete(childEnv, "SOHO_NOWRITE")
 		delete(childEnv, "HERDR_SOHO_NOWRITE")
 	}
 	if bin := env.Get("HERDR_BIN_PATH"); bin != "" {
@@ -536,7 +539,7 @@ func RenderTeam(s *TeamState, width int) string {
 		return teamCut(StripPickerControls(s.targetErr), width) + "\n"
 	}
 	lines := []string{
-		displaySlice("herdr-soho · "+s.target.WorkspaceID+" · "+s.target.Cwd, width),
+		displaySlice("soho · "+s.target.WorkspaceID+" · "+s.target.Cwd, width),
 		displaySlice(teamViewBar(s), width),
 	}
 	content, footer := s.renderContent(width)
@@ -993,7 +996,7 @@ func (s *TeamState) switchView(view int) {
 func RunTeam(env platform.Env, platformName, cliExe string, args []string) (code int) {
 	view, err := teamInitialView(args)
 	if err != nil {
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho plugin: %s\n", err)
+		_, _ = fmt.Fprintf(platform.Stderr, "soho plugin: %s\n", err)
 		return 2
 	}
 	stdin, stdout := os.Stdin, os.Stdout

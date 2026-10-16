@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestQueuedBlockedClearsMarker(t *testing.T) { // JS: "wait: blocked and gone clear queued markers while unavailable preserves retry state"
@@ -267,7 +267,7 @@ func newQueuedProbeFixtureWithSequences(t *testing.T, state string, sequences []
 	}
 	// Re-executed race test binaries retain detection without the detector's
 	// one-second exit sleep, which would consume the real wait deadline.
-	f.env = platform.Env{"PATH": f.bin, "GORACE": "atexit_sleep_ms=0", "HERDR_SOHO_FAKECLI_CONFIG": f.bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock"), "HERDR_SOHO_WAIT_POLL_MS": "1"}
+	f.env = platform.Env{"PATH": f.bin, "GORACE": "atexit_sleep_ms=0", "SOHO_FAKECLI_CONFIG": f.bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock"), "SOHO_WAIT_POLL_MS": "1"}
 	return f
 }
 

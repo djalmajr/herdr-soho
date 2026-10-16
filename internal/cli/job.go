@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/job"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/job"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // jobStdin is the stdin source for the job subcommands' "-" bodies; tests
@@ -952,7 +952,7 @@ func jobSupervise(args []string, env platform.Env, launch job.LaunchLocators) in
 		// Unbound, it does nothing: no lane, worker, git, wake or
 		// workspace step; it prints the job status and exits 4. The team
 		// commands prove their parent is this executable, so a launcher
-		// that is another file (HERDR_SOHO_BIN) is refused before binding:
+		// that is another file (SOHO_BIN) is refused before binding:
 		// they would otherwise run with the server's configuration.
 		bound, reason := false, "the team command executable is not this supervisor's"
 		if job.SameExecutable(launcher) {

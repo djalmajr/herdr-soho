@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 const transcriptSessionUUID = "3f2b8c1a-9d4e-4c7a-b1f0-5e6d7c8b9a0f"

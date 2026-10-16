@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // The rc.12 claude case: send --now to a local Claude Code running a long
@@ -98,7 +98,7 @@ func TestSendArrivalBusyClaudeTranscript(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "50"
 		done := appendAfterPromptDelayed(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, userLine, 1600)
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "4000", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" {
@@ -135,7 +135,7 @@ func TestSendArrivalBusyClaudeTranscript(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "50"
 		done := appendAfterPromptDelayed(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, userLine, 1600)
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "4000", "hello"})
 		if code != 0 || !strings.HasPrefix(out, "queued for local/w0test:p0a") {
@@ -169,10 +169,10 @@ func TestSendArrivalBusyClaudeTranscript(t *testing.T) {
 		}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "100"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "100"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "2000", "hello"})
 		want := "send: local/w0test:p0a is busy; waiting for its transcript to show the message (up to 2s)\n" +
-			"herdr-soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
+			"soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("the deadline keeps today's outcome: code=%d stderr=%q", code, stderr)
 		}
@@ -203,10 +203,10 @@ func TestSendArrivalBusyClaudeTranscript(t *testing.T) {
 		)
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = configRoot
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "100"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "100"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "5000", "hello"})
 		want := "send: local/w0test:p0a is busy; waiting for its transcript to show the message (up to 5s)\n" +
-			"herdr-soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
+			"soho: send: local/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("leaving working without the growth follows today's path: code=%d stderr=%q", code, stderr)
 		}
@@ -227,9 +227,9 @@ func TestSendArrivalBusyClaudeTranscript(t *testing.T) {
 			{Argv: append([]string{"--machine", "windows"}, promptArgv(prompt)...)}}
 		f := newFixture(t, rules)
 		f.env["CLAUDE_CONFIG_DIR"] = t.TempDir() // present, but a remote target never resolves a transcript
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "20"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "20"
 		code, _, stderr := f.run([]string{"send", "windows/w0test:p0a", "--now", "hello"})
-		want := "herdr-soho: send: windows/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
+		want := "soho: send: windows/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
 		if code != 15 || stderr != want {
 			t.Fatalf("a remote target keeps today's outcome without the busy warning: code=%d stderr=%q", code, stderr)
 		}

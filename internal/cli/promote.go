@@ -10,12 +10,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/spawn"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/spawn"
 )
 
 var promoteProcRowState = core.ProcRowState
@@ -191,7 +191,7 @@ func cmdPromote(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 			if cause == "" {
 				cause = "herdr agent rename failed"
 			}
-			platform.Die(fmt.Sprintf("promote: partial — the worker roster row was removed, but the rename to '%s' failed (%s); the pane is no longer a worker. Run herdr-soho init in this pane (or rename the agent to '%s' or a '%s'-N name) and run promote again for the title; nothing was closed or moved", newName, cause, want, want), promotePartial)
+			platform.Die(fmt.Sprintf("promote: partial — the worker roster row was removed, but the rename to '%s' failed (%s); the pane is no longer a worker. Run soho init in this pane (or rename the agent to '%s' or a '%s'-N name) and run promote again for the title; nothing was closed or moved", newName, cause, want, want), promotePartial)
 		}
 		name = newName
 	}

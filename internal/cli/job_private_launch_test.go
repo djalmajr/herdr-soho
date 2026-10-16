@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // job_private_launch_test.go: the CLI side of the job start's private
@@ -72,7 +72,7 @@ func TestJobSupervisePrivateLaunchContext(t *testing.T) {
 	f := newJobFix(t)
 	co := f.checkout(t, "example-org", "example-repo")
 	f.startJob(t, co)
-	jobDir := filepath.Join(co, ".herdr-soho", "jobs", "job-1")
+	jobDir := filepath.Join(co, ".soho", "jobs", "job-1")
 	body := fmt.Sprintf(`{"schema":1,"id":"job-1","status":"running","brief_sha256":"x","decisions_acked_seq":0,"motivo":null,"dir":%q}`+"\n", co)
 	if err := os.WriteFile(filepath.Join(jobDir, "state.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestJobSupervisePrivateLaunchContext(t *testing.T) {
 			withEnv(herdr, testLaunchBaseVar, base, testLaunchHomeVar, "relative/home"),
 		} {
 			code, out, errOut := f.runEnv(t, bad, "supervise", "--id", "job-1")
-			if code != 2 || out != "" || errOut != "herdr-soho: job supervise: the private launch context is unusable\n" {
+			if code != 2 || out != "" || errOut != "soho: job supervise: the private launch context is unusable\n" {
 				t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 			}
 		}
@@ -99,14 +99,14 @@ func TestJobSupervisePrivateLaunchContext(t *testing.T) {
 	})
 	t.Run("a usable selection without the job is not_found, never another store", func(t *testing.T) {
 		other := filepath.Join(f.root, "other-base")
-		if err := os.MkdirAll(filepath.Join(other, "herdr-soho"), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(other, "soho"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		empty := filepath.Join(f.root, "empty-repos")
 		if err := os.MkdirAll(empty, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(other, "herdr-soho", "config"), []byte("job_repos_root="+empty+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(other, "soho", "config"), []byte("job_repos_root="+empty+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		code, out, errOut := f.runEnv(t, withEnv(herdr, testLaunchBaseVar, other), "supervise", "--id", "job-1")
@@ -116,7 +116,7 @@ func TestJobSupervisePrivateLaunchContext(t *testing.T) {
 	})
 	t.Run("a usable selection without a launch binding does not run", func(t *testing.T) {
 		code, out, errOut := f.runEnv(t, withEnv(herdr, testLaunchBaseVar, base), "supervise", "--id", "job-1")
-		if code != 4 || !strings.Contains(out, `"status":"running"`) || errOut != "herdr-soho: warning: job: the supervisor is not bound to its launch: the job has no launch record\n" {
+		if code != 4 || !strings.Contains(out, `"status":"running"`) || errOut != "soho: warning: job: the supervisor is not bound to its launch: the job has no launch record\n" {
 			t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 		}
 		friction, err := os.ReadFile(filepath.Join(jobDir, "friction.log"))
@@ -141,7 +141,7 @@ func TestJobSupervisePrivateLaunchContext(t *testing.T) {
 			t.Fatal(err)
 		}
 		code, _, errOut := f.runEnv(t, withEnv(herdr, testLaunchBaseVar, base, "HERDR_SOHO_BIN", other), "supervise", "--id", "job-1")
-		if code != 4 || errOut != "herdr-soho: warning: job: the supervisor is not bound to its launch: the team command executable is not this supervisor's\n" {
+		if code != 4 || errOut != "soho: warning: job: the supervisor is not bound to its launch: the team command executable is not this supervisor's\n" {
 			t.Fatalf("code=%d err=%q", code, errOut)
 		}
 		friction, err := os.ReadFile(filepath.Join(jobDir, "friction.log"))
@@ -157,10 +157,10 @@ func TestJobSupervisePrivateLaunchContext(t *testing.T) {
 func TestManagedCommandInheritedNamesIgnored(t *testing.T) {
 	env, repo := commandFixture(t)
 	other := filepath.Join(t.TempDir(), "other-base")
-	if err := os.MkdirAll(filepath.Join(other, "herdr-soho"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(other, "soho"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(other, "herdr-soho", "config"), []byte("max_workers=9\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(other, "soho", "config"), []byte("max_workers=9\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	runIn := func(env platform.Env, args ...string) (int, string, string) {
@@ -242,7 +242,7 @@ func TestManagedCommandRefusedBeforeSideEffects(t *testing.T) {
 			t.Fatal("the managed parent did not finish within 60s")
 		}
 		command := strings.Fields(c.args)[0]
-		want := fmt.Sprintf("code=2\nstdout=\"\"\nstderr=%q\n", "herdr-soho: "+command+": the job supervisor's launch binding does not hold\n")
+		want := fmt.Sprintf("code=2\nstdout=\"\"\nstderr=%q\n", "soho: "+command+": the job supervisor's launch binding does not hold\n")
 		if string(out) != want {
 			t.Fatalf("%s: output %q, want %q", c.args, out, want)
 		}

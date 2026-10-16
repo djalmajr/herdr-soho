@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/dispatch"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/dispatch"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 const briefA = `{"schema":1,"id":"job-1","origem":{"tipo":"card","ref":"CARD-1"},"repo":"example-org/example-repo","objetivo":"Ship the change.","aceite":[{"criterio":"tests pass","prova":"go test ./internal/job"}]}`
@@ -397,7 +397,7 @@ func startStarter(t *testing.T, f *prepareFixture, fake *fakeHerdr, stateRoot st
 		Preparer:  Preparer{Machine: f.machine, Env: f.env, Clone: f.gitClone()},
 		Herdr:     fake,
 		Panes:     fake,
-		SelfExe:   "/opt/bin/herdr-soho",
+		SelfExe:   "/opt/bin/soho",
 		StateRoot: func(checkout string) string { return stateRoot },
 		Friction:  func(message string) { *friction = append(*friction, message) },
 	}
@@ -510,7 +510,7 @@ func TestStartSuccess(t *testing.T) {
 	if fake.RunCalls[0].PaneID != "w9:p1" {
 		t.Fatalf("Run pane = %q", fake.RunCalls[0].PaneID)
 	}
-	if want := []string{"/opt/bin/herdr-soho", "job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo"}; !reflect.DeepEqual(fake.RunCalls[0].Argv, want) {
+	if want := []string{"/opt/bin/soho", "job", "supervise", "--id", "job-1", "--repo", "example-org/example-repo"}; !reflect.DeepEqual(fake.RunCalls[0].Argv, want) {
 		t.Fatalf("Run argv = %v", fake.RunCalls[0].Argv)
 	}
 	// The workspace: exactly one create, cwd = worktree, label job-<id>.

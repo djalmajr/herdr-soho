@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestMain(m *testing.M) {
@@ -138,7 +138,7 @@ func TestStateCommandParity(t *testing.T) {
 		code := Run([]string{"friction", "bogus"}, env)
 		platform.Stdout, platform.Stderr = oldOut, oldErr
 		log, readErr := os.ReadFile(filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "friction.log"))
-		if code != 2 || readErr != nil || strings.Count(string(log), "error(exit 2)\tfriction\tfriction: unknown subcommand 'bogus'\n") != 1 || stderr.String() != "herdr-soho: friction: unknown subcommand 'bogus'\n" {
+		if code != 2 || readErr != nil || strings.Count(string(log), "error(exit 2)\tfriction\tfriction: unknown subcommand 'bogus'\n") != 1 || stderr.String() != "soho: friction: unknown subcommand 'bogus'\n" {
 			t.Fatalf("code=%d log=%q stderr=%q readErr=%v", code, log, stderr.String(), readErr)
 		}
 	})
@@ -172,7 +172,7 @@ func TestStateCommandParity(t *testing.T) {
 	t.Run("title joins positionals, stores the title, and prints ordered JSON", func(t *testing.T) { // JS: "title: the positionals are joined with one space and stored once"
 		env, _ := commandFixture(t)
 		dir := t.TempDir()
-		_, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"pane", "report-metadata", "p1", "--source", "herdr-soho", "--title", "orchestrator: a b"}}})
+		_, err := fakecli.Install(t, dir, "herdr", []fakecli.Rule{{Argv: []string{"pane", "report-metadata", "p1", "--source", "soho", "--title", "orchestrator: a b"}}})
 		if err != nil {
 			t.Fatal(err)
 		}

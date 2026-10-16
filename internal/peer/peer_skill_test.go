@@ -7,12 +7,12 @@ import (
 	"testing"
 	_ "unsafe"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
-//go:linkname appendPeerLog github.com/djalmajr/herdr-soho/internal/peer.appendPeerLog
+//go:linkname appendPeerLog github.com/djalmajr/soho/internal/peer.appendPeerLog
 func appendPeerLog(stateDir, from, to, result string, chars int, id string, env platform.Env)
 
 func TestSendRefusesTheSkillDir(t *testing.T) {
@@ -34,7 +34,7 @@ func TestSendRefusesTheSkillDir(t *testing.T) {
 			if code != 2 {
 				t.Fatalf("code=%d stderr=%q", code, stderr)
 			}
-			want := "the state dir '" + filepath.Join(root, "state") + "' would be inside the herdr-soho skill ('" + root + "'); run herdr-soho from the project's directory (nothing was sent)"
+			want := "the state dir '" + filepath.Join(root, "state") + "' would be inside the soho skill ('" + root + "'); run soho from the project's directory (nothing was sent)"
 			if !strings.Contains(stderr, want) {
 				t.Fatalf("stderr=%q want %q", stderr, want)
 			}

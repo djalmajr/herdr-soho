@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // newWakeHookEnv installs the fake wake hook in its own directory and
@@ -76,7 +76,7 @@ func warmWakeImage(t *testing.T, env platform.Env) {
 	// Point the warm-up child at its own config dir: the inherited config
 	// env would make it dispatch the test's rules and log to the test's
 	// call log.
-	warm["HERDR_SOHO_FAKECLI_CONFIG"] = dir
+	warm["SOHO_FAKECLI_CONFIG"] = dir
 	hook := WakeHook{Cmd: "wakehook", JobID: "job-1", Env: warm, Delays: []time.Duration{}}
 	if attempts := hook.Run(wakeEvent("question", nil)); attempts != 1 {
 		t.Fatalf("warm-up run: attempts=%d, want 1", attempts)
@@ -178,13 +178,17 @@ func TestWakeEmptyCmd(t *testing.T) {
 	}
 }
 
-// TestWakeInput: stdin carries the exact events.jsonl line and the four
-// HERDR_SOHO_JOB_* vars hold the exact values.
+// TestWakeInput: stdin carries the exact events.jsonl line and the eight
+// wake vars hold the exact values: the four SOHO_JOB_* vars and the legacy
+// HERDR_SOHO_JOB_* set with identical values.
 func TestWakeInput(t *testing.T) {
 	fakeDir := t.TempDir()
 	if _, err := fakecli.InstallWithOptions(t, fakeDir, "wakehook", []fakecli.Rule{{AnyArgs: true}}, fakecli.InstallOptions{
 		CaptureStdin: true,
-		CaptureEnv:   []string{"HERDR_SOHO_JOB_ID", "HERDR_SOHO_JOB_SEQ", "HERDR_SOHO_JOB_EVENT", "HERDR_SOHO_JOB_IDEMPOTENCY_KEY"},
+		CaptureEnv: []string{
+			"SOHO_JOB_ID", "SOHO_JOB_SEQ", "SOHO_JOB_EVENT", "SOHO_JOB_IDEMPOTENCY_KEY",
+			"HERDR_SOHO_JOB_ID", "HERDR_SOHO_JOB_SEQ", "HERDR_SOHO_JOB_EVENT", "HERDR_SOHO_JOB_IDEMPOTENCY_KEY",
+		},
 	}); err != nil {
 		t.Fatalf("install the capturing fake wake hook: %v", err)
 	}
@@ -244,6 +248,10 @@ func TestWakeInput(t *testing.T) {
 		t.Fatalf("stdin = %q, want %q", calls[0].Stdin, string(marshaled)+"\n")
 	}
 	wantEnv := map[string]string{
+		"SOHO_JOB_ID":                    "job-1",
+		"SOHO_JOB_SEQ":                   "2",
+		"SOHO_JOB_EVENT":                 "question",
+		"SOHO_JOB_IDEMPOTENCY_KEY":       "job-1:2",
 		"HERDR_SOHO_JOB_ID":              "job-1",
 		"HERDR_SOHO_JOB_SEQ":             "2",
 		"HERDR_SOHO_JOB_EVENT":           "question",

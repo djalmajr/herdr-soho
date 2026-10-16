@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // finishing_timeout_config_test.go pins the configurable, persisted
@@ -96,7 +96,7 @@ func TestFinishingTimeoutRestartKeepsTheRecordedValueAfterTheMachineKeyChanges(t
 
 	// The restart is the production constructor over the recorded job; its
 	// collaborators are swapped for fakes the way the sibling fixtures do.
-	sup, err := NewSupervisor(store, "job-1", env, "/nonexistent/herdr-soho", func(message string) { friction = append(friction, message) })
+	sup, err := NewSupervisor(store, "job-1", env, "/nonexistent/soho", func(message string) { friction = append(friction, message) })
 	if err != nil {
 		t.Fatal(err)
 	}

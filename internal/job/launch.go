@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // launch.go is the private startup confirmation between `job start` and the
@@ -60,7 +60,7 @@ import (
 // only by their 0600 mode and the directory's owner. Any process of the same
 // user can read the nonce or write the record. The confirmation therefore
 // fences stale, duplicated, mismatched and late launches of cooperating
-// herdr-soho processes; it is not an authenticated proof against another
+// soho processes; it is not an authenticated proof against another
 // process running as the same user.
 //
 // Time: every wait on launch.lock is bounded by a deadline read on the

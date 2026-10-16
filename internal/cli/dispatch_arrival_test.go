@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 type dispatchArrivalFixture struct {
@@ -86,7 +86,7 @@ func newDispatchArrivalFixture(t *testing.T, initialMode string, initialSeq, nex
 		}
 	}
 	env["HERDR_ENV"], env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = "1", state, "ws"
-	env["HERDR_SOHO_ROLES"], env["HERDR_SOHO_SKILL_DIR"] = roles, "../../skills/herdr-soho"
+	env["HERDR_SOHO_ROLES"], env["HERDR_SOHO_SKILL_DIR"] = roles, "../../skills/soho"
 	env["HERDR_SOHO_PROMPT_CHECK_SECONDS"], env["HERDR_SOHO_PROMPT_SETTLE_SECONDS"] = "1", settle
 	env["HERDR_SOHO_BRIEF_LINT"], env["TMPDIR"] = "off", root
 	env["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing.sock")
@@ -607,7 +607,7 @@ func TestDispatchWorkingTargetTakesThePromptAfterItsTurn(t *testing.T) {
 		fakecli.Rule{Argv: get, Stdout: state("working", 7)},
 	)
 	f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\n", "10", extra...)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	f.env["SOHO_WAIT_POLL_MS"] = "500"
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	if code != 0 || dispatchOutputStatus(t, out) != "submitted" {
 		t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
@@ -621,7 +621,7 @@ func TestDispatchWorkingTargetTakesThePromptAfterItsTurn(t *testing.T) {
 // when the turn does not end within prompt_settle_seconds.
 func TestDispatchWorkingTargetStillBusyAfterTheSettleWindow(t *testing.T) {
 	f := newDispatchArrivalFixture(t, "working", 5, 5, "old work output\n", "2")
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	f.env["SOHO_WAIT_POLL_MS"] = "500"
 	start := time.Now()
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	if code != 15 || dispatchOutputStatus(t, out) != "not-received" || !strings.Contains(errText, "not confirmed") {
@@ -684,7 +684,7 @@ func runAltScreenDispatch(t *testing.T, screen func(stamp string) string, screen
 		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped"}, ArgvPrefix: true, Code: 1, Stderr: notIdle},
 		fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: screen(screenStamp)},
 	)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	f.env["SOHO_WAIT_POLL_MS"] = "500"
 	start := time.Now()
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	return code, out, errText, time.Since(start)

@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/kinds"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/kinds"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func ResolveParticipant(stateDir, name string, env platform.Env, contexts ...context.Context) (Participant, error) {

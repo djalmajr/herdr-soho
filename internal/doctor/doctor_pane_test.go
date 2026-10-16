@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // paneContextFixture builds a hermetic environment with a fake herdr on PATH
@@ -30,10 +30,10 @@ func paneContextFixture(t *testing.T, rules []fakecli.Rule) (platform.Env, strin
 	}
 	env := platform.Env{
 		"HOME": home, "USERPROFILE": home, "PATH": bin,
-		"HERDR_ENV":                 "1",
-		"HERDR_SOCKET_PATH":         filepath.Join(root, "missing.sock"),
-		"HERDR_SOHO_DIR":            state,
-		"HERDR_SOHO_FAKECLI_CONFIG": bin,
+		"HERDR_ENV":           "1",
+		"HERDR_SOCKET_PATH":   filepath.Join(root, "missing.sock"),
+		"HERDR_SOHO_DIR":      state,
+		"SOHO_FAKECLI_CONFIG": bin,
 		// The state must stay outside the skill dir: StateDir refuses a
 		// state dir inside the skill (exit 2), so the fixture's skill is a
 		// sibling, not the root that holds the state.
@@ -232,7 +232,7 @@ func Test_init_sub_orchestrator_init_in_roster_keeps_name(t *testing.T) {
 	if !strings.Contains(out, `"orchestrator": "cinzel-opus"`) || !strings.Contains(out, `"pane_id": "w0test:p0a"`) || !strings.Contains(out, `"title": ""`) {
 		t.Fatalf("the init did not report the roster worker as is (title left untouched, not set to 'orchestrator: …'):\n%s", out)
 	}
-	want := "herdr-soho: init: this pane is 'cinzel-opus' in the roster (a sub-orchestrator opened by another orchestrator); keeping its name\n"
+	want := "soho: init: this pane is 'cinzel-opus' in the roster (a sub-orchestrator opened by another orchestrator); keeping its name\n"
 	if !strings.Contains(stderr, want) {
 		t.Fatalf("missing the roster line:\n%s", stderr)
 	}

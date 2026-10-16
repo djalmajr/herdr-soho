@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // A review report that carries the findings/verdict header, with the given

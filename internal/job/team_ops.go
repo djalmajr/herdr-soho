@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // team_ops.go composes the CLI's own team commands for the job supervisor:
@@ -47,7 +47,7 @@ type rosterRow struct {
 	Pane string
 }
 
-// selfCLI is the production teamOps: one herdr-soho executable, the job
+// selfCLI is the production teamOps: one soho executable, the job
 // worktree as working directory, one bounded timeout per command (a zero
 // Timeout is 120 s) and, when set, one platform context every command runs
 // under (a cancelled context ends the command the adapter started, and

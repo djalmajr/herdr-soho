@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestWaitRemainingQueuedAndRetryCases(t *testing.T) {
@@ -118,7 +118,7 @@ func TestWaitRemainingMirrorAndStuckSinceCases(t *testing.T) {
 		state := filepath.Join(root, "state", "ws")
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 		env := platform.Env{"TMPDIR": root, "HERDR_WORKSPACE_ID": "ws"}
-		tmpReportDir := filepath.Join(root, "herdr-soho", core.WorkspaceID(ctx, env, ""), "reports")
+		tmpReportDir := filepath.Join(root, "soho", core.WorkspaceID(ctx, env, ""), "reports")
 		if err := os.MkdirAll(tmpReportDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -268,7 +268,7 @@ func TestWaitRemainingCapacityCases(t *testing.T) {
 		}
 		f.bin = bin
 		f.env["PATH"] = bin
-		f.env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+		f.env["SOHO_FAKECLI_CONFIG"] = bin
 		f.env["HERDR_SOHO_PROVIDER_RETRIES"] = "1"
 		f.env["HERDR_SOHO_PROVIDER_RETRY_DELAY"] = "0"
 		return f, bin
@@ -494,10 +494,10 @@ func TestWaitRemainingTaskCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		bin := filepath.Join(base, "bin")
-		if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{Argv: []string{"pane", "report-metadata", "pane-1", "--source", "herdr-soho", "--title", "Task title ✓"}}}); err != nil {
+		if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{Argv: []string{"pane", "report-metadata", "pane-1", "--source", "soho", "--title", "Task title ✓"}}}); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"PATH": bin, "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock")}
+		env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock")}
 		if err := core.MarkTaskDone(sd, "worker", env); err != nil {
 			t.Fatal(err)
 		}
@@ -509,7 +509,7 @@ func TestWaitRemainingTaskCases(t *testing.T) {
 			t.Fatalf("task=%q err=%v", got, err)
 		}
 		calls, err := fakecli.ReadCalls(filepath.Join(bin, "herdr.calls.jsonl"))
-		if err != nil || len(calls) != 1 || strings.Join(calls[0].Argv, " ") != "pane report-metadata pane-1 --source herdr-soho --title Task title ✓" {
+		if err != nil || len(calls) != 1 || strings.Join(calls[0].Argv, " ") != "pane report-metadata pane-1 --source soho --title Task title ✓" {
 			t.Fatalf("calls=%+v err=%v", calls, err)
 		}
 	})

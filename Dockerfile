@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.27@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 
-# herdr-soho base image: the herdr-soho CLI and skill, the claude, codex,
+# soho base image: the soho CLI and skill, the claude, codex,
 # grok and pi agent runner CLIs, and the Go/C/Git/Node toolchain a job
 # container builds and tests with. Every input is pinned: the base image
 # and the Dockerfile frontend by digest, Debian packages by an immutable
@@ -13,7 +13,7 @@ ARG DEBIAN_IMAGE=docker.io/library/debian:trixie-slim@sha256:a29215f6a35e51e22ad
 ARG DEBIAN_SNAPSHOT=20261005T000000Z
 
 ARG BASE_IMAGE_VERSION=0.1.0
-ARG HERDR_SOHO_VERSION=dev
+ARG SOHO_VERSION=dev
 # Full commit SHA of the source the image was built from, recorded in the
 # org.opencontainers.image.revision label. Empty when not passed.
 ARG VCS_REF=
@@ -109,22 +109,22 @@ RUN set -eu; \
     install -m 0755 grok /out/bin/grok; \
     rm -rf /dl
 
-# herdr-soho, built from the curated source with the release flags.
-FROM fetch AS herdr-soho
-ARG HERDR_SOHO_VERSION
+# soho, built from the curated source with the release flags.
+FROM fetch AS soho
+ARG SOHO_VERSION
 ENV PATH=/out/go/bin:$PATH GOTOOLCHAIN=local CGO_ENABLED=0 GOFLAGS=-mod=readonly \
     GOCACHE=/tmp/gocache GOPATH=/tmp/gopath
 WORKDIR /src
 COPY go.mod ./
-COPY cmd/herdr-soho cmd/herdr-soho
+COPY cmd/soho cmd/soho
 COPY internal internal
-COPY skills/herdr-soho skills/herdr-soho
+COPY skills/soho skills/soho
 RUN set -eu; \
     go build -trimpath -buildvcs=false \
-      -ldflags "-s -w -X github.com/djalmajr/herdr-soho/internal/cli.version=${HERDR_SOHO_VERSION}" \
-      -o /out/herdr-soho ./cmd/herdr-soho; \
+      -ldflags "-s -w -X github.com/djalmajr/soho/internal/cli.version=${SOHO_VERSION}" \
+      -o /out/soho ./cmd/soho; \
     mkdir -p /out/skill; \
-    cd skills/herdr-soho; \
+    cd skills/soho; \
     cp -R SKILL.md README.md config.defaults roles references templates agents /out/skill/; \
     rm -rf /tmp/gocache /tmp/gopath
 
@@ -132,7 +132,7 @@ RUN set -eu; \
 # scripts.
 FROM fetch AS runners
 ENV PATH=/out/node/bin:$PATH
-WORKDIR /opt/herdr-soho/runners
+WORKDIR /opt/soho/runners
 COPY container/runners/package.json container/runners/package-lock.json ./
 RUN set -eu; \
     npm ci --ignore-scripts --no-audit --no-fund --cache /tmp/npm-cache; \
@@ -140,19 +140,19 @@ RUN set -eu; \
 
 FROM os AS base
 ARG BASE_IMAGE_VERSION
-ARG HERDR_SOHO_VERSION
+ARG SOHO_VERSION
 ARG VCS_REF
 ARG DEBIAN_IMAGE
 ARG DEBIAN_SNAPSHOT
 COPY --from=fetch /out/go /usr/local/go
 COPY --from=fetch /out/node /opt/node
 COPY --from=fetch /out/bin/ /usr/local/bin/
-COPY --from=herdr-soho /out/herdr-soho /usr/local/bin/herdr-soho
-COPY --from=herdr-soho /out/skill /usr/local/share/herdr-soho/skills/herdr-soho
-COPY --from=runners /opt/herdr-soho/runners /opt/herdr-soho/runners
+COPY --from=soho /out/soho /usr/local/bin/soho
+COPY --from=soho /out/skill /usr/local/share/soho/skills/soho
+COPY --from=runners /opt/soho/runners /opt/soho/runners
 RUN set -eu; \
-    ln -s /opt/herdr-soho/runners/node_modules/.bin/codex /usr/local/bin/codex; \
-    ln -s /opt/herdr-soho/runners/node_modules/.bin/pi /usr/local/bin/pi; \
+    ln -s /opt/soho/runners/node_modules/.bin/codex /usr/local/bin/codex; \
+    ln -s /opt/soho/runners/node_modules/.bin/pi /usr/local/bin/pi; \
     groupadd --gid 1000 agent; \
     useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash agent; \
     install -d -o agent -g agent -m 0700 /home/agent/.claude /home/agent/.codex \
@@ -162,17 +162,17 @@ RUN set -eu; \
     rm -rf /var/log/* /var/cache/ldconfig/aux-cache
 ENV PATH=/usr/local/go/bin:/opt/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     GOTOOLCHAIN=local \
-    HERDR_SOHO_SKILL_DIR=/usr/local/share/herdr-soho/skills/herdr-soho \
+    SOHO_SKILL_DIR=/usr/local/share/soho/skills/soho \
     DISABLE_AUTOUPDATER=1 \
     GROK_DISABLE_AUTOUPDATER=1 \
     PI_SKIP_VERSION_CHECK=1
-LABEL org.opencontainers.image.title="herdr-soho-base" \
-      org.opencontainers.image.description="herdr-soho CLI and skill, agent runner CLIs and build toolchain for one-container-per-job execution" \
+LABEL org.opencontainers.image.title="soho-base" \
+      org.opencontainers.image.description="soho CLI and skill, agent runner CLIs and build toolchain for one-container-per-job execution" \
       org.opencontainers.image.version="${BASE_IMAGE_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.base.name="${DEBIAN_IMAGE}" \
-      io.github.herdr-soho.cli.version="${HERDR_SOHO_VERSION}" \
-      io.github.herdr-soho.debian.snapshot="${DEBIAN_SNAPSHOT}"
+      io.github.soho.cli.version="${SOHO_VERSION}" \
+      io.github.soho.debian.snapshot="${DEBIAN_SNAPSHOT}"
 USER agent
 WORKDIR /workspace
 ENTRYPOINT ["/usr/bin/tini", "--"]

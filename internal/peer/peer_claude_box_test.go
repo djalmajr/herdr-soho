@@ -9,8 +9,8 @@ import (
 	"testing"
 	_ "unsafe"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // The rc.14 false negative (Windows, local claude): the send to a working
@@ -29,13 +29,13 @@ import (
 //
 // The stalled 15 of the unproved path now says the proof window ran.
 
-//go:linkname claudeInputRegion github.com/djalmajr/herdr-soho/internal/peer.claudeInputRegion
+//go:linkname claudeInputRegion github.com/djalmajr/soho/internal/peer.claudeInputRegion
 func claudeInputRegion(visible string) ([]string, bool)
 
-//go:linkname idInInputBox github.com/djalmajr/herdr-soho/internal/peer.idInInputBox
+//go:linkname idInInputBox github.com/djalmajr/soho/internal/peer.idInInputBox
 func idInInputBox(kind, visible, id string) bool
 
-//go:linkname messageStillInScreen github.com/djalmajr/herdr-soho/internal/peer.messageStillInScreen
+//go:linkname messageStillInScreen github.com/djalmajr/soho/internal/peer.messageStillInScreen
 func messageStillInScreen(kind, visible, endLine, id string) bool
 
 // rc14ClaudeScreen is the real rc.14 screen (the end), verbatim: the taken
@@ -242,7 +242,7 @@ func TestSendClaudeComposerBorders(t *testing.T) {
 		post := "history table\n" + sep + "\nrow\n" + sep + "\n❯ " + prompt + "\n"
 		reseed(t)
 		f := newFixture(t, stalledRules(post, prompt+"\n"))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "50"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 15 || out != "" {
 			t.Fatalf("the message typed below the history separators must not prove delivery: code=%d out=%q stderr=%q", code, out, stderr)
@@ -266,7 +266,7 @@ func TestSendClaudeComposerBorders(t *testing.T) {
 		post := "history table\n" + sep + "\n" + prompt + "\n" + sep + "\n❯\n" + sep + "\nfooter\n"
 		reseed(t)
 		f := newFixture(t, stalledRules(post, prompt+"\n"))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "50"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("the taken message out of the box must be sent: code=%d out=%q stderr=%q", code, out, stderr)
@@ -285,7 +285,7 @@ func TestSendClaudeComposerBorders(t *testing.T) {
 		post := "history table\n" + prompt + "\n" + sep + "\n❯ " + prompt + "\n" + sep + "\nfooter\n"
 		reseed(t)
 		f := newFixture(t, stalledRules(post, "old history without the marker\n"))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "50"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 15 || out != "" {
 			t.Fatalf("the message typed in the box must not prove delivery: code=%d out=%q stderr=%q", code, out, stderr)
@@ -334,7 +334,7 @@ func TestSendClaudeStalledRealScreen(t *testing.T) {
 		{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stdout: prompt + "\n"},
 	}
 	f := newFixture(t, rules)
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "50"
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 	if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 		t.Fatalf("the real screen must prove the stalled arrival: code=%d out=%q stderr=%q", code, out, stderr)
@@ -366,7 +366,7 @@ func TestSendClaudeStalledTranscript(t *testing.T) {
 	}
 	f := newFixture(t, rules)
 	f.env["CLAUDE_CONFIG_DIR"] = configRoot
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "50"
 	done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, userLine)
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 	if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
@@ -399,7 +399,7 @@ func TestSendPiStalledTranscript(t *testing.T) {
 		{Argv: []string{"agent", "prompt", "w0test:p0a", prompt, "--wait", "--until", "working", "--until", "blocked", "--until", "idle", "--until", "done", "--timeout", "15000"}, Stderr: stalledPromptErr, Code: 1, Delay: 100},
 	}
 	f := newFixture(t, rules)
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "50"
 	done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), sessionPath, id, userLine)
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 	if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
@@ -439,7 +439,7 @@ func TestSendClaudeStalledQueueNotProof(t *testing.T) {
 	}
 	f := newFixture(t, rules)
 	f.env["CLAUDE_CONFIG_DIR"] = configRoot
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "500", "50"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "500", "50"
 	done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, userLine)
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 	if code != 15 || out != "" {
@@ -480,10 +480,10 @@ func TestSendClaudeStalledNewMessage(t *testing.T) {
 		{Argv: []string{"agent", "read", "w0test:p0a", "--source", "recent-unwrapped"}, ArgvPrefix: true, Stdout: "old history without the marker\n"},
 	}
 	f := newFixture(t, rules)
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "500", "50"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "500", "50"
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 	screenPath := filepath.Join(f.dir, "state", "ws-test", "wait", "send-"+id+".screen")
-	want := "herdr-soho: send: local/w0test:p0a did not confirm taking the message (agent_prompt_stalled: stalled); delivery is uncertain: no proof within the 0.5s window; read its pane for #01020304 or a reply before sending again; screen saved to " + screenPath + "\n"
+	want := "soho: send: local/w0test:p0a did not confirm taking the message (agent_prompt_stalled: stalled); delivery is uncertain: no proof within the 0.5s window; read its pane for #01020304 or a reply before sending again; screen saved to " + screenPath + "\n"
 	if code != 15 || out != "" || stderr != want {
 		t.Fatalf("the unproved stalled 15 says the window ran and cites the saved screen: code=%d out=%q stderr=%q want %q", code, out, stderr, want)
 	}

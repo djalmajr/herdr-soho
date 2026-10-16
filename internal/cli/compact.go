@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/provider"
-	"github.com/djalmajr/herdr-soho/internal/spawn"
-	"github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/provider"
+	"github.com/djalmajr/soho/internal/spawn"
+	"github.com/djalmajr/soho/internal/text"
 )
 
 const compactDefaultTimeoutMS = 300000
@@ -429,7 +429,7 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 		}
 		if inDispatch && endStatus == "nothing-to-compact" {
 			// The dispatch keeps one JSON line on stdout: its own result.
-			fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: '%s' had nothing to compact\n", agent)
+			fmt.Fprintf(platform.Stderr, "soho: dispatch: '%s' had nothing to compact\n", agent)
 			return 0
 		}
 		fmt.Fprintln(platform.Stdout, resultJSON(endStatus))
@@ -465,7 +465,7 @@ func compactRun(agent, pane, kind, role, lane, model string, timeoutMS int64, ct
 	compactThinkingWarning(agent, kind, role, lane, model, ctx, env, cwd)
 	if inDispatch {
 		// The dispatch keeps one JSON line on stdout: its own result.
-		fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: compacted '%s' in %d ms\n", agent, elapsed)
+		fmt.Fprintf(platform.Stderr, "soho: dispatch: compacted '%s' in %d ms\n", agent, elapsed)
 		return 0
 	}
 	fmt.Fprintln(platform.Stdout, resultJSON("compacted"))

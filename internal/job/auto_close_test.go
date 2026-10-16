@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // Both keys are known to ConfigKeyOk, stay out of ConfigScalarKeys (the
@@ -88,7 +88,7 @@ func TestAutoCloseKeysConfigValidation(t *testing.T) {
 // autoCloseStartFix wires one hermetic job start over an existing checkout
 // (the project file's home) with a controlled defaults layer: defaultsBody
 // is the temp skill's config.defaults, projectBody the checkout's
-// .agents/herdr-soho.conf and userBody the user configuration file; an
+// .agents/soho.conf and userBody the user configuration file; an
 // empty body leaves that layer without the keys.
 func autoCloseStartFix(t *testing.T, defaultsBody, projectBody, userBody string) (Starter, *prepareFixture, string, *[]string) {
 	t.Helper()
@@ -98,7 +98,7 @@ func autoCloseStartFix(t *testing.T, defaultsBody, projectBody, userBody string)
 	f.env["HERDR_SOHO_SKILL_DIR"] = skill
 	f.cloneCheckout()
 	if projectBody != "" {
-		writeTeamFile(t, filepath.Join(f.checkout(), ".agents", "herdr-soho.conf"), projectBody)
+		writeTeamFile(t, filepath.Join(f.checkout(), ".agents", "soho.conf"), projectBody)
 	}
 	if userBody != "" {
 		writeTeamFile(t, platform.UserConfigPath(platform.Current(), f.env), userBody)

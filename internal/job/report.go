@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/djalmajr/herdr-soho/internal/reportscan"
+	"github.com/djalmajr/soho/internal/reportscan"
 )
 
 // ReportFacts is the worktree and job snapshot the supervisor passes in to

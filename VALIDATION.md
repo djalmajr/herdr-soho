@@ -1,6 +1,6 @@
 # Pull request validation
 
-This document is the procedure a maintainer follows to validate a pull request before merge by running a real, supported `herdr-soho job` end to end on the exact pull request head, and to record the verdict (PASS, FAIL or BLOCKED) with raw evidence. The authority for every `job` command, flag, exit code, field and event is [docs/job-contract.md](docs/job-contract.md); this document adds the validation procedure on top of it and changes no product behavior.
+This document is the procedure a maintainer follows to validate a pull request before merge by running a real, supported `soho job` end to end on the exact pull request head, and to record the verdict (PASS, FAIL or BLOCKED) with raw evidence. The authority for every `job` command, flag, exit code, field and event is [docs/job-contract.md](docs/job-contract.md); this document adds the validation procedure on top of it and changes no product behavior.
 
 ## Purpose and scope
 
@@ -27,8 +27,8 @@ If one of these is unavailable, the verdict is BLOCKED (see Verdict criteria), n
 
 - Herdr 0.9.1 or newer (0.9.3 or newer recommended on Windows) with a running, reachable server. On Windows `job start` never starts a server and exits 4 when none is reachable.
 - `gh auth status` succeeds, and the authenticated account can push to the sandbox repository.
-- The machine configuration keys `machine_label`, `job_orgs` (it must list the sandbox organization), `job_repos_root`, and optionally `job_timeout` and `job_blocked_timeout`, exist in the user configuration file `config` inside the `herdr-soho` user configuration directory.
-- A team file exists in that directory (`teams/<org>/<repo>.conf` or `teams/default.conf`), or the sandbox repository carries `.agents/herdr-soho.conf` with at least one `lane.*.roles`. A job never falls back to the built-in pane presets, so without one of these `job start` exits 2.
+- The machine configuration keys `machine_label`, `job_orgs` (it must list the sandbox organization), `job_repos_root`, and optionally `job_timeout` and `job_blocked_timeout`, exist in the user configuration file `config` inside the `soho` user configuration directory.
+- A team file exists in that directory (`teams/<org>/<repo>.conf` or `teams/default.conf`), or the sandbox repository carries `.agents/soho.conf` with at least one `lane.*.roles`. A job never falls back to the built-in pane presets, so without one of these `job start` exits 2.
 - The worker CLI named by the team is installed and authenticated, runs without interactive approvals (`approvals=full` in the team file), and will not stop at a first-use workspace trust dialog for a new directory. See [docs/startup-trust.md](docs/startup-trust.md); a job that ends `blocked` at such a dialog is BLOCKED, not PASS.
 - Before the first smoke, open the job orchestrator's CLI once, interactively, at the sandbox checkout's root, and accept its trust prompt; the job worktrees below that root inherit the trust and open without the dialog. See [docs/startup-trust.md](docs/startup-trust.md) for the other CLIs. Never grant trust to the home directory, to a parent directory outside the sandbox, or to the product repository.
 - `auto_approve` stays off, so that no unclassified dialog is answered automatically. That does not disable launch-time grants: `approvals=full` already grants trust and MCP access at launch in some adapters (for example the Cursor `--trust` and `--approve-mcps` flags and the Claude project MCP enablement), so before launch inspect the server account's inherited project resources and MCP configuration and record the installed adapter's full-mode trust and MCP grants.
@@ -37,7 +37,7 @@ If one of these is unavailable, the verdict is BLOCKED (see Verdict criteria), n
 
 `job start` creates the job workspace without forwarding environment variables. The supervisor therefore runs with the environment of the Herdr server and reads the user configuration file that environment resolves. `job supervise` finds the job by scanning `<job_repos_root>/*/*` from that configuration, and the other subcommands (`status`, `wait`, `events`, `collect`, `ack`, `cancel`, `close`, `list`) locate the job the same way from the configuration of the shell that runs them.
 
-The configuration that `job start` reads (for example through `XDG_CONFIG_HOME`) must resolve to the same user configuration file as the Herdr server's environment; otherwise the supervisor cannot find the job. Each side also resolves its own absolute state root: `HERDR_SOHO_DIR` takes precedence over `HERDR_SOHO_STATE_DIR`, which takes precedence over the `state_dir` setting, and the legacy `HERDR_AGENTS_DIR` and `HERDR_AGENTS_STATE_DIR` variables are copied when the new ones are absent, so a state override in only one environment is not a valid isolated setup. The machine keys are read only from the user configuration file, with no project or session override. Record the effective user configuration, the machine keys, the team and session configuration and the absolute state root for the invoking shell, the Herdr server environment and the worker environment, with secrets redacted, and stop, as BLOCKED, unless both job readers resolve the same stored job.
+The configuration that `job start` reads (for example through `XDG_CONFIG_HOME`) must resolve to the same user configuration file as the Herdr server's environment; otherwise the supervisor cannot find the job. Each side also resolves its own absolute state root: `SOHO_DIR` takes precedence over `SOHO_STATE_DIR`, which takes precedence over the `state_dir` setting, and the legacy `HERDR_SOHO_DIR` and `HERDR_SOHO_STATE_DIR` variables are copied when the new ones are absent, so a state override in only one environment is not a valid isolated setup. The machine keys are read only from the user configuration file, with no project or session override. Record the effective user configuration, the machine keys, the team and session configuration and the absolute state root for the invoking shell, the Herdr server environment and the worker environment, with secrets redacted, and stop, as BLOCKED, unless both job readers resolve the same stored job.
 
 ## Build provenance
 
@@ -48,19 +48,19 @@ git rev-parse HEAD
 git rev-parse HEAD^{tree}
 git status --porcelain
 go version
-go build -o <evidence-dir>/herdr-soho ./cmd/herdr-soho
-go version -m <evidence-dir>/herdr-soho
+go build -o <evidence-dir>/soho ./cmd/soho
+go version -m <evidence-dir>/soho
 ```
 
-On Windows the output file is `<evidence-dir>/herdr-soho.exe`. Then compute the SHA-256 of the binary with the platform's hash tool and record the value.
+On Windows the output file is `<evidence-dir>/soho.exe`. Then compute the SHA-256 of the binary with the platform's hash tool and record the value.
 
-Copy the `skills/herdr-soho` tree of the same checkout into the binary's directory, so that `SKILL.md`, `roles/` and the rest sit next to `<evidence-dir>/herdr-soho`. Then run `<bin> env` and require the line `skill dir: <evidence-dir> (executable)`. Role files resolve in the order: the repository's `.agents/herdr-roles/`, the directory in `HERDR_SOHO_ROLES`, then the skill. The skill resolves in the order `HERDR_SOHO_SKILL_DIR`, a skill tree beside the executable (searched in the executable's directory and its parents), the skill installed in the home directory, and the embedded skill. The candidate's tree beside the executable must win in every environment the job uses, not only in the maintainer's shell: the Herdr server launches the supervisor and the workers with its own environment. Record, by name only and never by value, whether `HERDR_SOHO_SKILL_DIR`, `HERDR_SOHO_ROLES` or their legacy aliases `HERDR_AGENTS_SKILL_DIR` and `HERDR_AGENTS_ROLES` (which the CLI maps to the new names) is set in the maintainer's shell and in the Herdr server's environment, and whether the sandbox carries `.agents/herdr-roles/`. Any of them makes the validation BLOCKED until it is removed for the run. Without it, a candidate that adds a role runs against an older installed skill and the job ends `failed` with the motivo `job: cannot ensure the job lane`, because the lane setup rejects the new role as an invalid value.
+Copy the `skills/soho` tree of the same checkout into the binary's directory, so that `SKILL.md`, `roles/` and the rest sit next to `<evidence-dir>/soho`. Then run `<bin> env` and require the line `skill dir: <evidence-dir> (executable)`. Role files resolve in the order: the repository's `.agents/herdr-roles/`, the directory in `SOHO_ROLES`, then the skill. The skill resolves in the order `SOHO_SKILL_DIR`, a skill tree beside the executable (searched in the executable's directory and its parents), the skill installed in the home directory, and the embedded skill. The candidate's tree beside the executable must win in every environment the job uses, not only in the maintainer's shell: the Herdr server launches the supervisor and the workers with its own environment. Record, by name only and never by value, whether `SOHO_SKILL_DIR`, `SOHO_ROLES` or their legacy aliases `HERDR_SOHO_SKILL_DIR` and `HERDR_SOHO_ROLES` (which the CLI maps to the new names) is set in the maintainer's shell and in the Herdr server's environment, and whether the sandbox carries `.agents/herdr-roles/`. Any of them makes the validation BLOCKED until it is removed for the run. Without it, a candidate that adds a role runs against an older installed skill and the job ends `failed` with the motivo `job: cannot ensure the job lane`, because the lane setup rejects the new role as an invalid value.
 
 - `git status --porcelain` must print nothing.
 - The pull request head SHA as the forge reports it must equal `git rev-parse HEAD`.
 - In the `go version -m` output, `vcs.revision` must equal that head SHA and `vcs.modified` must be `false`.
 
-Every later command runs that binary by its absolute path (called `<bin>` below), never a binary found on `PATH`. `job start` launches the supervisor with the launcher path, which prefers the `HERDR_SOHO_BIN` override (and its legacy `HERDR_AGENTS_BIN` fallback) over the candidate's own executable path. Before invoking the candidate, ensure both are absent or resolve to the verified candidate, and enforce the same executable identity in the Herdr server and worker environments. A provenance mismatch stops the validation as FAIL.
+Every later command runs that binary by its absolute path (called `<bin>` below), never a binary found on `PATH`. `job start` launches the supervisor with the launcher path, which prefers the `SOHO_BIN` override (and its legacy `HERDR_SOHO_BIN` fallback) over the candidate's own executable path. Before invoking the candidate, ensure both are absent or resolve to the verified candidate, and enforce the same executable identity in the Herdr server and worker environments. A provenance mismatch stops the validation as FAIL.
 
 ## Sandbox repository and bounded task
 
@@ -164,8 +164,8 @@ BLOCKED is a prerequisite that is unavailable (no reachable Herdr server, authen
 
 The smoke is native. Cross-compilation is not execution proof, and a run on one platform says nothing about another. Run it on each platform whose installation, process or terminal contract the pull request touches (macOS, Linux, Windows), and record the verdict and the evidence per platform. A platform that cannot be run is BLOCKED for that platform, with the reason.
 
-- Windows: the user configuration directory is `%APPDATA%\herdr-soho` unless `XDG_CONFIG_HOME` is set, in which case that variable takes precedence. The default `job_repos_root` is `%USERPROFILE%\repo.git`. A running Herdr server is required, because `job start` never starts one there.
-- macOS and Linux: the user configuration directory is `$XDG_CONFIG_HOME/herdr-soho` when that variable is set, otherwise `~/.config/herdr-soho`. The default `job_repos_root` is `~/repo.git`.
+- Windows: the user configuration directory is `%APPDATA%\soho` unless `XDG_CONFIG_HOME` is set, in which case that variable takes precedence. The default `job_repos_root` is `%USERPROFILE%\repo.git`. A running Herdr server is required, because `job start` never starts one there.
+- macOS and Linux: the user configuration directory is `$XDG_CONFIG_HOME/soho` when that variable is set, otherwise `~/.config/soho`. The default `job_repos_root` is `~/repo.git`.
 
 ## Evidence and how to paste it
 

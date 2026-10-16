@@ -12,14 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 const (
-	copiesUsage = "usage: herdr-soho copies [add <path> [--agent <name>]]"
-	gcUsage     = "usage: herdr-soho gc [--yes] [--older-than HOURS] [--include-unregistered]"
+	copiesUsage = "usage: soho copies [add <path> [--agent <name>]]"
+	gcUsage     = "usage: soho gc [--yes] [--older-than HOURS] [--include-unregistered]"
 
 	// copiesTimeLayout is the ISO-8601 UTC format the registry stores in the
 	// created column (core.FrictionISO).
@@ -227,7 +227,7 @@ func cmdCopies(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 		return copiesList(ctx, env, cwd)
 	}
 	if argv[0] != "add" {
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", copiesUsage)
+		_, _ = fmt.Fprintf(platform.Stderr, "soho: %s\n", copiesUsage)
 		return 2
 	}
 	return copiesAdd(argv[1:], ctx, env, cwd)
@@ -376,7 +376,7 @@ func copiesAdd(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 }
 
 func copiesAddUsageError() int {
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", copiesUsage)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: %s\n", copiesUsage)
 	return 2
 }
 
@@ -429,7 +429,7 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 	}
 	thresholdHours, err := parseGcHours(hours)
 	if err != nil {
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: gc: --older-than expects a non-negative integer (%s)\n", hours)
+		_, _ = fmt.Fprintf(platform.Stderr, "soho: gc: --older-than expects a non-negative integer (%s)\n", hours)
 		return 2
 	}
 	sd := core.StateDir(ctx, env, cwd)
@@ -486,13 +486,13 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 				_, _ = fmt.Fprintf(platform.Stdout, "would remove %s  %s  %s  %s\n", cand.path, humanSize(cand.size), cand.owner, humanAge(cand.age))
 			}
 			_, _ = fmt.Fprintf(platform.Stdout, "total: %s\n", humanSize(total))
-			_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes' to remove them")
+			_, _ = fmt.Fprintln(platform.Stdout, "run 'soho gc --yes' to remove them")
 		}
 		if len(unregistered) > 0 {
 			gcPrintUnregistered(unregistered, false)
 			if len(candidates) == 0 {
 				// Only unregistered copies: name the flag that actually removes them.
-				_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes --include-unregistered' to remove the unregistered ones")
+				_, _ = fmt.Fprintln(platform.Stdout, "run 'soho gc --yes --include-unregistered' to remove the unregistered ones")
 			}
 		}
 		if len(orphan) > 0 {
@@ -502,7 +502,7 @@ func cmdGc(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
 				_, _ = fmt.Fprintf(platform.Stdout, "%d  %s  %s  %s\n", row.Pid, row.Name, row.Owner, humanAge(procAge(row, now)))
 			}
 			if len(candidates) == 0 {
-				_, _ = fmt.Fprintln(platform.Stdout, "run 'herdr-soho gc --yes' to stop them")
+				_, _ = fmt.Fprintln(platform.Stdout, "run 'soho gc --yes' to stop them")
 			}
 		}
 		return 0
@@ -687,7 +687,7 @@ func gcPressureLine(ctx *core.Config, env platform.Env, stateDir string) string 
 		} else if !swapMeasured {
 			parts = append(parts, "swap not measured")
 		}
-		return "resource pressure: " + strings.Join(parts, "; ") + "; run 'herdr-soho gc' and close idle panes before opening more"
+		return "resource pressure: " + strings.Join(parts, "; ") + "; run 'soho gc' and close idle panes before opening more"
 	}
 	diskText, swapText := "disk not measured", "swap not measured"
 	if diskMeasured {
@@ -710,7 +710,7 @@ func gcPressureThreshold(ctx *core.Config, key string, limit int, env platform.E
 			return value
 		}
 	}
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: invalid value '%s' for %s; using the default %d\n", raw, key, limit)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: warning: invalid value '%s' for %s; using the default %d\n", raw, key, limit)
 	return limit
 }
 
@@ -767,7 +767,7 @@ func gcUnregistered(env platform.Env, rows []core.CopyRow, now time.Time, thresh
 }
 
 func gcUsageError() int {
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", gcUsage)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: %s\n", gcUsage)
 	return 2
 }
 

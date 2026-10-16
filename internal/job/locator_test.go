@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // winAbs stands in for the production abs in the win32 subtests: it accepts
@@ -416,9 +416,9 @@ func TestLocatorSelectionParity(t *testing.T) {
 					}
 				}
 				if which == "current" {
-					writeTeamFile(t, filepath.Join(base, "herdr-soho", "config"), body)
+					writeTeamFile(t, filepath.Join(base, "soho", "config"), body)
 				} else {
-					writeTeamFile(t, filepath.Join(base, "herdr-agents", "config"), body)
+					writeTeamFile(t, filepath.Join(base, "herdr-soho", "config"), body)
 				}
 			}
 			loc, err := supervisorLocatorEnv(osName, starterEnv, tc.reposHome, absLocator)
@@ -736,7 +736,7 @@ func TestLoadMachineReposRootHome(t *testing.T) {
 	home := filepath.Join(root, "home")
 	xdg := filepath.Join(root, "xdg")
 	env := platform.Env{"HOME": home, "XDG_CONFIG_HOME": xdg}
-	config := filepath.Join(xdg, "herdr-soho", "config")
+	config := filepath.Join(xdg, "soho", "config")
 	for _, tc := range []struct {
 		name      string
 		body      string

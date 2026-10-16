@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/dispatch"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/dispatch"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 const lintUsage = "usage: lint <brief.md> [--role <role>]"
@@ -38,14 +38,14 @@ func cmdLint(args []string, ctx *core.Config, env platform.Env, cwd string) int 
 		return 0
 	}
 	for _, warning := range result.Warnings {
-		fmt.Fprintf(platform.Stderr, "herdr-soho: warning: %s\n", warning)
+		fmt.Fprintf(platform.Stderr, "soho: warning: %s\n", warning)
 	}
 	if result.MissingMessage != "" && result.Mode == "strict" {
-		fmt.Fprintf(platform.Stderr, "herdr-soho: %s (brief_lint=strict)\n", result.MissingMessage)
+		fmt.Fprintf(platform.Stderr, "soho: %s (brief_lint=strict)\n", result.MissingMessage)
 		return 2
 	}
 	if result.MissingMessage != "" {
-		fmt.Fprintf(platform.Stderr, "herdr-soho: warning: %s\n", result.MissingMessage)
+		fmt.Fprintf(platform.Stderr, "soho: warning: %s\n", result.MissingMessage)
 	}
 	if len(result.Warnings) > 0 || result.MissingMessage != "" {
 		return 1

@@ -1,8 +1,8 @@
 # Container base image
 
-The root `Dockerfile` builds a versioned base image for running one herdr-soho job per container. It holds the `herdr-soho` CLI and skill resources, the `claude`, `codex`, `grok` and `pi` agent runner CLIs, and the toolchain a job needs to build and test this repository: Go, a C compiler for the race detector, Git and Node.js. Downstream images extend it with `FROM`; the base itself contains no credentials, no runner login and no project checkout.
+The root `Dockerfile` builds a versioned base image for running one soho job per container. It holds the `soho` CLI and skill resources, the `claude`, `codex`, `grok` and `pi` agent runner CLIs, and the toolchain a job needs to build and test this repository: Go, a C compiler for the race detector, Git and Node.js. Downstream images extend it with `FROM`; the base itself contains no credentials, no runner login and no project checkout.
 
-Herdr stays on the host. A host-side Herdr pane runs `docker exec -it` into the job container, so a person can watch and type into the in-container runner like any other pane. The image does not ship Herdr, and in-container `herdr-soho` cannot control host panes (see [Herdr and in-container herdr-soho](#herdr-and-in-container-herdr-soho)).
+Herdr stays on the host. A host-side Herdr pane runs `docker exec -it` into the job container, so a person can watch and type into the in-container runner like any other pane. The image does not ship Herdr, and in-container `soho` cannot control host panes (see [Herdr and in-container soho](#herdr-and-in-container-soho)).
 
 ## Contents
 
@@ -16,7 +16,7 @@ Herdr stays on the host. A host-side Herdr pane runs `docker exec -it` into the 
 | Grok CLI | `GROK_VERSION`, `GROK_SHA256_*` | Release artifact `x.ai/cli/grok-<version>-linux-<arch>` (the official installer's source), or the same file from the installer's fallback host `storage.googleapis.com/grok-build-public-artifacts/cli/` when that download fails; upstream publishes no checksum, so the digest is recorded when the version is pinned |
 | Codex CLI | `CODEX_VERSION`, `container/runners/package-lock.json` | npm package `@openai/codex` and its platform package, installed with `npm ci` from the lockfile |
 | Pi | `PI_VERSION`, `container/runners/package-lock.json` | npm package `@earendil-works/pi-coding-agent`, installed with `npm ci --ignore-scripts` as its documentation recommends; the `protobufjs` override is the one in the official Pi installer's `package.json` for that version; every other transitive version comes from this repository's own lockfile |
-| herdr-soho | `HERDR_SOHO_VERSION` | Built from the curated source in the build context with the release flags (`-trimpath -buildvcs=false -ldflags "-s -w -X …version=…"`) |
+| soho | `SOHO_VERSION` | Built from the curated source in the build context with the release flags (`-trimpath -buildvcs=false -ldflags "-s -w -X …version=…"`) |
 | Dockerfile frontend | `# syntax=` line | `docker/dockerfile` pinned by digest |
 
 Debian packages installed explicitly: `ca-certificates`, `curl`, `fd-find` (also linked as `fd`), `gcc`, `git`, `less`, `libc6-dev`, `openssh-client`, `patch`, `procps`, `ripgrep`, `tini` and `xz-utils`. Their dependencies come from the same snapshot.
@@ -27,56 +27,56 @@ Runtime layout:
 
 | Path | Content |
 |---|---|
-| `/usr/local/bin/herdr-soho` | herdr-soho CLI |
-| `/usr/local/share/herdr-soho/skills/herdr-soho` | Skill resources (`SKILL.md`, roles, references, templates); `HERDR_SOHO_SKILL_DIR` points here |
+| `/usr/local/bin/soho` | soho CLI |
+| `/usr/local/share/soho/skills/soho` | Skill resources (`SKILL.md`, roles, references, templates); `SOHO_SKILL_DIR` points here |
 | `/usr/local/bin/claude`, `/usr/local/bin/grok` | Native runner binaries |
-| `/opt/herdr-soho/runners` | npm tree for `codex` and `pi` (linked from `/usr/local/bin`) |
+| `/opt/soho/runners` | npm tree for `codex` and `pi` (linked from `/usr/local/bin`) |
 | `/usr/local/go`, `/opt/node` | Go and Node.js toolchains |
 | `/workspace` | Working directory for the job checkout (owned by `agent`) |
 | `/home/agent` | Home of the non-root `agent` user (UID and GID 1000) |
 
-The image runs as `agent`, with `tini` as the entrypoint and `sleep infinity` as the default command: the container idles, and runner sessions start with `docker exec`. The environment sets `GOTOOLCHAIN=local` (the pinned Go never downloads another toolchain), `DISABLE_AUTOUPDATER=1`, `GROK_DISABLE_AUTOUPDATER=1` and `PI_SKIP_VERSION_CHECK=1`, so runners do not replace the pinned binaries at run time. To use the skill with a runner's skill loader, link the resource directory into that runner's skill directory inside the container, for example `ln -s "$HERDR_SOHO_SKILL_DIR" ~/.claude/skills/herdr-soho`.
+The image runs as `agent`, with `tini` as the entrypoint and `sleep infinity` as the default command: the container idles, and runner sessions start with `docker exec`. The environment sets `GOTOOLCHAIN=local` (the pinned Go never downloads another toolchain), `DISABLE_AUTOUPDATER=1`, `GROK_DISABLE_AUTOUPDATER=1` and `PI_SKIP_VERSION_CHECK=1`, so runners do not replace the pinned binaries at run time. To use the skill with a runner's skill loader, link the resource directory into that runner's skill directory inside the container, for example `ln -s "$SOHO_SKILL_DIR" ~/.claude/skills/soho`.
 
 ## Build
 
-The build reads only an allowlisted context: `Dockerfile.dockerignore` denies everything and allows `go.mod`, the `herdr-soho` command, `internal/`, the skill resources and the runner lockfile, then excludes tests, test data and dot files. Version control data, local state, agent configuration, documentation and anything else in the checkout never reach the builder.
+The build reads only an allowlisted context: `Dockerfile.dockerignore` denies everything and allows `go.mod`, the `soho` command, `internal/`, the skill resources and the runner lockfile, then excludes tests, test data and dot files. Version control data, local state, agent configuration, documentation and anything else in the checkout never reach the builder.
 
 Build with a dedicated BuildKit builder pinned by digest. The builder version is part of the reproducibility boundary, and the exporter of Docker's default `docker` driver on the classic image store does not apply `rewrite-timestamp`, which leaves build-time file timestamps in the layers.
 
 ```sh
-docker buildx create --name herdr-soho-base --driver docker-container \
+docker buildx create --name soho-base --driver docker-container \
   --driver-opt image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
-docker buildx build --builder herdr-soho-base \
+docker buildx build --builder soho-base \
   --platform linux/arm64 \
   --build-arg SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" \
-  --build-arg HERDR_SOHO_VERSION="$(git describe --tags --always)" \
+  --build-arg SOHO_VERSION="$(git describe --tags --always)" \
   --build-arg VCS_REF="$(git rev-parse HEAD)" \
   --provenance=false --sbom=false \
-  --output type=docker,name=herdr-soho-base:0.1.0,dest=herdr-soho-base-0.1.0.tar,rewrite-timestamp=true \
+  --output type=docker,name=soho-base:0.1.0,dest=soho-base-0.1.0.tar,rewrite-timestamp=true \
   .
-docker load -i herdr-soho-base-0.1.0.tar
+docker load -i soho-base-0.1.0.tar
 ```
 
-Use `--platform linux/amd64` on an x86-64 host. Run each platform's image on a host of that architecture: under QEMU emulation of `linux/amd64` on an ARM host, the native Claude Code binary aborts at start (its Bun runtime crashes), while the other tools run. The tag carries `BASE_IMAGE_VERSION` (also the `org.opencontainers.image.version` label); bump both together when an input changes. `VCS_REF` records the full source commit in the `org.opencontainers.image.revision` label, `HERDR_SOHO_VERSION` the `git describe` name in `io.github.herdr-soho.cli.version`, and `SOURCE_DATE_EPOCH` the image `created` time; the label is empty when `VCS_REF` is not passed. Provenance and SBOM attestations are disabled because they record builder and context details; the inputs are documented here instead. `docker buildx rm herdr-soho-base` removes the builder when it is no longer needed.
+Use `--platform linux/amd64` on an x86-64 host. Run each platform's image on a host of that architecture: under QEMU emulation of `linux/amd64` on an ARM host, the native Claude Code binary aborts at start (its Bun runtime crashes), while the other tools run. The tag carries `BASE_IMAGE_VERSION` (also the `org.opencontainers.image.version` label); bump both together when an input changes. `VCS_REF` records the full source commit in the `org.opencontainers.image.revision` label, `SOHO_VERSION` the `git describe` name in `io.github.soho.cli.version`, and `SOURCE_DATE_EPOCH` the image `created` time; the label is empty when `VCS_REF` is not passed. Provenance and SBOM attestations are disabled because they record builder and context details; the inputs are documented here instead. `docker buildx rm soho-base` removes the builder when it is no longer needed.
 
 To inspect the exact context the build receives, export the `build-context` stage:
 
 ```sh
-docker buildx build --target build-context --output type=local,dest=/tmp/herdr-soho-context .
+docker buildx build --target build-context --output type=local,dest=/tmp/soho-context .
 ```
 
 ## Using the base downstream
 
 `container/examples/downstream/Dockerfile` is a generic downstream image. Two references to the base exist, and they are different digests:
 
-- **Local tag.** After `docker load`, the base exists only on this Docker engine as `herdr-soho-base:0.1.0`. `docker build` resolves local images, so `FROM herdr-soho-base:0.1.0` works: `docker build -t my-job-image:dev container/examples/downstream`. Check that the tag still points at the expected build with `docker image inspect --format '{{.Id}}' herdr-soho-base:0.1.0`; the image ID is the digest of the image config. A `docker-container` builder (such as the pinned builder above) does not see the engine's local images, so build downstream images with the engine's own builder.
-- **Registry digest.** A digest after `@` in `FROM` is a manifest digest, which only a registry resolves. The local image ID is not one: `FROM herdr-soho-base:0.1.0@sha256:<image ID>` fails. Once the base is pushed to a registry you control, pin downstream images to the digest the push reports (`docker image inspect --format '{{json .RepoDigests}}'`): `FROM <registry>/herdr-soho-base:0.1.0@sha256:<repo digest>`. The example's `BASE_IMAGE` build argument takes either form. This repository does not publish the image.
+- **Local tag.** After `docker load`, the base exists only on this Docker engine as `soho-base:0.1.0`. `docker build` resolves local images, so `FROM soho-base:0.1.0` works: `docker build -t my-job-image:dev container/examples/downstream`. Check that the tag still points at the expected build with `docker image inspect --format '{{.Id}}' soho-base:0.1.0`; the image ID is the digest of the image config. A `docker-container` builder (such as the pinned builder above) does not see the engine's local images, so build downstream images with the engine's own builder.
+- **Registry digest.** A digest after `@` in `FROM` is a manifest digest, which only a registry resolves. The local image ID is not one: `FROM soho-base:0.1.0@sha256:<image ID>` fails. Once the base is pushed to a registry you control, pin downstream images to the digest the push reports (`docker image inspect --format '{{json .RepoDigests}}'`): `FROM <registry>/soho-base:0.1.0@sha256:<repo digest>`. The example's `BASE_IMAGE` build argument takes either form. This repository does not publish the image.
 
 Downstream images should keep `USER agent`, the `/workspace` working directory and the entrypoint unless they have a reason to change them, and must keep credentials out of their builds as well.
 
 ## Reproducibility
 
-What is pinned: the frontend, the base image and every download by digest; Debian packages by snapshot timestamp; npm packages by lockfile integrity; the herdr-soho source by the checked-in tree. `SOURCE_DATE_EPOCH` fixes the image creation time and history timestamps, and `rewrite-timestamp=true` clamps the modification time of every file in the layers to that value.
+What is pinned: the frontend, the base image and every download by digest; Debian packages by snapshot timestamp; npm packages by lockfile integrity; the soho source by the checked-in tree. `SOURCE_DATE_EPOCH` fixes the image creation time and history timestamps, and `rewrite-timestamp=true` clamps the modification time of every file in the layers to that value.
 
 Verify a rebuild by building twice without the cache, with the same builder, platform, build arguments and image name, and comparing the exported archives:
 
@@ -100,8 +100,8 @@ The boundary of the claim:
 `container/smoke.json` lists the commands that prove each tool is present and runs without a login: `--version` and `--help` for every runner, the toolchain versions, the skill resources and the runtime user. `imagecheck smoke` runs each one in a fresh container with `--network none` and checks the reported version against the `ARG` defaults in the `Dockerfile`:
 
 ```sh
-go run ./container/imagecheck smoke --image herdr-soho-base:0.1.0 --spec container/smoke.json \
-  --build-arg HERDR_SOHO_VERSION="$(git describe --tags --always)"
+go run ./container/imagecheck smoke --image soho-base:0.1.0 --spec container/smoke.json \
+  --build-arg SOHO_VERSION="$(git describe --tags --always)"
 ```
 
 ## Secret and independence scans
@@ -130,7 +130,7 @@ An entry binds to one exact match: the rule, the path inside the layer or contex
 `container/image-scan-accept.linux-arm64.txt` and `container/image-scan-accept.linux-amd64.txt` list the reviewed matches of each platform's image, grouped with the reason and the upstream source of each file. Because entries are bound to file bytes, every pin change that replaces one of those files makes its entries unmatched: scan without the list, review each new match without printing it (rule, length, surrounding structure, the file's upstream origin), and regenerate the platform's list from the scan output. Each list belongs to its own platform's image: scanning one platform's image with the other platform's list fails the scan, because the entries for files that differ between the platforms stay unmatched (an entry for a file that is byte-identical on both platforms matches in both), so both lists are reviewed and regenerated together when a shared pin changes.
 
 ```sh
-go run ./container/imagecheck image herdr-soho-base-0.1.0.tar \
+go run ./container/imagecheck image soho-base-0.1.0.tar \
   --accept-file container/image-scan-accept.linux-arm64.txt --deny-file /path/outside/repo/deny.txt
 ```
 
@@ -161,7 +161,7 @@ Without Compose:
 docker run -d --name job-42 \
   --mount type=bind,source=/path/to/jobs/42/repo,target=/workspace \
   --mount type=volume,source=job-42-claude,target=/home/agent/.claude \
-  herdr-soho-base:0.1.0
+  soho-base:0.1.0
 docker exec -it job-42 claude
 docker rm -f job-42          # the job-42-* volumes stay until docker volume rm
 ```
@@ -191,29 +191,29 @@ docker exec -it job-42 claude
 
 `-i` keeps stdin open and `-t` allocates a terminal, so keys typed into the pane (or sent with `herdr pane send-keys`) reach the runner, and resizing the pane resizes the runner's terminal. When the session ends, the pane returns to the host shell; the container keeps running.
 
-## Herdr and in-container herdr-soho
+## Herdr and in-container soho
 
-The `herdr-soho` binary in the image runs the commands that need no Herdr server, such as `--version`, `--help`, `env` (which reports the skill directory and the installed runner versions) and `lint` for briefs, and it serves the skill resources. Commands that drive Herdr (`init`, `spawn`, `dispatch`, `wait`, `roster`, …) need the Herdr server's control socket and `HERDR_ENV`. Herdr does not run in the container, and no bridge forwards its socket into one, so those commands are not available inside the container.
+The `soho` binary in the image runs the commands that need no Herdr server, such as `--version`, `--help`, `env` (which reports the skill directory and the installed runner versions) and `lint` for briefs, and it serves the skill resources. Commands that drive Herdr (`init`, `spawn`, `dispatch`, `wait`, `roster`, …) need the Herdr server's control socket and `HERDR_ENV`. Herdr does not run in the container, and no bridge forwards its socket into one, so those commands are not available inside the container.
 
-Orchestration therefore stays on the host: the orchestrating agent and `herdr-soho` run in Herdr on the host, and a pane runs a containerized runner with `docker exec -it`. `herdr-soho spawn` starts runner CLIs directly on the host; it has no option to start them inside a container, so a containerized worker pane is opened and driven by hand (or by a host tool) rather than by `spawn`. Report files a containerized runner writes under `/workspace` appear in the host checkout through the bind mount.
+Orchestration therefore stays on the host: the orchestrating agent and `soho` run in Herdr on the host, and a pane runs a containerized runner with `docker exec -it`. `soho spawn` starts runner CLIs directly on the host; it has no option to start them inside a container, so a containerized worker pane is opened and driven by hand (or by a host tool) rather than by `spawn`. Report files a containerized runner writes under `/workspace` appear in the host checkout through the bind mount.
 
 ## Continuous integration
 
-`.github/workflows/container-image.yml` builds and checks the image on pull requests and on pushes to `main` that change a build input: `Dockerfile`, `Dockerfile.dockerignore`, `go.mod`, `cmd/herdr-soho/**`, `internal/**`, `skills/herdr-soho/**`, `container/**` or the workflow itself.
+`.github/workflows/container-image.yml` builds and checks the image on pull requests and on pushes to `main` that change a build input: `Dockerfile`, `Dockerfile.dockerignore`, `go.mod`, `cmd/soho/**`, `internal/**`, `skills/soho/**`, `container/**` or the workflow itself.
 
 Each platform runs on its own native GitHub-hosted runner, without emulation: `ubuntu-24.04` (x86-64) for `linux/amd64` and `ubuntu-24.04-arm` (aarch64) for `linux/arm64`. The amd64 image needs a native x86-64 host because the native Claude Code binary aborts under QEMU emulation (see [Build](#build)).
 
-The job checks out the exact commit under test: the pull request's head commit, not the synthetic merge commit, or the pushed commit on `main`. It validates that the value is a full 40-character SHA, fetches it anonymously with its full history and every tag, and fails unless `HEAD` is that commit. `git describe --tags --always` is resolved once from that checkout, and the same `HERDR_SOHO_VERSION` is passed to the build and to the smoke check. The build uses the [Build](#build) command: the pinned BuildKit builder, `--no-cache`, one platform, the Dockerfile defaults, `SOURCE_DATE_EPOCH` from the commit, `VCS_REF` set to the full commit SHA, no attestations and the timestamp-rewriting Docker archive output. The archive is hashed and loaded into the runner's engine.
+The job checks out the exact commit under test: the pull request's head commit, not the synthetic merge commit, or the pushed commit on `main`. It validates that the value is a full 40-character SHA, fetches it anonymously with its full history and every tag, and fails unless `HEAD` is that commit. `git describe --tags --always` is resolved once from that checkout, and the same `SOHO_VERSION` is passed to the build and to the smoke check. The build uses the [Build](#build) command: the pinned BuildKit builder, `--no-cache`, one platform, the Dockerfile defaults, `SOURCE_DATE_EPOCH` from the commit, `VCS_REF` set to the full commit SHA, no attestations and the timestamp-rewriting Docker archive output. The archive is hashed and loaded into the runner's engine.
 
 The job fails when any of these does not hold:
 
 - the runner's `uname -m` and the Docker server's architecture match the platform;
-- the loaded image is `linux` with the platform's architecture, its `org.opencontainers.image.revision` label is the commit SHA and its `io.github.herdr-soho.cli.version` label is the `HERDR_SOHO_VERSION` passed to the build;
+- the loaded image is `linux` with the platform's architecture, its `org.opencontainers.image.revision` label is the commit SHA and its `io.github.soho.cli.version` label is the `SOHO_VERSION` passed to the build;
 - `imagecheck smoke` exits 0 and reports every check of `container/smoke.json` as ok, run offline as described in [Inventory and smoke test](#inventory-and-smoke-test);
 - `imagecheck image` finds nothing in the archive with that platform's `container/image-scan-accept.linux-<arch>.txt`;
 - `imagecheck context` finds nothing in the exported `build-context` stage, with the allowed prefixes of `Dockerfile.dockerignore`.
 
-The workflow has read-only `contents` permission, uses no third-party actions, reads no secrets and pushes nothing. It publishes its evidence in the job log and in the run's step summary: run URL, source SHA and tree, `HERDR_SOHO_VERSION`, runner and image architecture, image ID, archive SHA-256 and the smoke and scan summaries. The private deny-literal scan and the two-build `compare` remain local steps. Because the scans run there without a deny file, a finding prints the displayed path of its entry unredacted, so a token-shaped string that is part of a path would reach the public job log (see [Secret and independence scans](#secret-and-independence-scans)).
+The workflow has read-only `contents` permission, uses no third-party actions, reads no secrets and pushes nothing. It publishes its evidence in the job log and in the run's step summary: run URL, source SHA and tree, `SOHO_VERSION`, runner and image architecture, image ID, archive SHA-256 and the smoke and scan summaries. The private deny-literal scan and the two-build `compare` remain local steps. Because the scans run there without a deny file, a finding prints the displayed path of its entry unredacted, so a token-shaped string that is part of a path would reach the public job log (see [Secret and independence scans](#secret-and-independence-scans)).
 
 ## Native-only checks
 

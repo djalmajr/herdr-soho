@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 type tm11RegridGolden struct {
@@ -69,7 +69,7 @@ func TestTM11RegridCommandParity(t *testing.T) {
 			if code != want.RC || out.String() != want.Out {
 				t.Fatalf("code=%d want=%d stdout=%q want=%q", code, want.RC, out.String(), want.Out)
 			}
-			calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+			calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 			if err != nil {
 				t.Fatal(err)
 			}

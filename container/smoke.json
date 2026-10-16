@@ -1,8 +1,8 @@
 {
   "checks": [
-    {"name": "herdr-soho", "argv": ["herdr-soho", "--version"], "version_arg": "HERDR_SOHO_VERSION"},
-    {"name": "herdr-soho-help", "argv": ["herdr-soho", "--help"]},
-    {"name": "herdr-soho-skill", "argv": ["test", "-f", "/usr/local/share/herdr-soho/skills/herdr-soho/SKILL.md"]},
+    {"name": "soho", "argv": ["soho", "--version"], "version_arg": "SOHO_VERSION"},
+    {"name": "soho-help", "argv": ["soho", "--help"]},
+    {"name": "soho-skill", "argv": ["test", "-f", "/usr/local/share/soho/skills/soho/SKILL.md"]},
     {"name": "claude", "argv": ["claude", "--version"], "version_arg": "CLAUDE_CODE_VERSION"},
     {"name": "claude-help", "argv": ["claude", "--help"]},
     {"name": "codex", "argv": ["codex", "--version"], "version_arg": "CODEX_VERSION"},

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // JS: "pi and opencode warn on approvals edits; FULL dies 2" — the exit-2 half,
@@ -17,7 +17,7 @@ func TestSpawnInvalidApprovalExitsTwo(t *testing.T) {
 		t.Fatal(err)
 	}
 	env["PATH"] = bin
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+	env["SOHO_FAKECLI_CONFIG"] = bin
 	env["HERDR_ENV"] = "1"
 	env["HERDR_SOHO_LANES"] = "off"
 	env["HERDR_SOCKET_PATH"] = filepath.Join(t.TempDir(), "missing", "herdr.sock")

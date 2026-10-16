@@ -1,4 +1,4 @@
-// Package release builds the six herdr-soho release binaries and publishes
+// Package release builds the six soho release binaries and publishes
 // them with the native gh CLI, replacing the Node/Bash release workflow.
 // Standard library only: go and gh are external Go CLIs invoked by argv,
 // never through a shell.
@@ -21,14 +21,14 @@ const (
 	// DevVersion is the build version for manual (workflow_dispatch) runs.
 	DevVersion = "dev"
 	// mainPackage is the package built into every release binary.
-	mainPackage = "./cmd/herdr-soho"
+	mainPackage = "./cmd/soho"
 	// versionLdflags is the exact ldflags format the release binaries get:
 	// size stripping plus the version injected into the CLI.
-	versionLdflags = "-s -w -X github.com/djalmajr/herdr-soho/internal/cli.version=%s"
+	versionLdflags = "-s -w -X github.com/djalmajr/soho/internal/cli.version=%s"
 	// sumsFileName is the checksum manifest name, matching the installer.
 	sumsFileName = "SHA256SUMS"
 	// stagingPattern prefixes the fresh sibling staging directory.
-	stagingPattern = ".herdr-soho-release-"
+	stagingPattern = ".soho-release-"
 )
 
 // target is one release build target.
@@ -36,17 +36,17 @@ type target struct{ os, arch string }
 
 // targets is the exact six release builds. This fixed order is also the
 // lexicographic order of the artifact names, so the generated SHA256SUMS
-// matches the old workflow's `sha256sum herdr-soho_*` output byte for byte.
+// matches the old workflow's `sha256sum soho_*` output byte for byte.
 var targets = [...]target{
 	{"darwin", "amd64"}, {"darwin", "arm64"},
 	{"linux", "amd64"}, {"linux", "arm64"},
 	{"windows", "amd64"}, {"windows", "arm64"},
 }
 
-// ArtifactName keeps the installer asset naming: herdr-soho_<os>_<arch>,
+// ArtifactName keeps the installer asset naming: soho_<os>_<arch>,
 // with the .exe suffix on windows.
 func ArtifactName(osName, arch string) string {
-	name := "herdr-soho_" + osName + "_" + arch
+	name := "soho_" + osName + "_" + arch
 	if osName == "windows" {
 		name += ".exe"
 	}

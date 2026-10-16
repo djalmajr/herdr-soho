@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func collaborationFixture(t *testing.T, uncertain bool) (*copiesFixture, string) {
@@ -37,7 +37,7 @@ func collaborationFixture(t *testing.T, uncertain bool) (*copiesFixture, string)
 	if _, err := fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	f.env["HERDR_SOHO_FAKECLI_CONFIG"] = fakeDir
+	f.env["SOHO_FAKECLI_CONFIG"] = fakeDir
 	f.env["PATH"] = fakeDir + string(os.PathListSeparator) + f.env.Get("PATH")
 	f.env["HERDR_PANE_ID"] = "ws:p0"
 	ctx := core.LoadConfig(f.env, f.repo)
@@ -161,7 +161,7 @@ func TestCollaborateCLIUncertainEventIsRecordedAndNeverResent(t *testing.T) {
 	if code, _, stderr := f.run(t, env, args...); code != 0 {
 		t.Fatalf("idempotent read code=%d %s", code, stderr)
 	}
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env.Get("HERDR_SOHO_FAKECLI_CONFIG"), "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(env.Get("SOHO_FAKECLI_CONFIG"), "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

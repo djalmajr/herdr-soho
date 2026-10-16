@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // A pi target writes every prompt it takes into its local session file as a
@@ -59,7 +59,7 @@ func newPiDispatchFixture(t *testing.T, mode string, seq int, sessionKind, sessi
 		t.Fatal(err)
 	}
 	base.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "2"
-	base.env["HERDR_SOHO_WAIT_POLL_MS"] = "100"
+	base.env["SOHO_WAIT_POLL_MS"] = "100"
 	f := &piDispatchFixture{
 		dispatchArrivalFixture: base,
 		composed:               filepath.Join(base.state, "ws", "briefs", "worker-"+piTranscriptStamp+".md"),

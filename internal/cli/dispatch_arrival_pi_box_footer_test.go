@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // piBoxWithFooter builds the real pi shape from the evidence screens: the
@@ -62,7 +62,7 @@ func TestDispatchIdlePiInputRegionWithFooter(t *testing.T) {
 		// The region rules are kind-aware: the target's row is pi, so the
 		// borders (when present) are the recognized composer region.
 		arrivalRosterKind(t, f, "pi")
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "100"
+		f.env["SOHO_WAIT_POLL_MS"] = "100"
 		return f
 	}
 	t.Run("the prompt in the box with the 2-line footer does not close received and sends Enter", func(t *testing.T) {

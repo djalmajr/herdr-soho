@@ -83,7 +83,7 @@ func TestLockTakesAStaleLockAndTimesOutOnALiveOne(t *testing.T) {
 		if !errors.As(err, &locked) || locked.Path != lock {
 			t.Fatalf("err=%v, want the locked error for %s", err, lock)
 		}
-		want := fmt.Sprintf("copies: registry is locked by another herdr-soho (%s)", lock)
+		want := fmt.Sprintf("copies: registry is locked by another soho (%s)", lock)
 		if err.Error() != want {
 			t.Fatalf("message=%q, want %q", err.Error(), want)
 		}

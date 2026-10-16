@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 const noAgentNotRef = `{"error":{"code":"agent_not_found","message":"no such pane"}}`
@@ -41,7 +41,7 @@ func TestSendNoAgentHintListsSameWorkspaceAgents(t *testing.T) {
 	if code != 4 || out != "" {
 		t.Fatalf("the hint keeps today's exit 4 and sends nothing: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	want := "herdr-soho: send: no agent in local/w12:p1; agents in w12: local/w12:p10 (orchestrator-12, claude), local/w12:p3 (-, codex)\n"
+	want := "soho: send: no agent in local/w12:p1; agents in w12: local/w12:p10 (orchestrator-12, claude), local/w12:p3 (-, codex)\n"
 	if stderr != want {
 		t.Fatalf("the message suggests the same-workspace agents: %q", stderr)
 	}
@@ -59,7 +59,7 @@ func TestSendNoAgentHintRemoteListsWithMachine(t *testing.T) {
 	if code != 4 || out != "" {
 		t.Fatalf("the remote hint keeps today's exit 4 and sends nothing: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	want := "herdr-soho: send: no agent in mac/w12:p1; agents in w12: mac/w12:p10 (orchestrator-12, claude), mac/w12:p3 (-, codex)\n"
+	want := "soho: send: no agent in mac/w12:p1; agents in w12: mac/w12:p10 (orchestrator-12, claude), mac/w12:p3 (-, codex)\n"
 	if stderr != want {
 		t.Fatalf("the remote message suggests the same-workspace agents on that machine: %q", stderr)
 	}
@@ -76,7 +76,7 @@ func TestSendNoAgentHintKeepsMessageWhenListingFails(t *testing.T) {
 	if code != 4 || out != "" {
 		t.Fatalf("a failed listing keeps today's exit 4: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	if want := "herdr-soho: send: no agent in local/w12:p1\n"; stderr != want {
+	if want := "soho: send: no agent in local/w12:p1\n"; stderr != want {
 		t.Fatalf("a failed listing keeps today's message: %q", stderr)
 	}
 	assertNoAgentHintCalls(t, f, 2, "api snapshot")
@@ -93,7 +93,7 @@ func TestSendNoAgentHintKeepsMessageWhenListingEmpty(t *testing.T) {
 	if code != 4 || out != "" {
 		t.Fatalf("an empty listing keeps today's exit 4: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	if want := "herdr-soho: send: no agent in local/w12:p1\n"; stderr != want {
+	if want := "soho: send: no agent in local/w12:p1\n"; stderr != want {
 		t.Fatalf("an empty listing keeps today's message: %q", stderr)
 	}
 	assertNoAgentHintCalls(t, f, 2, "api snapshot")
@@ -110,7 +110,7 @@ func TestSendNoAgentHintCutsAtFivePreferringOrchestrator(t *testing.T) {
 	if code != 4 || out != "" {
 		t.Fatalf("the crowded hint keeps today's exit 4: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	want := "herdr-soho: send: no agent in local/w12:p9; agents in w12: local/w12:p12 (orchestrator-12, claude), local/w12:p15 (orchestrator-3, claude), local/w12:p11 (planner-12, pi), local/w12:p13 (reviewer-12, codex), local/w12:p14 (implementer-12, pi)\n"
+	want := "soho: send: no agent in local/w12:p9; agents in w12: local/w12:p12 (orchestrator-12, claude), local/w12:p15 (orchestrator-3, claude), local/w12:p11 (planner-12, pi), local/w12:p13 (reviewer-12, codex), local/w12:p14 (implementer-12, pi)\n"
 	if stderr != want {
 		t.Fatalf("the crowded message prefers orchestrator names and cuts at 5: %q", stderr)
 	}
@@ -127,7 +127,7 @@ func TestSendNoAgentHintNameTargetKeepsMessage(t *testing.T) {
 	if code != 4 || out != "" {
 		t.Fatalf("a name target keeps today's exit 4: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	if want := "herdr-soho: send: no agent in build\n"; stderr != want {
+	if want := "soho: send: no agent in build\n"; stderr != want {
 		t.Fatalf("a name target keeps today's message: %q", stderr)
 	}
 	assertNoAgentHintCalls(t, f, 1, "")

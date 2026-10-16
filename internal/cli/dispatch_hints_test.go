@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func Test_dispatch_hints_cwd_unknown_option(t *testing.T) {
@@ -15,7 +15,7 @@ func Test_dispatch_hints_cwd_unknown_option(t *testing.T) {
 	t.Run("--cwd exits 2 with the spawn pointer", func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
 		code, out, stderr := f.run(t, "worker", f.brief, "--cwd", "/tmp/work")
-		want := "herdr-soho: dispatch: unknown option --cwd (the worker's directory is set when it is opened: spawn <role> --cwd <dir>, then dispatch to it)\n"
+		want := "soho: dispatch: unknown option --cwd (the worker's directory is set when it is opened: spawn <role> --cwd <dir>, then dispatch to it)\n"
 		if code != 2 || strings.TrimSpace(out) != "" || stderr != want {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
@@ -23,7 +23,7 @@ func Test_dispatch_hints_cwd_unknown_option(t *testing.T) {
 	t.Run("--foo keeps today's message", func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
 		code, out, stderr := f.run(t, "worker", f.brief, "--foo")
-		if code != 2 || strings.TrimSpace(out) != "" || stderr != "herdr-soho: dispatch: unknown option --foo\n" {
+		if code != 2 || strings.TrimSpace(out) != "" || stderr != "soho: dispatch: unknown option --foo\n" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 		}
 	})

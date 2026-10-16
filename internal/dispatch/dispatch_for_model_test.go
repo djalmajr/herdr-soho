@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/kinds"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/kinds"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // F1: --for accepts a model name or id whose family the project already

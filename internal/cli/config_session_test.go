@@ -11,8 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
 )
 
 func commandFixture(t *testing.T) (platform.Env, string) {
@@ -50,7 +51,7 @@ func testSkillDir(t *testing.T) string {
 	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	skillDir := filepath.Join(root, "skills", "herdr-soho")
+	skillDir := filepath.Join(root, "skills", "soho")
 	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err == nil {
 		return skillDir
 	}
@@ -60,7 +61,7 @@ func testSkillDir(t *testing.T) string {
 	if packageDirErr != nil {
 		t.Fatal(packageDirErr)
 	}
-	skillDir = filepath.Clean(filepath.Join(packageDir, "..", "..", "skills", "herdr-soho"))
+	skillDir = filepath.Clean(filepath.Join(packageDir, "..", "..", "skills", "soho"))
 	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
 		t.Fatalf("skill directory %q: %v", skillDir, err)
 	}
@@ -102,7 +103,7 @@ func TestParityConfigGolden(t *testing.T) {
 			}
 			env, cwd := commandFixture(t)
 			root := filepath.Dir(cwd)
-			projectFile := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+			projectFile := filepath.Join(cwd, ".agents", "soho.conf")
 			seed := ""
 			switch name {
 			case "config-set-dotted", "config-set-lane-roles", "config-set-verbatim":
@@ -153,13 +154,16 @@ func TestParityConfigGolden(t *testing.T) {
 				errOut = normalizeParityError(errOut)
 				errOut = strings.ReplaceAll(errOut, root, "<ROOT>")
 				errOut = normalizeGoldenRootPathSeparators(errOut)
-				wantErr := strings.ReplaceAll(want.Err, root, "<ROOT>")
+				wantErr := testutil.RewriteSohoName(want.Err)
+				wantErr = strings.ReplaceAll(wantErr, root, "<ROOT>")
 				wantErr = normalizeGoldenRootPathSeparators(wantErr)
+				want.Out = testutil.RewriteSohoName(want.Out)
 				if code != want.RC || out != want.Out || errOut != wantErr {
 					t.Fatalf("step %d args=%v\ncode=%d want=%d\nstdout:\n%s\nwant:\n%s\nstderr=%q want=%q", i, want.Args, code, want.RC, out, want.Out, errOut, wantErr)
 				}
 			}
 			for _, expected := range golden.Files {
+				expected.Rel = testutil.RewriteSohoName(expected.Rel)
 				path := filepath.Join(root, filepath.FromSlash(expected.Rel))
 				actual, readErr := os.ReadFile(path)
 				if expected.Content == nil {
@@ -168,8 +172,9 @@ func TestParityConfigGolden(t *testing.T) {
 					}
 					continue
 				}
-				if readErr != nil || string(actual) != *expected.Content {
-					t.Fatalf("file %s=%q err=%v want=%q", expected.Rel, actual, readErr, *expected.Content)
+				wantContent := testutil.RewriteSohoName(*expected.Content)
+				if readErr != nil || string(actual) != wantContent {
+					t.Fatalf("file %s=%q err=%v want=%q", expected.Rel, actual, readErr, wantContent)
 				}
 			}
 		})
@@ -235,7 +240,13 @@ func firstGoldenLineDifference(got, want string) string {
 func normalizeParityError(value string) string {
 	lines := strings.Split(value, "\n")
 	for i, line := range lines {
-		if strings.HasPrefix(line, "herdr-soho:") {
+		// The frozen goldens normalize the legacy program prefixes to
+		// PROG:; the native binary now carries the soho prefix (and the
+		// frozen double-prefix form soho: soho: in the NOWRITE refusal),
+		// so the first prefix maps to PROG: exactly like the legacy ones.
+		if strings.HasPrefix(line, "soho:") {
+			lines[i] = "PROG:" + strings.TrimPrefix(line, "soho:")
+		} else if strings.HasPrefix(line, "herdr-soho:") {
 			lines[i] = "PROG:" + strings.TrimPrefix(line, "herdr-soho:")
 		} else if strings.HasPrefix(line, "herdr-soho.mjs:") {
 			lines[i] = "PROG:" + strings.TrimPrefix(line, "herdr-soho.mjs:")
@@ -273,16 +284,16 @@ func TestConfigCommandRoutesToGo(t *testing.T) {
 	if code != 0 || errOut != "" || !strings.Contains(out, "set max_workers=5 in ") {
 		t.Fatalf("config set code=%d out=%q err=%q", code, out, errOut)
 	}
-	content, err := os.ReadFile(filepath.Join(cwd, ".agents", "herdr-soho.conf"))
+	content, err := os.ReadFile(filepath.Join(cwd, ".agents", "soho.conf"))
 	if err != nil || string(content) != "max_workers=5\n" {
 		t.Fatalf("config file=%q err=%v", content, err)
 	}
-	info, err := os.Stat(filepath.Join(cwd, ".agents", "herdr-soho.conf"))
+	info, err := os.Stat(filepath.Join(cwd, ".agents", "soho.conf"))
 	if err != nil || (runtime.GOOS == "windows" && info.Mode().Perm()&0o200 == 0) || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
 		t.Fatalf("new config mode=%v err=%v", info, err)
 	}
 	if runtime.GOOS != "windows" {
-		path := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		path := filepath.Join(cwd, ".agents", "soho.conf")
 		if err := os.Chmod(path, 0o640); err != nil {
 			t.Fatal(err)
 		}
@@ -295,7 +306,7 @@ func TestConfigCommandRoutesToGo(t *testing.T) {
 		}
 	}
 	code, out, errOut = runIn(t, []string{"config", "set", "nope", "1"}, env, cwd)
-	if code != 2 || out != "" || errOut != "herdr-soho: config set: unknown key 'nope'\n" {
+	if code != 2 || out != "" || errOut != "soho: config set: unknown key 'nope'\n" {
 		t.Fatalf("invalid config set code=%d out=%q err=%q", code, out, errOut)
 	}
 }
@@ -303,7 +314,7 @@ func TestConfigCommandRoutesToGo(t *testing.T) {
 func TestConfigCLIReadsCRLFLikeLF(t *testing.T) {
 	// JS: "config CLI: a CRLF config file behaves like the same file with LF"
 	env, repo := commandFixture(t)
-	configFile := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+	configFile := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config")
 	if err := os.MkdirAll(filepath.Dir(configFile), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +353,7 @@ func TestConfigSetArgumentForms(t *testing.T) {
 	t.Run("joins dash-prefixed value", func(t *testing.T) {
 		env, cwd := commandFixture(t)
 		code, _, errOut := runIn(t, []string{"config", "set", "args.codex", "-c", "a=b"}, env, cwd)
-		path := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		path := filepath.Join(cwd, ".agents", "soho.conf")
 		data, err := os.ReadFile(path)
 		if code != 0 || errOut != "" || err != nil || string(data) != "args.codex=-c a=b\n" {
 			t.Fatalf("dash value code=%d err=%q file=%q readErr=%v", code, errOut, data, err)
@@ -351,7 +362,7 @@ func TestConfigSetArgumentForms(t *testing.T) {
 	t.Run("accepts key=value", func(t *testing.T) {
 		env, cwd := commandFixture(t)
 		code, _, errOut := runIn(t, []string{"config", "set", "layout=columns"}, env, cwd)
-		data, err := os.ReadFile(filepath.Join(cwd, ".agents", "herdr-soho.conf"))
+		data, err := os.ReadFile(filepath.Join(cwd, ".agents", "soho.conf"))
 		if code != 0 || errOut != "" || err != nil || string(data) != "layout=columns\n" {
 			t.Fatalf("assignment code=%d err=%q file=%q readErr=%v", code, errOut, data, err)
 		}
@@ -359,17 +370,17 @@ func TestConfigSetArgumentForms(t *testing.T) {
 	t.Run("empty assignment value requests a missing value", func(t *testing.T) {
 		env, cwd := commandFixture(t)
 		code, out, errOut := runIn(t, []string{"config", "set", "layout="}, env, cwd)
-		if code != 2 || out != "" || errOut != "herdr-soho: usage: config set <key> <value> | <key>=<value> [--project|--user]\n" {
+		if code != 2 || out != "" || errOut != "soho: usage: config set <key> <value> | <key>=<value> [--project|--user]\n" {
 			t.Fatalf("empty assignment code=%d out=%q err=%q", code, out, errOut)
 		}
-		if _, err := os.Stat(filepath.Join(cwd, ".agents", "herdr-soho.conf")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(cwd, ".agents", "soho.conf")); !os.IsNotExist(err) {
 			t.Fatalf("empty assignment wrote config: %v", err)
 		}
 	})
 	t.Run("explicit empty value is rejected", func(t *testing.T) {
 		env, cwd := commandFixture(t)
 		code, out, errOut := runIn(t, []string{"config", "set", "layout", ""}, env, cwd)
-		if code != 2 || out != "" || errOut != "herdr-soho: config set: empty value\n" {
+		if code != 2 || out != "" || errOut != "soho: config set: empty value\n" {
 			t.Fatalf("explicit empty value code=%d out=%q err=%q", code, out, errOut)
 		}
 	})
@@ -386,7 +397,7 @@ func TestSessionCommandRoutesToGoAndLegacyEnvIsApplied(t *testing.T) {
 	// JS: "session set writes the session file in the state dir"
 	// JS: "config shows the session value with source `session`"
 	env, cwd := commandFixture(t)
-	env["HERDR_AGENTS_LAYOUT"] = "columns"
+	env["HERDR_SOHO_LAYOUT"] = "columns"
 	code, out, errOut := runIn(t, []string{"session", "set", "lane.build.kind=codex"}, env, cwd)
 	if code != 0 || errOut != "" || !strings.Contains(out, "session: this Herdr workspace only") {
 		t.Fatalf("session set code=%d out=%q err=%q", code, out, errOut)
@@ -422,10 +433,10 @@ func TestNowriteRejectsPortedCommandsBeforeWriting(t *testing.T) {
 	env, cwd := commandFixture(t)
 	env["HERDR_SOHO_NOWRITE"] = "1"
 	code, out, errOut := runIn(t, []string{"config", "set", "max_workers", "5"}, env, cwd)
-	if code != 2 || out != "" || !strings.Contains(errOut, "HERDR_SOHO_NOWRITE=1 is read-only") {
+	if code != 2 || out != "" || !strings.Contains(errOut, "SOHO_NOWRITE=1 is read-only") {
 		t.Fatalf("NOWRITE code=%d out=%q err=%q", code, out, errOut)
 	}
-	if _, err := os.Stat(filepath.Join(cwd, ".agents", "herdr-soho.conf")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(cwd, ".agents", "soho.conf")); !os.IsNotExist(err) {
 		t.Fatalf("NOWRITE created project config: %v", err)
 	}
 }
@@ -436,11 +447,11 @@ func TestNowriteRejectsConfigSetWithTheNewMessage(t *testing.T) {
 	env, cwd := commandFixture(t)
 	env["HERDR_SOHO_NOWRITE"] = "1"
 	code, out, errOut := runIn(t, []string{"config", "set", "panes", "3"}, env, cwd)
-	wantErr := "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: config (3 extra arguments not allowed) — unset HERDR_SOHO_NOWRITE to write\n"
+	wantErr := "soho: soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: config (3 extra arguments not allowed) — unset SOHO_NOWRITE to write\n"
 	if code != 2 || out != "" || errOut != wantErr {
 		t.Fatalf("config set under NOWRITE code=%d out=%q err=%q", code, out, errOut)
 	}
-	if _, err := os.Stat(filepath.Join(cwd, ".agents", "herdr-soho.conf")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(cwd, ".agents", "soho.conf")); !os.IsNotExist(err) {
 		t.Fatalf("NOWRITE created project config: %v", err)
 	}
 }
@@ -475,12 +486,12 @@ func TestLegacyConfigMigratesThroughConfigSet(t *testing.T) {
 			var oldPath, newPath string
 			args := []string{"config", "set", "layout", "tab"}
 			if where == "user" {
-				oldPath = filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-agents", "config")
-				newPath = filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+				oldPath = filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+				newPath = filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config")
 				args = append(args, "--user")
 			} else {
-				oldPath = filepath.Join(cwd, ".agents", "herdr-agents.conf")
-				newPath = filepath.Join(cwd, ".agents", "herdr-soho.conf")
+				oldPath = filepath.Join(cwd, ".agents", "herdr-soho.conf")
+				newPath = filepath.Join(cwd, ".agents", "soho.conf")
 			}
 			if err := os.MkdirAll(filepath.Dir(oldPath), 0o700); err != nil {
 				t.Fatal(err)
@@ -520,8 +531,8 @@ func TestLegacyConfigMigratesThroughConfigSet(t *testing.T) {
 		}
 		env, cwd := commandFixture(t)
 		target := filepath.Join(filepath.Dir(cwd), "legacy-target.conf")
-		oldPath := filepath.Join(cwd, ".agents", "herdr-agents.conf")
-		newPath := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		oldPath := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		newPath := filepath.Join(cwd, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(oldPath), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -546,8 +557,8 @@ func TestLegacyUnreadableConfigSetDoesNotCreateNewFile(t *testing.T) {
 		t.Skip("permission denial is not observable for this process")
 	}
 	env, cwd := commandFixture(t)
-	oldPath := filepath.Join(cwd, ".agents", "herdr-agents.conf")
-	newPath := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+	oldPath := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+	newPath := filepath.Join(cwd, ".agents", "soho.conf")
 	if err := os.MkdirAll(filepath.Dir(oldPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +587,7 @@ func TestConfigAndSessionIOFailuresUseCommandExitCode(t *testing.T) {
 	// Mutation captured: I/O failures must return code 4 with command-specific diagnostics and preserve the failing path.
 	t.Run("destination directory", func(t *testing.T) {
 		env, cwd := commandFixture(t)
-		dest := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		dest := filepath.Join(cwd, ".agents", "soho.conf")
 		if err := os.MkdirAll(dest, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -592,7 +603,7 @@ func TestConfigAndSessionIOFailuresUseCommandExitCode(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, entry := range entries {
-			if strings.HasPrefix(entry.Name(), ".herdr-soho.conf.") && strings.HasSuffix(entry.Name(), ".tmp") {
+			if strings.HasPrefix(entry.Name(), ".soho.conf.") && strings.HasSuffix(entry.Name(), ".tmp") {
 				t.Fatalf("failed config write left temporary file %q", entry.Name())
 			}
 		}
@@ -602,7 +613,7 @@ func TestConfigAndSessionIOFailuresUseCommandExitCode(t *testing.T) {
 			t.Skip("permission denial is not observable for this process")
 		}
 		env, cwd := commandFixture(t)
-		dest := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		dest := filepath.Join(cwd, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -628,7 +639,7 @@ func TestConfigAndSessionIOFailuresUseCommandExitCode(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(cwd, ".agents"), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		dest := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		dest := filepath.Join(cwd, ".agents", "soho.conf")
 		code, out, errOut := runIn(t, []string{"config", "set", "layout", "tab"}, env, cwd)
 		if code != 4 || out != "" || !strings.Contains(errOut, "config set: could not rewrite "+dest) {
 			t.Fatalf("agents file code=%d out=%q err=%q", code, out, errOut)
@@ -636,7 +647,7 @@ func TestConfigAndSessionIOFailuresUseCommandExitCode(t *testing.T) {
 	})
 	t.Run("user directory parent is a file", func(t *testing.T) {
 		env, cwd := commandFixture(t)
-		parent := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho")
+		parent := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho")
 		if err := os.WriteFile(parent, []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}

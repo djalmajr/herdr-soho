@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/communication"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/communication"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // policyFixture builds an isolated config stack (user under XDG_CONFIG_HOME,
@@ -58,7 +58,7 @@ func skillDir(t *testing.T) string {
 	if policyPackageDirErr != nil {
 		t.Fatal(policyPackageDirErr)
 	}
-	skill := filepath.Join(policyPackageDir, "..", "..", "skills", "herdr-soho")
+	skill := filepath.Join(policyPackageDir, "..", "..", "skills", "soho")
 	if _, err := os.Stat(filepath.Join(skill, "SKILL.md")); err != nil {
 		t.Fatalf("skill directory %q not found: %v", skill, err)
 	}
@@ -194,7 +194,7 @@ func TestWorkerMessagesLoadsCurrentWorkspaceSessionOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	env["PATH"] = bin + string(os.PathListSeparator) + env["PATH"]
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+	env["SOHO_FAKECLI_CONFIG"] = bin
 	writePolicy(t, filepath.Join(env["HERDR_SOHO_DIR"], "probe-ws", "session.conf"), "layout=stack\n")
 	ctx := core.LoadConfig(env, cwd)
 	if core.Cfg(&ctx, "layout", "", env) != "stack" {

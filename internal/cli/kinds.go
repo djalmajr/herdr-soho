@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/kinds"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/kinds"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func cmdModels(argv []string, env platform.Env) int {
 	if len(argv) == 0 || argv[0] == "" {
-		_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho: 1: kind")
+		_, _ = fmt.Fprintln(platform.Stderr, "soho: 1: kind")
 		return 1
 	}
 	ids := kinds.ModelIDs(argv[0], env)
@@ -38,11 +38,11 @@ func cmdModel(argv []string, env platform.Env) int {
 		effort = argv[2]
 	}
 	if kind == "" {
-		_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho: 1: kind")
+		_, _ = fmt.Fprintln(platform.Stderr, "soho: 1: kind")
 		return 1
 	}
 	if spec == "" {
-		_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho: 2: spec")
+		_, _ = fmt.Fprintln(platform.Stderr, "soho: 2: spec")
 		return 1
 	}
 	model, err := kinds.ResolveModel(kind, spec, effort, env, func(string) {})

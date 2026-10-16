@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // herdrLogger installs a fake herdr (the shared fakecli: the re-executed
@@ -43,7 +43,7 @@ func assertNoHerdrCalls(t *testing.T, log string) {
 // (the production code under test resolves git and nothing else).
 func herdrLoggerEnv(t *testing.T, bin string) platform.Env {
 	t.Helper()
-	return platform.Env{"PATH": bin + string(os.PathListSeparator) + gitOnlyDir(t), "HERDR_SOHO_FAKECLI_CONFIG": bin}
+	return platform.Env{"PATH": bin + string(os.PathListSeparator) + gitOnlyDir(t), "SOHO_FAKECLI_CONFIG": bin}
 }
 
 // skillFixture builds a skill dir (SKILL.md + roles) and an empty home in a
@@ -88,12 +88,12 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		_, skill, home := skillFixture(t)
 		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
 		code, msg := stateDirExit(t, ctx, env, skill)
-		wantDir := filepath.Join(skill, ".herdr-soho")
-		want := "the state dir '" + wantDir + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"
+		wantDir := filepath.Join(skill, ".soho")
+		want := "the state dir '" + wantDir + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"
 		if code != 2 || msg != want {
 			t.Fatalf("exit=%d msg=%q want %q", code, msg, want)
 		}
-		if _, err := os.Stat(filepath.Join(skill, ".herdr-soho")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(skill, ".soho")); !os.IsNotExist(err) {
 			t.Fatalf("state tree created inside the skill: %v", err)
 		}
 		entries, err := os.ReadDir(skill)
@@ -115,13 +115,13 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		if code != 2 {
 			t.Fatalf("exit=%d msg=%q", code, msg)
 		}
-		if want := "the state dir '" + filepath.Join(sub, ".herdr-soho") + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"; msg != want {
+		if want := "the state dir '" + filepath.Join(sub, ".soho") + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"; msg != want {
 			t.Fatalf("msg=%q want %q", msg, want)
 		}
-		if _, err := os.Stat(filepath.Join(skill, ".herdr-soho")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(skill, ".soho")); !os.IsNotExist(err) {
 			t.Fatalf("state created at the skill root: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(sub, ".herdr-soho")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(sub, ".soho")); !os.IsNotExist(err) {
 			t.Fatalf("state created inside the skill subdir: %v", err)
 		}
 	})
@@ -148,14 +148,14 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		if code != 2 {
 			t.Fatalf("exit=%d msg=%q", code, msg)
 		}
-		if want := "the state dir '" + filepath.Join(real, ".herdr-soho") + "' would be inside the herdr-soho skill ('" + link + "'); run herdr-soho from the project's directory (nothing was written)"; msg != want {
+		if want := "the state dir '" + filepath.Join(real, ".soho") + "' would be inside the soho skill ('" + link + "'); run soho from the project's directory (nothing was written)"; msg != want {
 			t.Fatalf("msg=%q want %q", msg, want)
 		}
 		// Neither the symlink path nor its target gained a state tree.
-		if _, err := os.Stat(filepath.Join(link, ".herdr-soho")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(link, ".soho")); !os.IsNotExist(err) {
 			t.Fatalf("state created through the symlink: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(real, ".herdr-soho")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(real, ".soho")); !os.IsNotExist(err) {
 			t.Fatalf("state created at the symlink target: %v", err)
 		}
 	})
@@ -178,7 +178,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 			env[key] = value
 		}
 		code, msg := stateDirExit(t, ctx, env, skill)
-		want := "the state dir '" + filepath.Join(skill, ".herdr-soho") + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"
+		want := "the state dir '" + filepath.Join(skill, ".soho") + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"
 		if code != 2 || msg != want {
 			t.Fatalf("exit=%d msg=%q want %q", code, msg, want)
 		}
@@ -198,12 +198,12 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 			env[key] = value
 		}
 		code, msg := stateDirExit(t, ctx, env, skill)
-		want := "the state dir '" + filepath.Join(skill, ".herdr-soho") + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"
+		want := "the state dir '" + filepath.Join(skill, ".soho") + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"
 		if code != 2 || msg != want {
 			t.Fatalf("exit=%d msg=%q want %q", code, msg, want)
 		}
 		assertNoHerdrCalls(t, log)
-		if _, err := os.Stat(filepath.Join(skill, ".herdr-soho")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(skill, ".soho")); !os.IsNotExist(err) {
 			t.Fatalf("state created inside the skill: %v", err)
 		}
 	})
@@ -226,7 +226,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 				t.Fatalf("%s missing: %v", child, err)
 			}
 		}
-		if _, err := os.Stat(filepath.Join(skill, ".herdr-soho")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(skill, ".soho")); !os.IsNotExist(err) {
 			t.Fatalf("state created inside the skill: %v", err)
 		}
 	})
@@ -243,7 +243,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, "wait")); err != nil {
 			t.Fatalf("state not created outside the skill: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(skill, ".herdr-soho")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(skill, ".soho")); !os.IsNotExist(err) {
 			t.Fatalf("state also created inside the skill: %v", err)
 		}
 	})
@@ -258,7 +258,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 			t.Fatalf("StateInSkill()=%q want empty (no skill, no Die)", got)
 		}
 		dir := StateDir(ctx, env, plain)
-		if dir != filepath.Join(plain, ".herdr-soho", "ws") {
+		if dir != filepath.Join(plain, ".soho", "ws") {
 			t.Fatalf("dir=%q", dir)
 		}
 		if _, err := os.Stat(filepath.Join(dir, "wait")); err != nil {
@@ -269,7 +269,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		_, skill, home := skillFixture(t)
 		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_NOWRITE": "1", "HOME": home, "USERPROFILE": home}
 		dir := StateDir(ctx, env, skill)
-		if dir != filepath.Join(skill, ".herdr-soho", "ws") {
+		if dir != filepath.Join(skill, ".soho", "ws") {
 			t.Fatalf("dir=%q", dir)
 		}
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
@@ -301,8 +301,8 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 		_, skill, home := gitSkill(t)
 		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		dir := StateRoot(ctx, env, skill)
-		if dir != filepath.Join(skill, ".herdr-soho") {
-			t.Fatalf("dir=%q want %q", dir, filepath.Join(skill, ".herdr-soho"))
+		if dir != filepath.Join(skill, ".soho") {
+			t.Fatalf("dir=%q want %q", dir, filepath.Join(skill, ".soho"))
 		}
 		if _, err := os.Stat(filepath.Join(skill, ".gitignore")); !os.IsNotExist(err) {
 			t.Fatalf("StateRoot created the skill .gitignore: %v", err)
@@ -327,8 +327,8 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 		}
 		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		dir := StateDirPath(ctx, env, skill)
-		if dir != filepath.Join(skill, ".herdr-soho", "ws") {
-			t.Fatalf("dir=%q want %q", dir, filepath.Join(skill, ".herdr-soho", "ws"))
+		if dir != filepath.Join(skill, ".soho", "ws") {
+			t.Fatalf("dir=%q want %q", dir, filepath.Join(skill, ".soho", "ws"))
 		}
 		got, err := os.ReadFile(filepath.Join(skill, ".gitignore"))
 		if err != nil || string(got) != "# pre-existing\n" {
@@ -349,11 +349,11 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 		}
 		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		dir := StateRoot(ctx, env, proj)
-		if dir != filepath.Join(proj, ".herdr-soho") {
-			t.Fatalf("dir=%q want %q", dir, filepath.Join(proj, ".herdr-soho"))
+		if dir != filepath.Join(proj, ".soho") {
+			t.Fatalf("dir=%q want %q", dir, filepath.Join(proj, ".soho"))
 		}
 		got, err := os.ReadFile(filepath.Join(proj, ".gitignore"))
-		if err != nil || string(got) != ".herdr-soho/\n" {
+		if err != nil || string(got) != ".soho/\n" {
 			t.Fatalf(".gitignore not appended as today: %q err=%v", got, err)
 		}
 	})

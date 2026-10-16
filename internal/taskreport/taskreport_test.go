@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/jsonjs"
 )
 
 func TestTaskReportPointer(t *testing.T) {

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestSpawnEntryCatchJavaScriptCases(t *testing.T) {
@@ -81,7 +81,7 @@ func commandSpawnEnv(t *testing.T, root, state, bin string) platform.Env {
 	env["HERDR_ENV"] = "1"
 	env["HERDR_WORKSPACE_ID"] = "ws"
 	env["HERDR_SOHO_DIR"] = state
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
-	env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+	env["SOHO_WAIT_POLL_MS"] = "1"
 	return env
 }

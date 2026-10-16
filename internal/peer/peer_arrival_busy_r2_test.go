@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // Round 2 of the send arrival proof: the three review findings of R-R12C
@@ -71,12 +71,12 @@ func TestSendArrivalBusyR2ComposerSequence(t *testing.T) {
 		{Argv: []string{"--machine", "windows", "agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: boxScreen},
 	}
 	f := newFixture(t, rules)
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 	code, out, stderr := f.run([]string{"send", d15Pane, "hello"})
 	if code != 15 || out != "" {
 		t.Fatalf("must refuse sent with the marker still in the composer: code=%d out=%q stderr=%q", code, out, stderr)
 	}
-	want := "herdr-soho: send: windows/w0test:p0a did not confirm taking the message (agent_prompt_stalled: stalled); delivery is uncertain: no proof within the 0.001s window; read its pane for #29a25864 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-29a25864.screen") + "\n"
+	want := "soho: send: windows/w0test:p0a did not confirm taking the message (agent_prompt_stalled: stalled); delivery is uncertain: no proof within the 0.001s window; read its pane for #29a25864 or a reply before sending again; screen saved to " + filepath.Join(f.dir, "state", "ws-test", "wait", "send-29a25864.screen") + "\n"
 	if stderr != want {
 		t.Fatalf("the refusal keeps today's stalled 15: %q", stderr)
 	}
@@ -132,7 +132,7 @@ func TestSendArrivalBusyR2VisibleQueueNoGrowth(t *testing.T) {
 	}
 	f := newFixture(t, rules)
 	f.env["CLAUDE_CONFIG_DIR"] = configRoot
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1000", "50"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1000", "50"
 	started := time.Now()
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "30000", "hello"})
 	if code != 0 || !strings.HasPrefix(out, "queued for local/w0test:p0a") {
@@ -191,7 +191,7 @@ func TestSendArrivalBusyR2QueueDuringWait(t *testing.T) {
 	}
 	f := newFixture(t, rules)
 	f.env["CLAUDE_CONFIG_DIR"] = configRoot
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 	started := time.Now()
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "3000", "hello"})
 	if code != 0 || !strings.HasPrefix(out, "queued for local/w0test:p0a") {
@@ -348,7 +348,7 @@ func TestSendArrivalBusyR2SubsecondWindow(t *testing.T) {
 	}
 	f := newFixture(t, rules)
 	f.env["CLAUDE_CONFIG_DIR"] = configRoot
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "500", "50"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "500", "50"
 	done := appendTranscriptLineOnVisibleRead(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, userLine, 2)
 	code, out, stderr := f.run([]string{"send", "w0test:p0a", "--now", "--timeout", "4000", "hello"})
 	if code != 0 || out != "sent to local/w0test:p0a\n" {

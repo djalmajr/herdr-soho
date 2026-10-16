@@ -21,7 +21,7 @@ jobs:
       RELEASE_SHA: ${{ github.sha }}
     steps:
       # Thin pwsh glue only: the release logic lives in the native Go tool
-      # (cmd/herdr-soho-release), not in Node/Bash workflow steps.
+      # (cmd/soho-release), not in Node/Bash workflow steps.
       - name: Check out the exact commit
         shell: pwsh
         run: |
@@ -38,7 +38,7 @@ jobs:
       - name: Build release artifacts
         shell: pwsh
         run: |
-          go run ./cmd/herdr-soho-release ci-build
+          go run ./cmd/soho-release ci-build
           if ($LASTEXITCODE -ne 0) { throw "ci-build failed" }
       - name: Publish tagged release
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -46,5 +46,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          go run ./cmd/herdr-soho-release ci-publish
+          go run ./cmd/soho-release ci-publish
           if ($LASTEXITCODE -ne 0) { throw "ci-publish failed" }

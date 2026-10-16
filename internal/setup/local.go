@@ -9,8 +9,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 const localInstructionFile = "CLAUDE.local.md"
@@ -261,7 +261,7 @@ func localRels(root string, ctx *core.Config, env platform.Env, cwd string) []st
 func refuseUnignorableStateDir(root string, ctx *core.Config, env platform.Env, cwd, cmdName string) {
 	c := classifyLocalState(root, ctx, env, cwd)
 	if c.kind == "root" {
-		platform.DieFriction(fmt.Sprintf("%s: refusing to use state path '%s' because it is the root of a git work tree; a work tree root cannot be named in the git exclude file (no files were changed; point HERDR_SOHO_DIR or state_dir at a directory inside — or outside — the work tree)", cmdName, c.shown), 4)
+		platform.DieFriction(fmt.Sprintf("%s: refusing to use state path '%s' because it is the root of a git work tree; a work tree root cannot be named in the git exclude file (no files were changed; point SOHO_DIR or state_dir at a directory inside — or outside — the work tree)", cmdName, c.shown), 4)
 	}
 	if c.kind == "symlink" {
 		reason := "it is a symlink to a directory inside the work tree and ignoring the symlink entry would not cover the path its target occupies"
@@ -270,7 +270,7 @@ func refuseUnignorableStateDir(root string, ctx *core.Config, env platform.Env, 
 		} else if c.link != "" {
 			reason = fmt.Sprintf("the path traverses the symlink '%s' below the work tree root and git cannot ignore a path through a symlink", c.link)
 		}
-		platform.DieFriction(fmt.Sprintf("%s: refusing to use state path '%s' because %s (no files were changed; point HERDR_SOHO_DIR or state_dir at a directory that does not pass through an in-repo symlink)", cmdName, c.shown, reason), 4)
+		platform.DieFriction(fmt.Sprintf("%s: refusing to use state path '%s' because %s (no files were changed; point SOHO_DIR or state_dir at a directory that does not pass through an in-repo symlink)", cmdName, c.shown, reason), 4)
 	}
 }
 
@@ -295,7 +295,7 @@ func assertSafeLocalRels(rels []string, cmdName string) {
 		for _, seg := range strings.Split(norm, "/") {
 			last, _ := utf8.DecodeLastRuneInString(seg)
 			if unicode.IsSpace(last) || last == '\ufeff' {
-				platform.DieFriction(fmt.Sprintf("%s: refusing to ignore state path '%s' via the git exclude file because a path segment ends in whitespace (git strips it from the exclude pattern, so the directory would stay untracked) (no files were changed; set HERDR_SOHO_DIR or state_dir to a plain directory name such as .herdr-soho)", cmdName, raw), 4)
+				platform.DieFriction(fmt.Sprintf("%s: refusing to ignore state path '%s' via the git exclude file because a path segment ends in whitespace (git strips it from the exclude pattern, so the directory would stay untracked) (no files were changed; set SOHO_DIR or state_dir to a plain directory name such as .soho)", cmdName, raw), 4)
 			}
 		}
 		unsafe := strings.ContainsAny(norm, "*?[\\]\n\r")
@@ -305,7 +305,7 @@ func assertSafeLocalRels(rels []string, cmdName string) {
 			}
 		}
 		if unsafe {
-			platform.DieFriction(fmt.Sprintf("%s: refusing to ignore state path '%s' via the git exclude file because it contains git-ignore metacharacters or escapes the repo root (no files were changed; set HERDR_SOHO_DIR or state_dir to a plain directory name such as .herdr-soho)", cmdName, raw), 4)
+			platform.DieFriction(fmt.Sprintf("%s: refusing to ignore state path '%s' via the git exclude file because it contains git-ignore metacharacters or escapes the repo root (no files were changed; set SOHO_DIR or state_dir to a plain directory name such as .soho)", cmdName, raw), 4)
 		}
 	}
 }
@@ -458,7 +458,7 @@ func preflightLocalExcludes(root string, rels []string, env platform.Env, cmdNam
 		probeDir = up
 	}
 	if active {
-		if f, err := os.CreateTemp(probeDir, ".herdr-soho-probe-"); err != nil {
+		if f, err := os.CreateTemp(probeDir, ".soho-probe-"); err != nil {
 			platform.DieFriction(fmt.Sprintf("%s: cannot write the git exclude file at %s (no files were changed)", cmdName, excl), 4)
 		} else {
 			name := f.Name()

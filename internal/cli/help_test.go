@@ -8,7 +8,7 @@ import (
 func TestCommandHelpFirstPositionOnly(t *testing.T) {
 	env, cwd := commandFixture(t)
 
-	const spawnHelp = "  herdr-soho spawn <role> [--name N] [--kind K] [--direction right|down]\n" +
+	const spawnHelp = "  soho spawn <role> [--name N] [--kind K] [--direction right|down]\n" +
 		"                      [--ratio F] [--cwd DIR] [--pane ID] [--timeout MS]\n" +
 		"                      [--effort low|medium|high|xhigh|max] [--model M]\n" +
 		"                      [--approvals ask|edits|full] [--reuse|--fresh]\n" +
@@ -23,7 +23,7 @@ func TestCommandHelpFirstPositionOnly(t *testing.T) {
 	}
 
 	t.Run("feedback --help", func(t *testing.T) {
-		const want = "  herdr-soho feedback send <report.md> \"<one-line summary>\"\n" +
+		const want = "  soho feedback send <report.md> \"<one-line summary>\"\n" +
 			"                                             # feedback=local: file the report in feedback_dir; one line to feedback_to when set\n"
 		code, out, errOut := runIn(t, []string{"feedback", "--help"}, env, cwd)
 		if code != 0 || out != want || errOut != "" {
@@ -32,7 +32,7 @@ func TestCommandHelpFirstPositionOnly(t *testing.T) {
 	})
 
 	t.Run("a command cited together with another prints the line it appears on", func(t *testing.T) {
-		const want = "  herdr-soho roles | kinds\n"
+		const want = "  soho roles | kinds\n"
 		for _, command := range []string{"roles", "kinds"} {
 			code, out, errOut := runIn(t, []string{command, "--help"}, env, cwd)
 			if code != 0 || out != want || errOut != "" {
@@ -42,7 +42,7 @@ func TestCommandHelpFirstPositionOnly(t *testing.T) {
 	})
 
 	t.Run("send --help prints the send lines", func(t *testing.T) {
-		const want = "  herdr-soho send <ref|name> <message…> | --file <path> [--now] [--timeout MS]\n" +
+		const want = "  soho send <ref|name> <message…> | --file <path> [--now] [--timeout MS]\n" +
 			"                      [--assignment ID --type review.question]\n" +
 			"                                             # peer message to an agent of any kind (a reference, or a name on the local server); waits for a busy target to settle by default; the target project's inbound=off refuses (exit 18)\n"
 		code, out, errOut := runIn(t, []string{"send", "--help"}, env, cwd)
@@ -52,15 +52,15 @@ func TestCommandHelpFirstPositionOnly(t *testing.T) {
 	})
 
 	t.Run("a command without continuation lines prints only its own line", func(t *testing.T) {
-		const want = "  herdr-soho mutation-guard <copy-dir> [--source <dir>] [--env NAME]...\n"
+		const want = "  soho mutation-guard <copy-dir> [--source <dir>] [--env NAME]...\n"
 		code, out, errOut := runIn(t, []string{"mutation-guard", "--help"}, env, cwd)
 		if code != 0 || out != want || errOut != "" {
 			t.Fatalf("code=%d out=%q err=%q; want the mutation-guard usage line on stdout", code, out, errOut)
 		}
 	})
 
-	t.Run("friction --help stops at the next herdr-soho line", func(t *testing.T) {
-		const want = "  herdr-soho friction [--since D] [--level L] [--command C] [--agent A] [--summary]  # errors/warnings of this workspace; options AND together\n"
+	t.Run("friction --help stops at the next soho line", func(t *testing.T) {
+		const want = "  soho friction [--since D] [--level L] [--command C] [--agent A] [--summary]  # errors/warnings of this workspace; options AND together\n"
 		code, out, errOut := runIn(t, []string{"friction", "--help"}, env, cwd)
 		if code != 0 || out != want || errOut != "" {
 			t.Fatalf("code=%d out=%q err=%q; want the first friction usage line on stdout", code, out, errOut)

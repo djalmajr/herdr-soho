@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/provider"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/provider"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 const harnessModulePost = "Error: Cannot find module\n" +
@@ -40,7 +40,7 @@ func TestDispatchDoneHarnessModuleEndsProviderError(t *testing.T) { // JS: "disp
 		authScreen: true,
 	}
 	f := newR11Fixture(t, tc)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+	f.env["SOHO_WAIT_POLL_MS"] = "1"
 	code, stdout, stderr := f.run(t, "worker", f.brief, "--timeout", tc.timeout)
 	var got map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &got); err != nil {

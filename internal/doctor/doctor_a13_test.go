@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func a13SkillDir(t *testing.T) string {
@@ -19,7 +19,7 @@ func a13SkillDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	skillDir, err := filepath.Abs(filepath.Join(pkg, "..", "..", "skills", "herdr-soho"))
+	skillDir, err := filepath.Abs(filepath.Join(pkg, "..", "..", "skills", "soho"))
 	if err != nil {
 		t.Fatal(err)
 	}

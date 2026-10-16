@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // tableRun executes CmdTable with the captured stdout/stderr, recovering the
@@ -32,7 +32,7 @@ func tableRun(t *testing.T, args []string) (code int, out, err string) {
 		}
 		code = ee.Code
 		if ee.Msg != "" {
-			_, _ = errBuf.WriteString("herdr-soho: " + ee.Msg + "\n")
+			_, _ = errBuf.WriteString("soho: " + ee.Msg + "\n")
 		}
 		out, err = outBuf.String(), errBuf.String()
 	}()
@@ -445,10 +445,10 @@ func TestTable_ZeroLines(t *testing.T) {
 }
 
 // TestTable_WriteRealProfiles runs --write on a temporary copy of the real
-// skills/herdr-soho/references/agent-profiles.md: the placeholder is
+// skills/soho/references/agent-profiles.md: the placeholder is
 // replaced by the table and nothing outside the markers changes.
 func TestTable_WriteRealProfiles(t *testing.T) {
-	originalPath := filepath.Join("..", "..", "skills", "herdr-soho", "references", "agent-profiles.md")
+	originalPath := filepath.Join("..", "..", "skills", "soho", "references", "agent-profiles.md")
 	original, err := os.ReadFile(originalPath)
 	if err != nil {
 		t.Fatalf("reading %s: %v", originalPath, err)

@@ -69,9 +69,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // ---------- frozen golden shapes ----------
@@ -215,7 +215,7 @@ func newRetirementFixture(t *testing.T, rules []fakecli.Rule, seed func(*retirem
 	// wait polls fast.
 	env["HERDR_SOHO_REGRID"] = "off"
 	env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
-	env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+	env["SOHO_WAIT_POLL_MS"] = "1"
 	f.env = withFakeCLI(env, bin)
 	return f
 }
@@ -311,7 +311,7 @@ func stampOrder(rel string) (string, int) {
 }
 
 // collectState mirrors parity-dispatch.test.mjs collectState: every file
-// under <state>/ws and under $TMPDIR/herdr-soho, keys and contents
+// under <state>/ws and under $TMPDIR/soho, keys and contents
 // normalized, .since files as EPOCH, approvals/friction timestamps to TS.
 // Two files that normalize to the same key resolve to the newest by
 // stampOrder.
@@ -365,7 +365,7 @@ func (f *retirementFixture) collectState(t *testing.T) map[string]string {
 		}
 	}
 	walk(f.ws, "state/ws")
-	walk(filepath.Join(f.tmp, "herdr-soho"), "tmp/herdr-soho")
+	walk(filepath.Join(f.tmp, "soho"), "tmp/soho")
 	return out
 }
 
@@ -375,7 +375,7 @@ func TestRetirementEntryGolden(t *testing.T) {
 	// JS: parity-entry.test.mjs (help-variants, unknown-command).
 	// The stored legacy help prose is superseded: the native usage text is
 	// the current contract, pinned by TestHelpAndUnknown
-	// (cli_test.go "help variants print the usage", "herdr-soho —
+	// (cli_test.go "help variants print the usage", "soho —
 	// role-agent layer"). The scenario is consumed against that Go
 	// contract: the same argument matrix, rc 0, the current usage on
 	// stdout, nothing on stderr.
@@ -781,7 +781,7 @@ Touch nothing.
 
 # Owned files
 
-skills/herdr-soho/scripts/herdr-soho
+skills/soho/scripts/soho
 
 # Forbidden
 
@@ -797,7 +797,7 @@ Confirm which role the composed prompt uses.
 
 # Owned files
 
-skills/herdr-soho/scripts/herdr-soho
+skills/soho/scripts/soho
 
 # Forbidden
 
@@ -843,15 +843,20 @@ func runRetirementDispatchScenario(t *testing.T, goldens map[string]json.RawMess
 		}
 		code, out, errOut := f.run(t, step)
 		out = f.norm(out)
+		// The frozen goldens predate the name renames; the oracle rewrites
+		// only the anchored name/message forms, everything else is
+		// byte-identical.
+		wantOut, wantErr := testutil.RewriteSohoName(step.Out), testutil.RewriteSohoName(step.Err)
 		errOut = f.norm(normalizeParityError(errOut))
-		if code != step.RC || out != step.Out || errOut != step.Err {
+		if code != step.RC || out != wantOut || errOut != wantErr {
 			t.Fatalf("step %d args=%v: code=%d want %d; first stdout diff: %s; stderr=%q want %q",
-				i, step.Args, code, step.RC, firstGoldenLineDifference(out, step.Out), errOut, step.Err)
+				i, step.Args, code, step.RC, firstGoldenLineDifference(out, wantOut), errOut, wantErr)
 		}
 		stepOuts = append(stepOuts, out)
 		// The fake herdr call log after the step is the legacy herdr.log:
 		// one joined-argv line per call (an empty log is an empty slice).
 		if wantRaw, ok := stored.StepFiles[i]["herdr.log"]; ok {
+			wantRaw = testutil.RewriteSohoName(wantRaw)
 			want := []string{}
 			if trimmed := strings.TrimSuffix(wantRaw, "\n"); trimmed != "" {
 				want = strings.Split(trimmed, "\n")
@@ -921,7 +926,7 @@ func compareComposed(t *testing.T, key, got string, sc retireDispatchCase, stepO
 		"# Role: " + sc.role + "\n",
 		"You are running as the `" + sc.role + "` role, agent name `" + sc.agent + "`, inside a multi-agent run",
 		sc.brief,
-		"- Run every `herdr-soho` command this prompt names through the launcher at `<BIN>`, not through PATH.",
+		"- Run every `soho` command this prompt names through the launcher at `<BIN>`, not through PATH.",
 		"# Report contract",
 	}
 	if sc.role == "researcher" {
@@ -935,7 +940,7 @@ func compareComposed(t *testing.T, key, got string, sc retireDispatchCase, stepO
 			t.Fatalf("composed %s misses %q", key, line)
 		}
 	}
-	if strings.Contains(got, "<SKILL>/scripts/herdr-soho") {
+	if strings.Contains(got, "<SKILL>/scripts/soho") {
 		t.Fatalf("composed %s still names the retired script launcher", key)
 	}
 	if sc.role == "researcher" && strings.Contains(got, "the `scouter` role") {
@@ -1024,7 +1029,7 @@ func TestRetirementDispatchGolden(t *testing.T) {
 		// test-status.sh:199 — a denied worker: the dispatch reports
 		// `unavailable` (rc 4), never `gone`; the worker cwd outside the repo
 		// routes the report and the composed prompt through
-		// $TMPDIR/herdr-soho/<ws>/reports/.
+		// $TMPDIR/soho/<ws>/reports/.
 		"dispatch-denied": {
 			rules: []fakecli.Rule{
 				{Argv: []string{"agent", "get", "worker"}, Code: 1, Stderr: retireDeniedOS + "\n"},
@@ -1231,13 +1236,18 @@ func runRetirementRunWait(t *testing.T, goldens map[string]json.RawMessage) {
 	step := mergeStepEnv(stored.Steps[0], sc.stepEnv)
 	code, out, errOut := f.run(t, step)
 	out = f.norm(out)
+	// The frozen goldens predate the name renames; the oracle rewrites
+	// only the anchored name/message forms, everything else is
+	// byte-identical.
+	wantOut, wantErr := testutil.RewriteSohoName(step.Out), testutil.RewriteSohoName(step.Err)
 	errOut = f.norm(normalizeParityError(errOut))
-	if code != step.RC || out != step.Out || errOut != step.Err {
+	if code != step.RC || out != wantOut || errOut != wantErr {
 		t.Fatalf("step 0 args=%v: code=%d want %d; first stdout diff: %s; stderr=%q want %q",
-			step.Args, code, step.RC, firstGoldenLineDifference(out, step.Out), errOut, step.Err)
+			step.Args, code, step.RC, firstGoldenLineDifference(out, wantOut), errOut, wantErr)
 	}
 	stepOuts := []string{out}
 	if wantRaw, ok := stored.StepFiles[0]["herdr.log"]; ok {
+		wantRaw = testutil.RewriteSohoName(wantRaw)
 		want := strings.Split(strings.TrimSuffix(wantRaw, "\n"), "\n")
 		if got := f.herdrLogLines(t); !reflect.DeepEqual(got, want) {
 			t.Fatalf("herdr call log:\ngot  %v\nwant %v", got, want)
@@ -1253,7 +1263,13 @@ func runRetirementRunWait(t *testing.T, goldens map[string]json.RawMessage) {
 func checkDispatchFinalFiles(t *testing.T, f *retirementFixture, stored retireDispatchScenario, sc retireDispatchCase, stepOuts []string) {
 	t.Helper()
 	final := f.collectState(t)
+	// The frozen file set predates the name renames; the oracle rewrites
+	// only the anchored name/message forms, keys and contents alike.
+	wantFiles := make(map[string]string, len(stored.Files))
 	for key, want := range stored.Files {
+		wantFiles[testutil.RewriteSohoName(key)] = testutil.RewriteSohoName(want)
+	}
+	for key, want := range wantFiles {
 		if key == "herdr.log" {
 			continue
 		}
@@ -1274,7 +1290,7 @@ func checkDispatchFinalFiles(t *testing.T, f *retirementFixture, stored retireDi
 		}
 	}
 	for key := range final {
-		if _, ok := stored.Files[key]; !ok {
+		if _, ok := wantFiles[key]; !ok {
 			t.Fatalf("unexpected state file %s: %q (the legacy run left no such file)", key, final[key])
 		}
 	}
@@ -1363,7 +1379,7 @@ func TestRetirementDispatchFamilyOrderUTF16(t *testing.T) {
 			t.Fatalf("a refused --for leaves no composed brief: %s", e.Name())
 		}
 	}
-	if _, err := os.Stat(filepath.Join(f.tmp, "herdr-soho")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(f.tmp, "soho")); !os.IsNotExist(err) {
 		t.Fatalf("no $TMPDIR tree for a refused dispatch: %v", err)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 var KnownKinds = []string{"claude", "codex", "grok", "agy", "gemini", "cursor", "pi", "opencode"}
@@ -108,7 +108,7 @@ func ClampTo(effort, ceiling string) string {
 
 type WarnFunc func(string)
 
-func DefaultWarn(msg string) { _, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: %s\n", msg) }
+func DefaultWarn(msg string) { _, _ = fmt.Fprintf(platform.Stderr, "soho: warning: %s\n", msg) }
 
 func KindEffortArgs(kind, effort, model string, env platform.Env, warn WarnFunc) []string {
 	if effort == "" {

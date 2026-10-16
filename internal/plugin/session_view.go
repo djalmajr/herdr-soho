@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/sessionref"
+	"github.com/djalmajr/soho/internal/sessionref"
 )
 
 // SessionViewState holds the presentation and input focus of a native

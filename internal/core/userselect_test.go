@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // TestLoadConfigForSelection: a selection replaces only the user layer —
@@ -19,15 +19,15 @@ func TestLoadConfigForSelection(t *testing.T) {
 	cwd := filepath.Join(root, "project")
 	server := filepath.Join(root, "server-xdg")
 	starter := filepath.Join(root, "starter base")
-	for _, dir := range []string{cwd, filepath.Join(server, "herdr-soho"), filepath.Join(starter, "herdr-agents")} {
+	for _, dir := range []string{cwd, filepath.Join(server, "soho"), filepath.Join(starter, "herdr-soho")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(server, "herdr-soho", "config"), []byte("max_workers=2\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(server, "soho", "config"), []byte("max_workers=2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	legacy := filepath.Join(starter, "herdr-agents", "config")
+	legacy := filepath.Join(starter, "herdr-soho", "config")
 	if err := os.WriteFile(legacy, []byte("max_workers=7\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestLoadConfigForSelection(t *testing.T) {
 	if got := base.Entries["max_workers"].Value; got != "2" {
 		t.Fatalf("zero selection max_workers=%q", got)
 	}
-	if text := show(base); !strings.Contains(text, "user file:    "+filepath.Join(server, "herdr-soho", "config")+"\n") {
+	if text := show(base); !strings.Contains(text, "user file:    "+filepath.Join(server, "soho", "config")+"\n") {
 		t.Fatalf("zero selection config output:\n%s", text)
 	}
 
@@ -61,7 +61,7 @@ func TestLoadConfigForSelection(t *testing.T) {
 		t.Fatal("the selection changed the environment")
 	}
 
-	current := filepath.Join(starter, "herdr-soho", "config")
+	current := filepath.Join(starter, "soho", "config")
 	if err := os.MkdirAll(filepath.Dir(current), 0o700); err != nil {
 		t.Fatal(err)
 	}

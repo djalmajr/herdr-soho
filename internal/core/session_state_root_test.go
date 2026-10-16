@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // TestSessionStateRootPath pins the state root a command looks its session
@@ -103,7 +103,7 @@ func TestSessionStateRootPath(t *testing.T) {
 		// defaults source, so neither root may move to it. A pre-session
 		// reader that honors the defaults source, or that drops a layer,
 		// fails here.
-		want := filepath.Join(proj, ".herdr-soho")
+		want := filepath.Join(proj, ".soho")
 		if got := SessionStateRootPath(env, proj); got != want {
 			t.Fatalf("pre-session root = %q, want %q", got, want)
 		}
@@ -126,7 +126,7 @@ func TestSessionStateRootPath(t *testing.T) {
 		}
 	})
 
-	t.Run("project .agents/herdr-soho.conf state_dir is honored by both roots", func(t *testing.T) {
+	t.Run("project .agents/soho.conf state_dir is honored by both roots", func(t *testing.T) {
 		env, proj, _ := layers(t)
 		writeProject(t, proj, "state_dir=proj-state\n")
 		// A relative state_dir joins the project root; a pre-session
@@ -147,13 +147,13 @@ func TestSessionStateRootPath(t *testing.T) {
 		// the session layer, it would bootstrap the very file it looks up:
 		// the root would move to the session's state_dir. The full load
 		// still moves: the session wins over the base layers there.
-		writeSession(t, filepath.Join(proj, ".herdr-soho"), "w1",
+		writeSession(t, filepath.Join(proj, ".soho"), "w1",
 			"state_dir="+filepath.Join(root, "session-state")+"\n"+
 				"lane.build.roles=from-session\n")
 		if got := fullRoot(t, env, proj); got != filepath.Join(root, "session-state") {
 			t.Fatalf("full-load root = %q, want the session's state_dir %q", got, filepath.Join(root, "session-state"))
 		}
-		if got := SessionStateRootPath(env, proj); got != filepath.Join(proj, ".herdr-soho") {
+		if got := SessionStateRootPath(env, proj); got != filepath.Join(proj, ".soho") {
 			t.Fatalf("pre-session root = %q, want the default root (a reader that loads the session layer would return the session's state_dir)", got)
 		}
 		// The full load read the session from the pre-session root: its

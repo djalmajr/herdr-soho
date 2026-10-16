@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/reportscan"
+	"github.com/djalmajr/soho/internal/reportscan"
 )
 
 // reportFieldOrder is the top-level key order of the contract report

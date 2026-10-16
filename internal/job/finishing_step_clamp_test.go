@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // finishing_step_clamp_test.go pins that the finishing clamp is applied to

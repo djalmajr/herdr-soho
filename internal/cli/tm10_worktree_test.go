@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestTM10WorktreeCommandsReadMainState(t *testing.T) {
@@ -172,7 +172,7 @@ func TestTM10RosterGitProcessBound(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chdir(old) })
 		env["PATH"] = fakeDir
-		env["HERDR_SOHO_FAKECLI_CONFIG"] = fakeDir
+		env["SOHO_FAKECLI_CONFIG"] = fakeDir
 		env["HERDR_SOCKET_PATH"] = filepath.Join(t.TempDir(), "missing.sock")
 		env["HERDR_ENV"], env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = "1", filepath.Join(t.TempDir(), "state"), "ws"
 		oldOut, oldErr := platform.Stdout, platform.Stderr

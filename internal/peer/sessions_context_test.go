@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func TestDiscoverContextCancellationPreservesPublishedLocalAndStopsEnumeration(t *testing.T) {

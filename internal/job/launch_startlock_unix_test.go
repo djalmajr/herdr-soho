@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // launch_startlock_unix_test.go pins the unix-specific start.lock probe:

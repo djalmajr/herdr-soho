@@ -7,8 +7,8 @@
 package metrics
 
 import (
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // CommandContext carries what every metrics subcommand needs.
@@ -19,7 +19,7 @@ type CommandContext struct {
 	FrictionLog string
 }
 
-const usageLine = "metrics: usage: herdr-soho metrics mark <report> [--finding <n>=real|false]... [--missed P0|P1|P2|P3]... [--amendment implementer|brief] | metrics export [--since <date>] [--project-label <label>] | metrics table [--write <file>] <export.jsonl>..."
+const usageLine = "metrics: usage: soho metrics mark <report> [--finding <n>=real|false]... [--missed P0|P1|P2|P3]... [--amendment implementer|brief] | metrics export [--since <date>] [--project-label <label>] | metrics table [--write <file>] <export.jsonl>..."
 
 // CmdMetrics routes `metrics mark` and `metrics export`.
 func CmdMetrics(args []string, c CommandContext) int {

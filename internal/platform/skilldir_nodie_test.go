@@ -17,9 +17,13 @@ func TestSkillDirSourceOrEmptyDoesNotDie(t *testing.T) {
 	})
 	t.Run("the configured value wins without a Die", func(t *testing.T) {
 		configured := filepath.Join(t.TempDir(), "skill")
-		dir, origin := SkillDirSourceOrEmpty(Env{"HERDR_SOHO_SKILL_DIR": configured})
-		if dir != configured || origin != "HERDR_SOHO_SKILL_DIR" {
-			t.Fatalf("SkillDirSourceOrEmpty() = %q %q; want %q HERDR_SOHO_SKILL_DIR", dir, origin, configured)
+		dir, origin := SkillDirSourceOrEmpty(Env{"SOHO_SKILL_DIR": configured})
+		if dir != configured || origin != "SOHO_SKILL_DIR" {
+			t.Fatalf("SkillDirSourceOrEmpty() = %q %q; want %q SOHO_SKILL_DIR", dir, origin, configured)
+		}
+		legacy, legacyOrigin := SkillDirSourceOrEmpty(Env{"HERDR_SOHO_SKILL_DIR": configured})
+		if legacy != configured || legacyOrigin != "HERDR_SOHO_SKILL_DIR" {
+			t.Fatalf("legacy configured value = %q %q; want %q HERDR_SOHO_SKILL_DIR", legacy, legacyOrigin, configured)
 		}
 	})
 	t.Run("the home skill is found without a Die", func(t *testing.T) {
@@ -89,7 +93,7 @@ func TestSkillDirSourceOrEmptyDoesNotDie(t *testing.T) {
 		}
 	})
 	t.Run("native and legacy NOWRITE only reuse an already published bundle", func(t *testing.T) {
-		for _, key := range []string{"HERDR_SOHO_NOWRITE", "HERDR_AGENTS_NOWRITE"} {
+		for _, key := range []string{"SOHO_NOWRITE", "HERDR_SOHO_NOWRITE"} {
 			t.Run(key, func(t *testing.T) {
 				home := t.TempDir()
 				env := homeSkillFixture(t, home)
@@ -125,7 +129,7 @@ func TestSkillDirSourceOrEmptyDoesNotDie(t *testing.T) {
 		}
 		got := capturePanic(func() { SkillDirSource(env) })
 		exit, ok := got.(*ExitError)
-		if !ok || exit.Code != 2 || exit.Msg != "cannot find skill directory; set HERDR_SOHO_SKILL_DIR" {
+		if !ok || exit.Code != 2 || exit.Msg != "cannot find skill directory; set SOHO_SKILL_DIR" {
 			t.Fatalf("SkillDirSource on a corrupt cache panicked %#v; want ExitError code 2 with the old message", got)
 		}
 		data, err := os.ReadFile(file)
@@ -139,7 +143,7 @@ func TestSkillDirSourceOrEmptyDoesNotDie(t *testing.T) {
 		t.Cleanup(func() { currentExecutable = previous })
 		got := capturePanic(func() { SkillDirSource(Env{}) })
 		exit, ok := got.(*ExitError)
-		if !ok || exit.Code != 2 || exit.Msg != "cannot find skill directory; set HERDR_SOHO_SKILL_DIR" {
+		if !ok || exit.Code != 2 || exit.Msg != "cannot find skill directory; set SOHO_SKILL_DIR" {
 			t.Fatalf("SkillDirSource without any usable env panicked %#v; want the old missing-skill error", got)
 		}
 	})
@@ -151,7 +155,7 @@ func TestSkillDirSourceOrEmptyDoesNotDie(t *testing.T) {
 		t.Cleanup(func() { currentExecutable = previous })
 		got := capturePanic(func() { SkillDirSource(Env{"HOME": "", "USERPROFILE": ""}) })
 		exit, ok := got.(*ExitError)
-		if !ok || exit.Code != 2 || exit.Msg != "cannot find skill directory; set HERDR_SOHO_SKILL_DIR" {
+		if !ok || exit.Code != 2 || exit.Msg != "cannot find skill directory; set SOHO_SKILL_DIR" {
 			t.Fatalf("SkillDirSource panic=%#v; want ExitError code 2 with the current message", got)
 		}
 	})

@@ -64,21 +64,21 @@ func TestSuperviseCollabEvidenceComponentSwapRefused(t *testing.T) {
 	// its directory entry" (the Lstat/SameFile check in openEvidenceRoot
 	// removed): the swapped component would be accepted.
 	base := t.TempDir()
-	suffix := filepath.Join("herdr-soho", "w1", "reports")
+	suffix := filepath.Join("soho", "w1", "reports")
 	path := writeEvidenceTarget(t, filepath.Join(base, suffix, "report.md"), "inside\n")
 	if err := os.Symlink(base, filepath.Join(t.TempDir(), "probe")); err != nil {
 		t.Skipf("cannot create symlinks on %s: %v", runtime.GOOS, err)
 	}
 	swapped := false
 	evidenceComponentOpenedHook = func(name string) {
-		if swapped || name != "herdr-soho" {
+		if swapped || name != "soho" {
 			return
 		}
 		swapped = true
-		if err := os.Rename(filepath.Join(base, "herdr-soho"), filepath.Join(base, "moved")); err != nil {
+		if err := os.Rename(filepath.Join(base, "soho"), filepath.Join(base, "moved")); err != nil {
 			t.Error(err)
 		}
-		if err := os.Symlink(filepath.Join(base, "moved"), filepath.Join(base, "herdr-soho")); err != nil {
+		if err := os.Symlink(filepath.Join(base, "moved"), filepath.Join(base, "soho")); err != nil {
 			t.Error(err)
 		}
 	}
@@ -106,13 +106,13 @@ func TestSuperviseCollabEvidenceSymlinkedComponentRefused(t *testing.T) {
 	}{
 		{"reports to outside", false, "reports"},
 		{"reports to inside the base", true, "reports"},
-		{"herdr-soho to outside", false, "herdr-soho"},
-		{"herdr-soho to inside the base", true, "herdr-soho"},
+		{"soho to outside", false, "soho"},
+		{"soho to inside the base", true, "soho"},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			base := t.TempDir()
-			suffix := filepath.Join("herdr-soho", "w1", "reports")
+			suffix := filepath.Join("soho", "w1", "reports")
 			if tc.depth == "reports" {
 				suffix = "reports"
 			}

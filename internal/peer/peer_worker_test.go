@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // rosterSender writes the fixture's roster so that the sender's pane carries
@@ -44,7 +44,7 @@ func TestSendWorkerLookupFailureOrIncompleteRegistrationNeverBypassesGuard(t *te
 			if code != 2 {
 				t.Fatalf("unverified worker was allowed: %d", code)
 			}
-			calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+			calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +84,7 @@ func TestSendRefusesTheWorkerSender(t *testing.T) {
 		if code != 2 {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
-		want := "herdr-soho: send: 'worker-b' is a worker of this team (role implementer): a worker reports through its report file, not by message (nothing was sent)\n"
+		want := "soho: send: 'worker-b' is a worker of this team (role implementer): a worker reports through its report file, not by message (nothing was sent)\n"
 		if stderr != want {
 			t.Fatalf("stderr=%q want %q", stderr, want)
 		}
@@ -102,8 +102,8 @@ func TestSendRefusesTheWorkerSender(t *testing.T) {
 		}
 	})
 	t.Run("a name known to herdr but absent from the roster is not a worker", func(t *testing.T) {
-		t.Setenv("HERDR_SOHO_SEND_WINDOW_MS", "1")
-		t.Setenv("HERDR_SOHO_SEND_POLL_MS", "1")
+		t.Setenv("SOHO_SEND_WINDOW_MS", "1")
+		t.Setenv("SOHO_SEND_POLL_MS", "1")
 		id := "01020304"
 		oldReader := rand.Reader
 		rand.Reader = bytes.NewReader([]byte{1, 2, 3, 4})
@@ -124,8 +124,8 @@ func TestSendKeepsTheNonWorkerRoles(t *testing.T) {
 	// refusal only targets rostered workers.
 	for _, tc := range []struct{ role string }{{"-"}, {"sub-orchestrator"}} {
 		t.Run("role "+tc.role, func(t *testing.T) {
-			t.Setenv("HERDR_SOHO_SEND_WINDOW_MS", "1")
-			t.Setenv("HERDR_SOHO_SEND_POLL_MS", "1")
+			t.Setenv("SOHO_SEND_WINDOW_MS", "1")
+			t.Setenv("SOHO_SEND_POLL_MS", "1")
 			id := "01020304"
 			oldReader := rand.Reader
 			rand.Reader = bytes.NewReader([]byte{1, 2, 3, 4})

@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // Resource pressure for `spawn`, `wait`, and `status`: one line on stderr
 // (never stdout, never the friction log) when the state dir's disk or the
 // swap passed the configured limits. Every measurement failure is
 // silent, the command's stdout and exit code never change, and under
-// HERDR_SOHO_NOWRITE nothing is written and no warning goes out.
+// SOHO_NOWRITE nothing is written and no warning goes out.
 
 const (
 	pressureDiskKey = "pressure_disk_free_percent"
@@ -58,7 +58,7 @@ func pressureCheck(ctx *Config, env platform.Env, cwd string, throttle bool) {
 	if throttle && recentlyWarned(stateDir, platform.Now()) {
 		return
 	}
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: resource pressure: %s; run 'herdr-soho gc' and close idle panes before opening more\n", strings.Join(parts, "; "))
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: resource pressure: %s; run 'soho gc' and close idle panes before opening more\n", strings.Join(parts, "; "))
 	if throttle {
 		stampPressure(stateDir)
 	}
@@ -114,7 +114,7 @@ func pressureThreshold(ctx *Config, key string, limit int, env platform.Env) int
 			return value
 		}
 	}
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: invalid value '%s' for %s; using the default %d\n", raw, key, limit)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: warning: invalid value '%s' for %s; using the default %d\n", raw, key, limit)
 	return limit
 }
 

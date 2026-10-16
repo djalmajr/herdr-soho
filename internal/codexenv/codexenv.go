@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 type Policy struct {
@@ -291,7 +291,7 @@ func DiagnoseOutsideHerdr(base string, env platform.Env, goos string, pid int, a
 		if !strings.HasPrefix(id, "local/") {
 			id = "local/" + id
 		}
-		return fmt.Sprintf("this command runs under Codex in Herdr pane %s (matched by process ancestry), but Codex's shell_environment_policy does not pass HERDR_*; allow them (see herdr-soho doctor) and restart Codex", id)
+		return fmt.Sprintf("this command runs under Codex in Herdr pane %s (matched by process ancestry), but Codex's shell_environment_policy does not pass HERDR_*; allow them (see soho doctor) and restart Codex", id)
 	}
 	return base + " (a Codex ancestor was found, but no single Herdr pane matched it)"
 }

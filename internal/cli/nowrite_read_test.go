@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
-// HERDR_SOHO_NOWRITE read contract (the plugin's reads): every accepted
+// SOHO_NOWRITE read contract (the plugin's reads): every accepted
 // invocation runs read-only — no file or directory in the project or the
 // state tree is created or changed (paths, sizes and mtimes), no friction
 // line is recorded, and a state dir that does not exist appears empty.
@@ -30,7 +30,7 @@ const nowriteRosterTail = "\n# other live agents in workspace ws (not spawned by
 
 const nowriteRosterRow = "worker               implementer        grok     p-worker -                gone      ready            /tmp/work -\n"
 
-const nowriteExplainIdle = "herdr-soho runs a small team of agents in Herdr panels. You stay in this panel and lead. Each other panel is one agent with one job: writing code (research included) or reviewing. Those agents never commit or push. You can watch a panel or close it. Each assistant spends the quota of its own account. Nothing is running yet. To start, describe the work here. The first time, you are asked how many panels to open and which assistant each job should use, and nothing opens until you agree. Four panels are recommended: two write code in parallel and one reviews; that uses more quota. Three panels are lighter: one writes and one reviews. With two panels one writes and the review happens here.\n"
+const nowriteExplainIdle = "soho runs a small team of agents in Herdr panels. You stay in this panel and lead. Each other panel is one agent with one job: writing code (research included) or reviewing. Those agents never commit or push. You can watch a panel or close it. Each assistant spends the quota of its own account. Nothing is running yet. To start, describe the work here. The first time, you are asked how many panels to open and which assistant each job should use, and nothing opens until you agree. Four panels are recommended: two write code in parallel and one reviews; that uses more quota. Three panels are lighter: one writes and one reviews. With two panels one writes and the review happens here.\n"
 
 const nowriteExplainRunning = "Panels: 4.\nbuild: implementer, grok, model grok-4.7, idle\nreview: not started\n\nRecommendation: 4 panels - two write code (research included) in parallel and one reviews. Uses more quota. 3 panels are lighter: one writes and one reviews. With 2 panels one writes and the review happens here.\n"
 
@@ -156,7 +156,7 @@ func nowriteTreeSnapshot(t *testing.T, root string) map[string]nowriteTreeEntry 
 	return snap
 }
 
-// runNowrite runs argv with HERDR_SOHO_NOWRITE=1 and proves the whole fixture
+// runNowrite runs argv with SOHO_NOWRITE=1 and proves the whole fixture
 // tree (paths, sizes, mtimes) is identical before and after.
 func (nr *nowriteReads) runNowrite(t *testing.T, argv ...string) (int, string, string) {
 	t.Helper()
@@ -165,7 +165,7 @@ func (nr *nowriteReads) runNowrite(t *testing.T, argv ...string) (int, string, s
 	for k, v := range nr.f.env {
 		env[k] = v
 	}
-	env["HERDR_SOHO_NOWRITE"] = "1"
+	env["SOHO_NOWRITE"] = "1"
 	code, out, errOut := nr.f.run(t, env, argv...)
 	after := nowriteTreeSnapshot(t, nr.f.root)
 	if !reflect.DeepEqual(before, after) {
@@ -180,7 +180,7 @@ func (nr *nowriteReads) runNowrite(t *testing.T, argv ...string) (int, string, s
 				changed = append(changed, path+" (removed)")
 			}
 		}
-		t.Fatalf("%v under HERDR_SOHO_NOWRITE=1 changed the tree: %v", argv, changed)
+		t.Fatalf("%v under SOHO_NOWRITE=1 changed the tree: %v", argv, changed)
 	}
 	return code, out, errOut
 }
@@ -235,7 +235,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 				cases[6].wantOut = fmt.Sprintf("<!-- report: %s -->\nreport body line\n", nr.report)
 				cases[7].wantOut = fmt.Sprintf("%s  ghost  1d  orphan\n%s  worker  5h  owned\n", nr.orphan, nr.owned)
 				cases[8].wantOut = nowriteGcNoneLine +
-					fmt.Sprintf("would remove %s  2.0 KB  ghost  1d\ntotal: 2.0 KB\nrun 'herdr-soho gc --yes' to remove them\n", nr.orphan) +
+					fmt.Sprintf("would remove %s  2.0 KB  ghost  1d\ntotal: 2.0 KB\nrun 'soho gc --yes' to remove them\n", nr.orphan) +
 					"unregistered mutation copies (another project or an older version may own them):\n" +
 					fmt.Sprintf("%s  100 B  3h\n", nr.mutation)
 				cases[9].wantOut = cases[8].wantOut
@@ -247,7 +247,7 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 				cases[5].wantOut = fmt.Sprintf("no friction matches under %s\n", frictionLog)
 				cases[6].code = 6
 				cases[6].wantOut = "recent output line\n"
-				cases[6].wantErr = "herdr-soho: warning: no report file yet for 'worker' (expected <none dispatched>); falling back to recent terminal output\n"
+				cases[6].wantErr = "soho: warning: no report file yet for 'worker' (expected <none dispatched>); falling back to recent terminal output\n"
 				cases[7].wantOut = "no registered copies\n"
 				cases[8].wantOut = nowriteGcNoneLine + "nothing to remove\n"
 				cases[9].wantOut = cases[8].wantOut
@@ -275,8 +275,8 @@ func TestNowriteReadCommandsWriteNothing(t *testing.T) {
 // command runs (nothing is written).
 func TestNowriteRejectsWritingInvocations(t *testing.T) {
 	nr := newNowriteReads(t, true)
-	const messagePrefix = "herdr-soho: herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "
-	const messageTail = " — unset HERDR_SOHO_NOWRITE to write\n"
+	const messagePrefix = "soho: soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "
+	const messageTail = " — unset SOHO_NOWRITE to write\n"
 	cases := []struct {
 		name     string
 		argv     []string
@@ -314,7 +314,7 @@ func TestNowriteRejectsWritingInvocations(t *testing.T) {
 }
 
 // TestNowriteAcceptsExactConfigAndRoles proves the exact config and the exact
-// roles run under HERDR_SOHO_NOWRITE=1 (exit 0, non-empty output) and write
+// roles run under SOHO_NOWRITE=1 (exit 0, non-empty output) and write
 // nothing: the whole fixture tree — project and user config tree included —
 // keeps the same paths, sizes and mtimes, starting from a project without a
 // state dir and without a .gitignore line; a project that has only the legacy
@@ -328,7 +328,7 @@ func TestNowriteAcceptsExactConfigAndRoles(t *testing.T) {
 		t.Run(flavor, func(t *testing.T) {
 			nr := newNowriteReads(t, false)
 			if legacy {
-				legacyConf := filepath.Join(nr.f.repo, ".agents", "herdr-agents.conf")
+				legacyConf := filepath.Join(nr.f.repo, ".agents", "herdr-soho.conf")
 				if err := os.MkdirAll(filepath.Dir(legacyConf), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -345,17 +345,17 @@ func TestNowriteAcceptsExactConfigAndRoles(t *testing.T) {
 					if out == "" {
 						t.Fatalf("empty stdout; err=%q", errOut)
 					}
-					if _, err := os.Stat(filepath.Join(nr.f.repo, ".herdr-soho")); !os.IsNotExist(err) {
-						t.Fatalf(".herdr-soho/ appeared in the project: %v", err)
+					if _, err := os.Stat(filepath.Join(nr.f.repo, ".soho")); !os.IsNotExist(err) {
+						t.Fatalf(".soho/ appeared in the project: %v", err)
 					}
 					if _, err := os.Stat(filepath.Join(nr.f.repo, ".gitignore")); !os.IsNotExist(err) {
 						t.Fatalf(".gitignore appeared in the project: %v", err)
 					}
-					if _, err := os.Stat(filepath.Join(nr.f.repo, ".agents", "herdr-soho.conf")); !os.IsNotExist(err) {
+					if _, err := os.Stat(filepath.Join(nr.f.repo, ".agents", "soho.conf")); !os.IsNotExist(err) {
 						t.Fatalf("the legacy config was migrated: %v", err)
 					}
 					if legacy {
-						legacyConf := filepath.Join(nr.f.repo, ".agents", "herdr-agents.conf")
+						legacyConf := filepath.Join(nr.f.repo, ".agents", "herdr-soho.conf")
 						data, err := os.ReadFile(legacyConf)
 						if err != nil || string(data) != "panes=4\n" {
 							t.Fatalf("legacy config changed: %q err=%v", data, err)
@@ -385,7 +385,7 @@ func TestGcShowsThePressureLine(t *testing.T) {
 	}{
 		{
 			name: "under pressure", diskFreeGB: 3, diskOK: true, swapUsedGB: 95, swapOK: true,
-			want: "resource pressure: disk " + sd + " has 3% free (3 GB of 100 GB); swap 95% used (95 GB of 100 GB); run 'herdr-soho gc' and close idle panes before opening more",
+			want: "resource pressure: disk " + sd + " has 3% free (3 GB of 100 GB); swap 95% used (95 GB of 100 GB); run 'soho gc' and close idle panes before opening more",
 		},
 		{
 			name: "none", diskFreeGB: 60, diskOK: true, swapUsedGB: 30, swapOK: true,
@@ -405,12 +405,12 @@ func TestGcShowsThePressureLine(t *testing.T) {
 		},
 		{
 			name: "pressure with swap not measured", diskFreeGB: 3, diskOK: true, swapUsedGB: 0, swapOK: false,
-			want: "resource pressure: disk " + sd + " has 3% free (3 GB of 100 GB); swap not measured; run 'herdr-soho gc' and close idle panes before opening more",
+			want: "resource pressure: disk " + sd + " has 3% free (3 GB of 100 GB); swap not measured; run 'soho gc' and close idle panes before opening more",
 		},
 		{
 			name: "the configured limit applies", diskFreeGB: 60, diskOK: true, swapUsedGB: 30, swapOK: true,
 			env:  platform.Env{"HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT": "70"},
-			want: "resource pressure: disk " + sd + " has 60% free (60 GB of 100 GB); run 'herdr-soho gc' and close idle panes before opening more",
+			want: "resource pressure: disk " + sd + " has 60% free (60 GB of 100 GB); run 'soho gc' and close idle panes before opening more",
 		},
 	}
 	for _, c := range cases {
@@ -428,7 +428,7 @@ func TestGcShowsThePressureLine(t *testing.T) {
 			for k, v := range nr.f.env {
 				env[k] = v
 			}
-			env["HERDR_SOHO_NOWRITE"] = "1"
+			env["SOHO_NOWRITE"] = "1"
 			for k, v := range c.env {
 				env[k] = v
 			}
@@ -439,7 +439,7 @@ func TestGcShowsThePressureLine(t *testing.T) {
 				t.Fatalf("code=%d want 0; err=%q out=%q", code, errOut, out)
 			}
 			if !reflect.DeepEqual(before, after) {
-				t.Fatalf("gc under HERDR_SOHO_NOWRITE=1 changed the tree")
+				t.Fatalf("gc under SOHO_NOWRITE=1 changed the tree")
 			}
 			i := strings.IndexByte(out, '\n')
 			if i < 0 {

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestMain(m *testing.M) { fakecli.RunTests(m) }
@@ -22,7 +22,7 @@ func fakeEnv(t *testing.T, rules map[string][]fakecli.Rule) (platform.Env, strin
 			t.Fatal(err)
 		}
 	}
-	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "HERDR_SOHO_FAKECLI_CONFIG": bin}
+	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "SOHO_FAKECLI_CONFIG": bin}
 	return env, bin
 }
 func TestKindRules(t *testing.T) {
@@ -318,7 +318,7 @@ func TestTM11KindAndModelCases(t *testing.T) {
 		}
 	})
 	t.Run(`JS: "shipped defaults (config.defaults and role frontmatter)"`, func(t *testing.T) {
-		defaults, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "config.defaults"))
+		defaults, err := os.ReadFile(filepath.Join("..", "..", "skills", "soho", "config.defaults"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -331,7 +331,7 @@ func TestTM11KindAndModelCases(t *testing.T) {
 			t.Fatal("generic kinds must not ship model defaults")
 		}
 		for role, fields := range map[string][]string{"implementer": {"kind: grok"}, "reviewer": {"kind: codex", "alternatives: [claude]"}, "security-reviewer": {"kind: claude"}, "tasker": {"kind: grok"}} {
-			data, readErr := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "roles", role+".md"))
+			data, readErr := os.ReadFile(filepath.Join("..", "..", "skills", "soho", "roles", role+".md"))
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
@@ -370,7 +370,7 @@ func TestTM11KindAndModelCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		short, _ := fakeEnv(t, map[string][]fakecli.Rule{"grok": {{Argv: []string{"models"}, Stdout: "grok-4.6 - old\n"}}})
-		short["HERDR_SOHO_MODELS_TIMEOUT"] = "5"
+		short["SOHO_MODELS_TIMEOUT"] = "5"
 		if got := ModelIDs("grok", short); !reflect.DeepEqual(got, []string{"grok-4.6"}) {
 			t.Fatalf("short listing=%v", got)
 		}
@@ -378,9 +378,9 @@ func TestTM11KindAndModelCases(t *testing.T) {
 			t.Fatalf("short mode wrote cache: %v", err)
 		}
 	})
-	t.Run(`JS: "model listing: a CLI slower than HERDR_SOHO_MODELS_TIMEOUT yields no list and no cache"`, func(t *testing.T) {
+	t.Run(`JS: "model listing: a CLI slower than SOHO_MODELS_TIMEOUT yields no list and no cache"`, func(t *testing.T) {
 		env, _ := fakeEnv(t, map[string][]fakecli.Rule{"grok": {{Argv: []string{"models"}, Stdout: "grok-4.7 - slow\n", Delay: 1200}}})
-		env["HERDR_SOHO_MODELS_TIMEOUT"] = "0.02"
+		env["SOHO_MODELS_TIMEOUT"] = "0.02"
 		if got := ModelIDs("grok", env); len(got) != 0 {
 			t.Fatalf("timed-out listing=%v", got)
 		}

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func TestWaitShortTimeoutWarnsOnceAndProceeds(t *testing.T) { // --timeout 45 means 45 ms: one warning with the seconds fix, then the wait loop still runs

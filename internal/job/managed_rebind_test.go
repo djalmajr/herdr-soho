@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // managed_rebind_test.go: BindLaunch taking over a confirmed launch
@@ -92,7 +92,7 @@ func confirmedFixture(t *testing.T, pid int, started string, edit func(*launchRe
 	editState(t, f.dir, func(s *State) { s.Status = StatusRunning })
 	rec := recordState(t, f.dir)
 	rec.State = launchConfirmed
-	rec.PID, rec.Started, rec.Exe = pid, started, "/prior/herdr-soho"
+	rec.PID, rec.Started, rec.Exe = pid, started, "/prior/soho"
 	rec.ConfigBase = f.base
 	if edit != nil {
 		edit(&rec)

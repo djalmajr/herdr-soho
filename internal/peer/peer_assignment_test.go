@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func workerAgent(name, pane, kind, cwd, session string) string {
@@ -25,7 +25,7 @@ func assignedFixture(t *testing.T, additional []fakecli.Rule) (*fixture, collabo
 	if err != nil {
 		t.Fatal(err)
 	}
-	skill, _ := filepath.Abs(filepath.Join("..", "..", "skills", "herdr-soho"))
+	skill, _ := filepath.Abs(filepath.Join("..", "..", "skills", "soho"))
 	rules := append([]fakecli.Rule{}, additional...)
 	rules = append(rules,
 		fakecli.Rule{Argv: []string{"agent", "get", "author"}, Stdout: workerAgent("author", "ws:p1", "codex", dir, "a1")},
@@ -70,7 +70,7 @@ func assignedFixture(t *testing.T, additional []fakecli.Rule) (*fixture, collabo
 
 func assignmentPrompts(t *testing.T, f *fixture) []fakecli.Call {
 	t.Helper()
-	calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.env.Get("HERDR_SOHO_FAKECLI_CONFIG"), "herdr.json"))
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(f.env.Get("SOHO_FAKECLI_CONFIG"), "herdr.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestAssignedSendSubmitsOnceToWorkingRecipient(t *testing.T) {
 	headerID := strings.Fields(strings.SplitN(message, "\n", 2)[0])[1]
 	// The closing line closes the peer marker with a slash (PeerEndPrefix);
 	// the assignment message keeps its header, metadata and quoted body.
-	wantTail := "> First line with \"quotes\" and \\path\n> Segunda linha Ω\n>\n> Last line\n[/herdr-soho:peer] " + headerID + " end of message"
+	wantTail := "> First line with \"quotes\" and \\path\n> Segunda linha Ω\n>\n> Last line\n[/soho:peer] " + headerID + " end of message"
 	if !strings.HasSuffix(message, wantTail) {
 		t.Fatalf("multiline body or closing marker was changed: %q", message)
 	}
@@ -128,7 +128,7 @@ func TestAssignedSendRefusesBeforePrompt(t *testing.T) {
 				f.env["HERDR_SOHO_WORKER_MESSAGES"] = "off"
 			}
 			if kind == "inbound" {
-				file := filepath.Join(f.dir, ".agents", "herdr-soho.conf")
+				file := filepath.Join(f.dir, ".agents", "soho.conf")
 				if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
 					t.Fatal(err)
 				}
@@ -202,7 +202,7 @@ func TestAssignedSendRefusesUnreadableFreshDestinationPolicy(t *testing.T) {
 	config := core.LoadConfig(f.env, f.dir)
 	// Origin was read successfully. A destination policy becomes unreadable
 	// before sending, so defaults cannot silently replace its inbound setting.
-	file := filepath.Join(f.env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+	file := filepath.Join(f.env.Get("XDG_CONFIG_HOME"), "soho", "config")
 	if err := os.MkdirAll(file, 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // shippedBriefLintDefaults reads the two brief-lint keys from the shipped
 // config.defaults, so the tests pin the same values both runtimes load.
 func shippedBriefLintDefaults(t *testing.T) map[string]string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "herdr-soho", "config.defaults"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "soho", "config.defaults"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func Test_dispatch_hints_r2_paths_cross(t *testing.T) {

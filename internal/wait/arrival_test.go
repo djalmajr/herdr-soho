@@ -2,10 +2,10 @@ package wait
 
 import (
 	"encoding/json"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,7 +151,7 @@ func runQueuedProbe(t *testing.T, screen, marker string, secondProbe ...bool) (s
 	if _, err := fakecli.Install(t, bin, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock"), "HERDR_SOHO_WAIT_POLL_MS": "1"}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock"), "SOHO_WAIT_POLL_MS": "1"}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	got := ProbeAgent(state, "worker", "", ctx, env)
 	if len(secondProbe) > 0 && secondProbe[0] {

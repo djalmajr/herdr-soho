@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/cli"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/cli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestSpawnBadAgentListRecordsFriction(t *testing.T) {
@@ -34,7 +34,7 @@ func TestSpawnBadAgentListRecordsFriction(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"HERDR_ENV": "1", "HERDR_SOHO_DIR": state, "HERDR_SOHO_FAKECLI_CONFIG": bin,
+		"HERDR_ENV": "1", "HERDR_SOHO_DIR": state, "SOHO_FAKECLI_CONFIG": bin,
 		"HERDR_SOHO_LANES": "off", "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws",
 		"HOME": root, "PATH": bin, "TMPDIR": root,
 	}

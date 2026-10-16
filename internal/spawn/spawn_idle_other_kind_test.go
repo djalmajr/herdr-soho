@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // m1Rules is freshSpawnRules with the M1 state added: one exact per-worker
@@ -69,7 +69,7 @@ func TestSpawnWarnsOnceAboutIdleOtherKindWorkerOnTheLane(t *testing.T) {
 	if !strings.Contains(stdout, `"created_pane": true`) || !strings.Contains(stdout, `"kind": "codex"`) {
 		t.Fatalf("the spawn did not open the new codex worker:\n%s", stdout)
 	}
-	want := "herdr-soho: warning: lane 'build' still holds idle 'oldgrok' (grok), not the lane's kind 'codex'; release it with: herdr-soho release oldgrok --close\n"
+	want := "soho: warning: lane 'build' still holds idle 'oldgrok' (grok), not the lane's kind 'codex'; release it with: soho release oldgrok --close\n"
 	if n := strings.Count(stderr, want); n != 1 {
 		t.Fatalf("warning count=%d, want exactly once\nstderr:\n%s", n, stderr)
 	}
@@ -99,7 +99,7 @@ func TestSpawnWarnsAboutDoneOtherKindWorker(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, `"created_pane": true`) {
 		t.Fatalf("exit=%d stdout=%q stderr=%q; the spawn must proceed", code, stdout, stderr)
 	}
-	want := "herdr-soho: warning: lane 'build' still holds idle 'oldgrok' (grok), not the lane's kind 'codex'; release it with: herdr-soho release oldgrok --close\n"
+	want := "soho: warning: lane 'build' still holds idle 'oldgrok' (grok), not the lane's kind 'codex'; release it with: soho release oldgrok --close\n"
 	if n := strings.Count(stderr, want); n != 1 {
 		t.Fatalf("warning count=%d, want exactly once for the done worker\nstderr:\n%s", n, stderr)
 	}
@@ -141,8 +141,8 @@ func TestSpawnWarnsOncePerIdleOtherKindWorker(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, `"created_pane": true`) {
 		t.Fatalf("exit=%d stdout=%q stderr=%q; the spawn must proceed", code, stdout, stderr)
 	}
-	want1 := "herdr-soho: warning: lane 'build' still holds idle 'oldgrok' (grok), not the lane's kind 'codex'; release it with: herdr-soho release oldgrok --close"
-	want2 := "herdr-soho: warning: lane 'build' still holds idle 'oldgrok2' (grok), not the lane's kind 'codex'; release it with: herdr-soho release oldgrok2 --close"
+	want1 := "soho: warning: lane 'build' still holds idle 'oldgrok' (grok), not the lane's kind 'codex'; release it with: soho release oldgrok --close"
+	want2 := "soho: warning: lane 'build' still holds idle 'oldgrok2' (grok), not the lane's kind 'codex'; release it with: soho release oldgrok2 --close"
 	i1, i2 := strings.Index(stderr, want1), strings.Index(stderr, want2)
 	if i1 < 0 || i2 < 0 || strings.Count(stderr, want1) != 1 || strings.Count(stderr, want2) != 1 {
 		t.Fatalf("want one warning per worker:\n%s", stderr)

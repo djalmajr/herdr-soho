@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // D8 (infra, Windows): `setup --probe --kind codex` timed out at the 20 s
 // default (a false negative; --timeout 60 gave ready). Without --timeout nor
-// HERDR_SOHO_PROBE_TIMEOUT the codex default is now 60 s (every other kind
+// SOHO_PROBE_TIMEOUT the codex default is now 60 s (every other kind
 // keeps 20 s), and a timeout cause carries the fixed retry hint.
 func TestProbeCodexTimeout(t *testing.T) {
 	const wantCause = "timeout after 1s (a timeout does not prove the assistant is unavailable; retry with --timeout 90)"
@@ -32,7 +32,7 @@ func TestProbeCodexTimeout(t *testing.T) {
 	})
 	t.Run("probe_codex_timeout_invalid_env_variable_dies_2", func(t *testing.T) {
 		env := fakeEnv(t, t.TempDir())
-		env["HERDR_SOHO_PROBE_TIMEOUT"] = "bad"
+		env["SOHO_PROBE_TIMEOUT"] = "bad"
 		func() {
 			defer func() {
 				e, ok := recover().(*platform.ExitError)
@@ -51,7 +51,7 @@ func TestProbeCodexTimeout(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := fakeEnv(t, bin)
-		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
+		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
 		old := platform.Stdout
 		var out bytes.Buffer
@@ -76,8 +76,8 @@ func TestProbeCodexTimeout(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := fakeEnv(t, bin)
-		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
-		env["HERDR_SOHO_PROBE_TIMEOUT"] = "1"
+		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+		env["SOHO_PROBE_TIMEOUT"] = "1"
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
 		old := platform.Stdout
 		var out bytes.Buffer

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 const mutationCopyUsage = "usage: mutation-copy [--source <dir>] [--dest <dir>] [--link <relpath>=<target>]..."
@@ -337,7 +337,7 @@ type mutationCopyResult struct {
 }
 
 func mutationCopyUsageError() int {
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", mutationCopyUsage)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: %s\n", mutationCopyUsage)
 	return 2
 }
 

@@ -26,5 +26,5 @@ func CleanEnv(t testing.TB) []string {
 		env = append(env, item)
 	}
 	return append(env, "HERDR_SOCKET_PATH="+filepath.Join(t.TempDir(), "herdr.sock"), "TMPDIR="+t.TempDir(),
-		"HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT=0", "HERDR_SOHO_PRESSURE_SWAP_PERCENT=0")
+		"SOHO_PRESSURE_DISK_FREE_PERCENT=0", "SOHO_PRESSURE_SWAP_PERCENT=0")
 }

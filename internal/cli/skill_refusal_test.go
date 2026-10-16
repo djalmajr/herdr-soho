@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // skillWriteFixture builds a non-git tree whose skill dir is a plain
 // directory (not a git repository): with cwd inside the skill the project
-// root is the skill itself and the state root is <skill>/.herdr-soho. PATH
+// root is the skill itself and the state root is <skill>/.soho. PATH
 // holds only the fake herdr (no git, no real herdr), so root resolution
 // never leaves the fixture and any herdr call is recorded in the call log.
 type skillWriteFixture struct {
@@ -48,7 +48,7 @@ func newSkillWriteFixture(t *testing.T) *skillWriteFixture {
 	}
 	env := platform.Env{
 		"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": xdg,
-		"PATH": bin, "HERDR_SOHO_FAKECLI_CONFIG": bin,
+		"PATH": bin, "SOHO_FAKECLI_CONFIG": bin,
 		"HERDR_WORKSPACE_ID":   "ws",
 		"HERDR_SOHO_SKILL_DIR": skill,
 	}
@@ -105,7 +105,7 @@ func (f *skillWriteFixture) noHerdrCalls(t *testing.T) {
 
 func (f *skillWriteFixture) refusal(t *testing.T, command, path string) string {
 	t.Helper()
-	return "herdr-soho: " + command + ": the state dir '" + path + "' would be inside the herdr-soho skill ('" + f.skill + "'); run herdr-soho from the project's directory (nothing was written)\n"
+	return "soho: " + command + ": the state dir '" + path + "' would be inside the soho skill ('" + f.skill + "'); run soho from the project's directory (nothing was written)\n"
 }
 
 // stateRefusal runs the command from inside the skill and asserts the exit
@@ -125,7 +125,7 @@ func (f *skillWriteFixture) stateRefusal(t *testing.T, args []string, command, p
 
 func TestSessionSetRefusesInsideTheSkill(t *testing.T) {
 	f := newSkillWriteFixture(t)
-	f.stateRefusal(t, []string{"session", "set", "lane.build.kind", "grok"}, "session set", filepath.Join(f.skill, ".herdr-soho"))
+	f.stateRefusal(t, []string{"session", "set", "lane.build.kind", "grok"}, "session set", filepath.Join(f.skill, ".soho"))
 
 	// Control: from outside the skill the command still writes.
 	proj := filepath.Join(f.root, "proj")
@@ -136,7 +136,7 @@ func TestSessionSetRefusesInsideTheSkill(t *testing.T) {
 	if code != 0 || errOut != "" || !strings.Contains(out, "set lane.build.kind=grok in ") {
 		t.Fatalf("control code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
-	sessionFile := filepath.Join(proj, ".herdr-soho", "ws", "session.conf")
+	sessionFile := filepath.Join(proj, ".soho", "ws", "session.conf")
 	data, err := os.ReadFile(sessionFile)
 	if err != nil || string(data) != "lane.build.kind=grok\n" {
 		t.Fatalf("control session.conf=%q err=%v", data, err)
@@ -147,14 +147,14 @@ func TestSessionClearRefusesInsideTheSkill(t *testing.T) {
 	f := newSkillWriteFixture(t)
 	// A session file that already sits inside the skill: the refusal must
 	// come before it is read or removed.
-	seeded := filepath.Join(f.skill, ".herdr-soho", "ws", "session.conf")
+	seeded := filepath.Join(f.skill, ".soho", "ws", "session.conf")
 	if err := os.MkdirAll(filepath.Dir(seeded), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(seeded, []byte("lane.build.kind=grok\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f.stateRefusal(t, []string{"session", "clear", "lane.build.kind"}, "session clear", filepath.Join(f.skill, ".herdr-soho"))
+	f.stateRefusal(t, []string{"session", "clear", "lane.build.kind"}, "session clear", filepath.Join(f.skill, ".soho"))
 	data, err := os.ReadFile(seeded)
 	if err != nil || string(data) != "lane.build.kind=grok\n" {
 		t.Fatalf("session file touched before the refusal: %q err=%v", data, err)
@@ -162,10 +162,10 @@ func TestSessionClearRefusesInsideTheSkill(t *testing.T) {
 
 	// Control: from outside the skill the clear still works.
 	proj := filepath.Join(f.root, "proj")
-	if err := os.MkdirAll(filepath.Join(proj, ".herdr-soho", "ws"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(proj, ".soho", "ws"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	projFile := filepath.Join(proj, ".herdr-soho", "ws", "session.conf")
+	projFile := filepath.Join(proj, ".soho", "ws", "session.conf")
 	if err := os.WriteFile(projFile, []byte("lane.build.kind=grok\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestConfigSetProjectRefusesInsideTheSkill(t *testing.T) {
 	if code != 0 || errOut != "" || !strings.Contains(out, "set max_workers=5 in ") {
 		t.Fatalf("control code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
-	projFile := filepath.Join(proj, ".agents", "herdr-soho.conf")
+	projFile := filepath.Join(proj, ".agents", "soho.conf")
 	data, err := os.ReadFile(projFile)
 	if err != nil || string(data) != "max_workers=5\n" {
 		t.Fatalf("control project config=%q err=%v", data, err)
@@ -202,7 +202,7 @@ func TestConfigSetUserStillWorksInsideTheSkill(t *testing.T) {
 	f := newSkillWriteFixture(t)
 	before := f.skillEntries(t)
 	code, out, errOut := runIn(t, []string{"config", "set", "--user", "max_workers", "5"}, f.env, f.skill)
-	userFile := filepath.Join(f.xdg, "herdr-soho", "config")
+	userFile := filepath.Join(f.xdg, "soho", "config")
 	if code != 0 || errOut != "" || !strings.Contains(out, "set max_workers=5 in "+userFile) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
@@ -229,7 +229,7 @@ func TestSetupRefusesInsideTheSkill(t *testing.T) {
 	}
 	agents := filepath.Join(proj, "AGENTS.md")
 	data, err := os.ReadFile(agents)
-	if err != nil || !strings.Contains(string(data), "<!-- herdr-soho:start -->") {
+	if err != nil || !strings.Contains(string(data), "<!-- soho:start -->") {
 		t.Fatalf("control AGENTS.md=%q err=%v", data, err)
 	}
 }
@@ -247,7 +247,7 @@ func TestDoctorFixRefusesInsideTheSkill(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("control code=%d stderr=%q", code, errOut)
 	}
-	projFile := filepath.Join(proj, ".agents", "herdr-soho.conf")
+	projFile := filepath.Join(proj, ".agents", "soho.conf")
 	data, err := os.ReadFile(projFile)
 	if err != nil || !strings.Contains(string(data), "panes=3") {
 		t.Fatalf("control project config=%q err=%v", data, err)
@@ -285,14 +285,14 @@ func TestSkillAsGitCheckoutRefusesSessionSetWithoutGitignore(t *testing.T) {
 	env := f.env.Clone()
 	env["PATH"] = f.bin + string(os.PathListSeparator) + os.Getenv("PATH") // git for root resolution, fake herdr first
 	code, out, errOut := runIn(t, []string{"session", "set", "lane.build.kind", "grok"}, env, f.skill)
-	want := f.refusal(t, "session set", filepath.Join(f.skill, ".herdr-soho"))
+	want := f.refusal(t, "session set", filepath.Join(f.skill, ".soho"))
 	if code != 2 || out != "" || errOut != want {
 		t.Fatalf("code=%d stdout=%q stderr=%q want=%q", code, out, errOut, want)
 	}
 	if _, err := os.Stat(filepath.Join(f.skill, ".gitignore")); !os.IsNotExist(err) {
 		t.Fatalf(".gitignore created inside the skill checkout: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(f.skill, ".herdr-soho")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(f.skill, ".soho")); !os.IsNotExist(err) {
 		t.Fatalf("state dir created inside the skill checkout: %v", err)
 	}
 	f.noHerdrCalls(t)

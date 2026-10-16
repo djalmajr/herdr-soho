@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // ownFix is a jobFix carrying a "starter" checkout: a real git repository
 // with an initial commit, the job worktree <co>/.worktrees/job-9 (branch
-// job/job-9) and the store <co>/.herdr-soho/jobs/job-9 with a valid
+// job/job-9) and the store <co>/.soho/jobs/job-9 with a valid
 // state.json (schema 1, running, worktree mode, the measured checkout and
 // job directory recorded). underRoot selects where the checkout lives:
 // under job_repos_root (the root scan hits its store too) or outside it
@@ -55,7 +55,7 @@ func newOwnFix(t *testing.T, underRoot bool) *ownFix {
 	// newJobFix's relative HERDR_SOHO_SKILL_DIR resolves against, so the
 	// fixture pins the skill directory to an absolute path for the
 	// chdir'd runs.
-	skillDir, err := filepath.Abs(filepath.Join("..", "..", "skills", "herdr-soho"))
+	skillDir, err := filepath.Abs(filepath.Join("..", "..", "skills", "soho"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func newOwnFix(t *testing.T, underRoot bool) *ownFix {
 	// the .git / gitdir files to name each other (worktreeRegistered).
 	runGit(t, gitEnv, co, "worktree", "add", "-q", worktree, "-b", "job/"+ownJobID)
 
-	store := filepath.Join(co, ".herdr-soho")
+	store := filepath.Join(co, ".soho")
 	jobDir := filepath.Join(store, "jobs", ownJobID)
 	if err := os.MkdirAll(jobDir, 0o700); err != nil {
 		t.Fatal(err)

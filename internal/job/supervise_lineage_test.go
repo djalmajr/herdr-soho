@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // TestUseLaunchSelectionLineage: a bound supervisor hands the selection to
@@ -29,7 +29,7 @@ func TestUseLaunchSelectionLineage(t *testing.T) {
 		s.Status, s.Dir, s.Branch, s.Base, s.Modo = StatusRunning, worktree, "job/job-1", "main", "worktree"
 	})
 	env := platform.Env{"XDG_CONFIG_HOME": "/server/xdg", "HOME": "/server/home", "USERPROFILE": "/server/home", "APPDATA": "/server/appdata", "PATH": "/usr/bin"}
-	sup, err := NewSupervisor(store, "job-1", env, "/bin/herdr-soho", nil)
+	sup, err := NewSupervisor(store, "job-1", env, "/bin/soho", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func preferenceEnv(t *testing.T) platform.Env {
@@ -51,7 +51,7 @@ func TestSessionPreferenceReadFallbackDoesNotRewrite(t *testing.T) {
 	for _, raw := range []string{"", "invalid\n", "table\nextra", strings.Repeat("x", 1024), "table" + strings.Repeat(" ", sessionViewPreferenceLimit)} {
 		t.Run(raw[:min(len(raw), 10)], func(t *testing.T) {
 			env := preferenceEnv(t)
-			path := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "session-view")
+			path := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "session-view")
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -133,7 +133,7 @@ func TestSessionPreferenceSharesUserPathAcrossPlatforms(t *testing.T) {
 			if next.ViewState.View != sessionViewTable {
 				t.Fatal("independent popup lost preference")
 			}
-			if next.viewPreferencePath != filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "session-view") {
+			if next.viewPreferencePath != filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "session-view") {
 				t.Fatalf("unexpected preference path %s", next.viewPreferencePath)
 			}
 		})
@@ -141,14 +141,14 @@ func TestSessionPreferenceSharesUserPathAcrossPlatforms(t *testing.T) {
 	env := platform.Env{"APPDATA": t.TempDir()}
 	s := newSessionState(env, "win32", true)
 	s.ApplyKey("v")
-	if got := newSessionState(env, "win32", true); got.ViewState.View != sessionViewTable || got.viewPreferencePath != filepath.Join(env.Get("APPDATA"), "herdr-soho", "session-view") {
+	if got := newSessionState(env, "win32", true); got.ViewState.View != sessionViewTable || got.viewPreferencePath != filepath.Join(env.Get("APPDATA"), "soho", "session-view") {
 		t.Fatal("Windows APPDATA preference not restored")
 	}
 }
 
 func TestSessionPreferenceSaveFailureKeepsModalUsable(t *testing.T) {
 	env := preferenceEnv(t)
-	blocker := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho")
+	blocker := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho")
 	if err := os.WriteFile(blocker, []byte("owned blocker"), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func releasedForFixture(t *testing.T, family string, extra ...fakecli.Rule) *dispatchArrivalFixture {
@@ -32,7 +32,7 @@ func addReleasedForSidecar(t *testing.T, f *dispatchArrivalFixture, agent, stamp
 	t.Helper()
 	dir := filepath.Join(f.state, "ws", "briefs")
 	if tmp {
-		dir = filepath.Join(f.env.Get("TMPDIR"), "herdr-soho", "ws", "reports")
+		dir = filepath.Join(f.env.Get("TMPDIR"), "soho", "ws", "reports")
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func TestTaskReportCommandLifecycleCases(t *testing.T) {
 	})
 	t.Run("task report is stable across two amendments, wait and collect; clean and stats ignore the copy and pointer", func(t *testing.T) { // JS: "task report is stable across two amendments, wait and collect; clean and stats ignore the copy and pointer"
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+		f.env["SOHO_WAIT_POLL_MS"] = "1"
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		fixedNow := platform.Now
 		now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
@@ -324,7 +324,7 @@ func TestTaskReportCommandLifecycleCases(t *testing.T) {
 	})
 	t.Run("--amend creates a task pointer for a legacy task without one", func(t *testing.T) { // JS: "--amend creates a task pointer for a legacy task without one"
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+		f.env["SOHO_WAIT_POLL_MS"] = "1"
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		fixedNow := platform.Now
 		now := time.Date(2026, 9, 29, 1, 0, 0, 0, time.UTC)
@@ -377,7 +377,7 @@ func TestTaskReportCommandLifecycleCases(t *testing.T) {
 func TestTaskReportNewTaskCommandCase(t *testing.T) {
 	t.Run("a new dispatch after a finished task gets its own stable copy and leaves the previous one", func(t *testing.T) { // JS: "a new dispatch after a finished task gets its own stable copy and leaves the previous one"
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+		f.env["SOHO_WAIT_POLL_MS"] = "1"
 		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		fixedNow := platform.Now
 		now := time.Date(2026, 9, 29, 2, 0, 0, 0, time.UTC)

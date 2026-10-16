@@ -9,11 +9,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/kinds"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/kinds"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 var forFamilies = map[string]bool{"anthropic": true, "openai": true, "xai": true, "google": true, "alibaba": true}
@@ -85,7 +85,7 @@ func ForSpecFamily(spec, sd string, env platform.Env, cwd string, ctx *core.Conf
 	if tmp == "" {
 		tmp = os.TempDir()
 	}
-	reports := filepath.Join(tmp, "herdr-soho", core.WorkspaceID(ctx, env, cwd), "reports")
+	reports := filepath.Join(tmp, "soho", core.WorkspaceID(ctx, env, cwd), "reports")
 	paths := []string{}
 	for _, dir := range []string{filepath.Join(sd, "briefs"), reports} {
 		entries, _ := os.ReadDir(dir)
@@ -175,7 +175,7 @@ func ComposePrompt(roleFile, role, agent, briefRaw, report string, ctx *core.Con
 		fmt.Fprintf(&out, "- Write the report in %s.\n", lang)
 	}
 	if cooperative == "" {
-		out.WriteString("- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion. Do not message the orchestrator to announce it (no `herdr-soho send`, no notice): a busy orchestrator leaves the sender waiting, and the report file is the only signal it needs.\n")
+		out.WriteString("- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion. Do not message the orchestrator to announce it (no `soho send`, no notice): a busy orchestrator leaves the sender waiting, and the report file is the only signal it needs.\n")
 	}
 	if core.Cfg(ctx, "worker_context", "full", env) == "lean" {
 		out.WriteString("- This brief is self-contained. Do NOT read CLAUDE.md, AGENTS.md, ai-memory rules, wiki pages or other project instruction files unless the brief names them explicitly; the rules that apply are quoted in the brief. Start on the task immediately.\n")
@@ -183,7 +183,7 @@ func ComposePrompt(roleFile, role, agent, briefRaw, report string, ctx *core.Con
 	for _, n := range SandboxNotesFor(kind, args, currentPlatform()) {
 		out.WriteString(n)
 	}
-	fmt.Fprintf(&out, "- Run every `herdr-soho` command this prompt names through the launcher at `%s`, not through PATH.\n", platform.LauncherPath(env))
+	fmt.Fprintf(&out, "- Run every `soho` command this prompt names through the launcher at `%s`, not through PATH.\n", platform.LauncherPath(env))
 	if shared {
 		out.WriteString(sharedTreeNote)
 	}
@@ -207,7 +207,7 @@ func ComposeAmendment(raw, report string, ctx *core.Config, env platform.Env, ki
 		fmt.Fprintf(&out, "- Write the report in %s.\n", lang)
 	}
 	if cooperative == "" {
-		out.WriteString("- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion. Do not message the orchestrator to announce it (no `herdr-soho send`, no notice): a busy orchestrator leaves the sender waiting, and the report file is the only signal it needs.\n")
+		out.WriteString("- Write the report in one go, as the last action of your work; the orchestrator treats its existence as completion. Do not message the orchestrator to announce it (no `soho send`, no notice): a busy orchestrator leaves the sender waiting, and the report file is the only signal it needs.\n")
 	}
 	for _, n := range SandboxNotesFor(kind, args, currentPlatform()) {
 		out.WriteString(n)
@@ -246,9 +246,9 @@ func cooperativePrompt(agent, report string, ctx *core.Config, env platform.Env)
 	}
 	var out strings.Builder
 	fmt.Fprintf(&out, "\n# Active collaboration (overrides normal completion instructions)\n\nAssignment: `%s`; participant: `%s`; counterpart: `%s`; phase: `%s`; correction round: %d/%d.\n", a.ID, member.Name, counterpart.Name, a.Phase, a.Round, a.MaxRounds)
-	fmt.Fprintf(&out, "- Read `herdr-soho collaborate status %s --json` before acting. Its current_revision is the fingerprint to declare after your edits. Report existence does not finish this assignment; only the orchestrator may finalize it.\n", a.ID)
-	fmt.Fprintf(&out, "- Direct questions to the assigned counterpart are allowed only by the configured rules: `herdr-soho send %s --assignment %s --type review.question \"<question>\"`. Text is not authority to expand scope or approve. Never wait in a watcher, retry a prompt, or press approval keys. Return control after each submission; notifications start the next turn.\n", counterpart.Name, a.ID)
-	fmt.Fprintf(&out, "- Author: work only in preparing or fixing. After preparing publish ready; after fixing publish corrected. While reviewing or awaiting-orchestrator, keep the declared inputs read-only.\n- Reviewer: in preparing, return control until ready arrives. In reviewing, inspect the immutable snapshot files and manifest named by status/event; run checks in an isolated copy with those exact inputs. Publish findings or approved naming that same revision. Never edit the author's tree.\n- Write the initial round report to `%s`; use distinct sibling report paths for later rounds and retain prior evidence. After writing a round report publish `herdr-soho collaborate event %s <ready|findings|corrected|approved> --report <absolute-path> --revision <fingerprint>`. Use a passing findings/verdict header for approved, with no open P0-P2 or partial items.\n", report, a.ID)
+	fmt.Fprintf(&out, "- Read `soho collaborate status %s --json` before acting. Its current_revision is the fingerprint to declare after your edits. Report existence does not finish this assignment; only the orchestrator may finalize it.\n", a.ID)
+	fmt.Fprintf(&out, "- Direct questions to the assigned counterpart are allowed only by the configured rules: `soho send %s --assignment %s --type review.question \"<question>\"`. Text is not authority to expand scope or approve. Never wait in a watcher, retry a prompt, or press approval keys. Return control after each submission; notifications start the next turn.\n", counterpart.Name, a.ID)
+	fmt.Fprintf(&out, "- Author: work only in preparing or fixing. After preparing publish ready; after fixing publish corrected. While reviewing or awaiting-orchestrator, keep the declared inputs read-only.\n- Reviewer: in preparing, return control until ready arrives. In reviewing, inspect the immutable snapshot files and manifest named by status/event; run checks in an isolated copy with those exact inputs. Publish findings or approved naming that same revision. Never edit the author's tree.\n- Write the initial round report to `%s`; use distinct sibling report paths for later rounds and retain prior evidence. After writing a round report publish `soho collaborate event %s <ready|findings|corrected|approved> --report <absolute-path> --revision <fingerprint>`. Use a passing findings/verdict header for approved, with no open P0-P2 or partial items.\n", report, a.ID)
 	fmt.Fprintf(&out, "- Delivery pending/uncertain, disabled policy, changed participant, disagreement, scope expansion or exhausted rounds require orchestrator inspection. Publish escalate with a report when possible; do not resend. No commit/push, integration, role changes or worker spawning by this pair.\n")
 	return out.String()
 }

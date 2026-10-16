@@ -112,7 +112,7 @@ func TestRunCliWindowsTreeKill(t *testing.T) {
 		badTempEnv := env.Clone()
 		badTempEnv["TMPDIR"] = fileTemp
 		got := RunCli("wrapper", nil, RunOptions{Env: badTempEnv, Platform: "win32", MergeOutput: true, TimeoutMs: 1000})
-		if got.Status != nil || got.Error != "EEXIST" || got.Stdout != "" || got.Stderr != "herdr-soho: cannot write temporary files: EEXIST\n" {
+		if got.Status != nil || got.Error != "EEXIST" || got.Stdout != "" || got.Stderr != "soho: cannot write temporary files: EEXIST\n" {
 			t.Fatalf("file TMPDIR result = %#v", got)
 		}
 	})

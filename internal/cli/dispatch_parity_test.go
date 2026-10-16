@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/dispatch"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/dispatch"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestDispatchParityPortedCases(t *testing.T) {
@@ -161,10 +161,10 @@ func dispatchOutputField(t *testing.T, out, key string) (string, bool) {
 
 func TestDispatchInvalidNativeBinaryPrecedesCompactAndState(t *testing.T) {
 	f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-	f.env["HERDR_SOHO_BIN"] = filepath.Join(t.TempDir(), "missing-native-binary")
+	f.env["SOHO_BIN"] = filepath.Join(t.TempDir(), "missing-native-binary")
 	before := snapshotTree(t, f.state)
 	code, out, stderr := f.run(t, "worker", f.brief, "--compact", "--no-wait")
-	if code != 2 || out != "" || !strings.Contains(stderr, "HERDR_SOHO_BIN") {
+	if code != 2 || out != "" || !strings.Contains(stderr, "SOHO_BIN") {
 		t.Fatalf("invalid binary: code=%d out=%q stderr=%q", code, out, stderr)
 	}
 	calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))
@@ -182,10 +182,10 @@ func TestDispatchInvalidNativeBinaryPrecedesCompactAndState(t *testing.T) {
 
 func TestRunInvalidNativeBinaryPrecedesSpawn(t *testing.T) {
 	f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-	f.env["HERDR_SOHO_BIN"] = filepath.Join(t.TempDir(), "missing-native-binary")
+	f.env["SOHO_BIN"] = filepath.Join(t.TempDir(), "missing-native-binary")
 	before := snapshotTree(t, f.state)
 	code, out, stderr := runIn(t, []string{"run", "implementer", f.brief, "--no-wait"}, f.env, f.root)
-	if code != 2 || out != "" || !strings.Contains(stderr, "HERDR_SOHO_BIN") {
+	if code != 2 || out != "" || !strings.Contains(stderr, "SOHO_BIN") {
 		t.Fatalf("invalid binary: code=%d out=%q stderr=%q", code, out, stderr)
 	}
 	calls, err := fakecli.ReadCalls(filepath.Join(f.bin, "herdr.calls.jsonl"))

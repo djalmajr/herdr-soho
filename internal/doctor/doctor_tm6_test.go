@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func tm6DoctorEnv(t *testing.T) (platform.Env, string) {
@@ -27,7 +27,7 @@ func tm6DoctorEnv(t *testing.T) (platform.Env, string) {
 		}
 	}
 	_, file, _, _ := runtime.Caller(0)
-	skill := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "skills", "herdr-soho"))
+	skill := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "skills", "soho"))
 	for _, role := range []string{"implementer", "designer", "tasker", "scouter", "researcher", "reviewer", "security-reviewer", "ui-reviewer", "inspector", "documenter", "planner", "sub-orchestrator"} {
 		kind := "grok"
 		if role == "reviewer" || role == "documenter" {

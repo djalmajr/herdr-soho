@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 const rosterHeader = "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\n"
@@ -63,7 +63,7 @@ func frictionLog(file, fallbackCommand, level, message string) {
 }
 
 func Warn(message, logFile string, fallbackCommand ...string) {
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: %s\n", message)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: warning: %s\n", message)
 	legacyCommand := ""
 	if len(fallbackCommand) > 0 {
 		legacyCommand = fallbackCommand[0]
@@ -172,7 +172,7 @@ func StateDirPath(ctx *Config, env platform.Env, cwd string) string {
 func StateDir(ctx *Config, env platform.Env, cwd string) string {
 	if !Nowrite(env) {
 		if skill := StateInSkill(ctx, env, cwd); skill != "" {
-			platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was written)", StateRootPath(ctx, env, cwd), skill), 2)
+			platform.Die(fmt.Sprintf("the state dir '%s' would be inside the soho skill ('%s'); run soho from the project's directory (nothing was written)", StateRootPath(ctx, env, cwd), skill), 2)
 		}
 	}
 	dir := StateDirPath(ctx, env, cwd)
@@ -245,7 +245,7 @@ func WithRosterLock(dir string, fn func()) {
 		}
 		tries++
 		if tries >= 200 {
-			platform.DieFriction(fmt.Sprintf("roster lock %s held for too long; remove it if no herdr-soho command is running", lock), 4)
+			platform.DieFriction(fmt.Sprintf("roster lock %s held for too long; remove it if no soho command is running", lock), 4)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

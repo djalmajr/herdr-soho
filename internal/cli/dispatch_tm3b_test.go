@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/dispatch"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/dispatch"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestDispatchTM3bOwnedPathsAndOverlap(t *testing.T) {
@@ -261,7 +261,7 @@ func TestDispatchTM3bAuthScreenCases(t *testing.T) {
 	})
 	t.Run("dispatch --no-wait: a prompt that never arrives ends not-received despite the auth screen (R11/D58)", func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "working", 1, 1, auth, "0")
-		f.env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+		f.env["SOHO_WAIT_POLL_MS"] = "1"
 		code, out, stderr := f.run(t, "worker", f.brief, "--no-wait")
 		value, err := jsonjs.Parse([]byte(strings.TrimSpace(out)))
 		if err != nil {
@@ -476,15 +476,15 @@ func newTM3bHarnessAt(t *testing.T, root, briefText string) tm3bHarness {
 		}
 	}
 	env["PATH"] = bin
-	// The user's own config (~/.config/herdr-soho/config) must not reach the
+	// The user's own config (~/.config/soho/config) must not reach the
 	// harness: a context_window.grok there changes the spawn's herdr calls.
 	env["HOME"] = filepath.Join(root, "home")
 	env["USERPROFILE"] = filepath.Join(root, "home")
 	env["XDG_CONFIG_HOME"] = filepath.Join(root, "xdg")
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = filepath.Join(bin, "herdr.json")
+	env["SOHO_FAKECLI_CONFIG"] = filepath.Join(bin, "herdr.json")
 	env["HERDR_SOHO_DIR"] = state
 	env["HERDR_WORKSPACE_ID"] = "ws"
-	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/herdr-soho"
+	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/soho"
 	env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
 	env["HERDR_SOHO_PROMPT_SETTLE_SECONDS"] = "0"
 	env["HERDR_SOHO_BRIEF_LINT"] = "off"
@@ -708,7 +708,7 @@ func TestDispatchTM3bStrictLintOverlapAndMarkerCases(t *testing.T) {
 		briefText := strings.Replace(tm3bFullBrief(), "internal/a.go", "- scripts/x.mjs", 1)
 		h := newTM3bHarness(t, briefText)
 		h.env["TMPDIR"] = tmp
-		reports := filepath.Join(tmp, "herdr-soho", "ws", "reports")
+		reports := filepath.Join(tmp, "soho", "ws", "reports")
 		pending := filepath.Join(reports, "other.brief.md")
 		if err := os.MkdirAll(reports, 0o700); err != nil {
 			t.Fatal(err)
@@ -737,7 +737,7 @@ func TestDispatchTM3bStrictLintOverlapAndMarkerCases(t *testing.T) {
 		briefText := strings.Replace(tm3bFullBrief(), "internal/a.go", "- scripts/x.mjs", 1)
 		h := newTM3bHarness(t, briefText)
 		h.env["TMPDIR"] = tmp
-		reports := filepath.Join(tmp, "herdr-soho", "ws", "reports")
+		reports := filepath.Join(tmp, "soho", "ws", "reports")
 		if err := os.MkdirAll(reports, 0o700); err != nil {
 			t.Fatal(err)
 		}

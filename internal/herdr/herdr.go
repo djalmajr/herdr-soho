@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/codexenv"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/codexenv"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/text"
 )
 
 const Timeout = 30 * time.Second
@@ -362,7 +362,7 @@ func jsString(v any) string {
 	}
 }
 func PaneTitle(pane string, title *string, env platform.Env) bool {
-	args := []string{"pane", "report-metadata", pane, "--source", "herdr-soho"}
+	args := []string{"pane", "report-metadata", pane, "--source", "soho"}
 	if title == nil {
 		args = append(args, "--clear-title")
 	} else {

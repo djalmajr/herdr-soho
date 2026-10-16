@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func regridCommandFixture(t *testing.T, rules []fakecli.Rule) (platform.Env, string, string) {
@@ -96,7 +96,7 @@ func TestReleaseAutomaticRegridLifecycle(t *testing.T) {
 		platform.Stdout, platform.Stderr = &out, &stderr
 		code := Run([]string{"release", "worker", "--close"}, env)
 		platform.Stdout, platform.Stderr = oldOut, oldErr
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		if err != nil || code != 0 || stderr.Len() != 0 || out.String() != "closed pane pa\nreleased worker\n" || !hasCallPrefix(calls, "tab", "create") {
 			t.Fatalf("code=%d out=%q stderr=%q calls=%#v err=%v", code, out.String(), stderr.String(), calls, err)
 		}
@@ -149,7 +149,7 @@ func TestReleaseAutomaticRegridLifecycle(t *testing.T) {
 	t.Run(`release without --close: the relabel branch is untouched by the regrid`, func(t *testing.T) { // JS: "release without --close: the relabel branch is untouched by the regrid"
 		// Mutation captured: triggering automatic regrid without --close moves panes after a release that should only clear its title.
 		rules := []fakecli.Rule{
-			{Argv: []string{"pane", "report-metadata", "pa", "--source", "herdr-soho", "--clear-title"}},
+			{Argv: []string{"pane", "report-metadata", "pa", "--source", "soho", "--clear-title"}},
 			{Argv: []string{"pane", "list", "--workspace", "ws"}, ArgvPrefix: true, Stdout: `{"result":{"panes":[]}}`},
 		}
 		env, _ := commandFixture(t)
@@ -178,12 +178,12 @@ func TestReleaseAutomaticRegridLifecycle(t *testing.T) {
 		platform.Stdout, platform.Stderr = &out, &stderr
 		code := Run([]string{"release", "worker"}, env)
 		platform.Stdout, platform.Stderr = oldOut, oldErr
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["HERDR_SOHO_FAKECLI_CONFIG"], "herdr.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(env["SOHO_FAKECLI_CONFIG"], "herdr.json"))
 		// The release without --close now names the pane that stays open (the
 		// orphan follow-up of the release slice); the relabel branch must still
 		// not move panes.
-		wantErr := "herdr-soho: release: the pane pa stays open; close it later with: herdr-soho release worker --close\n"
-		if err != nil || code != 0 || out.String() != "released worker\n" || stderr.String() != wantErr || hasCallPrefix(calls, "pane", "move") || len(callsTo(calls, "pane", "report-metadata", "pa", "--source", "herdr-soho", "--clear-title")) != 1 {
+		wantErr := "soho: release: the pane pa stays open; close it later with: soho release worker --close\n"
+		if err != nil || code != 0 || out.String() != "released worker\n" || stderr.String() != wantErr || hasCallPrefix(calls, "pane", "move") || len(callsTo(calls, "pane", "report-metadata", "pa", "--source", "soho", "--clear-title")) != 1 {
 			t.Fatalf("code=%d out=%q stderr=%q calls=%#v err=%v", code, out.String(), stderr.String(), calls, err)
 		}
 	})

@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // verifiedReviewerFileHashes are the durable verified byte hashes of the

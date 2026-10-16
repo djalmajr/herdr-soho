@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	textutil "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/platform"
+	textutil "github.com/djalmajr/soho/internal/text"
 )
 
 const mutationGuardUsage = "usage: mutation-guard <copy-dir> [--source <dir>] [--env NAME]..."
@@ -179,7 +179,7 @@ func (r mutationGuardReport) failingLines() []string {
 }
 
 func mutationGuardUsageError() int {
-	_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", mutationGuardUsage)
+	_, _ = fmt.Fprintf(platform.Stderr, "soho: %s\n", mutationGuardUsage)
 	return 2
 }
 

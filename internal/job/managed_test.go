@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // managed_test.go: ManagedSelection with real processes. The parent is this

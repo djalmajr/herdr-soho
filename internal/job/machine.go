@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // Machine is the per-machine job configuration.

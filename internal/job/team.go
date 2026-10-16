@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // segmentNameRE is the contract class for a repository name. Organization
@@ -41,7 +41,10 @@ type teamCandidate struct {
 }
 
 // ResolveTeam reads teams/<org>/<repo>.conf, then teams/default.conf, then
-// <repoRoot>/.agents/herdr-soho.conf when that file sets lane.*.roles.
+// <repoRoot>/.agents/soho.conf when that file sets lane.*.roles. Each team
+// file is read from the soho user configuration directory, or, while it
+// is absent there, from the former herdr-soho directory (the
+// compatibility window); the source keeps the same relative name.
 // osName is the platform name platform.UserConfigPath expects.
 // overrides is the brief equipe map; nil means none. Keys and values are
 // checked with core.ConfigKeyOk and core.ConfigValueOk, the session set
@@ -55,10 +58,25 @@ func ResolveTeam(osName string, env platform.Env, repoRoot, org, repo string, ov
 		return Team{}, exitErr(2, "team: invalid repository")
 	}
 	userDir := filepath.Dir(platform.UserConfigPath(osName, env))
+	legacyDir := filepath.Dir(core.LegacyUserConfigPath(osName, env))
+	// The former file is read only when the soho path does not exist at
+	// all: a soho path that exists but is not a regular file still goes
+	// to regularTeamFile, which refuses it.
+	userTeamFile := func(parts ...string) string {
+		current := filepath.Join(append([]string{userDir, "teams"}, parts...)...)
+		if _, err := os.Lstat(current); !os.IsNotExist(err) {
+			return current
+		}
+		legacy := filepath.Join(append([]string{legacyDir, "teams"}, parts...)...)
+		if _, err := os.Lstat(legacy); err == nil {
+			return legacy
+		}
+		return current
+	}
 	candidates := []teamCandidate{
-		{source: "teams/" + org + "/" + repo + ".conf", file: filepath.Join(userDir, "teams", org, repo+".conf")},
-		{source: "teams/default.conf", file: filepath.Join(userDir, "teams", "default.conf")},
-		{source: ".agents/herdr-soho.conf", file: filepath.Join(repoRoot, ".agents", "herdr-soho.conf"), roles: true},
+		{source: "teams/" + org + "/" + repo + ".conf", file: userTeamFile(org, repo+".conf")},
+		{source: "teams/default.conf", file: userTeamFile("default.conf")},
+		{source: ".agents/soho.conf", file: filepath.Join(repoRoot, ".agents", "soho.conf"), roles: true},
 	}
 	var chosen teamCandidate
 	var pairs []TeamPair

@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/spawn"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/spawn"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func pressureFixture(t *testing.T) (ctx *core.Config, env platform.Env, stateDir string) {
@@ -36,8 +36,8 @@ func pressureFixture(t *testing.T) (ctx *core.Config, env platform.Env, stateDir
 	env["HERDR_WORKSPACE_ID"] = "ws"
 	// Explicit limits: CleanEnv ships the machine-state warning disabled
 	// (0/0), so the tests that expect a warning set their limits themselves.
-	env["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "15"
-	env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "80"
+	env["SOHO_PRESSURE_DISK_FREE_PERCENT"] = "15"
+	env["SOHO_PRESSURE_SWAP_PERCENT"] = "80"
 	ctx = &core.Config{Entries: map[string]core.ConfigEntry{}}
 	return ctx, env, filepath.Join(state, "ws")
 }
@@ -72,7 +72,7 @@ func pressureLine(stateDir string, parts ...string) string {
 		}
 		joined += part
 	}
-	return "herdr-soho: resource pressure: " + joined + "; run 'herdr-soho gc' and close idle panes before opening more\n"
+	return "soho: resource pressure: " + joined + "; run 'soho gc' and close idle panes before opening more\n"
 }
 
 func diskPressure() (int64, int64) {
@@ -99,7 +99,7 @@ func TestPressureWarnsWithThePartsThatPassedTheirLimits(t *testing.T) {
 		fused, ftotal := swapPressure()
 		fakeMachine(t, int64(5)*1024*1024*1024, int64(10)*1024*1024*1024, true, fused, ftotal, true)
 		stderr := captureStderr(t, func() { core.PressureWarn(ctx, env, "") })
-		want := "herdr-soho: resource pressure: " + swapPart + "; run 'herdr-soho gc' and close idle panes before opening more\n"
+		want := "soho: resource pressure: " + swapPart + "; run 'soho gc' and close idle panes before opening more\n"
 		if stderr != want {
 			t.Fatalf("stderr=%q, want %q", stderr, want)
 		}
@@ -128,8 +128,8 @@ func TestPressureWarnsWithThePartsThatPassedTheirLimits(t *testing.T) {
 		})
 		t.Run("zero thresholds disable the parts", func(t *testing.T) {
 			ctx, env, _ := pressureFixture(t)
-			env["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "0"
-			env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "0"
+			env["SOHO_PRESSURE_DISK_FREE_PERCENT"] = "0"
+			env["SOHO_PRESSURE_SWAP_PERCENT"] = "0"
 			dfree, dtotal := diskPressure()
 			sused, stotal := swapPressure()
 			fakeMachine(t, dfree, dtotal, true, sused, stotal, true)
@@ -159,11 +159,11 @@ func TestPressureWarnsWithThePartsThatPassedTheirLimits(t *testing.T) {
 
 	t.Run("an invalid threshold uses the default with the project warning", func(t *testing.T) {
 		ctx, env, stateDir := pressureFixture(t)
-		env["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "abc"
+		env["SOHO_PRESSURE_DISK_FREE_PERCENT"] = "abc"
 		free, total := diskPressure()
 		fakeMachine(t, free, total, true, 0, 0, false)
 		stderr := captureStderr(t, func() { core.PressureWarn(ctx, env, "") })
-		want := "herdr-soho: warning: invalid value 'abc' for pressure_disk_free_percent; using the default 15\n" +
+		want := "soho: warning: invalid value 'abc' for pressure_disk_free_percent; using the default 15\n" +
 			pressureLine(stateDir, sprintfPart(stateDir))
 		if stderr != want {
 			t.Fatalf("stderr=%q, want %q", stderr, want)
@@ -173,11 +173,11 @@ func TestPressureWarnsWithThePartsThatPassedTheirLimits(t *testing.T) {
 
 func TestPressureNegativeThresholdUsesTheDefault(t *testing.T) {
 	ctx, env, stateDir := pressureFixture(t)
-	env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "-1"
+	env["SOHO_PRESSURE_SWAP_PERCENT"] = "-1"
 	gb := int64(1024 * 1024 * 1024)
 	fakeMachine(t, 50*gb, 100*gb, true, 96*gb, 100*gb, true)
 	stderr := captureStderr(t, func() { core.PressureWarn(ctx, env, "") })
-	want := "herdr-soho: warning: invalid value '-1' for pressure_swap_percent; using the default 80\n" +
+	want := "soho: warning: invalid value '-1' for pressure_swap_percent; using the default 80\n" +
 		pressureLine(stateDir, "swap 96% used (96 GB of 100 GB)")
 	if stderr != want {
 		t.Fatalf("stderr=%q, want %q (a negative value must not turn the warning off)", stderr, want)
@@ -338,9 +338,9 @@ func TestPressureSpawnWarnsAndKeepsTheStdoutJSON(t *testing.T) {
 		env["HERDR_SOHO_LANES"] = "off"
 		env["HERDR_ENV"] = "1"
 		env["HERDR_PANE_ID"] = "p1"
-		env["HERDR_SOHO_WAIT_POLL_MS"] = "1"
-		env["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "15"
-		env["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "80"
+		env["SOHO_WAIT_POLL_MS"] = "1"
+		env["SOHO_PRESSURE_DISK_FREE_PERCENT"] = "15"
+		env["SOHO_PRESSURE_SWAP_PERCENT"] = "80"
 		fakeMachine(t, diskFree, diskTotal, true, 0, 0, false)
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 		oldOut, oldErr := platform.Stdout, platform.Stderr
@@ -372,7 +372,7 @@ func TestPressureSpawnWarnsAndKeepsTheStdoutJSON(t *testing.T) {
 	if outPressure != outCalm {
 		t.Fatalf("the pressure warning changed the stdout JSON:\ncalm:\n%s\nunder pressure:\n%s", outCalm, outPressure)
 	}
-	if !strings.Contains(errPressure, "herdr-soho: resource pressure: disk ") {
+	if !strings.Contains(errPressure, "soho: resource pressure: disk ") {
 		t.Fatalf("the spawn stderr has no pressure warning: %q", errPressure)
 	}
 	if strings.Contains(errCalm, "resource pressure") {

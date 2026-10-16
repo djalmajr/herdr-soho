@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // procs add discovery: a pid whose identity the single snapshot read could
@@ -48,7 +48,7 @@ func TestProcsAddUnreadableIdentityIsNotADeadProcess(t *testing.T) {
 		if code != 4 {
 			t.Fatalf("code=%d err=%q; want 4 (a failed read is not a dead process)", code, errOut)
 		}
-		want := "herdr-soho: procs add: the identity of pid " + strconv.Itoa(live) + " is unreadable (the system state read failed and the kernel did not report it gone); not registered"
+		want := "soho: procs add: the identity of pid " + strconv.Itoa(live) + " is unreadable (the system state read failed and the kernel did not report it gone); not registered"
 		if !strings.Contains(errOut, want) {
 			t.Fatalf("stderr = %q; want the clear unreadable diagnostic %q", errOut, want)
 		}

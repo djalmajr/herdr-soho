@@ -10,11 +10,11 @@ import (
 	"testing"
 	_ "unsafe"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
-//go:linkname receiptLineIn github.com/djalmajr/herdr-soho/internal/peer.receiptLineIn
+//go:linkname receiptLineIn github.com/djalmajr/soho/internal/peer.receiptLineIn
 func receiptLineIn(line, id string) bool
 
 // bannedHeaderWords are the substrings the metadata-only peer header must
@@ -39,9 +39,9 @@ func assertMetadataOnly(t *testing.T, label, header string) {
 func TestPeerHeaderMetadataOnlyBytes(t *testing.T) {
 	t.Run("local header with all four sender fields known", func(t *testing.T) {
 		got := peer.PeerHeaderFor(peer.PeerSender{Ref: "local/w14:p1", Name: "soho-s4", Kind: "pi", Role: "sub-orchestrator", Model: "gpt-5.1"}, "01020304")
-		want := "[herdr-soho:peer] #01020304 Message from another agent — local/w14:p1, sent " + peerTestSentTime + ".\n" +
+		want := "[soho:peer] #01020304 Message from another agent — local/w14:p1, sent " + peerTestSentTime + ".\n" +
 			"Sender: name soho-s4; kind pi; role sub-orchestrator; model gpt-5.1.\n" +
-			`Reply with: herdr-soho send local/w14:p1 "<your reply>"` + "\n" +
+			`Reply with: soho send local/w14:p1 "<your reply>"` + "\n" +
 			`The message follows, each line quoted with "> ".`
 		if got != want {
 			t.Fatalf("header=%q want=%q", got, want)
@@ -50,9 +50,9 @@ func TestPeerHeaderMetadataOnlyBytes(t *testing.T) {
 	})
 	t.Run("local header with only some fields known omits the unknown ones", func(t *testing.T) {
 		got := peer.PeerHeaderFor(peer.PeerSender{Ref: "local/w14:p1", Name: "soho-s4", Kind: "pi", Role: "-", Model: "unknown"}, "01020304")
-		want := "[herdr-soho:peer] #01020304 Message from another agent — local/w14:p1, sent " + peerTestSentTime + ".\n" +
+		want := "[soho:peer] #01020304 Message from another agent — local/w14:p1, sent " + peerTestSentTime + ".\n" +
 			"Sender: name soho-s4; kind pi.\n" +
-			`Reply with: herdr-soho send local/w14:p1 "<your reply>"` + "\n" +
+			`Reply with: soho send local/w14:p1 "<your reply>"` + "\n" +
 			`The message follows, each line quoted with "> ".`
 		if got != want {
 			t.Fatalf("header=%q want=%q", got, want)
@@ -61,8 +61,8 @@ func TestPeerHeaderMetadataOnlyBytes(t *testing.T) {
 	})
 	t.Run("local header with nothing known has no Sender line and the local/- ref", func(t *testing.T) {
 		got := peer.PeerHeaderFor(peer.PeerSender{Ref: "local/-", Name: "-", Kind: "-", Role: "-", Model: "-"}, "01020304")
-		want := "[herdr-soho:peer] #01020304 Message from another agent — local/-, sent " + peerTestSentTime + ".\n" +
-			`Reply with: herdr-soho send local/- "<your reply>"` + "\n" +
+		want := "[soho:peer] #01020304 Message from another agent — local/-, sent " + peerTestSentTime + ".\n" +
+			`Reply with: soho send local/- "<your reply>"` + "\n" +
 			`The message follows, each line quoted with "> ".`
 		if got != want {
 			t.Fatalf("header=%q want=%q", got, want)
@@ -71,9 +71,9 @@ func TestPeerHeaderMetadataOnlyBytes(t *testing.T) {
 	})
 	t.Run("remote header with a hostname", func(t *testing.T) {
 		got := peer.PeerHeaderRemoteFor(peer.PeerSender{Name: "orchestrator-2", Kind: "claude", Role: "-", Model: "claude-opus-5"}, "w14:p1", "Run2Biz.local", "01020304")
-		want := "[herdr-soho:peer] #01020304 Message from another agent — w14:p1 on Run2Biz.local, sent " + peerTestSentTime + ".\n" +
+		want := "[soho:peer] #01020304 Message from another agent — w14:p1 on Run2Biz.local, sent " + peerTestSentTime + ".\n" +
 			"Sender: name orchestrator-2; kind claude; model claude-opus-5.\n" +
-			`Reply with: herdr-soho send <this machine's name in your herdr machine list>/w14:p1 "<your reply>" (this machine is Run2Biz.local)` + "\n" +
+			`Reply with: soho send <this machine's name in your herdr machine list>/w14:p1 "<your reply>" (this machine is Run2Biz.local)` + "\n" +
 			`The message follows, each line quoted with "> ".`
 		if got != want {
 			t.Fatalf("header=%q want=%q", got, want)
@@ -82,9 +82,9 @@ func TestPeerHeaderMetadataOnlyBytes(t *testing.T) {
 	})
 	t.Run("remote header with an empty hostname has no machine part or parenthetical", func(t *testing.T) {
 		got := peer.PeerHeaderRemoteFor(peer.PeerSender{Name: "orchestrator-2", Kind: "claude", Role: "-", Model: "-"}, "w14:p1", "", "01020304")
-		want := "[herdr-soho:peer] #01020304 Message from another agent — w14:p1, sent " + peerTestSentTime + ".\n" +
+		want := "[soho:peer] #01020304 Message from another agent — w14:p1, sent " + peerTestSentTime + ".\n" +
 			"Sender: name orchestrator-2; kind claude.\n" +
-			`Reply with: herdr-soho send <this machine's name in your herdr machine list>/w14:p1 "<your reply>"` + "\n" +
+			`Reply with: soho send <this machine's name in your herdr machine list>/w14:p1 "<your reply>"` + "\n" +
 			`The message follows, each line quoted with "> ".`
 		if got != want {
 			t.Fatalf("header=%q want=%q", got, want)
@@ -94,7 +94,7 @@ func TestPeerHeaderMetadataOnlyBytes(t *testing.T) {
 	t.Run("the send time on the opening line is the pinned instant in UTC RFC 3339 seconds", func(t *testing.T) {
 		got := peer.PeerHeaderFor(peer.PeerSender{Ref: "local/w14:p1", Name: "-", Kind: "-", Role: "-", Model: "-"}, "01020304")
 		lines := strings.Split(got, "\n")
-		wantFirst := "[herdr-soho:peer] #01020304 Message from another agent — local/w14:p1, sent " + peerTestSentTime + "."
+		wantFirst := "[soho:peer] #01020304 Message from another agent — local/w14:p1, sent " + peerTestSentTime + "."
 		if len(lines) != 3 || lines[0] != wantFirst || peerTestSentTime != "2026-10-09T14:22:05Z" {
 			t.Fatalf("header=%q (the opening line must carry the pinned send time %q)", got, wantFirst)
 		}
@@ -115,7 +115,7 @@ func TestPeerHeaderMetadataOnlyBytes(t *testing.T) {
 	})
 	t.Run("an empty id keeps the opening line without the id", func(t *testing.T) {
 		got := peer.PeerHeaderFor(peer.PeerSender{Ref: "local/w14:p1", Name: "soho-s4", Kind: "pi", Role: "-", Model: "-"}, "")
-		if !strings.HasPrefix(got, "[herdr-soho:peer] Message from another agent — local/w14:p1, sent ") {
+		if !strings.HasPrefix(got, "[soho:peer] Message from another agent — local/w14:p1, sent ") {
 			t.Fatalf("header=%q (no id, no \"#\")", got)
 		}
 	})
@@ -138,9 +138,9 @@ func TestPeerHeaderMetadataOnlyBytes(t *testing.T) {
 func TestPeerHeaderAssignmentBytes(t *testing.T) {
 	s := peer.PeerSender{Ref: "local/ws:p1", Name: "author", Kind: "codex", Role: "implementer", Model: "gpt-5.4"}
 	got := peer.PeerHeaderAssignment(s, "author", "c-0102030405060708", "01020304")
-	want := "[herdr-soho:peer] #01020304 Message from another agent — local/ws:p1, sent " + peerTestSentTime + ".\n" +
+	want := "[soho:peer] #01020304 Message from another agent — local/ws:p1, sent " + peerTestSentTime + ".\n" +
 		"Sender: name author; kind codex; role implementer; model gpt-5.4.\n" +
-		`Reply within this assignment: herdr-soho send author --assignment c-0102030405060708 --type review.question "<your reply>"` + "\n" +
+		`Reply within this assignment: soho send author --assignment c-0102030405060708 --type review.question "<your reply>"` + "\n" +
 		`The message follows, each line quoted with "> ".`
 	if got != want {
 		t.Fatalf("header=%q want=%q", got, want)
@@ -154,7 +154,7 @@ func TestPeerHeaderAssignmentBytes(t *testing.T) {
 // payload, never the receipt.
 func TestReceiptLineInNewHeaderOpening(t *testing.T) {
 	id := "01020304"
-	open := "[herdr-soho:peer] #" + id + " Message from another agent — local/w14:p1, sent " + peerTestSentTime + "."
+	open := "[soho:peer] #" + id + " Message from another agent — local/w14:p1, sent " + peerTestSentTime + "."
 	if !receiptLineIn(open, id) {
 		t.Fatalf("the new opening line of this id is not a receipt: %q", open)
 	}
@@ -257,13 +257,13 @@ func TestAssignmentDeliveryHeaderIsMetadataOnly(t *testing.T) {
 	if len(prompts) != 1 {
 		t.Fatalf("delivery=%+v", prompts)
 	}
-	wantMessage := "[herdr-soho:peer] #" + id + " Message from another agent — local/ws:p1, sent " + peerTestSentTime + ".\n" +
+	wantMessage := "[soho:peer] #" + id + " Message from another agent — local/ws:p1, sent " + peerTestSentTime + ".\n" +
 		"Sender: name author; kind codex; role implementer; model gpt-5.4.\n" +
-		fmt.Sprintf("Reply within this assignment: herdr-soho send author --assignment %s --type review.question \"<your reply>\"\n", a.ID) +
+		fmt.Sprintf("Reply within this assignment: soho send author --assignment %s --type review.question \"<your reply>\"\n", a.ID) +
 		`The message follows, each line quoted with "> ".` + "\n" +
 		fmt.Sprintf("Assignment: %s; type: review.question; round: %d; revision: %s.\n\n", a.ID, a.Round, a.Revision) +
 		"> question\n" +
-		"[/herdr-soho:peer] #" + id + " end of message"
+		"[/soho:peer] #" + id + " end of message"
 	if prompts[0].Argv[3] != wantMessage {
 		t.Fatalf("message=%q want=%q", prompts[0].Argv[3], wantMessage)
 	}

@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/soho/internal/core"
 )
 
 func TestTM10ReleaseTitleMirrors(t *testing.T) {
@@ -27,7 +27,7 @@ func TestTM10ReleaseTitleMirrors(t *testing.T) {
 	t.Run(`JS: "release: an unknown option is a usage error (2)"`, func(t *testing.T) {
 		f := newReleaseFixture(t, "", "")
 		r := f.run(t, "worker", "--bogus")
-		if r.code != 2 || r.stderr != "herdr-soho: release: unknown option --bogus\n" {
+		if r.code != 2 || r.stderr != "soho: release: unknown option --bogus\n" {
 			t.Fatalf("code=%d stdout=%q stderr=%q", r.code, r.stdout, r.stderr)
 		}
 		if core.RosterLine(f.state, "worker") == "" || len(callsTo(r.calls, "pane", "close", "p-worker")) != 0 {

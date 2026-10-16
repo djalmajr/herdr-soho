@@ -24,9 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 const compactPhaseLivenessChildEnv = "COMPACT_PHASE_LIVENESS_CHILD"
@@ -103,7 +103,7 @@ func compactPhaseTestEnv(t *testing.T) platform.Env {
 	if _, err := fakecli.Install(t, fakebin, "ps", rules); err != nil {
 		t.Fatal(err)
 	}
-	return platform.Env{"PATH": fakebin, "HERDR_SOHO_FAKECLI_CONFIG": fakebin}
+	return platform.Env{"PATH": fakebin, "SOHO_FAKECLI_CONFIG": fakebin}
 }
 
 func compactPhaseTestState(t *testing.T) string {
@@ -326,7 +326,7 @@ func TestCompactPhaseClaimRefusesWhenSelfIdentityUnreadable(t *testing.T) {
 		}()
 		CompactPhaseClaim(CompactPhaseClaimOptions{
 			SD: sd, Agent: "worker", Pane: "p1", Brief: "/abs/brief.md",
-			Env: platform.Env{"PATH": fakebin, "HERDR_SOHO_FAKECLI_CONFIG": fakebin},
+			Env: platform.Env{"PATH": fakebin, "SOHO_FAKECLI_CONFIG": fakebin},
 		})
 	}()
 	if code != 4 {

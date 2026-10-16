@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil"
 )
 
 // subOrchRow is the row the tests promote: pane ws:pS, name sub-orch, role

@@ -12,12 +12,12 @@ import (
 	"testing"
 	_ "unsafe"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
 )
 
-//go:linkname platformRenameFile github.com/djalmajr/herdr-soho/internal/platform.renameFile
+//go:linkname platformRenameFile github.com/djalmajr/soho/internal/platform.renameFile
 var platformRenameFile func(string, string) error
 
 func localPlanFixture(t *testing.T) (string, platform.Env, *core.Config) {
@@ -61,7 +61,7 @@ func localPlanFixture(t *testing.T) (string, platform.Env, *core.Config) {
 	env["HOME"] = home
 	env["XDG_CONFIG_HOME"] = filepath.Join(home, ".config")
 	env["TMPDIR"] = tmp
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
+	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	ctx := core.LoadConfig(env, root)
 	return root, env, &ctx
 }
@@ -103,8 +103,9 @@ func runPlanStreams(args []string, ctx *core.Config, env platform.Env, cwd strin
 }
 
 func TestPlanLegacyConfigTemporaryNameMatchesJavaScript(t *testing.T) { // Mutation captured: renaming the simulated legacy config changes the warning in stderr.
+	// DJA-318: the recognized legacy config is the pre-rename herdr-soho.conf; the herdr-agents generation is retired.
 	root, env, _ := localPlanFixture(t)
-	legacyPath := filepath.Join(root, ".agents", "herdr-agents.conf")
+	legacyPath := filepath.Join(root, ".agents", "herdr-soho.conf")
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestPlanLegacyConfigTemporaryNameMatchesJavaScript(t *testing.T) { // Mutat
 	}
 	ctx := core.LoadConfig(env, root)
 	code, stdout, stderr, message := runPlanStreams([]string{"--panes", "4"}, &ctx, env, root)
-	if code != 0 || message != "" || !strings.Contains(stdout, filepath.Join(root, ".agents", "herdr-soho.conf")) {
+	if code != 0 || message != "" || !strings.Contains(stdout, filepath.Join(root, ".agents", "soho.conf")) {
 		t.Fatalf("code=%d message=%q stdout=%q", code, message, stdout)
 	}
 	if !strings.Contains(stderr, "proj.conf") || strings.Contains(stderr, "config-0") {

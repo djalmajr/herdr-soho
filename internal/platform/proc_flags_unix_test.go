@@ -202,7 +202,7 @@ func procFlagsSessionSleeper(t *testing.T, env Env) *exec.Cmd {
 	out := items[:0]
 	for _, item := range items {
 		// The re-executed test binary must not dispatch as the fake CLI.
-		if strings.HasPrefix(item, "HERDR_SOHO_FAKECLI_CONFIG=") {
+		if strings.HasPrefix(item, "SOHO_FAKECLI_CONFIG=") {
 			continue
 		}
 		out = append(out, item)

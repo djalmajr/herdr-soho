@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // countCallArgv counts the logged calls whose argv is exactly argv.
@@ -118,7 +118,7 @@ func TestSpawnGrokContextWindowConfirmed(t *testing.T) {
 func TestSpawnGrokContextWindowUnconfirmedWarnsAndSucceeds(t *testing.T) {
 	f := newSpawnFixture(t, freshSpawnRules()) // every visible read shows no confirmation line
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500" // bound the reads inside the 10s window
+	f.env["SOHO_WAIT_POLL_MS"] = "500" // bound the reads inside the 10s window
 	f.ctx.Entries["context_window_grok"] = core.ConfigEntry{Value: "500k", Source: "user"}
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
 	if code != 0 {
@@ -187,7 +187,7 @@ func TestSpawnReusedGrokGetsNoContextWindowCommand(t *testing.T) {
 	rules = append(rules, freshSpawnRules()...)
 	f := newSpawnFixture(t, rules)
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	f.env["SOHO_WAIT_POLL_MS"] = "500"
 	f.ctx.Entries["context_window_grok"] = core.ConfigEntry{Value: "500k", Source: "user"}
 	row := strings.Join([]string{"worker", "p-worker", "grok", "worker", "xai", "1", f.cwd, "now", "grok-4.7", "ask", "worker", "", "", "", "high"}, "\t")
 	f.roster(t, row)
@@ -209,7 +209,7 @@ func TestSpawnReusedGrokGetsNoContextWindowCommand(t *testing.T) {
 func TestSpawnNonGrokKindIgnoresContextWindowKey(t *testing.T) {
 	f := newSpawnFixture(t, freshSpawnRules())
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "500"
+	f.env["SOHO_WAIT_POLL_MS"] = "500"
 	if err := os.WriteFile(filepath.Join(f.root, "roles", "worker.md"), []byte("---\nkind: claude\nmodel: opus\neffort: high\napprovals: ask\n---\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/spawn"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/spawn"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 const promotePane = "ws:pS"
@@ -42,7 +42,7 @@ func promoteFixture(t *testing.T, liveName, liveStatus string, extra ...fakecli.
 	if _, err := fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	f.env["HERDR_SOHO_FAKECLI_CONFIG"] = fakeDir
+	f.env["SOHO_FAKECLI_CONFIG"] = fakeDir
 	f.env["PATH"] = fakeDir + string(os.PathListSeparator) + f.env.Get("PATH")
 	f.env["HERDR_PANE_ID"] = promotePane
 	// Production state initialization (creates the subdirs and the roster
@@ -61,7 +61,7 @@ func promoteVerbRules() []fakecli.Rule {
 	return []fakecli.Rule{
 		{Argv: []string{"agent", "rename", promotePane, "orchestrator"}},
 		{Argv: []string{"pane", "get", promotePane}, Stdout: fmt.Sprintf(`{"result":{"pane":{"pane_id":%q,"title":""}}}`, promotePane)},
-		{Argv: []string{"pane", "report-metadata", promotePane, "--source", "herdr-soho"}, ArgvPrefix: true},
+		{Argv: []string{"pane", "report-metadata", promotePane, "--source", "soho"}, ArgvPrefix: true},
 	}
 }
 
@@ -103,7 +103,7 @@ func runPromote(t *testing.T, f *copiesFixture, env platform.Env, argv ...string
 				panic(value)
 			}
 			if exitErr.Msg != "" {
-				_, _ = fmt.Fprintf(&errOut, "herdr-soho: %s\n", exitErr.Msg)
+				_, _ = fmt.Fprintf(&errOut, "soho: %s\n", exitErr.Msg)
 			}
 			code = exitErr.Code
 		}()
@@ -116,7 +116,7 @@ func runPromote(t *testing.T, f *copiesFixture, env platform.Env, argv ...string
 // calls case (the handler probed nothing).
 func promoteCalls(t *testing.T, env platform.Env) []fakecli.Call {
 	t.Helper()
-	calls, err := fakecli.ReadCalls(filepath.Join(env.Get("HERDR_SOHO_FAKECLI_CONFIG"), "herdr.calls.jsonl"))
+	calls, err := fakecli.ReadCalls(filepath.Join(env.Get("SOHO_FAKECLI_CONFIG"), "herdr.calls.jsonl"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -243,7 +243,7 @@ func TestPromoteSuccessWorkingCaller(t *testing.T) {
 	if !hasCall(calls, "agent", "rename", promotePane, "orchestrator") {
 		t.Fatalf("the generic name was not renamed: %v", calls)
 	}
-	if !hasCall(calls, "pane", "report-metadata", promotePane, "--source", "herdr-soho", "--title", wantTitle) {
+	if !hasCall(calls, "pane", "report-metadata", promotePane, "--source", "soho", "--title", wantTitle) {
 		t.Fatalf("the orchestrator title was not set: %v", calls)
 	}
 	assertOnlyScopeCalls(t, calls)
@@ -257,7 +257,7 @@ func TestPromoteSuccessKeepsAnOrchestratorName(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f, wantTitle := promoteFixture(t, name, "idle",
 				fakecli.Rule{Argv: []string{"pane", "get", promotePane}, Stdout: fmt.Sprintf(`{"result":{"pane":{"pane_id":%q,"title":""}}}`, promotePane)},
-				fakecli.Rule{Argv: []string{"pane", "report-metadata", promotePane, "--source", "herdr-soho"}, ArgvPrefix: true})
+				fakecli.Rule{Argv: []string{"pane", "report-metadata", promotePane, "--source", "soho"}, ArgvPrefix: true})
 			sd := f.stateDir(t)
 			promoteRoster(t, sd, name)
 			code, out, stderr := runPromote(t, f, f.env)
@@ -268,7 +268,7 @@ func TestPromoteSuccessKeepsAnOrchestratorName(t *testing.T) {
 			if res.Name != name || res.RosterRow != "removed" || res.Title != wantTitle {
 				t.Fatalf("unexpected result: %+v", res)
 			}
-			if !hasCall(promoteCalls(t, f.env), "pane", "report-metadata", promotePane, "--source", "herdr-soho", "--title", wantTitle) {
+			if !hasCall(promoteCalls(t, f.env), "pane", "report-metadata", promotePane, "--source", "soho", "--title", wantTitle) {
 				t.Fatalf("the orchestrator title was not set exactly: %v", promoteCalls(t, f.env))
 			}
 			if hasCall(promoteCalls(t, f.env), "agent", "rename", promotePane, name) {
@@ -282,7 +282,7 @@ func TestPromoteTitleFromAnExistingWorkerTitle(t *testing.T) {
 	f, _ := promoteFixture(t, "sub-orch", "working",
 		fakecli.Rule{Argv: []string{"agent", "rename", promotePane, "orchestrator"}},
 		fakecli.Rule{Argv: []string{"pane", "get", promotePane}, Stdout: fmt.Sprintf(`{"result":{"pane":{"pane_id":%q,"title":"sub-orchestrator: Build the thing"}}}`, promotePane)},
-		fakecli.Rule{Argv: []string{"pane", "report-metadata", promotePane, "--source", "herdr-soho"}, ArgvPrefix: true})
+		fakecli.Rule{Argv: []string{"pane", "report-metadata", promotePane, "--source", "soho"}, ArgvPrefix: true})
 	sd := f.stateDir(t)
 	promoteRoster(t, sd, "sub-orch")
 	code, out, stderr := runPromote(t, f, f.env)
@@ -293,7 +293,7 @@ func TestPromoteTitleFromAnExistingWorkerTitle(t *testing.T) {
 	if res.Title != "orchestrator: Build the thing" || res.TitleKept {
 		t.Fatalf("the worker title must be relabeled under orchestrator: %+v", res)
 	}
-	if !hasCall(promoteCalls(t, f.env), "pane", "report-metadata", promotePane, "--source", "herdr-soho", "--title", "orchestrator: Build the thing") {
+	if !hasCall(promoteCalls(t, f.env), "pane", "report-metadata", promotePane, "--source", "soho", "--title", "orchestrator: Build the thing") {
 		t.Fatalf("the relabeled title was not set: %v", promoteCalls(t, f.env))
 	}
 }
@@ -327,7 +327,7 @@ func TestPromoteTitleFromACustomTitle(t *testing.T) {
 			f, _ := promoteFixture(t, "sub-orch", "working",
 				fakecli.Rule{Argv: []string{"agent", "rename", promotePane, "orchestrator"}},
 				fakecli.Rule{Argv: []string{"pane", "get", promotePane}, Stdout: fmt.Sprintf(`{"result":{"pane":{"pane_id":%q,"title":%q}}}`, promotePane, tc.existing)},
-				fakecli.Rule{Argv: []string{"pane", "report-metadata", promotePane, "--source", "herdr-soho"}, ArgvPrefix: true})
+				fakecli.Rule{Argv: []string{"pane", "report-metadata", promotePane, "--source", "soho"}, ArgvPrefix: true})
 			sd := f.stateDir(t)
 			promoteRoster(t, sd, "sub-orch")
 			code, out, stderr := runPromote(t, f, f.env)
@@ -338,7 +338,7 @@ func TestPromoteTitleFromACustomTitle(t *testing.T) {
 			if res.Title != tc.want || res.TitleKept {
 				t.Fatalf("the custom title must be preserved under orchestrator: got %+v want %q", res, tc.want)
 			}
-			if !hasCall(promoteCalls(t, f.env), "pane", "report-metadata", promotePane, "--source", "herdr-soho", "--title", tc.want) {
+			if !hasCall(promoteCalls(t, f.env), "pane", "report-metadata", promotePane, "--source", "soho", "--title", tc.want) {
 				t.Fatalf("the preserved title was not set: %v", promoteCalls(t, f.env))
 			}
 		})
@@ -567,7 +567,7 @@ func staleFixture(t *testing.T, agentGetTemplate string) *copiesFixture {
 	if _, err := fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	f.env["HERDR_SOHO_FAKECLI_CONFIG"] = fakeDir
+	f.env["SOHO_FAKECLI_CONFIG"] = fakeDir
 	f.env["PATH"] = fakeDir + string(os.PathListSeparator) + f.env.Get("PATH")
 	f.env["HERDR_PANE_ID"] = promotePane
 	ctx := core.LoadConfig(f.env, f.cwd)
@@ -845,7 +845,7 @@ func TestPromotePartialOnTitleFailure(t *testing.T) {
 		f, _ := promoteFixture(t, "sub-orch", "working",
 			fakecli.Rule{Argv: []string{"agent", "rename", promotePane, "orchestrator"}},
 			fakecli.Rule{Argv: []string{"pane", "get", promotePane}, Stdout: fmt.Sprintf(`{"result":{"pane":{"pane_id":%q,"title":""}}}`, promotePane)},
-			fakecli.Rule{Argv: []string{"pane", "report-metadata", promotePane, "--source", "herdr-soho"}, ArgvPrefix: true, Code: 1, Stderr: "metadata rejected"})
+			fakecli.Rule{Argv: []string{"pane", "report-metadata", promotePane, "--source", "soho"}, ArgvPrefix: true, Code: 1, Stderr: "metadata rejected"})
 		sd := f.stateDir(t)
 		promoteRoster(t, sd, "sub-orch")
 		code, _, stderr := runPromote(t, f, f.env)

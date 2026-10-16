@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/taskreport"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
-	waitpkg "github.com/djalmajr/herdr-soho/internal/wait"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/taskreport"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
+	waitpkg "github.com/djalmajr/soho/internal/wait"
 )
 
 const (
@@ -84,7 +84,7 @@ func newCompactPhaseDispatchFixture(t *testing.T, root string, clockStep time.Du
 		brief:    brief,
 		env: platform.Env{
 			"PATH":                             bin + string(os.PathListSeparator) + "/usr/bin:/bin",
-			"HERDR_SOHO_FAKECLI_CONFIG":        bin,
+			"SOHO_FAKECLI_CONFIG":              bin,
 			"HERDR_ENV":                        "1",
 			"HERDR_SOHO_DIR":                   state,
 			"HERDR_WORKSPACE_ID":               "ws",
@@ -93,7 +93,7 @@ func newCompactPhaseDispatchFixture(t *testing.T, root string, clockStep time.Du
 			"HERDR_SOHO_PROMPT_CHECK_SECONDS":  "0",
 			"HERDR_SOHO_PROMPT_SETTLE_SECONDS": "0",
 			"HERDR_SOHO_BRIEF_LINT":            "off",
-			"HERDR_SOHO_WAIT_POLL_MS":          "50",
+			"SOHO_WAIT_POLL_MS":                "50",
 			"FAKECLI_WAIT_FILE_TIMEOUT_MS":     "15000",
 			"TMPDIR":                           root,
 			"HOME":                             filepath.Join(root, "home"),
@@ -243,7 +243,7 @@ func TestDispatchCompactSuccessShowsThePhaseAndSendsAfterIt(t *testing.T) {
 		t.Fatalf("code=%d out=%q err=%q", res.code, res.out, res.err)
 	}
 	compactPhaseMarkerAbsent(t, marker)
-	wantLine := "herdr-soho: dispatch: compacting 'worker' before sending the brief; status shows this phase\n"
+	wantLine := "soho: dispatch: compacting 'worker' before sending the brief; status shows this phase\n"
 	if !strings.Contains(res.err, wantLine) {
 		t.Fatalf("stderr=%q; want the progress line before the phase", res.err)
 	}
@@ -278,7 +278,7 @@ func TestDispatchCompactTimeoutRemovesTheMarkerAndSendsNothing(t *testing.T) {
 	if !strings.Contains(out, `"status":"timeout"`) {
 		t.Fatalf("the phase's timeout JSON is missing from stdout: %q", out)
 	}
-	if !strings.Contains(errText, "herdr-soho: dispatch: the compact step of 'worker' did not finish (exit 9); the brief was not sent") {
+	if !strings.Contains(errText, "soho: dispatch: the compact step of 'worker' did not finish (exit 9); the brief was not sent") {
 		t.Fatalf("stderr=%q; want the did-not-finish note", errText)
 	}
 	compactPhaseMarkerAbsent(t, marker)
@@ -304,7 +304,7 @@ func TestDispatchCompactBusyWorkerReleasesTheMarkerAndSendsNothing(t *testing.T)
 	if out != "" {
 		t.Fatalf("a panicked phase printed stdout: %q", out)
 	}
-	if !strings.Contains(errText, "herdr-soho: dispatch: the compact step of 'worker' did not finish (exit 10); the brief was not sent") {
+	if !strings.Contains(errText, "soho: dispatch: the compact step of 'worker' did not finish (exit 10); the brief was not sent") {
 		t.Fatalf("stderr=%q; want the did-not-finish note", errText)
 	}
 	compactPhaseMarkerAbsent(t, marker)
@@ -398,10 +398,10 @@ func TestDispatchCompactSuccessWithUnremovableMarkerAbortsBeforeSend(t *testing.
 			if res.out != "" {
 				t.Fatalf("the aborted dispatch printed a result JSON: %q", res.out)
 			}
-			if !strings.Contains(res.err, "herdr-soho: warning: dispatch: the compact-phase marker of 'worker' was not removed:") {
+			if !strings.Contains(res.err, "soho: warning: dispatch: the compact-phase marker of 'worker' was not removed:") {
 				t.Fatalf("stderr=%q; want the recorded cleanup failure", res.err)
 			}
-			if !strings.Contains(res.err, "herdr-soho: dispatch: the compact phase of 'worker' finished, but its marker could not be removed (") || !strings.Contains(res.err, "the brief was not sent") {
+			if !strings.Contains(res.err, "soho: dispatch: the compact phase of 'worker' finished, but its marker could not be removed (") || !strings.Contains(res.err, "the brief was not sent") {
 				t.Fatalf("stderr=%q; want the 4 diagnosis naming that the brief was not sent", res.err)
 			}
 			if !strings.Contains(res.err, c.wantDiag) {
@@ -525,7 +525,7 @@ func TestDispatchWithoutCompactRefusesAnActivePhase(t *testing.T) {
 	if out != "" {
 		t.Fatalf("the refusal printed stdout: %q", out)
 	}
-	want := fmt.Sprintf("herdr-soho: dispatch: the compact phase of 'worker' (pane p1) is in progress (owner pid %d is alive); the brief was not sent; wait for it to end (herdr-soho status worker)", os.Getpid())
+	want := fmt.Sprintf("soho: dispatch: the compact phase of 'worker' (pane p1) is in progress (owner pid %d is alive); the brief was not sent; wait for it to end (soho status worker)", os.Getpid())
 	if !strings.Contains(errText, want) {
 		t.Fatalf("stderr=%q; want %q", errText, want)
 	}
@@ -589,7 +589,7 @@ func TestDispatchWithoutCompactCleansDeadAndForeignRecords(t *testing.T) {
 		if code != 4 || out != "" {
 			t.Fatalf("code=%d out=%q err=%q; want the 4 refusal", code, out, errText)
 		}
-		want := "herdr-soho: dispatch: the compact-phase marker " + marker + " of 'worker' is unreadable; the brief was not sent"
+		want := "soho: dispatch: the compact-phase marker " + marker + " of 'worker' is unreadable; the brief was not sent"
 		if !strings.Contains(errText, want) {
 			t.Fatalf("stderr=%q; want %q", errText, want)
 		}
@@ -615,7 +615,7 @@ func TestDispatchWithoutCompactCleansDeadAndForeignRecords(t *testing.T) {
 		if code != 4 || out != "" {
 			t.Fatalf("code=%d out=%q err=%q; want the 4 refusal", code, out, errText)
 		}
-		want := "herdr-soho: dispatch: the compact-phase marker " + marker + " of 'worker' is unreadable; the brief was not sent"
+		want := "soho: dispatch: the compact-phase marker " + marker + " of 'worker' is unreadable; the brief was not sent"
 		if !strings.Contains(errText, want) {
 			t.Fatalf("stderr=%q; want %q", errText, want)
 		}
@@ -834,13 +834,13 @@ func newCompactPhaseStatusFixture(t *testing.T, withStaleReport bool) *compactPh
 		briefPath: briefPath,
 		ctx:       &core.Config{Entries: map[string]core.ConfigEntry{}},
 		env: platform.Env{
-			"PATH":                      bin + string(os.PathListSeparator) + "/usr/bin:/bin",
-			"HERDR_ENV":                 "1",
-			"HERDR_SOHO_DIR":            state,
-			"HERDR_WORKSPACE_ID":        "ws",
-			"HERDR_SOCKET_PATH":         filepath.Join(root, "none.sock"),
-			"HERDR_SOHO_FAKECLI_CONFIG": bin,
-			"HERDR_SOHO_SKILL_DIR":      skill,
+			"PATH":                 bin + string(os.PathListSeparator) + "/usr/bin:/bin",
+			"HERDR_ENV":            "1",
+			"HERDR_SOHO_DIR":       state,
+			"HERDR_WORKSPACE_ID":   "ws",
+			"HERDR_SOCKET_PATH":    filepath.Join(root, "none.sock"),
+			"SOHO_FAKECLI_CONFIG":  bin,
+			"HERDR_SOHO_SKILL_DIR": skill,
 		},
 		cwd: cwd,
 	}
@@ -987,7 +987,7 @@ func TestStatusCompactPhaseLines(t *testing.T) {
 		if out != want {
 			t.Fatalf("status line:\n got:  %q\nwant: %q", out, want)
 		}
-		if !strings.Contains(errText, "herdr-soho: warning: status: the compact-pending marker "+marker+" of 'worker' is unreadable; it was left in place") {
+		if !strings.Contains(errText, "soho: warning: status: the compact-pending marker "+marker+" of 'worker' is unreadable; it was left in place") {
 			t.Fatalf("stderr=%q; want the visible warning", errText)
 		}
 		after, err := os.ReadFile(marker)
@@ -1009,7 +1009,7 @@ func TestStatusCompactPhaseLines(t *testing.T) {
 		if out != want {
 			t.Fatalf("status line:\n got:  %q\nwant: %q", out, want)
 		}
-		if !strings.Contains(errText, "herdr-soho: warning: status: the compact-pending marker "+marker+" of 'worker' is unreadable; it was left in place") {
+		if !strings.Contains(errText, "soho: warning: status: the compact-pending marker "+marker+" of 'worker' is unreadable; it was left in place") {
 			t.Fatalf("stderr=%q; want the visible warning", errText)
 		}
 		after, err := os.ReadFile(marker)

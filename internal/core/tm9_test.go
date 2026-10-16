@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/provider"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/provider"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestTM9CoreCases(t *testing.T) {
@@ -36,10 +36,10 @@ func TestTM9CoreCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, want := ConfigFileFor("user", env, repo), filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config"); got != want {
+		if got, want := ConfigFileFor("user", env, repo), filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config"); got != want {
 			t.Fatalf("user config path=%q want %q", got, want)
 		}
-		if got, want := ConfigFileFor("project", env, repo), filepath.Join(repo, ".agents", "herdr-soho.conf"); got != want {
+		if got, want := ConfigFileFor("project", env, repo), filepath.Join(repo, ".agents", "soho.conf"); got != want {
 			t.Fatalf("project config path=%q want %q", got, want)
 		}
 	})
@@ -53,7 +53,7 @@ func TestTM9CoreCases(t *testing.T) {
 	})
 	t.Run("laneNames: sort -u order (C locale) and only effective non-empty roles", func(t *testing.T) { // JS: "laneNames: sort -u order (C locale) and only effective non-empty roles"
 		env, repo := fixture(t)
-		write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.z.roles=tasker\nlane.a.roles=\nlane.b.roles=implementer\n")
+		write(t, filepath.Join(repo, ".agents", "soho.conf"), "lane.z.roles=tasker\nlane.a.roles=\nlane.b.roles=implementer\n")
 		ctx := LoadConfig(env, repo)
 		if got := strings.Join(LaneNames(&ctx, env), ","); got != "b,z" {
 			t.Fatalf("effective lane names=%q", got)
@@ -76,7 +76,7 @@ func TestTM9CoreCases(t *testing.T) {
 	t.Run("maxWorkers: explicit value per layer (user, project, env, session)", func(t *testing.T) { // JS: "maxWorkers: explicit value per layer (user, project, env, session)"
 		env, repo := fixture(t)
 		write(t, platform.UserConfigPath(platform.Current(), env), "max_workers=4\n")
-		write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "max_workers=5\n")
+		write(t, filepath.Join(repo, ".agents", "soho.conf"), "max_workers=5\n")
 		write(t, filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf"), "max_workers=6\n")
 		ctx := LoadConfig(env, repo)
 		if got := MaxWorkers(&ctx, env); got != "6" {
@@ -104,7 +104,7 @@ func TestTM9CoreCases(t *testing.T) {
 			t.Skip("a read-only directory does not block writes on this host")
 		}
 		env, repo := fixture(t)
-		dest := filepath.Join(t.TempDir(), "dest", "herdr-soho.conf")
+		dest := filepath.Join(t.TempDir(), "dest", "soho.conf")
 		const original = "role.implementer.kind=grok\n"
 		write(t, dest, original)
 		if err := os.Chmod(filepath.Dir(dest), 0o555); err != nil {
@@ -124,7 +124,7 @@ func TestTM9CoreCases(t *testing.T) {
 			t.Fatalf("dest=%q err=%v", got, err)
 		}
 		entries, err := os.ReadDir(filepath.Dir(dest))
-		if err != nil || len(entries) != 1 || entries[0].Name() != "herdr-soho.conf" {
+		if err != nil || len(entries) != 1 || entries[0].Name() != "soho.conf" {
 			t.Fatalf("entries=%v err=%v", entries, err)
 		}
 	})
@@ -139,7 +139,7 @@ func TestTM9CoreCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		env["PATH"] = bin
-		env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+		env["SOHO_FAKECLI_CONFIG"] = bin
 		env["HERDR_SOCKET_PATH"] = filepath.Join(t.TempDir(), "missing.sock")
 		ctx := LoadConfig(env, repo)
 		if got := LaneDecide(&ctx, "build", "implementer", env, repo, true).Decision; got != "absent" {
@@ -338,7 +338,7 @@ func tm9LiveWorkerFixture(t *testing.T, rows []string, rules []fakecli.Rule) (pl
 		t.Fatal(err)
 	}
 	env["PATH"] = bin
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+	env["SOHO_FAKECLI_CONFIG"] = bin
 	env["HERDR_SOCKET_PATH"] = filepath.Join(t.TempDir(), "missing.sock")
 	ctx := LoadConfig(env, cwd)
 	state := StateDir(&ctx, env, cwd)

@@ -12,8 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // boardRefreshInterval is the team board's auto-update cadence; tests replace it.
@@ -1296,7 +1296,7 @@ func runSessionLoopWithSignals(env platform.Env, platformName, executable string
 				if bin == "" {
 					bin = "herdr"
 				}
-				_ = pickerRun(contextpkg.Background(), bin, []string{"notification", "show", "herdr-soho", "--body", res.Note, "--sound", "none"}, env, platformName, 30_000, "")
+				_ = pickerRun(contextpkg.Background(), bin, []string{"notification", "show", "soho", "--body", res.Note, "--sound", "none"}, env, platformName, 30_000, "")
 			}
 			boardNavApplyResult(state, res)
 			redrawSession(stdout, state, width)

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestTM10InitGoldenMirrors(t *testing.T) {
@@ -20,7 +20,7 @@ func TestTM10InitGoldenMirrors(t *testing.T) {
 	})
 	t.Run(`JS: "init: first_run false with a roster row and no config (comments and max_workers do not count)"`, func(t *testing.T) {
 		seed := func(repo, state string, roster string) {
-			conf := filepath.Join(repo, ".agents", "herdr-soho.conf")
+			conf := filepath.Join(repo, ".agents", "soho.conf")
 			if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -130,7 +130,7 @@ func TestTM10InitGoldenMirrors(t *testing.T) {
 		}
 		count := 0
 		for _, call := range calls {
-			if strings.Join(call.Argv, " ") == "pane report-metadata p1 --source herdr-soho --title orchestrator: repo" {
+			if strings.Join(call.Argv, " ") == "pane report-metadata p1 --source soho --title orchestrator: repo" {
 				count++
 			}
 		}
@@ -180,7 +180,7 @@ func runTM10Init(t *testing.T, agent, pane string, paneGetCode, metadataCode int
 		{Argv: []string{"agent", "list"}, Stdout: `{"result":{"agents":[]}}`},
 		{Argv: []string{"agent", "rename", "p1", "orchestrator"}},
 		{Argv: []string{"pane", "get", "p1"}, Stdout: pane, Code: paneGetCode},
-		{Argv: []string{"pane", "report-metadata", "p1", "--source", "herdr-soho", "--title", "orchestrator: repo"}, Code: metadataCode},
+		{Argv: []string{"pane", "report-metadata", "p1", "--source", "soho", "--title", "orchestrator: repo"}, Code: metadataCode},
 		{AnyArgs: true},
 	}
 	_, err := fakecli.Install(t, fakeDir, "herdr", rules)

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	herdrtext "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	herdrtext "github.com/djalmajr/soho/internal/text"
 )
 
 func cmdFeedback(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
@@ -86,7 +86,7 @@ func cmdFeedback(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	noticeFailed := false
 	noticeErr := ""
 	if to != "" {
-		message := fmt.Sprintf("herdr-soho feedback from %s (%s): %s — %s", project, core.WorkspaceID(ctx, env, cwd), summary, dest)
+		message := fmt.Sprintf("soho feedback from %s (%s): %s — %s", project, core.WorkspaceID(ctx, env, cwd), summary, dest)
 		result := herdr.AgentPrompt(to, message, env)
 		if !result.Ok {
 			noticeFailed = true

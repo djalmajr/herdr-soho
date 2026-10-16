@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // markFixture is a workspace whose state dir already holds a settled
@@ -81,7 +81,7 @@ func (f *markFixture) lines(t *testing.T) []string {
 }
 
 // run drives CmdMark the way cli.Run does: the ExitError panic is the exit
-// code and the message goes to stderr with the herdr-soho prefix.
+// code and the message goes to stderr with the soho prefix.
 func (f *markFixture) run(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	oldCwd, err := os.Getwd()
@@ -108,7 +108,7 @@ func (f *markFixture) run(t *testing.T, args ...string) (int, string, string) {
 				panic(value)
 			}
 			if exitErr.Msg != "" {
-				_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho: "+exitErr.Msg)
+				_, _ = fmt.Fprintln(platform.Stderr, "soho: "+exitErr.Msg)
 			}
 			code = exitErr.Code
 		}()
@@ -344,7 +344,7 @@ func TestMarkRefusals(t *testing.T) { // mutation: dropping a guard lets a mark 
 			f := newMarkFixture(t)
 			f.seedLine(t, tc.settled)
 			code, out, errOut := f.run(t, tc.args...)
-			want := "herdr-soho: " + "metrics mark: " + tc.stderr + "\n"
+			want := "soho: " + "metrics mark: " + tc.stderr + "\n"
 			if code != 2 || out != "" || errOut != want {
 				t.Fatalf("code=%d out=%q stderr=%q, want code 2, no stdout, stderr=%q", code, out, errOut, want)
 			}
@@ -389,13 +389,13 @@ func TestMarkInsideTheSkill(t *testing.T) { // mutation: skipping the StateDir r
 					panic(value)
 				}
 				if exitErr.Msg != "" {
-					_, _ = fmt.Fprintln(platform.Stderr, "herdr-soho: "+exitErr.Msg)
+					_, _ = fmt.Fprintln(platform.Stderr, "soho: "+exitErr.Msg)
 				}
 				code = exitErr.Code
 			}()
 			code = CmdMark([]string{"review-20261001T191548.md", "--missed", "P2"}, CommandContext{Config: f.ctx, Env: env, Cwd: skillCwd, FrictionLog: ""})
 		}()
-		want := "herdr-soho: the state dir '" + filepath.Join(f.skill, ".herdr-soho") + "' would be inside the herdr-soho skill ('" + f.skill + "'); run herdr-soho from the project's directory (nothing was written)\n"
+		want := "soho: the state dir '" + filepath.Join(f.skill, ".herdr-soho") + "' would be inside the soho skill ('" + f.skill + "'); run soho from the project's directory (nothing was written)\n"
 		if code != 2 || out.String() != "" || errOut.String() != want {
 			t.Fatalf("code=%d out=%q stderr=%q, want %q", code, out.String(), errOut.String(), want)
 		}

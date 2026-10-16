@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func TestPromptExplainsActiveAssignmentWithoutNormalCompletion(t *testing.T) {
 	root := t.TempDir()
 	env := platform.Env{"HERDR_SOHO_DIR": t.TempDir(), "HERDR_WORKSPACE_ID": "ws"}
-	skill, _ := filepath.Abs(filepath.Join("..", "..", "skills", "herdr-soho"))
+	skill, _ := filepath.Abs(filepath.Join("..", "..", "skills", "soho"))
 	env["HERDR_SOHO_SKILL_DIR"] = skill
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	sd := core.StateDir(&ctx, env, root)

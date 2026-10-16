@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // Review probes for the required receipt contract: a path that is not a
@@ -40,7 +40,7 @@ func reviewReceiptFixture(t *testing.T, kind, screen string) *dispatchArrivalFix
 		fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, ArgvPrefix: true},
 	)
 	arrivalRosterKind(t, f, kind)
-	f.env["HERDR_SOHO_WAIT_POLL_MS"] = "50"
+	f.env["SOHO_WAIT_POLL_MS"] = "50"
 	return f
 }
 

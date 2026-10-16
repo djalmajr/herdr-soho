@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	textutil "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	textutil "github.com/djalmajr/soho/internal/text"
 )
 
 var shellNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -62,6 +62,17 @@ func laneRolesName(key, prefix, suffix string) (string, bool) {
 		return "", false
 	}
 	return key[len(prefix) : len(key)-len(suffix)], true
+}
+
+// laneEnvName extracts the lane name from a SOHO_LANE_<n>_ROLES or
+// HERDR_SOHO_LANE_<n>_ROLES environment variable name; "" when k is neither.
+func laneEnvName(k string) string {
+	for _, prefix := range []string{"SOHO_LANE_", "HERDR_SOHO_LANE_"} {
+		if name, ok := laneRolesName(k, prefix, "_ROLES"); ok {
+			return name
+		}
+	}
+	return ""
 }
 
 func PresetLaneNamesFor(p, mode string) []string {
@@ -149,7 +160,7 @@ func CustomLanesPresent(ctx *Config, env platform.Env) bool {
 	}
 	for k, v := range env {
 		if shellNameRE.MatchString(k) && v != "" {
-			if _, ok := laneRolesName(k, "HERDR_SOHO_LANE_", "_ROLES"); ok {
+			if laneEnvName(k) != "" {
 				return true
 			}
 		}
@@ -174,12 +185,8 @@ func LaneNames(ctx *Config, env platform.Env) []string {
 		if !shellNameRE.MatchString(k) || v == "" {
 			continue
 		}
-		name, ok := laneRolesName(k, "HERDR_SOHO_LANE_", "_ROLES")
-		if !ok {
-			continue
-		}
-		n := strings.ToLower(name)
-		if Cfg(ctx, LaneKey(n, "roles"), "", env) != "" {
+		n := strings.ToLower(laneEnvName(k))
+		if n != "" && Cfg(ctx, LaneKey(n, "roles"), "", env) != "" {
 			names[n] = true
 		}
 	}
@@ -230,12 +237,14 @@ func EffectiveLaneSignature(ctx *Config, env platform.Env) string {
 		}
 	}
 	for k, v := range env {
-		if !shellNameRE.MatchString(k) || v == "" || !strings.HasPrefix(k, "HERDR_SOHO_LANE_") || !strings.HasSuffix(k, "_ROLES") {
+		if !shellNameRE.MatchString(k) || v == "" {
 			continue
 		}
-		n := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(k, "HERDR_SOHO_LANE_"), "_ROLES"))
-		if x := Cfg(ctx, LaneKey(n, "roles"), "", env); x != "" {
-			vals[n] = x
+		n := strings.ToLower(laneEnvName(k))
+		if n != "" {
+			if x := Cfg(ctx, LaneKey(n, "roles"), "", env); x != "" {
+				vals[n] = x
+			}
 		}
 	}
 	keys := make([]string, 0, len(vals))
@@ -802,7 +811,7 @@ func MigrateLaneAttr(file, lane, rolesCSV, attr string, acc *laneMigration, env 
 	}
 	if !agree {
 		msg := fmt.Sprintf("lane '%s' %ss differ (%s). Left the role.*.%s keys in place. Orchestrator: ask the user which %s this lane should use, then run 'setup --lane %s=<kind>[:<model>[:<effort>]]'.", lane, attr, strings.Join(vals, " "), attr, attr, lane)
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: %s\n", msg)
+		_, _ = fmt.Fprintf(platform.Stderr, "soho: warning: %s\n", msg)
 	}
 }
 
@@ -920,7 +929,7 @@ func ApplyLaneFile(file, panes string, env platform.Env, cwd string) []string {
 	mode := PaneMode(&ctx, env)
 	lines := []string{}
 	if !isPreset {
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: warning: lane roles in %s are custom; left in place. Remove them to restore the panes=%s preset.\n", file, panes)
+		_, _ = fmt.Fprintf(platform.Stderr, "soho: warning: lane roles in %s are custom; left in place. Remove them to restore the panes=%s preset.\n", file, panes)
 	} else {
 		dropPresetFileExtras(file, panes, &lines, mode)
 	}

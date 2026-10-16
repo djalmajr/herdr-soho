@@ -1,8 +1,8 @@
 {
-  "name": "herdr-soho-base-runners",
+  "name": "soho-base-runners",
   "version": "0.0.0",
   "private": true,
-  "description": "Pinned npm-distributed agent runner CLIs installed into the herdr-soho base image with npm ci --ignore-scripts.",
+  "description": "Pinned npm-distributed agent runner CLIs installed into the soho base image with npm ci --ignore-scripts.",
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.1.0",
     "@openai/codex": "0.162.1"

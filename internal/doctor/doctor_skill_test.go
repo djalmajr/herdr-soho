@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // insideSkillFixture builds a hermetic env whose skill dir (SKILL.md only) is
 // the project root the state would resolve to: with cwd inside the skill and
-// no HERDR_SOHO_DIR the state root is <skill>/.herdr-soho.
+// no HERDR_SOHO_DIR the state root is <skill>/.soho.
 func insideSkillFixture(t *testing.T) (root, skill string, env platform.Env) {
 	t.Helper()
 	root = t.TempDir()
@@ -33,7 +33,7 @@ func insideSkillFixture(t *testing.T) (root, skill string, env platform.Env) {
 	}
 	env = platform.Env{
 		"HOME": home, "USERPROFILE": home, "PATH": bin,
-		"HERDR_ENV": "1", "HERDR_SOHO_FAKECLI_CONFIG": bin,
+		"HERDR_ENV": "1", "SOHO_FAKECLI_CONFIG": bin,
 		"HERDR_SOHO_SKILL_DIR": skill,
 	}
 	return root, skill, env
@@ -45,8 +45,8 @@ func TestDoctorWarnsWhenTheStateDirIsInsideTheSkill(t *testing.T) {
 	var out strings.Builder
 	DoctorCheck(&ctx, env, skill, &out) // cwd = the skill; must finish
 	got := out.String()
-	rootPath := filepath.Join(skill, ".herdr-soho")
-	want := "warn   state dir: '" + rootPath + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory\n"
+	rootPath := filepath.Join(skill, ".soho")
+	want := "warn   state dir: '" + rootPath + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("doctor output lacks the warn line:\n%s", got)
 	}
@@ -103,7 +103,7 @@ func TestInitRefusesBeforeDoctorCheckWhenInsideTheSkill(t *testing.T) {
 	if exitErr.Code != 2 {
 		t.Fatalf("exit=%d msg=%q", exitErr.Code, exitErr.Msg)
 	}
-	want := "the state dir '" + filepath.Join(skill, ".herdr-soho") + "' would be inside the herdr-soho skill ('" + skill + "'); run herdr-soho from the project's directory (nothing was written)"
+	want := "the state dir '" + filepath.Join(skill, ".soho") + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"
 	if exitErr.Msg != want {
 		t.Fatalf("msg=%q want %q", exitErr.Msg, want)
 	}
@@ -113,7 +113,7 @@ func TestInitRefusesBeforeDoctorCheckWhenInsideTheSkill(t *testing.T) {
 		t.Fatalf("DoctorCheck ran before the refusal (stdout=%q stderr=%q)", outBuf.String(), errBuf.String())
 	}
 	// Nothing was created: DoctorCheck (with its MkdirAll) never ran.
-	if _, err := os.Stat(filepath.Join(skill, ".herdr-soho")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(skill, ".soho")); !os.IsNotExist(err) {
 		t.Fatalf("state dir created before the refusal: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(skill, ".gitignore")); !os.IsNotExist(err) {

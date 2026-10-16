@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 type tm11SpawnStep struct {
@@ -169,7 +169,7 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 				tm11SpawnReset(t, f)
 				_ = tm11SpawnWriteConfig(t, f, "", "lane.build.kind = \"codex\"\n")
 			case 5:
-				_ = os.Remove(filepath.Join(f.cwd, ".agents", "herdr-soho.conf"))
+				_ = os.Remove(filepath.Join(f.cwd, ".agents", "soho.conf"))
 				roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\n" + "implementer\tp-impl\tgrok\timplementer\txai\t1\t" + f.cwd + "\tnow\n"
 				if err := os.WriteFile(filepath.Join(f.state, "agents.tsv"), []byte(roster), 0o600); err != nil {
 					t.Fatal(err)
@@ -306,7 +306,7 @@ func newTM11SpawnFixture(t *testing.T, herdrRules []fakecli.Rule) *tm11SpawnFixt
 	clean["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "0"
 	clean["HERDR_SOHO_LAYOUT"] = "tab"
 	clean["HERDR_SOHO_REGRID"] = "off"
-	clean["HERDR_SOHO_WAIT_POLL_MS"] = "1"
+	clean["SOHO_WAIT_POLL_MS"] = "1"
 	clean = withFakeCLI(clean, bin)
 	return &tm11SpawnFixture{env: clean, cwd: cwd, state: filepath.Join(state, "ws"), bin: bin, herdrLog: filepath.Join(bin, "herdr.log")}
 }
@@ -460,9 +460,9 @@ func tm11SpawnSeed(t *testing.T, f *tm11SpawnFixture, rows [][4]string, live str
 
 func tm11SpawnWriteConfig(t *testing.T, f *tm11SpawnFixture, user, project string) error {
 	t.Helper()
-	// user layer: the file the product reads ($XDG_CONFIG_HOME/herdr-soho/config)
-	userPath := filepath.Join(f.env["XDG_CONFIG_HOME"], "herdr-soho", "config")
-	projectPath := filepath.Join(f.cwd, ".agents", "herdr-soho.conf")
+	// user layer: the file the product reads ($XDG_CONFIG_HOME/soho/config)
+	userPath := filepath.Join(f.env["XDG_CONFIG_HOME"], "soho", "config")
+	projectPath := filepath.Join(f.cwd, ".agents", "soho.conf")
 	if user == "" {
 		_ = os.Remove(userPath)
 	} else {

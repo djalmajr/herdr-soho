@@ -21,7 +21,7 @@ func TestSetValuesWithDoubleDash(t *testing.T) {
 	}
 	projectFile := func(t *testing.T, cwd string) string {
 		t.Helper()
-		data, err := os.ReadFile(filepath.Join(cwd, ".agents", "herdr-soho.conf"))
+		data, err := os.ReadFile(filepath.Join(cwd, ".agents", "soho.conf"))
 		if err != nil {
 			t.Fatal(err)
 		}

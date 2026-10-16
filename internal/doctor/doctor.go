@@ -9,18 +9,18 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/codexenv"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/dispatch"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/kinds"
-	"github.com/djalmajr/herdr-soho/internal/layout"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	setupcmd "github.com/djalmajr/herdr-soho/internal/setup"
-	"github.com/djalmajr/herdr-soho/internal/setuptext"
-	"github.com/djalmajr/herdr-soho/internal/spawn"
-	textutil "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/codexenv"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/dispatch"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/kinds"
+	"github.com/djalmajr/soho/internal/layout"
+	"github.com/djalmajr/soho/internal/platform"
+	setupcmd "github.com/djalmajr/soho/internal/setup"
+	"github.com/djalmajr/soho/internal/setuptext"
+	"github.com/djalmajr/soho/internal/spawn"
+	textutil "github.com/djalmajr/soho/internal/text"
 )
 
 type Say struct {
@@ -92,7 +92,7 @@ func CmdInit(ctx *core.Config, env platform.Env, cwd string) {
 	// inside the skill before the refusal. Decided with StateInSkill/
 	// StateRootPath, so the refusal itself has no side effect.
 	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
-		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory (nothing was written)", core.StateRootPath(ctx, env, cwd), skill), 2)
+		platform.Die(fmt.Sprintf("the state dir '%s' would be inside the soho skill ('%s'); run soho from the project's directory (nothing was written)", core.StateRootPath(ctx, env, cwd), skill), 2)
 	}
 	oldOut := platform.Stdout
 	platform.Stdout = platform.Stderr
@@ -151,7 +151,7 @@ func CmdInit(ctx *core.Config, env platform.Env, cwd string) {
 
 func ProjectIsFirstRun(ctx *core.Config, env platform.Env, cwd string) bool {
 	root := platform.ProjectRoot(env, cwd)
-	file := filepath.Join(root, ".agents", "herdr-soho.conf")
+	file := filepath.Join(root, ".agents", "soho.conf")
 	if !isFile(file) {
 		file = core.LegacyProjectConfigPath(root)
 	}
@@ -171,9 +171,9 @@ var inlineComment = regexp.MustCompile(`[ \t]#.*$`)
 
 func isFile(p string) bool { st, e := os.Stat(p); return e == nil && st.Mode().IsRegular() }
 
-// entryScript is the native herdr-soho executable for the setup guidance
-// lines: the absolute HERDR_SOHO_BIN override or the currently running
-// binary (platform.LauncherPath), never the obsolete skill scripts launcher.
+// entryScript is the native executable for the setup guidance
+// lines: the absolute SOHO_BIN override or the currently running binary
+// (platform.LauncherPath), never the obsolete skill scripts launcher.
 func entryScript(env platform.Env) string {
 	return platform.LauncherPath(env)
 }
@@ -201,7 +201,7 @@ func CmdDoctor(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	}
 	if fix {
 		doctorFix(where, panes, ctx, env, cwd)
-		if env.Get("HERDR_SOHO_LIB") == "1" {
+		if env.Get("SOHO_LIB") == "1" || env.Get("HERDR_SOHO_LIB") == "1" {
 			return
 		}
 		fresh := core.LoadConfig(env, cwd)
@@ -337,7 +337,7 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 	// A state dir inside the skill is a warn, not a probe: no StateRoot, no
 	// MkdirAll, and the doctor goes on.
 	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
-		s.Warning(fmt.Sprintf("state dir: '%s' would be inside the herdr-soho skill ('%s'); run herdr-soho from the project's directory", core.StateRootPath(ctx, env, cwd), skill))
+		s.Warning(fmt.Sprintf("state dir: '%s' would be inside the soho skill ('%s'); run soho from the project's directory", core.StateRootPath(ctx, env, cwd), skill))
 	} else {
 		d := core.StateRoot(ctx, env, cwd)
 		if core.Nowrite(env) {
@@ -845,7 +845,7 @@ func doctorOrphans(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 		if state == "" {
 			state = "null"
 		}
-		s.Warning(fmt.Sprintf("orphan pane: '%s' (%s, %s) is not in the roster; close it with: herdr-soho release %s --close", orphan.Name, orphan.Pane, state, orphan.Name))
+		s.Warning(fmt.Sprintf("orphan pane: '%s' (%s, %s) is not in the roster; close it with: soho release %s --close", orphan.Name, orphan.Pane, state, orphan.Name))
 	}
 }
 
@@ -1087,14 +1087,14 @@ func checkSetup(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 		s.Ok("instruction block present in CLAUDE.local.md")
 	} else if tl || ll {
 		if ll || setupLocal {
-			s.Warning(fmt.Sprintf("legacy herdr-agents instruction block in CLAUDE.local.md: run '%s setup --local' to rename it in place (its text is kept)", entry))
+			s.Warning(fmt.Sprintf("an older instruction block in CLAUDE.local.md: run '%s setup --local' to rename it in place (its text is kept)", entry))
 		} else {
-			s.Warning(fmt.Sprintf("legacy herdr-agents instruction block in %s: run '%s setup' to rename it in place (its text is kept)", filepath.Base(target), entry))
+			s.Warning(fmt.Sprintf("an older instruction block in %s: run '%s setup' to rename it in place (its text is kept)", filepath.Base(target), entry))
 		}
 	} else if setupLocal {
-		s.Warning(fmt.Sprintf("no herdr-soho block in CLAUDE.local.md: run '%s setup --local' (writes the delegation rules between <!-- herdr-soho:start/end --> markers, kept unversioned)", entry))
+		s.Warning(fmt.Sprintf("no soho block in CLAUDE.local.md: run '%s setup --local' (writes the delegation rules between <!-- soho:start/end --> markers, kept unversioned)", entry))
 	} else {
-		s.Warning(fmt.Sprintf("no herdr-soho block in AGENTS.md/CLAUDE.md: run '%s setup' (writes the delegation rules between <!-- herdr-soho:start/end --> markers)", entry))
+		s.Warning(fmt.Sprintf("no soho block in AGENTS.md/CLAUDE.md: run '%s setup' (writes the delegation rules between <!-- soho:start/end --> markers)", entry))
 	}
 	// A separate CLAUDE.md (not a symlink, not the file setup targets) that
 	// still carries only the pre-rename block: Claude Code keeps reading it.
@@ -1102,7 +1102,7 @@ func checkSetup(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 	if info, err := os.Lstat(claudeMd); err == nil && info.Mode().IsRegular() && claudeMd != target {
 		claudeRaw, _ := platform.ReadTextFile(claudeMd)
 		if strings.Contains(claudeRaw, setuptext.LegacySetupStart) && !strings.Contains(claudeRaw, setuptext.SetupStart) {
-			s.Warning(fmt.Sprintf("legacy herdr-agents instruction block in CLAUDE.md: run '%s setup --target CLAUDE.md' to rename it in place (its text is kept)", entry))
+			s.Warning(fmt.Sprintf("an older instruction block in CLAUDE.md: run '%s setup --target CLAUDE.md' to rename it in place (its text is kept)", entry))
 		}
 	}
 	settings := filepath.Join(root, ".claude", "settings.json")
@@ -1117,23 +1117,23 @@ func checkSetup(ctx *core.Config, env platform.Env, cwd string, s *Say) {
 		}
 	} else if hook == "legacy" {
 		if ll || setupLocal {
-			s.Warning(fmt.Sprintf("legacy herdr-agents hooks in .claude/settings.json: run '%s setup --local' to replace them", entry))
+			s.Warning(fmt.Sprintf("an older version of the hooks in .claude/settings.json: run '%s setup --local' to replace them", entry))
 		} else {
-			s.Warning(fmt.Sprintf("legacy herdr-agents hooks in .claude/settings.json: run '%s setup' to replace them", entry))
+			s.Warning(fmt.Sprintf("an older version of the hooks in .claude/settings.json: run '%s setup' to replace them", entry))
 		}
 	} else if ln || setupLocal {
-		s.Warning(fmt.Sprintf("no herdr-soho hooks in .claude/settings.json: run '%s setup --local' (UserPromptSubmit reminder + SessionStart doctor)", entry))
+		s.Warning(fmt.Sprintf("no soho hooks in .claude/settings.json: run '%s setup --local' (UserPromptSubmit reminder + SessionStart doctor)", entry))
 	} else {
-		s.Warning(fmt.Sprintf("no herdr-soho hooks in .claude/settings.json: run '%s setup' (UserPromptSubmit reminder + SessionStart doctor)", entry))
+		s.Warning(fmt.Sprintf("no soho hooks in .claude/settings.json: run '%s setup' (UserPromptSubmit reminder + SessionStart doctor)", entry))
 	}
 }
 
 // settingsDoctorHook classifies the SessionStart hook the settings file
 // carries: "native" when the exact current native command is present,
 // "old" for the recognized previous herdr-soho shell command, "legacy" for
-// the exact pre-rename herdr-agents command, and "" for anything else.
+// the exact pre-rename herdr-soho native command, and "" for anything else.
 // Recognition is by exact command equality; a foreign command that merely
-// mentions herdr-soho is not a herdr-soho hook.
+// mentions herdr-soho is not a soho hook.
 func settingsDoctorHook(file string) string {
 	raw, e := platform.ReadTextFile(file)
 	if e != nil {

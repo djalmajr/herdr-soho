@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/layout"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/layout"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) int {
@@ -124,7 +124,7 @@ func cmdRelease(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 		// released it. A pane the skill did not create (spawn --pane) is
 		// never registered: release --close must never close it later.
 		core.ReleasedPanesRecord(ctx, env, cwd, agent, pane, field(2))
-		_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: release: the pane %s stays open; close it later with: herdr-soho release %s --close\n", pane, agent)
+		_, _ = fmt.Fprintf(platform.Stderr, "soho: release: the pane %s stays open; close it later with: soho release %s --close\n", pane, agent)
 	}
 
 	worktrees := exec.Command("git", "-C", wdir, "worktree", "list")
@@ -218,7 +218,7 @@ func releaseProcs(sd, agent string, keepProcs bool, env platform.Env) {
 		return
 	}
 	if unlock, lockErr := core.LockProcs(sd); lockErr != nil {
-		core.Warn(fmt.Sprintf("release: the processes of '%s' were not stopped (%v); run 'herdr-soho gc' later", agent, lockErr), frictionLogPath, "release")
+		core.Warn(fmt.Sprintf("release: the processes of '%s' were not stopped (%v); run 'soho gc' later", agent, lockErr), frictionLogPath, "release")
 		return
 	} else {
 		unlock()
@@ -267,7 +267,7 @@ func collaborationReleaseRefusal(sd, agent, pane string, ctx *core.Config, env p
 	if err := collaboration.CheckParticipants(*a, sd, env); err != nil {
 		return 4, fmt.Sprintf("release: the participants of collaboration %s cannot be verified (%v); inspect before releasing %s", a.ID, err, agent)
 	}
-	return 10, fmt.Sprintf("release: %s is a participant of active collaboration %s (phase %s, round %d); stop it and finalize it explicitly first (herdr-soho collaborate stop %s, then herdr-soho collaborate finalize %s --verdict accept|reject): release never fakes the cycle's outcome", agent, a.ID, a.Phase, a.Round, a.ID, a.ID)
+	return 10, fmt.Sprintf("release: %s is a participant of active collaboration %s (phase %s, round %d); stop it and finalize it explicitly first (soho collaborate stop %s, then soho collaborate finalize %s --verdict accept|reject): release never fakes the cycle's outcome", agent, a.ID, a.Phase, a.Round, a.ID, a.ID)
 }
 
 // releaseCopies removes the released agent's registered copies at the same
@@ -277,7 +277,7 @@ func collaborationReleaseRefusal(sd, agent, pane string, ctx *core.Config, env p
 // leaves every line: the copies become orphans for gc. The lock gates the
 // destructive phase and covers the registry re-read and re-write, not the
 // removals. The roster is already cleaned when this runs, so a registry held
-// by another herdr-soho never fails the release: the copies stay registered,
+// by another soho never fails the release: the copies stay registered,
 // with a warning, and become orphans for gc.
 func releaseCopies(sd, agent string, keepCopies bool, env platform.Env, cwd string) {
 	if keepCopies {
@@ -289,7 +289,7 @@ func releaseCopies(sd, agent string, keepCopies bool, env platform.Env, cwd stri
 		return
 	}
 	if unlock, lockErr := core.LockCopies(sd); lockErr != nil {
-		core.Warn(fmt.Sprintf("release: the copies of '%s' were not removed (%v); run 'herdr-soho gc' later", agent, lockErr), frictionLogPath, "release")
+		core.Warn(fmt.Sprintf("release: the copies of '%s' were not removed (%v); run 'soho gc' later", agent, lockErr), frictionLogPath, "release")
 		return
 	} else {
 		unlock()
@@ -327,6 +327,6 @@ func releaseCopies(sd, agent string, keepCopies bool, env platform.Env, cwd stri
 	}
 	if err := core.DropCopiesLines(sd, removed); err != nil {
 		// The removed copies' lines read as missing and gc drops them.
-		_, _ = fmt.Fprintf(platform.Stderr, "release: could not update the copy registry (%v); 'herdr-soho gc' drops the removed lines\n", err)
+		_, _ = fmt.Fprintf(platform.Stderr, "release: could not update the copy registry (%v); 'soho gc' drops the removed lines\n", err)
 	}
 }

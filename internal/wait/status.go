@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/communication"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/provider"
-	"github.com/djalmajr/herdr-soho/internal/sessionref"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/communication"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/provider"
+	"github.com/djalmajr/soho/internal/sessionref"
 )
 
 // probeNotInRoster runs the D11 agent get for an agent outside the roster
@@ -184,7 +184,7 @@ func CmdStatus(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 			// the local query; the hint cites the command form that worked.
 			if known, cmd := probeNotInRoster(agent, env); known {
 				state = "not-in-roster"
-				fmt.Fprintf(platform.Stderr, "herdr-soho: status: '%s' is not a worker of this workspace's team; %s shows its state\n", agent, cmd)
+				fmt.Fprintf(platform.Stderr, "soho: status: '%s' is not a worker of this workspace's team; %s shows its state\n", agent, cmd)
 			} else {
 				state = "unknown-agent"
 			}

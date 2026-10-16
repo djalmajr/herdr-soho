@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 func TestMachineConfig(t *testing.T) {
@@ -194,7 +194,7 @@ func TestMachineConfig(t *testing.T) {
 		}
 		// Project, session and environment layers never change it.
 		writeTeamFile(t, platform.UserConfigPath("linux", f.env), "job_finishing_timeout=25\n")
-		writeTeamFile(t, filepath.Join(f.cwd, ".agents", "herdr-soho.conf"), "job_finishing_timeout=26\n")
+		writeTeamFile(t, filepath.Join(f.cwd, ".agents", "soho.conf"), "job_finishing_timeout=26\n")
 		env := platform.Env{}
 		for k, v := range f.env {
 			env[k] = v
@@ -236,8 +236,8 @@ func TestMachineConfig(t *testing.T) {
 	t.Run("project session and environment never change the user file", func(t *testing.T) {
 		f := newMachineFix(t)
 		writeTeamFile(t, platform.UserConfigPath("linux", f.env), "machine_label=user-label\njob_orgs=user-org\njob_repos_root=/data/user\njob_timeout=77\njob_blocked_timeout=720\njob_wake_cmd=echo user\n")
-		writeTeamFile(t, filepath.Join(f.cwd, ".agents", "herdr-soho.conf"), "machine_label=project-label\njob_orgs=project-org\njob_repos_root=/data/project\njob_timeout=66\njob_blocked_timeout=660\njob_wake_cmd=echo project\n")
-		writeTeamFile(t, filepath.Join(f.cwd, ".herdr-soho", "ws1", "session.conf"), "machine_label=session-label\njob_orgs=session-org\njob_repos_root=/data/session\njob_timeout=55\njob_blocked_timeout=550\njob_wake_cmd=echo session\n")
+		writeTeamFile(t, filepath.Join(f.cwd, ".agents", "soho.conf"), "machine_label=project-label\njob_orgs=project-org\njob_repos_root=/data/project\njob_timeout=66\njob_blocked_timeout=660\njob_wake_cmd=echo project\n")
+		writeTeamFile(t, filepath.Join(f.cwd, ".soho", "ws1", "session.conf"), "machine_label=session-label\njob_orgs=session-org\njob_repos_root=/data/session\njob_timeout=55\njob_blocked_timeout=550\njob_wake_cmd=echo session\n")
 		env := platform.Env{}
 		for name, value := range f.env {
 			env[name] = value
@@ -270,7 +270,7 @@ func TestMachineConfig(t *testing.T) {
 	t.Run("project only job_orgs leaves the allowlist empty", func(t *testing.T) {
 		f := newMachineFix(t)
 		writeTeamFile(t, platform.UserConfigPath("linux", f.env), "machine_label=user-label\n")
-		writeTeamFile(t, filepath.Join(f.cwd, ".agents", "herdr-soho.conf"), "job_orgs=other-org\n")
+		writeTeamFile(t, filepath.Join(f.cwd, ".agents", "soho.conf"), "job_orgs=other-org\n")
 		got := f.must(t, "linux")
 		if len(got.Orgs) != 0 {
 			t.Fatalf("orgs = %#v", got.Orgs)
@@ -327,10 +327,10 @@ func TestMachineConfig(t *testing.T) {
 			"APPDATA": appdata, "HOME": home, "USERPROFILE": profile,
 			"HERDR_SOHO_SKILL_DIR": skillDir(t), "PATH": filepath.Join(root, "bin"),
 		}
-		newUser := filepath.Join(appdata, "herdr-soho", "config")
+		newUser := filepath.Join(appdata, "soho", "config")
 		writeTeamFile(t, newUser, "machine_label=from-appdata\njob_orgs=appdata-org\n")
-		writeTeamFile(t, filepath.Join(home, ".config", "herdr-soho", "config"), "machine_label=from-home\n")
-		writeTeamFile(t, filepath.Join(profile, "AppData", "Roaming", "herdr-soho", "config"), "machine_label=from-profile\n")
+		writeTeamFile(t, filepath.Join(home, ".config", "soho", "config"), "machine_label=from-home\n")
+		writeTeamFile(t, filepath.Join(profile, "AppData", "Roaming", "soho", "config"), "machine_label=from-profile\n")
 		got, err := LoadMachine("win32", env)
 		if err != nil {
 			t.Fatal(err)
@@ -341,7 +341,7 @@ func TestMachineConfig(t *testing.T) {
 		if err := os.Remove(newUser); err != nil {
 			t.Fatal(err)
 		}
-		writeTeamFile(t, filepath.Join(appdata, "herdr-agents", "config"), "machine_label=from-legacy\n")
+		writeTeamFile(t, filepath.Join(appdata, "herdr-soho", "config"), "machine_label=from-legacy\n")
 		got, err = LoadMachine("win32", env)
 		if err != nil {
 			t.Fatal(err)

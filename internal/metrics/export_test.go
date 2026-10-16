@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // exportFixture holds a project directory (a plain dir, not a git repo, so
@@ -490,7 +490,7 @@ func TestExportProjectLabel(t *testing.T) {
 		t.Fatalf("same base name gave different labels: %s vs %s", labelA, string(gotB["project"]))
 	}
 	if want := wantProjectLabel(filepath.Join(base, "a", "herdr-soho", "state")); labelA != `"`+want+`"` {
-		t.Fatalf("herdr-soho label=%s want %s", labelA, want)
+		t.Fatalf("soho label=%s want %s", labelA, want)
 	}
 	// Invalid labels exit 2; the 31-char body (32 total) is the last valid.
 	for _, bad := range []string{"Bad", "bad_label", "-lead", "a.b", "", strings.Repeat("a", 33)} {
@@ -600,7 +600,7 @@ func TestExportInSkillRefuses(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout=%q; the refusal must print nothing to stdout", stdout)
 	}
-	if !strings.Contains(message, "would be inside the herdr-soho skill") || !strings.Contains(message, "(nothing was written)") {
+	if !strings.Contains(message, "would be inside the soho skill") || !strings.Contains(message, "(nothing was written)") {
 		t.Fatalf("message=%q is not the standard state refusal", message)
 	}
 	if !strings.HasPrefix(message, "metrics export: ") {

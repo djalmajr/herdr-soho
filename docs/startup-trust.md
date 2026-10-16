@@ -4,7 +4,7 @@ Workspace trust and tool approvals are separate decisions. A CLI can accept `app
 
 ## Current behavior
 
-Herdr starts the interactive CLI in the worker pane. If the CLI does not become ready, herdr-soho reports `blocked_at_startup` and exits with code 7 while keeping the pane available for inspection. This generic startup failure does not submit the trust dialog. There is a dedicated Grok trust-dialog guard; there is no equivalent verified adapter for every supported kind.
+Herdr starts the interactive CLI in the worker pane. If the CLI does not become ready, soho reports `blocked_at_startup` and exits with code 7 while keeping the pane available for inspection. This generic startup failure does not submit the trust dialog. There is a dedicated Grok trust-dialog guard; there is no equivalent verified adapter for every supported kind.
 
 The native Go CLI also checks Cursor startup on every operating system: a launch-only screen, failed or empty read, workspace trust dialog or clipped trust screen does not prove readiness. It keeps the pane available and reports the startup evidence instead of claiming that Herdr's idle status alone proves a drawn interface. This check observes startup; it does not grant workspace trust or establish an adapter for every kind. The Cursor trust dialog also announces the enabling of the MCP servers configured for the workspace, so the block covers that dialog as well.
 
@@ -16,7 +16,7 @@ Some current approval mappings also include project-resource decisions: Cursor e
 
 This audit was performed on 2026-10-05. Installed help, source, binary strings, and sanitized configuration schemas were inspected. These observations do not establish interactive startup behavior for every agent or every release. No shared trust store was changed.
 
-| Kind | Inspected version | Workspace trust mechanism | Current herdr-soho support and limits |
+| Kind | Inspected version | Workspace trust mechanism | Current soho support and limits |
 | --- | --- | --- | --- |
 | Claude | 2.1.289 | A workspace trust dialog is separate from `--permission-mode`. The inspected client records acceptance under `projects.<directory>.hasTrustDialogAccepted` in `~/.claude.json`. | Tool approval mapping is present. A new disposable copy can still stop at the trust dialog. Do not use print mode as a replacement for the interactive worker. |
 | Codex | 0.160.0 | `projects.<path>.trust_level` accepts `trusted` or `untrusted` in user configuration. Project configuration, hooks, and rules are gated by trust. Hook approval can also be a separate prompt. | Tool approval mapping is present. Workspace trust and hook trust are not equivalent to the sandbox or approval policy. The exact native prompts were not exercised in this audit. |

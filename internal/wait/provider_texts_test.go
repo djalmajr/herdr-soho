@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 const providerTextsScreen = "  ┃  nenhum worker de inferência pronto\n"
@@ -28,7 +28,7 @@ func newProviderTextsFixture(t *testing.T, capacityText string) *queuedProbeFixt
 	}
 	f.bin = bin
 	f.env["PATH"] = bin
-	f.env["HERDR_SOHO_FAKECLI_CONFIG"] = bin
+	f.env["SOHO_FAKECLI_CONFIG"] = bin
 	f.env["HERDR_SOHO_PROVIDER_RETRIES"] = "1"
 	f.env["HERDR_SOHO_PROVIDER_RETRY_DELAY"] = "0"
 	if capacityText != "" {

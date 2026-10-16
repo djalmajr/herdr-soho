@@ -7,9 +7,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	textutil "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	textutil "github.com/djalmajr/soho/internal/text"
 )
 
 const EditRoles = "implementer designer tasker"
@@ -24,7 +24,13 @@ func RoleDirs(env platform.Env, cwd string) []string {
 	if isDir(project) {
 		dirs = append(dirs, project)
 	}
-	if extra := env.Get("HERDR_SOHO_ROLES"); extra != "" && isDir(extra) {
+	// One roles override: SOHO_ROLES when it is present, else the former
+	// HERDR_SOHO_ROLES; never both.
+	extra, present := env.Lookup("SOHO_ROLES")
+	if !present {
+		extra = env.Get("HERDR_SOHO_ROLES")
+	}
+	if extra != "" && isDir(extra) {
 		dirs = append(dirs, extra)
 	}
 	dirs = append(dirs, filepath.Join(platform.SkillDir(env), "roles"))
@@ -45,7 +51,7 @@ func ResolveRole(role string, env platform.Env, cwd string) string {
 	if file := RoleFile(role, env, cwd); file != "" {
 		return file
 	}
-	platform.Die(fmt.Sprintf("unknown role '%s' (run: herdr-soho roles)", role), 3)
+	platform.Die(fmt.Sprintf("unknown role '%s' (run: soho roles)", role), 3)
 	return ""
 }
 
@@ -139,7 +145,7 @@ func hasWord(list, needle string) bool {
 
 func CmdRole(argv []string, env platform.Env, cwd string) {
 	if len(argv) == 0 {
-		_, _ = platform.Stderr.Write([]byte("herdr-soho: 1: role\n"))
+		_, _ = platform.Stderr.Write([]byte("soho: 1: role\n"))
 		panic(&platform.ExitError{Code: 1})
 	}
 	f := ResolveRole(argv[0], env, cwd)

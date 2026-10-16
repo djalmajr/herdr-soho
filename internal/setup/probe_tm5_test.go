@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 type tm5ProbeStep struct {
@@ -60,7 +60,7 @@ func probeGoldenContext(t *testing.T, kind, model string, rules []fakecli.Rule) 
 	home := t.TempDir()
 	env["HOME"], env["USERPROFILE"] = home, home
 	env["XDG_CONFIG_HOME"], env["TMPDIR"] = filepath.Join(home, ".config"), t.TempDir()
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
+	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	env["HERDR_PANE_ID"], env["HERDR_WORKSPACE_ID"] = "w0test:p0a", "w0test"
 	env["HERDR_SOCKET_PATH"] = filepath.Join(t.TempDir(), "missing-socket")
 	if os.PathSeparator == '\\' {
@@ -85,7 +85,7 @@ func probeAllFakeEnv(t *testing.T, bin string) platform.Env {
 	home := t.TempDir()
 	env["HOME"], env["USERPROFILE"] = home, home
 	env["XDG_CONFIG_HOME"], env["TMPDIR"] = filepath.Join(home, ".config"), t.TempDir()
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
+	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	return env
 }
 
@@ -151,7 +151,7 @@ func TestSetupProbeTM5ParityGoldens(t *testing.T) {
 		for i, step := range golden.Steps {
 			stepEnv := env.Clone()
 			if i == 2 {
-				stepEnv["HERDR_SOHO_PROBE_TIMEOUT"] = "bad"
+				stepEnv["SOHO_PROBE_TIMEOUT"] = "bad"
 			}
 			t.Run(strings.Join(step.Args, " "), func(t *testing.T) { runProbeGoldenStep(t, step, stepEnv, ctx) })
 		}
@@ -201,7 +201,7 @@ func TestSetupProbeTM5Continuation(t *testing.T) {
 		if err := os.WriteFile(exe, []byte("#!/definitely/missing/herdr-test-interpreter\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "HERDR_SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "herdr-soho")}
+		env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "HERDR_SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho")}
 		got := probeOne(nil, "claude", "", "configured", 2, env, t.TempDir())
 		if got.Status != "error" || got.Cause != "exit 127" {
 			t.Fatalf("probe=%+v", got)
@@ -290,7 +290,7 @@ func TestSetupProbeTM5Continuation(t *testing.T) {
 		bin := t.TempDir()
 		rules := []string{"pi", "codex", "claude", "grok"}
 		env := probeAllFakeEnv(t, bin)
-		env["HERDR_SOHO_PROBE_TIMEOUT"] = "2"
+		env["SOHO_PROBE_TIMEOUT"] = "2"
 		for _, kind := range rules {
 			if _, err := fakecli.Install(t, bin, kind, []fakecli.Rule{{AnyArgs: true, Stdout: "ok\n"}}); err != nil {
 				t.Fatal(err)
@@ -341,7 +341,7 @@ func TestSetupProbeTM5Continuation(t *testing.T) {
 		golden := readProbeGoldens(t)["probe-custom"].Steps[0]
 		bin := t.TempDir()
 		env := probeAllFakeEnv(t, bin)
-		env["HERDR_SOHO_PROBE_TIMEOUT"] = "2"
+		env["SOHO_PROBE_TIMEOUT"] = "2"
 		for _, kind := range []string{"pi", "codex", "claude", "grok"} {
 			if _, err := fakecli.Install(t, bin, kind, []fakecli.Rule{{AnyArgs: true, Stdout: "ok\n"}}); err != nil {
 				t.Fatal(err)

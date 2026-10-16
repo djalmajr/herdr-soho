@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // boardTeamState is the board runtime state for the team-view tests (DJA-317
@@ -80,8 +80,8 @@ func TestBoardTeamViewIOpensLocalRowWithNowriteReads(t *testing.T) {
 		t.Fatalf("CLI calls=%#v want exactly roster then roles", calls)
 	}
 	for i, call := range calls {
-		if call.Env["HERDR_SOHO_NOWRITE"] != "1" {
-			t.Errorf("call %d %v: HERDR_SOHO_NOWRITE=%q want 1", i, call.Argv, call.Env["HERDR_SOHO_NOWRITE"])
+		if call.Env["SOHO_NOWRITE"] != "1" {
+			t.Errorf("call %d %v: SOHO_NOWRITE=%q want 1", i, call.Argv, call.Env["SOHO_NOWRITE"])
 		}
 		if call.Env["HERDR_WORKSPACE_ID"] != "w1" || call.Env["HERDR_PANE_ID"] != "p1" {
 			t.Errorf("call %d: target ids=%q want the row's w1/p1, not the shell decoys", i, call.Env)
@@ -322,7 +322,7 @@ func TestBoardTeamViewLoopOpensLoadsAndReturns(t *testing.T) {
 		{Argv: []string{"roster"}, Stdout: pickerTeamRosterFixture},
 		{Argv: []string{"roles"}, Stdout: pickerTeamRolesFixture},
 	}, fakecli.InstallOptions{
-		CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_SOHO_NOWRITE"},
+		CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_PANE_ID", "HERDR_TAB_ID", "SOHO_NOWRITE"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +337,7 @@ func TestBoardTeamViewLoopOpensLoadsAndReturns(t *testing.T) {
 	env["HERDR_BIN_PATH"] = herdr
 	env["HERDR_WORKSPACE_ID"] = "shell-ws" // the row's target must win over the shell decoy
 	env["HERDR_PANE_ID"] = "shell-pane"
-	env["HERDR_SOHO_NOWRITE"] = "0"
+	env["SOHO_NOWRITE"] = "0"
 	input, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -407,8 +407,8 @@ func TestBoardTeamViewLoopOpensLoadsAndReturns(t *testing.T) {
 		t.Fatalf("CLI calls=%#v want exactly roster then roles", calls)
 	}
 	for i, call := range calls {
-		if call.Env["HERDR_SOHO_NOWRITE"] != "1" {
-			t.Errorf("call %d %v: HERDR_SOHO_NOWRITE=%q want 1", i, call.Argv, call.Env["HERDR_SOHO_NOWRITE"])
+		if call.Env["SOHO_NOWRITE"] != "1" {
+			t.Errorf("call %d %v: SOHO_NOWRITE=%q want 1", i, call.Argv, call.Env["SOHO_NOWRITE"])
 		}
 		if call.Env["HERDR_WORKSPACE_ID"] != "w1" || call.Env["HERDR_PANE_ID"] != "w1:p1" {
 			t.Errorf("call %d: target ids=%q want the row's w1/w1:p1, not the shell decoys", i, call.Env)

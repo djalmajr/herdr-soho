@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // The pt-BR brief uses the five Portuguese headings of the shipped
@@ -22,7 +22,7 @@ const placeholderLintBrief = "# Goal\nDo the slice.\n# Expected result\nDone.\n#
 func lintV021Fixture(t *testing.T, briefBody string) (root, brief string, env platform.Env) {
 	t.Helper()
 	root = t.TempDir()
-	skillDir, err := filepath.Abs(filepath.Join("..", "..", "skills", "herdr-soho"))
+	skillDir, err := filepath.Abs(filepath.Join("..", "..", "skills", "soho"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestLintCommandPortugueseDefault(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, ".agents"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, ".agents", "herdr-soho.conf"), []byte("brief_lint_aliases=Goal=Task\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, ".agents", "soho.conf"), []byte("brief_lint_aliases=Goal=Task\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		env["HERDR_SOHO_BRIEF_LINT"] = "warn"
@@ -130,7 +130,7 @@ func TestLintCommandUnfilledPlaceholder(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, ".agents"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, ".agents", "herdr-soho.conf"), []byte("brief_lint_placeholders=MY_SLOT\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, ".agents", "soho.conf"), []byte("brief_lint_placeholders=MY_SLOT\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		env["HERDR_SOHO_BRIEF_LINT"] = "strict"

@@ -22,7 +22,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/skills/herdr-soho"
+	"github.com/djalmajr/soho/skills/soho"
 )
 
 // Env is an explicit environment passed to platform helpers and commands.
@@ -41,6 +41,17 @@ func (e Env) Clone() Env {
 		out[k] = v
 	}
 	return out
+}
+
+// nowriteGate is the read-only gate read at the platform layer: when
+// SOHO_NOWRITE is defined it decides alone (even the value 0), and the
+// legacy HERDR_SOHO_NOWRITE only applies when the new name is absent —
+// the same rule as core.Nowrite, which the platform layer cannot import.
+func nowriteGate(env Env) bool {
+	if value, ok := env.Lookup("SOHO_NOWRITE"); ok {
+		return value == "1"
+	}
+	return env.Get("HERDR_SOHO_NOWRITE") == "1"
 }
 
 func (e Env) List() []string {
@@ -145,15 +156,15 @@ var currentExecutable = os.Executable
 
 func UserConfigPath(platform string, env Env) string {
 	if xdg := env.Get("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "herdr-soho", "config")
+		return filepath.Join(xdg, "soho", "config")
 	}
 	if platform == "win32" {
 		if appdata := env.Get("APPDATA"); appdata != "" {
-			return filepath.Join(appdata, "herdr-soho", "config")
+			return filepath.Join(appdata, "soho", "config")
 		}
-		return filepath.Join(HomeDir(platform, env), "AppData", "Roaming", "herdr-soho", "config")
+		return filepath.Join(HomeDir(platform, env), "AppData", "Roaming", "soho", "config")
 	}
-	return filepath.Join(HomeDir(platform, env), ".config", "herdr-soho", "config")
+	return filepath.Join(HomeDir(platform, env), ".config", "soho", "config")
 }
 
 func ReadTextFile(file string) (string, error) {
@@ -370,24 +381,25 @@ func SkillDir(env Env) string {
 	return dir
 }
 
-// SkillDirSource returns the skill directory and its origin: "HERDR_SOHO_SKILL_DIR"
+// SkillDirSource returns the skill directory and its origin: "SOHO_SKILL_DIR"
 // for the configured value, "executable" for a skill tree beside the executable,
-// "home" for <home>/.agents/skills/herdr-soho or <home>/.claude/skills/herdr-soho
-// (tried in that order; <home> is HOME, USERPROFILE on Windows), "bundled" for
-// the embedded skill materialized into the cache derived from the env. It dies
-// with the same message as before when no source holds a skill and no usable
-// cache can be derived from the env.
+// "home" for <home>/.agents/skills/soho or <home>/.claude/skills/soho, then the
+// legacy <home>/.agents/skills/herdr-soho or <home>/.claude/skills/herdr-soho
+// (each pair tried in that order; <home> is HOME, USERPROFILE on Windows),
+// "bundled" for the embedded skill materialized into the cache derived from
+// the env. It dies with the same message as before when no source holds a
+// skill and no usable cache can be derived from the env.
 func SkillDirSource(env Env) (string, string) {
 	dir, source := SkillDirSourceOrEmpty(env)
 	if dir != "" {
 		return dir, source
 	}
-	if env.Get("HERDR_SOHO_NOWRITE") != "1" && env.Get("HERDR_AGENTS_NOWRITE") != "1" {
+	if !nowriteGate(env) {
 		if dir, err := skill.Materialize(bundledSkillCacheBase(env)); err == nil {
 			return dir, "bundled"
 		}
 	}
-	Die("cannot find skill directory; set HERDR_SOHO_SKILL_DIR", 2)
+	Die("cannot find skill directory; set SOHO_SKILL_DIR", 2)
 	return "", ""
 }
 
@@ -396,6 +408,9 @@ func SkillDirSource(env Env) (string, string) {
 // without an installed skill. It is strictly read-only: the bundled lookup
 // finds a completed bundle but never creates or repairs the cache.
 func SkillDirSourceOrEmpty(env Env) (string, string) {
+	if configured := env.Get("SOHO_SKILL_DIR"); configured != "" {
+		return configured, "SOHO_SKILL_DIR"
+	}
 	if configured := env.Get("HERDR_SOHO_SKILL_DIR"); configured != "" {
 		return configured, "HERDR_SOHO_SKILL_DIR"
 	}
@@ -411,6 +426,10 @@ func SkillDirSourceOrEmpty(env Env) (string, string) {
 	}
 	if home != "" {
 		for _, dir := range []string{
+			filepath.Join(home, ".agents", "skills", "soho"),
+			filepath.Join(home, ".claude", "skills", "soho"),
+			// Legacy: the herdr-soho generation installed the skill under the
+			// old name; a soho tree wins, an old-only install still works.
 			filepath.Join(home, ".agents", "skills", "herdr-soho"),
 			filepath.Join(home, ".claude", "skills", "herdr-soho"),
 		} {
@@ -461,10 +480,10 @@ func bundledSkillCacheBase(env Env) string {
 	return ""
 }
 
-// LauncherPath is the native herdr-soho executable the worker runs from:
-// the absolute HERDR_SOHO_BIN override when one is configured, otherwise the
+// LauncherPath is the native soho executable the worker runs from:
+// the absolute SOHO_BIN override when one is configured, otherwise the
 // currently running executable. It never returns the skill scripts launcher
-// (scripts/herdr-soho or scripts/herdr-soho.cmd) and never searches or
+// (scripts/soho or scripts/soho.cmd) and never searches or
 // executes Node, Bun or Bash; the dispatch instruction's "launcher" phrase
 // names this native binary.
 //
@@ -474,12 +493,15 @@ func bundledSkillCacheBase(env Env) string {
 // falling back. Symlinks are resolved before validation, and candidates are
 // validated by stat and header bytes only: they are never executed.
 func LauncherPath(env Env) string {
+	if bin := strings.TrimSpace(env.Get("SOHO_BIN")); bin != "" {
+		return validatedNativeBinary(bin)
+	}
 	if bin := strings.TrimSpace(env.Get("HERDR_SOHO_BIN")); bin != "" {
 		return validatedNativeBinary(bin)
 	}
 	executable, err := currentExecutable()
 	if err != nil {
-		Die("cannot resolve the current executable; set HERDR_SOHO_BIN", 2)
+		Die("cannot resolve the current executable; set SOHO_BIN", 2)
 	}
 	return executable
 }
@@ -489,7 +511,7 @@ func LauncherPath(env Env) string {
 // fail-closed code 2 error; there is no fallback.
 func validatedNativeBinary(bin string) string {
 	if !filepath.IsAbs(bin) {
-		Die("HERDR_SOHO_BIN must be an absolute path: "+bin, 2)
+		Die("SOHO_BIN must be an absolute path: "+bin, 2)
 	}
 	resolved := bin
 	if target, err := filepath.EvalSymlinks(bin); err == nil {
@@ -497,14 +519,14 @@ func validatedNativeBinary(bin string) string {
 	}
 	info, err := os.Stat(resolved)
 	if err != nil || !info.Mode().IsRegular() {
-		Die("HERDR_SOHO_BIN is missing or not a regular file: "+bin, 2)
+		Die("SOHO_BIN is missing or not a regular file: "+bin, 2)
 	}
 	if Current() != "win32" && info.Mode()&0o111 == 0 {
-		Die("HERDR_SOHO_BIN is not executable: "+bin, 2)
+		Die("SOHO_BIN is not executable: "+bin, 2)
 	}
 	header, err := readNativeBinaryHeader(resolved)
 	if err != nil || !isNativeExecutableHeader(header) {
-		Die("HERDR_SOHO_BIN is not a native binary (script, shebang or unknown format): "+bin, 2)
+		Die("SOHO_BIN is not a native binary (script, shebang or unknown format): "+bin, 2)
 	}
 	return resolved
 }
@@ -1016,7 +1038,7 @@ func assignThenResume(assign func() error, resume func() error) (bool, error) {
 	return true, resume()
 }
 
-const treeKillForceFallbackEnv = "HERDR_SOHO_TREEKILL_TEST_FORCE_JOB_FAILURE"
+const treeKillForceFallbackEnv = "SOHO_TREEKILL_TEST_FORCE_JOB_FAILURE"
 
 func forceWindowsTreeKillFallback(env Env) bool {
 	return env.Get(treeKillForceFallbackEnv) == "1"
@@ -1033,7 +1055,7 @@ func setRunTimeoutResult(result *RunResult) {
 // resolved inside the caller's temporary directory. The callback is injected
 // so this policy can be verified on platforms without taskkill.
 func runTreeKillTestKiller(env Env, tempDir string, pid int, run func(string, []string)) bool {
-	killer := env.Get("HERDR_SOHO_TREEKILL_TEST_KILLER")
+	killer := env.Get("SOHO_TREEKILL_TEST_KILLER")
 	if killer == "" || !filepath.IsAbs(killer) {
 		return false
 	}
@@ -1079,7 +1101,7 @@ func tempDirFor(env Env) (string, string) {
 func tempFileError(result RunResult, code string) RunResult {
 	result.Status = nil
 	result.Stdout = ""
-	result.Stderr = "herdr-soho: cannot write temporary files: " + code + "\n"
+	result.Stderr = "soho: cannot write temporary files: " + code + "\n"
 	result.Error = code
 	return result
 }

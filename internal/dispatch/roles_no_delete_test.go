@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // TestRolesNoDeleteRule guards the shipped roles' no-delete rule (DJA-258 +
@@ -22,7 +22,7 @@ func TestRolesNoDeleteRule(t *testing.T) {
 		"Before you delete a throwaway copy",
 		"a directory you did not create in this slice",
 	}
-	skillDir := filepath.Join("..", "..", "skills", "herdr-soho")
+	skillDir := filepath.Join("..", "..", "skills", "soho")
 	env := platform.Env{"HERDR_SOHO_SKILL_DIR": skillDir}
 	goos := "posix"
 	if runtime.GOOS == "windows" {

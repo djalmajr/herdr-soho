@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	textutil "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/platform"
+	textutil "github.com/djalmajr/soho/internal/text"
 )
 
 var legacyCopied []string
@@ -19,11 +19,18 @@ func LegacyEnvCopied() []string { return append([]string(nil), legacyCopied...) 
 func ApplyLegacyEnv(env platform.Env) []string {
 	copied := make([]string, 0)
 	for name, old := range env.Clone() {
-		if !strings.HasPrefix(name, "HERDR_AGENTS_") || old == "" {
+		if !strings.HasPrefix(name, "HERDR_SOHO_") || old == "" {
 			continue
 		}
-		fresh := "HERDR_SOHO_" + strings.TrimPrefix(name, "HERDR_AGENTS_")
-		if env.Get(fresh) == "" {
+		fresh := "SOHO_" + strings.TrimPrefix(name, "HERDR_SOHO_")
+		// An empty new value is replaced, as in the former bridge, except
+		// SOHO_NOWRITE: set at all, even to the empty string, it decides
+		// alone, so the former value is copied only while it is absent.
+		value, present := env.Lookup(fresh)
+		if fresh == "SOHO_NOWRITE" && present {
+			continue
+		}
+		if value == "" {
 			env[fresh] = old
 			copied = append(copied, name)
 		}
@@ -35,22 +42,22 @@ func ApplyLegacyEnv(env platform.Env) []string {
 
 func LegacyUserConfigPath(platformName string, env platform.Env) string {
 	if xdg := env.Get("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "herdr-agents", "config")
+		return filepath.Join(xdg, "herdr-soho", "config")
 	}
 	if platformName == "win32" {
 		if appdata := env.Get("APPDATA"); appdata != "" {
-			return filepath.Join(appdata, "herdr-agents", "config")
+			return filepath.Join(appdata, "herdr-soho", "config")
 		}
-		return filepath.Join(platform.HomeDir(platformName, env), "AppData", "Roaming", "herdr-agents", "config")
+		return filepath.Join(platform.HomeDir(platformName, env), "AppData", "Roaming", "herdr-soho", "config")
 	}
-	return filepath.Join(platform.HomeDir(platformName, env), ".config", "herdr-agents", "config")
+	return filepath.Join(platform.HomeDir(platformName, env), ".config", "herdr-soho", "config")
 }
 
 func LegacyProjectConfigPath(root string) string {
-	return filepath.Join(root, ".agents", "herdr-agents.conf")
+	return filepath.Join(root, ".agents", "herdr-soho.conf")
 }
 
-func LegacyStatePath(root string) string { return filepath.Join(root, ".herdr-agents") }
+func LegacyStatePath(root string) string { return filepath.Join(root, ".herdr-soho") }
 
 func EffectiveConfigFile(newPath, legacyPath string) string {
 	if isFile(newPath) {
@@ -67,7 +74,7 @@ func MigrateLegacyConfigFile(dest string, env platform.Env, cwd string) bool {
 	legacy := ""
 	if dest == platform.UserConfigPath(platform.Current(), env) {
 		legacy = LegacyUserConfigPath(platform.Current(), env)
-	} else if dest == filepath.Join(root, ".agents", "herdr-soho.conf") {
+	} else if dest == filepath.Join(root, ".agents", "soho.conf") {
 		legacy = LegacyProjectConfigPath(root)
 	}
 	if legacy == "" {
@@ -110,28 +117,28 @@ func MigrateLegacyConfigFile(dest string, env platform.Env, cwd string) bool {
 		cleanup()
 		platform.Die(fmt.Sprintf("config set: could not rewrite %s (file left untouched)", dest), 4)
 	}
-	fmt.Fprintf(platform.Stderr, "herdr-soho: warning: copied legacy config %s to %s; the legacy file is no longer read\n", legacy, dest)
+	fmt.Fprintf(platform.Stderr, "soho: warning: copied legacy config %s to %s; the legacy file is no longer read\n", legacy, dest)
 	return true
 }
 
 func DefaultStateDirName(root string) string {
-	newDir := filepath.Join(root, ".herdr-soho")
+	newDir := filepath.Join(root, ".soho")
 	oldDir := LegacyStatePath(root)
 	if _, err := os.Stat(newDir); os.IsNotExist(err) && isDir(oldDir) {
-		return ".herdr-agents"
+		return ".herdr-soho"
 	}
-	return ".herdr-soho"
+	return ".soho"
 }
 
 func LegacyDoctorWarnings(env platform.Env, cwd, platformName string) []string {
 	out := make([]string, 0)
 	for _, name := range LegacyEnvCopied() {
-		out = append(out, fmt.Sprintf("legacy environment variable %s is read as HERDR_SOHO_%s; rename it", name, strings.TrimPrefix(name, "HERDR_AGENTS_")))
+		out = append(out, fmt.Sprintf("legacy environment variable %s is read as SOHO_%s; rename it", name, strings.TrimPrefix(name, "HERDR_SOHO_")))
 	}
 	root := platform.ProjectRoot(env, cwd)
 	newUser := platform.UserConfigPath(platformName, env)
 	oldUser := LegacyUserConfigPath(platformName, env)
-	newProject := filepath.Join(root, ".agents", "herdr-soho.conf")
+	newProject := filepath.Join(root, ".agents", "soho.conf")
 	oldProject := LegacyProjectConfigPath(root)
 	if isFile(oldUser) {
 		if isFile(newUser) {
@@ -149,12 +156,12 @@ func LegacyDoctorWarnings(env platform.Env, cwd, platformName string) []string {
 	}
 	ctx := LoadConfig(env, cwd)
 	entry, found := ctx.Entries["state_dir"]
-	statePinned := env.Get("HERDR_SOHO_DIR") != "" || env.Get("HERDR_SOHO_STATE_DIR") != "" || (found && entry.Source != "defaults" && entry.Value != "")
-	if !statePinned && DefaultStateDirName(root) == ".herdr-agents" {
-		out = append(out, fmt.Sprintf("legacy state dir in use: %s (once no worker is live, rename it to .herdr-soho and ignore .herdr-soho/ in git)", LegacyStatePath(root)))
+	statePinned := env.Get("SOHO_DIR") != "" || env.Get("HERDR_SOHO_DIR") != "" || env.Get("SOHO_STATE_DIR") != "" || env.Get("HERDR_SOHO_STATE_DIR") != "" || (found && entry.Source != "defaults" && entry.Value != "")
+	if !statePinned && DefaultStateDirName(root) == ".herdr-soho" {
+		out = append(out, fmt.Sprintf("legacy state dir in use: %s (once no worker is live, rename it to .soho and ignore .soho/ in git)", LegacyStatePath(root)))
 	}
-	if isDir(LegacyStatePath(root)) && isDir(filepath.Join(root, ".herdr-soho")) {
-		out = append(out, fmt.Sprintf("legacy state dir %s is no longer used (%s exists); clean it once its reports are no longer needed", LegacyStatePath(root), filepath.Join(root, ".herdr-soho")))
+	if isDir(LegacyStatePath(root)) && isDir(filepath.Join(root, ".soho")) {
+		out = append(out, fmt.Sprintf("legacy state dir %s is no longer used (%s exists); clean it once its reports are no longer needed", LegacyStatePath(root), filepath.Join(root, ".soho")))
 	}
 	return out
 }

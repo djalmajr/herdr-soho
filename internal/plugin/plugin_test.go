@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/plugin"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/plugin"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestMain(m *testing.M) {
@@ -56,7 +56,7 @@ func installBridgeFakes(t *testing.T, paneJSON string, paneCode int, cliCode int
 	if err != nil {
 		t.Fatal(err)
 	}
-	cliBin, err := fakecli.InstallWithOptions(t, dir, "cli", []fakecli.Rule{{Argv: []string{"doctor"}, Stdout: stdout, Stderr: stderr, Code: cliCode}}, fakecli.InstallOptions{CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_PANE_ID", "HERDR_SOHO_NOWRITE", "PATH"}})
+	cliBin, err := fakecli.InstallWithOptions(t, dir, "cli", []fakecli.Rule{{Argv: []string{"doctor"}, Stdout: stdout, Stderr: stderr, Code: cliCode}}, fakecli.InstallOptions{CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_PANE_ID", "SOHO_NOWRITE", "PATH"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,12 +10,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/provider"
-	"github.com/djalmajr/herdr-soho/internal/taskreport"
-	waitpkg "github.com/djalmajr/herdr-soho/internal/wait"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/provider"
+	"github.com/djalmajr/soho/internal/taskreport"
+	waitpkg "github.com/djalmajr/soho/internal/wait"
 )
 
 // This file keeps the durable task link of the dispatch sidecars
@@ -209,7 +209,7 @@ func findDispatchDuplicate(sd, agent, briefSHA string, amend bool) *dispatchDupl
 // the same wait (same codes and JSON, plus duplicate_of) on the task's
 // current report; with --no-wait, the JSON with duplicate_of and 0.
 func dispatchDuplicateResult(agent, role, kind string, dup *dispatchDuplicate, noWait bool, timeoutRaw string, sd string, ctx *core.Config, env platform.Env, cwd string) int {
-	fmt.Fprintf(platform.Stderr, "herdr-soho: dispatch: %s already has this brief (%s); waiting on it without sending again (--resend sends it again)\n", agent, dup.duplicateOf)
+	fmt.Fprintf(platform.Stderr, "soho: dispatch: %s already has this brief (%s); waiting on it without sending again (--resend sends it again)\n", agent, dup.duplicateOf)
 	approved := 0
 	if raw, e := platform.ReadTextFile(filepath.Join(sd, "wait", agent+".approvals")); e == nil {
 		approved, _ = strconv.Atoi(strings.TrimSpace(raw))
@@ -296,7 +296,7 @@ func emitDuplicateDispatchResult(agent, role, kind string, dup *dispatchDuplicat
 		core.Warn(fmt.Sprintf("agent '%s' is blocked on an approval or question; run: herdr agent read %s --source recent-unwrapped --lines 80", agent, agent), frictionLogPath, "dispatch")
 		return 7
 	case "timeout":
-		core.Warn(fmt.Sprintf("timeout waiting for the report of '%s'; it may still be working. Run: herdr-soho wait %s", agent, agent), frictionLogPath, "dispatch")
+		core.Warn(fmt.Sprintf("timeout waiting for the report of '%s'; it may still be working. Run: soho wait %s", agent, agent), frictionLogPath, "dispatch")
 		return 9
 	case "settled-no-report", "gone":
 		if status == "settled-no-report" {

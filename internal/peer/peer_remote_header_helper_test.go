@@ -3,7 +3,7 @@ package peer_test
 import (
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
+	"github.com/djalmajr/soho/internal/peer"
 )
 
 // remotePeerHeader is the header send builds for a remote target in fixtures

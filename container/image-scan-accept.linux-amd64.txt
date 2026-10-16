@@ -1,4 +1,4 @@
-# Reviewed matches of `imagecheck image` for herdr-soho-base 0.1.0, linux-amd64.
+# Reviewed matches of `imagecheck image` for soho-base 0.1.0, linux-amd64.
 # Format: <rule> <offset> <length> sha256:<file sha256> <path>. Each entry
 # accepts one match of one exact file at one path (in each layer holding
 # those same bytes there); any other match, any changed byte
@@ -56,7 +56,7 @@ aws-access-key 51124154 20 sha256:7fde7b8afa198da66257f42ee2001d874c7355631e6d15
 # lower-case words, and (amd64 only) the compiled-in prefix constant
 # (verified upstream marker), also in the arm64 binary, run together with a
 # 19-letter word and UPPER_SNAKE constant names.
-github-token 239009276 40 sha256:628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1 opt/herdr-soho/runners/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
-openai-key 239068224 108 sha256:628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1 opt/herdr-soho/runners/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
-openai-key 243961383 55 sha256:628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1 opt/herdr-soho/runners/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
-github-token 244027152 72 sha256:628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1 opt/herdr-soho/runners/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
+github-token 239009276 40 sha256:628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1 opt/soho/runners/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
+openai-key 239068224 108 sha256:628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1 opt/soho/runners/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
+openai-key 243961383 55 sha256:628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1 opt/soho/runners/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
+github-token 244027152 72 sha256:628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1 opt/soho/runners/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex

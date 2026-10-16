@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func TestSpawnShortTimeoutWarnsOnceAndKeepsTheValue(t *testing.T) { // --timeout 45 means 45 ms: one warning, and the value still goes to `herdr agent start --timeout`
@@ -45,11 +45,11 @@ func TestSpawnShortTimeoutWarnsOnceAndKeepsTheValue(t *testing.T) { // --timeout
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"PATH": bin, "HOME": root, "TMPDIR": root, "HERDR_SOHO_FAKECLI_CONFIG": bin,
+		"PATH": bin, "HOME": root, "TMPDIR": root, "SOHO_FAKECLI_CONFIG": bin,
 		"HERDR_SOHO_SKILL_DIR": filepath.Join(root, "skill"), "HERDR_SOHO_ROLES": roles,
 		"HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1",
 		"HERDR_PANE_ID": "p1", "HERDR_SOHO_LANES": "off", "HERDR_SOHO_LAYOUT": "split",
-		"HERDR_SOHO_REGRID": "off", "HERDR_SOHO_WAIT_POLL_MS": "1",
+		"HERDR_SOHO_REGRID": "off", "SOHO_WAIT_POLL_MS": "1",
 	}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	oldOut, oldErr := platform.Stdout, platform.Stderr

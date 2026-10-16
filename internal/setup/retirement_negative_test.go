@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // F9 retirement negative contract (setup): the frozen test-setup.sh and
@@ -45,7 +45,7 @@ func TestRetirementNegativeContracts(t *testing.T) {
 				t.Fatal(err)
 			}
 			env := fakeEnv(t, bin)
-			env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "herdr-soho")
+			env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 			root := t.TempDir()
 			ctx := core.LoadConfig(env, root)
 			code, out, msg := runSetupWrite(tc.args, &ctx, env, root)

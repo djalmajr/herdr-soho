@@ -18,12 +18,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/taskreport"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
-	"github.com/djalmajr/herdr-soho/internal/wait"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/taskreport"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/wait"
 )
 
 // The exact byte text the Go and JS dispatchers must agree on.
@@ -147,7 +147,7 @@ func TestComposePromptWindowsRuntimeNote(t *testing.T) {
 	role := writeRole(t)
 	env := composeEnv(t)
 	brief := "# Goal\nDo it.\n"
-	launcher := "- Run every `herdr-soho` command"
+	launcher := "- Run every `soho` command"
 	t.Run("win32 sandboxed codex gets the note in the composed brief", func(t *testing.T) {
 		withPlatform(t, "win32")
 		p := ComposePrompt(role, "implementer", "worker", brief, "/report.md", ctx, env, "codex", "", false)
@@ -320,7 +320,7 @@ func TestWindowsRuntimeNoteReportLifecycle(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock"), "HERDR_SOHO_WAIT_POLL_MS": "1", "HERDR_WORKSPACE_ID": "ws"}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOCKET_PATH": filepath.Join(base, "none.sock"), "SOHO_WAIT_POLL_MS": "1", "HERDR_WORKSPACE_ID": "ws"}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	runWait := func(report string) (string, string, int) {
 		if err := os.WriteFile(filepath.Join(sd, "last-report-worker"), []byte(report+"\n"), 0o600); err != nil {

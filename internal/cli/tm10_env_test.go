@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func runTM10Env(t *testing.T, omitted string, extra platform.Env) (string, string, int) {
@@ -70,7 +70,7 @@ func TestTM10EnvMirrors(t *testing.T) {
 	})
 	t.Run(`without git the first line is the binary's version (the JS prints unversioned)`, func(t *testing.T) {
 		out, stderr, code := runTM10Env(t, "git", nil)
-		want := "herdr-soho: " + strings.TrimPrefix(strings.TrimSpace(versionText(version, vcsRevision())), "herdr-soho ") + "\n"
+		want := "soho: " + strings.TrimPrefix(strings.TrimSpace(versionText(version, vcsRevision())), "soho ") + "\n"
 		if code != 0 || stderr != "" || !strings.HasPrefix(out, want) || strings.Contains(out, "unversioned") {
 			t.Fatalf("code=%d out=%q err=%q", code, out, stderr)
 		}
@@ -95,8 +95,10 @@ func TestEnvPrintsTheSkillDirAndItsOrigin(t *testing.T) {
 	if dir == "" {
 		t.Fatal("the command fixture sets no HERDR_SOHO_SKILL_DIR")
 	}
+	// The fixture sets the legacy name; ApplyLegacyEnv copies it to
+	// SOHO_SKILL_DIR before Run, so the env line names the current variable.
 	out, stderr, code := runTM10Env(t, "", nil)
-	if code != 0 || stderr != "" || !strings.Contains(out, "\nskill dir: "+dir+" (HERDR_SOHO_SKILL_DIR)\n") {
+	if code != 0 || stderr != "" || !strings.Contains(out, "\nskill dir: "+dir+" (SOHO_SKILL_DIR)\n") {
 		t.Fatalf("code=%d out=%q err=%q", code, out, stderr)
 	}
 }

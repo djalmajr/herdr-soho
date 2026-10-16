@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	textutil "github.com/djalmajr/herdr-soho/internal/text"
+	"github.com/djalmajr/soho/internal/platform"
+	textutil "github.com/djalmajr/soho/internal/text"
 )
 
 var ansiSGR = regexp.MustCompile("\\x1b\\[[0-9;]*m")
@@ -86,7 +86,7 @@ func hasModelSource(kind string) bool {
 // fromCopy reports whether the returned list came from that copy.
 func modelIDs(kind string, env platform.Env, skipCopy bool) ([]string, bool) {
 	file := ModelsCacheFile(kind, env)
-	shortRaw, short := env.Lookup("HERDR_SOHO_MODELS_TIMEOUT")
+	shortRaw, short := env.Lookup("SOHO_MODELS_TIMEOUT")
 	short = short && shortRaw != ""
 	if kind != "codex" && !skipCopy {
 		if st, err := os.Stat(file); err == nil && st.Size() > 0 && st.ModTime().After(platform.Now().Add(-time.Hour)) {

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // collabFixture is the cooperative-completion fixture: a project dir, a
@@ -109,13 +109,13 @@ func newCollabFixture(t *testing.T, options collabFixtureOptions) collabFixture 
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"PATH":                      bin,
-		"HERDR_ENV":                 "1",
-		"HERDR_SOHO_DIR":            state,
-		"HERDR_SOHO_SKILL_DIR":      skill,
-		"HERDR_SOCKET_PATH":         filepath.Join(base, "none.sock"),
-		"HERDR_SOHO_FAKECLI_CONFIG": bin,
-		"HERDR_SOHO_WAIT_POLL_MS":   "5",
+		"PATH":                 bin,
+		"HERDR_ENV":            "1",
+		"HERDR_SOHO_DIR":       state,
+		"HERDR_SOHO_SKILL_DIR": skill,
+		"HERDR_SOCKET_PATH":    filepath.Join(base, "none.sock"),
+		"SOHO_FAKECLI_CONFIG":  bin,
+		"SOHO_WAIT_POLL_MS":    "5",
 	}
 	if options.workspaceID != "" {
 		env["HERDR_WORKSPACE_ID"] = options.workspaceID

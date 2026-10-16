@@ -148,7 +148,7 @@ func countStaging(t *testing.T, dir string) int {
 	}
 	n := 0
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".herdr-soho-release-") {
+		if strings.HasPrefix(e.Name(), ".soho-release-") {
 			n++
 		}
 	}
@@ -295,12 +295,12 @@ func TestBuildProducesSixArtifactsAndExactSums(t *testing.T) {
 					t.Fatalf("line %d = %+v", i, line)
 				}
 				argv := line.Argv
-				// build -trimpath -buildvcs=false -ldflags LF -o OUT ./cmd/herdr-soho
+				// build -trimpath -buildvcs=false -ldflags LF -o OUT ./cmd/soho
 				if len(argv) != 8 ||
 					argv[0] != "build" || argv[1] != "-trimpath" || argv[2] != "-buildvcs=false" ||
 					argv[3] != "-ldflags" || argv[4] != ldflags ||
 					argv[5] != "-o" || filepath.Base(argv[6]) != wantNames[i] ||
-					!strings.Contains(argv[6], ".herdr-soho-release-") ||
+					!strings.Contains(argv[6], ".soho-release-") ||
 					argv[7] != mainPackage {
 					t.Fatalf("line %d argv = %v", i, argv)
 				}
@@ -386,7 +386,7 @@ func TestBuildFailureCleansStagingAndLeavesNoDest(t *testing.T) {
 		Dest:         "dist",
 		GoExecutable: helperPath(t),
 	})
-	if err == nil || !strings.Contains(err.Error(), "herdr-soho_windows_amd64") {
+	if err == nil || !strings.Contains(err.Error(), "soho_windows_amd64") {
 		t.Fatalf("failure error = %v, want it naming the failed target", err)
 	}
 	if _, err := os.Lstat("dist"); !os.IsNotExist(err) {
@@ -688,14 +688,14 @@ func TestPublishRunsGhWithExactArgv(t *testing.T) {
 	t.Setenv("GH_TOKEN", secret)
 	res, err := Publish(context.Background(), PublishConfig{
 		Version:      "v1.2.3",
-		Repo:         "djalmajr/herdr-soho",
+		Repo:         "djalmajr/soho",
 		Dest:         dest,
 		GHExecutable: helperPath(t),
 	})
 	if err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if res.Tag != "v1.2.3" || res.Repo != "djalmajr/herdr-soho" || res.Prerelease {
+	if res.Tag != "v1.2.3" || res.Repo != "djalmajr/soho" || res.Prerelease {
 		t.Fatalf("result = %+v", res)
 	}
 	fields := ghFields(t, log)
@@ -714,7 +714,7 @@ func TestPublishRunsGhWithExactArgv(t *testing.T) {
 			t.Fatalf("gh argv file %d = %q, want %q", i, fields[3+i], wantFiles[i])
 		}
 	}
-	if fields[10] != "--repo" || fields[11] != "djalmajr/herdr-soho" || fields[12] != "--generate-notes" {
+	if fields[10] != "--repo" || fields[11] != "djalmajr/soho" || fields[12] != "--generate-notes" {
 		t.Fatalf("gh argv tail = %v", fields[10:13])
 	}
 	for _, f := range fields {
@@ -756,7 +756,7 @@ func TestPublishPrereleaseOnlyForHyphenTags(t *testing.T) {
 			log := setGHLog(t)
 			res, err := Publish(context.Background(), PublishConfig{
 				Version:      version,
-				Repo:         "djalmajr/herdr-soho",
+				Repo:         "djalmajr/soho",
 				Dest:         dest,
 				GHExecutable: helperPath(t),
 			})
@@ -820,7 +820,7 @@ func TestPublishRefusesBadInputsBeforeGh(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dest, sumsFileName), []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		err := run(t, "v1.2.3", "djalmajr/herdr-soho", dest)
+		err := run(t, "v1.2.3", "djalmajr/soho", dest)
 		if err == nil || !strings.Contains(err.Error(), "does not match file bytes") {
 			t.Fatalf("err = %v", err)
 		}
@@ -834,18 +834,18 @@ func TestPublishRefusesBadInputsBeforeGh(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dest, sumsFileName), []byte(strings.Join(append(lines, lines[0]), "\n")), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		err := run(t, "v1.2.3", "djalmajr/herdr-soho", dest)
+		err := run(t, "v1.2.3", "djalmajr/soho", dest)
 		if err == nil || !strings.Contains(err.Error(), "duplicate") {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("missing artifact", func(t *testing.T) {
 		dest := buildValidDist(t, "v1.2.3")
-		if err := os.Remove(filepath.Join(dest, "herdr-soho_linux_arm64")); err != nil {
+		if err := os.Remove(filepath.Join(dest, "soho_linux_arm64")); err != nil {
 			t.Fatal(err)
 		}
-		err := run(t, "v1.2.3", "djalmajr/herdr-soho", dest)
-		if err == nil || !strings.Contains(err.Error(), "herdr-soho_linux_arm64") {
+		err := run(t, "v1.2.3", "djalmajr/soho", dest)
+		if err == nil || !strings.Contains(err.Error(), "soho_linux_arm64") {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -854,11 +854,11 @@ func TestPublishRefusesBadInputsBeforeGh(t *testing.T) {
 		restore := mutate(t, dest)
 		defer restore()
 		data, _ := os.ReadFile(filepath.Join(dest, sumsFileName))
-		extra := fmt.Sprintf("%x  herdr-soho_extra\n", sha256.Sum256([]byte("x")))
+		extra := fmt.Sprintf("%x  soho_extra\n", sha256.Sum256([]byte("x")))
 		if err := os.WriteFile(filepath.Join(dest, sumsFileName), append(data, []byte(extra)...), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		err := run(t, "v1.2.3", "djalmajr/herdr-soho", dest)
+		err := run(t, "v1.2.3", "djalmajr/soho", dest)
 		if err == nil || !strings.Contains(err.Error(), "unexpected entry") {
 			t.Fatalf("err = %v", err)
 		}
@@ -872,7 +872,7 @@ func TestPublishRefusesBadInputsBeforeGh(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dest, sumsFileName), []byte(strings.Join(append(lines[1:], ""), "\n")), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		err := run(t, "v1.2.3", "djalmajr/herdr-soho", dest)
+		err := run(t, "v1.2.3", "djalmajr/soho", dest)
 		if err == nil || !strings.Contains(err.Error(), "exactly 6 entries") {
 			t.Fatalf("err = %v", err)
 		}
@@ -883,11 +883,11 @@ func TestPublishRefusesBadInputsBeforeGh(t *testing.T) {
 		defer restore()
 		data, _ := os.ReadFile(filepath.Join(dest, sumsFileName))
 		lines := strings.Split(string(data), "\n")
-		lines[0] = "nothex  herdr-soho_darwin_amd64"
+		lines[0] = "nothex  soho_darwin_amd64"
 		if err := os.WriteFile(filepath.Join(dest, sumsFileName), []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		err := run(t, "v1.2.3", "djalmajr/herdr-soho", dest)
+		err := run(t, "v1.2.3", "djalmajr/soho", dest)
 		if err == nil || !strings.Contains(err.Error(), "malformed") {
 			t.Fatalf("err = %v", err)
 		}
@@ -897,13 +897,13 @@ func TestPublishRefusesBadInputsBeforeGh(t *testing.T) {
 		if err := os.Remove(filepath.Join(dest, sumsFileName)); err != nil {
 			t.Fatal(err)
 		}
-		err := run(t, "v1.2.3", "djalmajr/herdr-soho", dest)
+		err := run(t, "v1.2.3", "djalmajr/soho", dest)
 		if err == nil || !strings.Contains(err.Error(), "SHA256SUMS") {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("dev version", func(t *testing.T) {
-		err := run(t, "dev", "djalmajr/herdr-soho", "does-not-matter")
+		err := run(t, "dev", "djalmajr/soho", "does-not-matter")
 		if err == nil || !strings.Contains(err.Error(), "v-prefixed release tag") {
 			t.Fatalf("err = %v", err)
 		}
@@ -926,7 +926,7 @@ func TestPublishSurfacesGhFailureWithoutSecrets(t *testing.T) {
 	t.Setenv("RELEASE_TEST_GH_FAIL", "1")
 	_, err := Publish(context.Background(), PublishConfig{
 		Version:      "v1.2.3",
-		Repo:         "djalmajr/herdr-soho",
+		Repo:         "djalmajr/soho",
 		Dest:         dest,
 		GHExecutable: helperPath(t),
 	})
@@ -1018,7 +1018,7 @@ func TestValidateVersion(t *testing.T) {
 }
 
 func TestValidateRepo(t *testing.T) {
-	valid := []string{"djalmajr/herdr-soho", "a-b/c_d", "Owner/Repo.v2"}
+	valid := []string{"djalmajr/soho", "a-b/c_d", "Owner/Repo.v2"}
 	for _, r := range valid {
 		if err := ValidateRepo(r); err != nil {
 			t.Fatalf("ValidateRepo(%q) = %v, want nil", r, err)
@@ -1034,10 +1034,10 @@ func TestValidateRepo(t *testing.T) {
 
 func TestArtifactName(t *testing.T) {
 	cases := map[string]string{
-		"darwin:amd64":  "herdr-soho_darwin_amd64",
-		"linux:arm64":   "herdr-soho_linux_arm64",
-		"windows:amd64": "herdr-soho_windows_amd64.exe",
-		"windows:arm64": "herdr-soho_windows_arm64.exe",
+		"darwin:amd64":  "soho_darwin_amd64",
+		"linux:arm64":   "soho_linux_arm64",
+		"windows:amd64": "soho_windows_amd64.exe",
+		"windows:arm64": "soho_windows_arm64.exe",
 	}
 	for key, want := range cases {
 		osName, arch, ok := strings.Cut(key, ":")

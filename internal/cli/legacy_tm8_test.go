@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
+	"github.com/djalmajr/soho/internal/core"
 )
 
 func TestTM8LegacyCLI(t *testing.T) {
 	t.Run(`config (launcher): the legacy user file is read under the user layer, shown flagged, and not created`, func(t *testing.T) { // JS: "config (launcher): the legacy user file is read under the user layer, shown flagged, and not created"
 		env, repo := tm8CommandFixture(t)
-		legacy := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-agents", "config")
-		current := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		legacy := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		current := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config")
 		tm8File(t, legacy, "# keep\nherd_label=crew\n")
 		code, out, errOut := runIn(t, []string{"config"}, env, repo)
 		if code != 0 || errOut != "" || !strings.Contains(out, "herd_label") || !strings.Contains(out, legacy+" (legacy)") {
@@ -26,16 +26,16 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`config (launcher): the legacy project file is read under the project layer and shown flagged`, func(t *testing.T) { // JS: "config (launcher): the legacy project file is read under the project layer and shown flagged"
 		env, repo := tm8CommandFixture(t)
-		legacy := filepath.Join(repo, ".agents", "herdr-agents.conf")
+		legacy := filepath.Join(repo, ".agents", "herdr-soho.conf")
 		tm8File(t, legacy, "max_workers=5\n")
 		code, out, errOut := runIn(t, []string{"config"}, env, repo)
 		if code != 0 || errOut != "" || !strings.Contains(out, "max_workers") || !strings.Contains(out, legacy+" (legacy)") {
 			t.Fatalf("config code=%d out=%q err=%q", code, out, errOut)
 		}
 	})
-	t.Run(`config (launcher): HERDR_AGENTS_LAYOUT is read as HERDR_SOHO_LAYOUT before the layers load`, func(t *testing.T) { // JS: "config (launcher): HERDR_AGENTS_LAYOUT is read as HERDR_SOHO_LAYOUT before the layers load"
+	t.Run(`config (launcher): HERDR_SOHO_LAYOUT is read as HERDR_SOHO_LAYOUT before the layers load`, func(t *testing.T) { // JS: "config (launcher): HERDR_SOHO_LAYOUT is read as HERDR_SOHO_LAYOUT before the layers load"
 		env, repo := tm8CommandFixture(t)
-		env["HERDR_AGENTS_LAYOUT"] = "columns"
+		env["HERDR_SOHO_LAYOUT"] = "columns"
 		code, out, errOut := runIn(t, []string{"config"}, env, repo)
 		if code != 0 || errOut != "" || !strings.Contains(out, "layout") || !strings.Contains(out, "columns") {
 			t.Fatalf("config code=%d out=%q err=%q", code, out, errOut)
@@ -43,8 +43,8 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`config set --user (launcher): the first write copies the legacy user file (content and mode), warns, keeps the legacy intact, and does not copy again`, func(t *testing.T) { // JS: "config set --user (launcher): the first write copies the legacy user file (content and mode), warns, keeps the legacy intact, and does not copy again"
 		env, repo := tm8CommandFixture(t)
-		legacy := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-agents", "config")
-		current := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		legacy := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		current := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config")
 		old := []byte("# keep this comment\nherd_label=crew\n")
 		tm8File(t, legacy, string(old))
 		if err := os.Chmod(legacy, 0o640); err != nil {
@@ -69,7 +69,7 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`doctor --fix (launcher): without --panes a legacy-only project reads panes from the legacy file and migrates it`, func(t *testing.T) { // JS: "doctor --fix (launcher): without --panes a legacy-only project reads panes from the legacy file and migrates it"
 		env, repo := tm8CommandFixture(t)
-		oldPath, newPath := filepath.Join(repo, ".agents", "herdr-agents.conf"), filepath.Join(repo, ".agents", "herdr-soho.conf")
+		oldPath, newPath := filepath.Join(repo, ".agents", "herdr-soho.conf"), filepath.Join(repo, ".agents", "soho.conf")
 		tm8File(t, oldPath, "panes=3\nherd_label=crew\n")
 		code, _, errOut := runIn(t, []string{"doctor", "--fix"}, env, repo)
 		got, readErr := os.ReadFile(newPath)
@@ -80,13 +80,13 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`setup (launcher): a team choice in the legacy project file counts, so no config prompt`, func(t *testing.T) { // JS: "setup (launcher): a team choice in the legacy project file counts, so no config prompt"
 		env, repo := tm8CommandFixture(t)
-		old := filepath.Join(repo, ".agents", "herdr-agents.conf")
+		old := filepath.Join(repo, ".agents", "herdr-soho.conf")
 		tm8File(t, old, "lane.build.kind=codex\n")
 		code, out, errOut := runIn(t, []string{"setup", "--no-hooks"}, env, repo)
 		if code != 0 || strings.Contains(errOut, "sets neither multi_role") {
 			t.Fatalf("setup with legacy team code=%d out=%q err=%q", code, out, errOut)
 		}
-		if _, err := os.Stat(filepath.Join(repo, ".agents", "herdr-soho.conf")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(repo, ".agents", "soho.conf")); !os.IsNotExist(err) {
 			t.Fatalf("setup without --panes created new project config: %v", err)
 		}
 	})
@@ -95,8 +95,8 @@ func TestTM8LegacyCLI(t *testing.T) {
 			t.Skip("symlink creation may require elevated privileges on Windows")
 		}
 		env, repo := tm8CommandFixture(t)
-		legacy := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-agents", "config")
-		current := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		legacy := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		current := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config")
 		target := filepath.Join(filepath.Dir(legacy), "target")
 		tm8File(t, target, "herd_label=crew\n")
 		if err := os.Symlink(target, legacy); err != nil {
@@ -111,37 +111,13 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`config (launcher): state_dir from the defaults shows the legacy directory the commands use`, func(t *testing.T) { // JS: "config (launcher): state_dir from the defaults shows the legacy directory the commands use"
 		env, repo := tm8CommandFixture(t)
-		legacyState := filepath.Join(repo, ".herdr-agents")
+		legacyState := filepath.Join(repo, ".herdr-soho")
 		if err := os.MkdirAll(legacyState, 0o700); err != nil {
 			t.Fatal(err)
 		}
 		code, out, errOut := runIn(t, []string{"config"}, env, repo)
-		if code != 0 || errOut != "" || !strings.Contains(out, "state_dir          .herdr-agents                  defaults") || core.DefaultStateDirName(repo) != ".herdr-agents" {
+		if code != 0 || errOut != "" || !strings.Contains(out, "state_dir          .herdr-soho                    defaults") || core.DefaultStateDirName(repo) != ".herdr-soho" {
 			t.Fatalf("config code=%d out=%q err=%q", code, out, errOut)
-		}
-	})
-	t.Run(`setup + doctor (launcher): a separate CLAUDE.md that keeps the legacy block is named`, func(t *testing.T) { // JS: "setup + doctor (launcher): a separate CLAUDE.md that keeps the legacy block is named"
-		env, repo := tm8CommandFixture(t)
-		legacyBlock := "<!-- herdr-agents:start -->\nold\n<!-- herdr-agents:end -->\n"
-		tm8File(t, filepath.Join(repo, "AGENTS.md"), "# A\n\n"+legacyBlock)
-		tm8File(t, filepath.Join(repo, "CLAUDE.md"), "# C\n\n"+legacyBlock)
-		code, setupOut, setupErr := runIn(t, []string{"setup", "--no-hooks"}, env, repo)
-		if code != 0 {
-			t.Fatalf("setup code=%d out=%q err=%q", code, setupOut, setupErr)
-		}
-		if !strings.Contains(setupErr, "CLAUDE.md exists separately and still has the legacy herdr-agents block") {
-			t.Fatalf("setup did not name CLAUDE.md: %q", setupErr)
-		}
-		code, out, errOut := runIn(t, []string{"doctor"}, env, repo)
-		if code != 0 || errOut != "" || !strings.Contains(out, "legacy herdr-agents instruction block in CLAUDE.md") {
-			t.Fatalf("doctor code=%d out=%q err=%q", code, out, errOut)
-		}
-		if code, _, errOut = runIn(t, []string{"setup", "--no-hooks", "--target", "CLAUDE.md"}, env, repo); code != 0 {
-			t.Fatalf("CLAUDE setup code=%d err=%q", code, errOut)
-		}
-		code, out, errOut = runIn(t, []string{"doctor"}, env, repo)
-		if code != 0 || strings.Contains(out, "legacy herdr-agents instruction block") {
-			t.Fatalf("doctor after CLAUDE migration code=%d out=%q err=%q", code, out, errOut)
 		}
 	})
 	t.Run(`doctor (launcher): without any legacy nothing new is printed`, func(t *testing.T) { // JS: "doctor (launcher): without any legacy nothing new is printed"
@@ -158,17 +134,17 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`doctor (launcher): the copied env variable is named`, func(t *testing.T) { // JS: "doctor (launcher): the copied env variable is named"
 		env, repo := tm8CommandFixture(t)
-		env["HERDR_AGENTS_LAYOUT"] = "columns"
+		env["HERDR_SOHO_LAYOUT"] = "columns"
 		code, out, errOut := runIn(t, []string{"doctor"}, env, repo)
-		want := "legacy environment variable HERDR_AGENTS_LAYOUT is read as HERDR_SOHO_LAYOUT; rename it"
+		want := "legacy environment variable HERDR_SOHO_LAYOUT is read as SOHO_LAYOUT; rename it"
 		if code != 0 || errOut != "" || !strings.Contains(out, want) {
 			t.Fatalf("doctor code=%d out=%q err=%q", code, out, errOut)
 		}
 	})
 	t.Run(`doctor (launcher): the legacy user config in use is named with the copy destination`, func(t *testing.T) { // JS: "doctor (launcher): the legacy user config in use is named with the copy destination"
 		env, repo := tm8CommandFixture(t)
-		oldPath := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-agents", "config")
-		newPath := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		oldPath := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		newPath := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config")
 		tm8File(t, oldPath, "herd_label=crew\n")
 		code, out, errOut := runIn(t, []string{"doctor"}, env, repo)
 		if code != 0 || errOut != "" || !strings.Contains(out, "legacy user config in use: "+oldPath+" (the next 'config set --user' copies it to "+newPath+")") {
@@ -177,8 +153,8 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`doctor (launcher): the legacy user config next to the new one is no longer read`, func(t *testing.T) { // JS: "doctor (launcher): the legacy user config next to the new one is no longer read"
 		env, repo := tm8CommandFixture(t)
-		oldPath := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-agents", "config")
-		newPath := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		oldPath := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		newPath := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config")
 		tm8File(t, oldPath, "herd_label=crew\n")
 		tm8File(t, newPath, "herd_label=crew\n")
 		code, out, errOut := runIn(t, []string{"doctor"}, env, repo)
@@ -188,7 +164,7 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`doctor (launcher): the legacy project config in use is named with the copy destination`, func(t *testing.T) { // JS: "doctor (launcher): the legacy project config in use is named with the copy destination"
 		env, repo := tm8CommandFixture(t)
-		oldPath, newPath := filepath.Join(repo, ".agents", "herdr-agents.conf"), filepath.Join(repo, ".agents", "herdr-soho.conf")
+		oldPath, newPath := filepath.Join(repo, ".agents", "herdr-soho.conf"), filepath.Join(repo, ".agents", "soho.conf")
 		tm8File(t, oldPath, "max_workers=5\n")
 		code, out, errOut := runIn(t, []string{"doctor"}, env, repo)
 		if code != 0 || errOut != "" || !strings.Contains(out, "legacy project config in use: "+oldPath+" (the next 'config set' copies it to "+newPath+")") {
@@ -197,7 +173,7 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`doctor (launcher): the legacy project config next to the new one is no longer read`, func(t *testing.T) { // JS: "doctor (launcher): the legacy project config next to the new one is no longer read"
 		env, repo := tm8CommandFixture(t)
-		oldPath, newPath := filepath.Join(repo, ".agents", "herdr-agents.conf"), filepath.Join(repo, ".agents", "herdr-soho.conf")
+		oldPath, newPath := filepath.Join(repo, ".agents", "herdr-soho.conf"), filepath.Join(repo, ".agents", "soho.conf")
 		tm8File(t, oldPath, "max_workers=5\n")
 		tm8File(t, newPath, "max_workers=5\n")
 		code, out, errOut := runIn(t, []string{"doctor"}, env, repo)
@@ -207,8 +183,8 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`doctor (launcher): the legacy state dir in use is named when nothing pins the state dir`, func(t *testing.T) { // JS: "doctor (launcher): the legacy state dir in use is named when nothing pins the state dir"
 		env, repo := tm8CommandFixture(t)
-		delete(env, "HERDR_SOHO_DIR")
-		legacy := filepath.Join(repo, ".herdr-agents")
+		delete(env, "SOHO_DIR")
+		legacy := filepath.Join(repo, ".herdr-soho")
 		if err := os.MkdirAll(legacy, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -219,7 +195,7 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`doctor (launcher): the legacy state dir next to the new one is no longer used`, func(t *testing.T) { // JS: "doctor (launcher): the legacy state dir next to the new one is no longer used"
 		env, repo := tm8CommandFixture(t)
-		oldPath, newPath := filepath.Join(repo, ".herdr-agents"), filepath.Join(repo, ".herdr-soho")
+		oldPath, newPath := filepath.Join(repo, ".herdr-soho"), filepath.Join(repo, ".soho")
 		if err := os.MkdirAll(oldPath, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -233,12 +209,12 @@ func TestTM8LegacyCLI(t *testing.T) {
 	})
 	t.Run(`setup --plan (launcher): the before side seeds from the legacy project file when the new one is absent`, func(t *testing.T) { // JS: "setup --plan (launcher): the before side seeds from the legacy project file when the new one is absent"
 		env, repo := tm8CommandFixture(t)
-		tm8File(t, filepath.Join(repo, ".agents", "herdr-agents.conf"), "lane.build.roles=scouter,implementer\n")
+		tm8File(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.build.roles=scouter,implementer\n")
 		code, out, errOut := runIn(t, []string{"setup", "--plan", "--panes", "4"}, env, repo)
-		if code != 0 || !strings.Contains(errOut, "lane roles in") || !strings.Contains(errOut, "are custom") || !strings.Contains(out, "  lane.build.roles     (unset) → scouter,implementer") || !strings.Contains(out, filepath.Join(repo, ".agents", "herdr-soho.conf")+"\n") {
+		if code != 0 || !strings.Contains(errOut, "lane roles in") || !strings.Contains(errOut, "are custom") || !strings.Contains(out, "  lane.build.roles     (unset) → scouter,implementer") || !strings.Contains(out, filepath.Join(repo, ".agents", "soho.conf")+"\n") {
 			t.Fatalf("setup plan code=%d out=%q err=%q", code, out, errOut)
 		}
-		if _, err := os.Stat(filepath.Join(repo, ".agents", "herdr-soho.conf")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(repo, ".agents", "soho.conf")); !os.IsNotExist(err) {
 			t.Fatalf("setup plan wrote new config: %v", err)
 		}
 	})

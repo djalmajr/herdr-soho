@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // The peer composer safety of the send's retry Enter: idInInputBox may
@@ -104,7 +104,7 @@ func TestComposerSafetyNoKeysOnRefusedShapes(t *testing.T) {
 		// message's id is not in the box.
 		post := piSendScreen("old turn output", otherPrompt)
 		f := newFixture(t, stalledSafetyRules("pi", piSendScreen("old turn output", ""), post, prompt))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		assertNoKeysStalled15(t, f)
 	})
 	t.Run("unknown layout: the full typed prompt without the kind's composer shape gets no Enter", func(t *testing.T) {
@@ -114,7 +114,7 @@ func TestComposerSafetyNoKeysOnRefusedShapes(t *testing.T) {
 		// Enter — the last-fifteen-lines fallback is gone.
 		post := prompt + "\n"
 		f := newFixture(t, stalledSafetyRules("pi", pre, post, prompt))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		assertNoKeysStalled15(t, f)
 	})
 	t.Run("unknown kind: a grok screen with the typed prompt gets no Enter", func(t *testing.T) {
@@ -123,7 +123,7 @@ func TestComposerSafetyNoKeysOnRefusedShapes(t *testing.T) {
 		// prompt on screen is not permission to press Enter.
 		post := "work output\n" + prompt + "\n"
 		f := newFixture(t, stalledSafetyRules("grok", pre, post, prompt))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		assertNoKeysStalled15(t, f)
 	})
 	t.Run("dialog: the codex question UI in the composer screen gets no Enter (shared classifier)", func(t *testing.T) {
@@ -136,7 +136,7 @@ func TestComposerSafetyNoKeysOnRefusedShapes(t *testing.T) {
 		post := "› [herdr-soho:peer] #" + id + " Message from another agent\n" +
 			"Enter to submit answer:\n"
 		f := newFixture(t, stalledSafetyRules("codex", pre, post, prompt))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		assertNoKeysStalled15(t, f)
 	})
 	t.Run("dialog: the claude approval UI under the recognized box gets no Enter (shared classifier)", func(t *testing.T) {
@@ -149,7 +149,7 @@ func TestComposerSafetyNoKeysOnRefusedShapes(t *testing.T) {
 		// not blocked): no Enter.
 		post := sep + "\n❯ [herdr-soho:peer] #" + id + " Message from another agent\n" + sep + "\nDo you want to continue with the refactor?\n"
 		f := newFixture(t, stalledSafetyRules("claude", pre, post, prompt))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		assertNoKeysStalled15(t, f)
 	})
 	t.Run("history: a delivered codex turn with the empty composer sends with no key", func(t *testing.T) {
@@ -173,7 +173,7 @@ func TestComposerSafetyNoKeysOnRefusedShapes(t *testing.T) {
 			}
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "500", "50"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "500", "50"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("the delivered turn with the empty composer must be sent without keys: code=%d out=%q stderr=%q", code, out, stderr)
@@ -194,7 +194,7 @@ func TestComposerSafetyNoKeysOnRefusedShapes(t *testing.T) {
 		longer := id + "a"
 		post := piSendScreen("old turn output", peer.PeerHeader("local/-", "-", "-", "-", longer)+"\n\n> other\n"+peer.PeerEndLine(longer))
 		f := newFixture(t, stalledSafetyRules("pi", piSendScreen("old turn output", ""), post, prompt))
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		assertNoKeysStalled15(t, f)
 	})
 }
@@ -222,7 +222,7 @@ func TestComposerSafetyLegitimateRetry(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 3, Stdout: piSendScreen(history+"\n"+prompt, "")},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -257,7 +257,7 @@ func TestComposerSafetyLegitimateRetry(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 3, Stdout: "✻ Working…\n" + prompt + "\n" + sep + "\n❯\n" + sep + "\n" + foot},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -288,7 +288,7 @@ func TestComposerSafetyLegitimateRetry(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 3, Stdout: "history\n" + prompt + "\n• Working (3s)\n› Ask Codex to do anything\n" + status},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 0 || out != "sent to local/w0test:p0a\n" || stderr != "" {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -326,7 +326,7 @@ func TestComposerSafetyHonorsSendKeyFailure(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: box},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 15 || out != "" {
 			t.Fatalf("the unproved stalled send keeps the 15: code=%d out=%q stderr=%q", code, out, stderr)
@@ -367,7 +367,7 @@ func TestComposerSafetyHonorsSendKeyFailure(t *testing.T) {
 			{Argv: []string{"agent", "send-keys", "w0test:p0a", "enter"}, Code: 1},
 		}
 		f := newFixture(t, rules)
-		f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 15 || out != "" {
 			t.Fatalf("the unproved send with the failed Enter keeps the lost 15: code=%d out=%q stderr=%q", code, out, stderr)

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // herdrFixture is one hermetic herdr-CLI scenario: a fake herdr on an
@@ -384,7 +384,7 @@ func TestHerdrWorkspacesClose(t *testing.T) {
 }
 
 func TestHerdrWorkspacesRun(t *testing.T) {
-	argv := []string{"/opt/bin/herdr-soho", "job", "supervise", "--id", "TASK-1.a"}
+	argv := []string{"/opt/bin/soho", "job", "supervise", "--id", "TASK-1.a"}
 	t.Run("exact argv and success", func(t *testing.T) {
 		want := append([]string{"pane", "run", "w9:p1"}, argv...)
 		f := newHerdrFixture(t, []fakecli.Rule{{Argv: want}})
@@ -405,7 +405,7 @@ func TestHerdrWorkspacesRun(t *testing.T) {
 			"space in pane id":    {paneID: "w9 p1"},
 			"semicolon in pane":   {paneID: "w9;p1"},
 			"empty argv element":  {paneID: "w9:p1", argv: []string{"/bin/cmd", ""}},
-			"space in argv":       {paneID: "w9:p1", argv: []string{"/Users/a b/herdr-soho"}},
+			"space in argv":       {paneID: "w9:p1", argv: []string{"/Users/a b/soho"}},
 			"semicolon in argv":   {paneID: "w9:p1", argv: []string{"x;y"}},
 			"glob in argv":        {paneID: "w9:p1", argv: []string{"cmd", "*"}},
 			"shell quote in argv": {paneID: "w9:p1", argv: []string{"cmd", "a'b"}},
@@ -436,7 +436,7 @@ func TestHerdrWorkspacesRunShortNames(t *testing.T) {
 	t.Run("8.3 short-name arguments are accepted", func(t *testing.T) {
 		for _, arg := range []string{
 			`C:\Users\RUNNER~1\AppData\Local\Temp\go-build1\b001\cli.test.exe`,
-			`C:\PROGRA~1\herdr\herdr-soho.exe`,
+			`C:\PROGRA~1\herdr\soho.exe`,
 			`/tmp/ABCDEF~12/x`,
 			`D:\a\b~3`,
 		} {

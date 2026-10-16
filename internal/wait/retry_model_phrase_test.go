@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // TestStatusModelRetryPhraseNoCause guards the real case: a working agent whose
@@ -41,12 +41,12 @@ func TestStatusModelRetryPhraseNoCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"PATH":                      bin,
-		"HERDR_ENV":                 "1",
-		"HERDR_SOHO_DIR":            state,
-		"HERDR_WORKSPACE_ID":        "ws",
-		"HERDR_SOCKET_PATH":         filepath.Join(base, "none.sock"),
-		"HERDR_SOHO_FAKECLI_CONFIG": bin,
+		"PATH":                bin,
+		"HERDR_ENV":           "1",
+		"HERDR_SOHO_DIR":      state,
+		"HERDR_WORKSPACE_ID":  "ws",
+		"HERDR_SOCKET_PATH":   filepath.Join(base, "none.sock"),
+		"SOHO_FAKECLI_CONFIG": bin,
 	}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	oldOut, oldErr := platform.Stdout, platform.Stderr

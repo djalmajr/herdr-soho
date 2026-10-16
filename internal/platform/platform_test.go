@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // runCliFixtureRoleEnv marks the re-executed fixture program: the RunCli
@@ -410,27 +410,27 @@ func assertRootReference(t *testing.T, reference *windowsReference, name string,
 func TestUserConfigPath(t *testing.T) {
 	t.Run("userConfigPath: XDG_CONFIG_HOME wins on every platform (decision 4)", func(t *testing.T) { // JS: "userConfigPath: XDG_CONFIG_HOME wins on every platform (decision 4)"
 		for _, osName := range []string{"linux", "darwin", "win32"} {
-			if got := UserConfigPath(osName, Env{"XDG_CONFIG_HOME": "/cfg/home"}); got != filepath.Join("/cfg/home", "herdr-soho", "config") {
+			if got := UserConfigPath(osName, Env{"XDG_CONFIG_HOME": "/cfg/home"}); got != filepath.Join("/cfg/home", "soho", "config") {
 				t.Errorf("%s: %q", osName, got)
 			}
 		}
 	})
 	t.Run("userConfigPath: win32 without XDG uses %APPDATA%\\herdr-soho\\config", func(t *testing.T) { // JS: "userConfigPath: win32 without XDG uses %APPDATA%\\herdr-soho\\config"
-		if got := UserConfigPath("win32", Env{"APPDATA": `C:\Users\dev\AppData\Roaming`}); got != filepath.Join(`C:\Users\dev\AppData\Roaming`, "herdr-soho", "config") {
+		if got := UserConfigPath("win32", Env{"APPDATA": `C:\Users\dev\AppData\Roaming`}); got != filepath.Join(`C:\Users\dev\AppData\Roaming`, "soho", "config") {
 			t.Errorf("APPDATA: %q", got)
 		}
-		if got := UserConfigPath("win32", Env{"USERPROFILE": `C:\Users\dev`}); got != filepath.Join(`C:\Users\dev`, "AppData", "Roaming", "herdr-soho", "config") {
+		if got := UserConfigPath("win32", Env{"USERPROFILE": `C:\Users\dev`}); got != filepath.Join(`C:\Users\dev`, "AppData", "Roaming", "soho", "config") {
 			t.Errorf("fallback: %q", got)
 		}
 	})
 	t.Run("userConfigPath: Unix without XDG uses ~/.config/herdr-soho/config", func(t *testing.T) { // JS: "userConfigPath: Unix without XDG uses ~/.config/herdr-soho/config"
-		if got := UserConfigPath("linux", Env{"HOME": "/home/dev"}); got != filepath.Join("/home/dev", ".config", "herdr-soho", "config") {
+		if got := UserConfigPath("linux", Env{"HOME": "/home/dev"}); got != filepath.Join("/home/dev", ".config", "soho", "config") {
 			t.Errorf("linux: %q", got)
 		}
-		if got := UserConfigPath("darwin", Env{"HOME": "/Users/dev"}); got != filepath.Join("/Users/dev", ".config", "herdr-soho", "config") {
+		if got := UserConfigPath("darwin", Env{"HOME": "/Users/dev"}); got != filepath.Join("/Users/dev", ".config", "soho", "config") {
 			t.Errorf("darwin: %q", got)
 		}
-		if got := UserConfigPath("linux", Env{"XDG_CONFIG_HOME": "", "HOME": "/home/dev"}); got != filepath.Join("/home/dev", ".config", "herdr-soho", "config") {
+		if got := UserConfigPath("linux", Env{"XDG_CONFIG_HOME": "", "HOME": "/home/dev"}); got != filepath.Join("/home/dev", ".config", "soho", "config") {
 			t.Errorf("empty XDG: %q", got)
 		}
 	})
@@ -554,11 +554,11 @@ func TestLauncherPath(t *testing.T) {
 			want    string
 			skipWin bool
 		}{
-			{name: "relative override", bin: "herdr-soho", want: "HERDR_SOHO_BIN must be an absolute path"},
-			{name: "missing override", bin: filepath.Join(tmp, "missing"), want: "HERDR_SOHO_BIN is missing or not a regular file"},
-			{name: "directory override", bin: tmp, want: "HERDR_SOHO_BIN is missing or not a regular file"},
+			{name: "relative override", bin: "herdr-soho", want: "SOHO_BIN must be an absolute path"},
+			{name: "missing override", bin: filepath.Join(tmp, "missing"), want: "SOHO_BIN is missing or not a regular file"},
+			{name: "directory override", bin: tmp, want: "SOHO_BIN is missing or not a regular file"},
 			{
-				name: "shebang script override", bin: filepath.Join(tmp, "script"), want: "HERDR_SOHO_BIN is not a native binary",
+				name: "shebang script override", bin: filepath.Join(tmp, "script"), want: "SOHO_BIN is not a native binary",
 				setup: func(t *testing.T) string {
 					f := filepath.Join(tmp, "script")
 					if err := os.WriteFile(f, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
@@ -568,7 +568,7 @@ func TestLauncherPath(t *testing.T) {
 				},
 			},
 			{
-				name: ".cmd batch override", bin: filepath.Join(tmp, "run.cmd"), want: "HERDR_SOHO_BIN is not a native binary",
+				name: ".cmd batch override", bin: filepath.Join(tmp, "run.cmd"), want: "SOHO_BIN is not a native binary",
 				setup: func(t *testing.T) string {
 					f := filepath.Join(tmp, "run.cmd")
 					if err := os.WriteFile(f, []byte("@echo off\nnode herdr-soho.mjs\n"), 0o755); err != nil {
@@ -578,7 +578,7 @@ func TestLauncherPath(t *testing.T) {
 				},
 			},
 			{
-				name: "symlink to a script resolves to the script", bin: filepath.Join(tmp, "link"), want: "HERDR_SOHO_BIN is not a native binary",
+				name: "symlink to a script resolves to the script", bin: filepath.Join(tmp, "link"), want: "SOHO_BIN is not a native binary",
 				setup: func(t *testing.T) string {
 					target := filepath.Join(tmp, "real-script")
 					if err := os.WriteFile(target, []byte("#!/usr/bin/env node\n"), 0o755); err != nil {
@@ -592,7 +592,7 @@ func TestLauncherPath(t *testing.T) {
 				},
 			},
 			{
-				name: "non-executable native binary", bin: filepath.Join(tmp, "noperm"), want: "HERDR_SOHO_BIN is not executable", skipWin: true,
+				name: "non-executable native binary", bin: filepath.Join(tmp, "noperm"), want: "SOHO_BIN is not executable", skipWin: true,
 				setup: func(t *testing.T) string {
 					f := filepath.Join(tmp, "noperm")
 					data, err := os.ReadFile(exe)
@@ -1152,7 +1152,7 @@ func TestRunTreeKillTestKiller(t *testing.T) {
 		gotPath = path
 		gotArgs = args
 	}
-	if !runTreeKillTestKiller(Env{"HERDR_SOHO_TREEKILL_TEST_KILLER": killer}, tempDir, 1234, run) {
+	if !runTreeKillTestKiller(Env{"SOHO_TREEKILL_TEST_KILLER": killer}, tempDir, 1234, run) {
 		t.Fatal("temporary test killer was not accepted")
 	}
 	resolvedKiller, err := filepath.EvalSymlinks(killer)
@@ -1168,7 +1168,7 @@ func TestRunTreeKillTestKiller(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			called := false
-			if runTreeKillTestKiller(Env{"HERDR_SOHO_TREEKILL_TEST_KILLER": value}, tempDir, 1234, func(string, []string) { called = true }) || called {
+			if runTreeKillTestKiller(Env{"SOHO_TREEKILL_TEST_KILLER": value}, tempDir, 1234, func(string, []string) { called = true }) || called {
 				t.Fatalf("unsafe test killer %q was accepted", value)
 			}
 		})
@@ -1227,7 +1227,7 @@ func TestRunExecutableUsesExactPathInsteadOfPATH(t *testing.T) {
 	}
 	env := EnvFromOS()
 	env["PATH"] = pathDir
-	env["HERDR_SOHO_FAKECLI_CONFIG"] = filepath.Join(targetDir, "fixture.json")
+	env["SOHO_FAKECLI_CONFIG"] = filepath.Join(targetDir, "fixture.json")
 
 	got := RunExecutable(target, []string{"identity"}, RunOptions{Env: env})
 	if got.NotFound || got.Resolved != target || got.Status == nil || *got.Status != 0 || got.Stdout != "target\n" {
@@ -1258,7 +1258,7 @@ func TestRunCliWindows(t *testing.T) {
 	baseEnv := EnvFromOS()
 	setTestPath(baseEnv, dir+";"+testPath(baseEnv))
 	baseEnv["PATHEXT"] = ".EXE;.CMD;.BAT;.COM"
-	baseEnv["HERDR_SOHO_FAKECLI_CONFIG"] = config
+	baseEnv["SOHO_FAKECLI_CONFIG"] = config
 	baseEnv["TMPDIR"] = dir
 	if baseEnv.Get("COMSPEC") == "" {
 		baseEnv["COMSPEC"] = `C:\Windows\System32\cmd.exe`
@@ -1903,7 +1903,7 @@ func TestRunCliTempDirMatchesJSTempDirFor(t *testing.T) { // JS: "send reports a
 		env := EnvFromOS()
 		env["TMPDIR"] = file
 		r := RunExecutable(exe, []string{"-test.run=^$"}, RunOptions{Env: env, TimeoutMs: 30000, MergeOutput: true})
-		if r.Status != nil || r.Error != "EEXIST" || r.Stdout != "" || r.Stderr != "herdr-soho: cannot write temporary files: EEXIST\n" {
+		if r.Status != nil || r.Error != "EEXIST" || r.Stdout != "" || r.Stderr != "soho: cannot write temporary files: EEXIST\n" {
 			t.Fatalf("result = %#v", r)
 		}
 	})

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // laneOrphanRules is freshSpawnRules with a live-agent list that holds an
@@ -66,7 +66,7 @@ func TestSpawnWarnsAboutIdleReleasedOrphanBeforeOpeningThePane(t *testing.T) {
 	if !strings.Contains(stdout, `"name": "build"`) || !strings.Contains(stdout, `"created_pane": true`) {
 		t.Fatalf("the spawn did not proceed to a new pane:\n%s", stdout)
 	}
-	want := "herdr-soho: spawn: 'build-2' is idle outside the roster (ws:p2); close it with: herdr-soho release build-2 --close\n"
+	want := "soho: spawn: 'build-2' is idle outside the roster (ws:p2); close it with: soho release build-2 --close\n"
 	if !strings.Contains(stderr, want) {
 		t.Fatalf("missing the released orphan warning:\n%s", stderr)
 	}

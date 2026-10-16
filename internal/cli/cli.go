@@ -8,19 +8,19 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/doctor"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/job"
-	"github.com/djalmajr/herdr-soho/internal/kinds"
-	"github.com/djalmajr/herdr-soho/internal/metrics"
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	pluginpkg "github.com/djalmajr/herdr-soho/internal/plugin"
-	"github.com/djalmajr/herdr-soho/internal/setup"
-	"github.com/djalmajr/herdr-soho/internal/spawn"
-	"github.com/djalmajr/herdr-soho/internal/stats"
-	waitpkg "github.com/djalmajr/herdr-soho/internal/wait"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/doctor"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/job"
+	"github.com/djalmajr/soho/internal/kinds"
+	"github.com/djalmajr/soho/internal/metrics"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/platform"
+	pluginpkg "github.com/djalmajr/soho/internal/plugin"
+	"github.com/djalmajr/soho/internal/setup"
+	"github.com/djalmajr/soho/internal/spawn"
+	"github.com/djalmajr/soho/internal/stats"
+	waitpkg "github.com/djalmajr/soho/internal/wait"
 )
 
 // knownCommands is the native command inventory: every entry has a native
@@ -52,7 +52,7 @@ func versionText(buildVersion, revision string) string {
 	if buildVersion == "dev" && revision != "" {
 		buildVersion += "+" + revision
 	}
-	return "herdr-soho " + buildVersion + "\n"
+	return "soho " + buildVersion + "\n"
 }
 
 func vcsRevision() string {
@@ -98,7 +98,7 @@ func Run(args []string, env platform.Env) (code int) {
 			panic(value)
 		}
 		if exitErr.Msg != "" {
-			_, _ = fmt.Fprintf(platform.Stderr, "herdr-soho: %s\n", exitErr.Msg)
+			_, _ = fmt.Fprintf(platform.Stderr, "soho: %s\n", exitErr.Msg)
 			if exitErr.Friction && frictionLogPath != "" {
 				core.RecordFrictionError(exitErr.Msg, exitErr.Code, frictionLogPath)
 			}
@@ -147,7 +147,7 @@ func Run(args []string, env platform.Env) (code int) {
 		userSel = sel
 	}
 	var commandConfig *core.Config
-	readOnlyRejectedDoctor := command == "doctor" && decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && len(args) > 1
+	readOnlyRejectedDoctor := command == "doctor" && decisionEnv.Get("SOHO_NOWRITE") == "1" && len(args) > 1
 	if !readOnlyRejectedDoctor && (command == "config" || command == "session" || command == "roles" || command == "role" || command == "explain" || command == "layout-plan" || command == "regrid" || command == "promote" || command == "tab-label" || command == "stats" || command == "metrics" || command == "collect" || command == "setup" || command == "release" || command == "doctor" || command == "init" || command == "spawn" || command == "dispatch" || command == "run" || command == "lint" || command == "wait" || command == "status") {
 		ctx := core.LoadConfigFor(decisionEnv, commandCwd, userSel)
 		configCtx = &ctx
@@ -163,10 +163,10 @@ func Run(args []string, env platform.Env) (code int) {
 	// A writing job subcommand under NOWRITE dies with the job-specific
 	// message before the generic refusal; the five read subcommands (and
 	// their flags) pass through nowriteReadInvocation below.
-	if decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && command == "job" && len(args) > 1 && !nowriteJobRead(args[1:]) {
-		platform.Die("HERDR_SOHO_NOWRITE=1 is read-only: job "+args[1]+" writes; only job status, wait, events, collect and list run", 2)
+	if decisionEnv.Get("SOHO_NOWRITE") == "1" && command == "job" && len(args) > 1 && !nowriteJobRead(args[1:]) {
+		platform.Die("SOHO_NOWRITE=1 is read-only: job "+args[1]+" writes; only job status, wait, events, collect and list run", 2)
 	}
-	if decisionEnv.Get("HERDR_SOHO_NOWRITE") == "1" && !nowriteReadInvocation(args) {
+	if decisionEnv.Get("SOHO_NOWRITE") == "1" && !nowriteReadInvocation(args) {
 		shown, extra := command, ""
 		if command == "" {
 			shown = "(none)"
@@ -178,7 +178,7 @@ func Run(args []string, env platform.Env) (code int) {
 			}
 			extra = fmt.Sprintf(" (%d extra %s not allowed)", count, noun)
 		}
-		platform.Die("herdr-soho: HERDR_SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset HERDR_SOHO_NOWRITE to write", 2)
+		platform.Die("soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset SOHO_NOWRITE to write", 2)
 	}
 	if command == "help" || command == "-h" || command == "--help" || command == "" {
 		_, _ = io.WriteString(platform.Stdout, usage)
@@ -192,14 +192,14 @@ func Run(args []string, env platform.Env) (code int) {
 		if args[1] == "clipboard" {
 			data, err := io.ReadAll(os.Stdin)
 			if err != nil {
-				fmt.Fprintf(platform.Stderr, "herdr-soho plugin: cannot read clipboard input: %s\n", err)
+				fmt.Fprintf(platform.Stderr, "soho plugin: cannot read clipboard input: %s\n", err)
 				return 2
 			}
 			input = string(data)
 		}
 		executable, err := os.Executable()
 		if err != nil && (args[1] == "bridge" || args[1] == "picker" || args[1] == "board" || args[1] == "team") {
-			fmt.Fprintf(platform.Stderr, "herdr-soho plugin: cannot resolve executable: %s\n", err)
+			fmt.Fprintf(platform.Stderr, "soho plugin: cannot resolve executable: %s\n", err)
 			return 4
 		}
 		return pluginpkg.PluginCommand(args[1:], env, platform.Current(), executable, input)
@@ -373,7 +373,7 @@ func Run(args []string, env platform.Env) (code int) {
 }
 
 // nowriteReadInvocation decides, from the shape of the invocation alone, what
-// runs under HERDR_SOHO_NOWRITE=1: the exact doctor/roster (the plugin's
+// runs under SOHO_NOWRITE=1: the exact doctor/roster (the plugin's
 // actions, unchanged), the exact explain, config, roles and copies, friction
 // with only the read options, collect <agent> with its options, status with
 // agent names, and gc without --yes.

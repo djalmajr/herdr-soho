@@ -7,7 +7,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // openEvidenceBase opens the trusted base of an evidence root (its own

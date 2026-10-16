@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
-// teamOpsFix installs the fake herdr-soho executable the selfCLI adapter
+// teamOpsFix installs the fake soho executable the selfCLI adapter
 // runs and returns the adapter pointed at it, plus a call-log reader.
 type teamOpsFix struct {
 	t     *testing.T
@@ -25,9 +25,9 @@ type teamOpsFix struct {
 func newTeamOpsFix(t *testing.T, rules []fakecli.Rule) *teamOpsFix {
 	t.Helper()
 	fakeDir := t.TempDir()
-	exe, err := fakecli.Install(t, fakeDir, "herdr-soho", rules)
+	exe, err := fakecli.Install(t, fakeDir, "soho", rules)
 	if err != nil {
-		t.Fatalf("install the fake herdr-soho: %v", err)
+		t.Fatalf("install the fake soho: %v", err)
 	}
 	f := &teamOpsFix{t: t, exe: exe, dir: t.TempDir()}
 	var pairs []string
@@ -35,9 +35,9 @@ func newTeamOpsFix(t *testing.T, rules []fakecli.Rule) *teamOpsFix {
 		pairs = append(pairs, item)
 	}
 	f.env = envFromPairs(t, pairs)
-	configDir := f.env["HERDR_SOHO_FAKECLI_CONFIG"]
+	configDir := f.env["SOHO_FAKECLI_CONFIG"]
 	f.calls = func() []fakecli.Call {
-		calls, err := fakecli.ReadCallsForConfig(filepath.Join(configDir, "herdr-soho.json"))
+		calls, err := fakecli.ReadCallsForConfig(filepath.Join(configDir, "soho.json"))
 		if err != nil {
 			t.Fatalf("read the fake call log: %v", err)
 		}

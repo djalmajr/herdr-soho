@@ -2,10 +2,10 @@ package cli
 
 import (
 	"bytes"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/kinds"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/kinds"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +20,7 @@ func commandFakeEnv(t *testing.T, rules map[string][]fakecli.Rule) platform.Env 
 			t.Fatal(err)
 		}
 	}
-	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "HERDR_SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": t.TempDir()}
 	env["GORACE"] = fakecli.RaceOptions(env.List())
 	return env
 }
@@ -68,7 +68,7 @@ func TestKindsCommands(t *testing.T) {
 		var stderr bytes.Buffer
 		platform.Stderr = &stderr
 		t.Cleanup(func() { platform.Stderr = oldErr })
-		if code := cmdModel(nil, nil); code != 1 || stderr.String() != "herdr-soho: 1: kind\n" {
+		if code := cmdModel(nil, nil); code != 1 || stderr.String() != "soho: 1: kind\n" {
 			t.Fatalf("code=%d stderr=%q", code, stderr.String())
 		}
 	})
@@ -82,7 +82,7 @@ func TestKindsCommands(t *testing.T) {
 		platform.Stdout = &out
 		t.Cleanup(func() { platform.Stdout = oldOut })
 		cmdEnv(&core.Config{Entries: map[string]core.ConfigEntry{}}, env, t.TempDir())
-		for _, line := range []string{"herdr-soho: abc1234 2026-09-24", "herdr: herdr 1.0", "kind grok: Grok 4", "runtime: go ", "config: layout=split reuse_workers=on approvals=ask"} {
+		for _, line := range []string{"soho: abc1234 2026-09-24", "herdr: herdr 1.0", "kind grok: Grok 4", "runtime: go ", "config: layout=split reuse_workers=on approvals=ask"} {
 			if !strings.Contains(out.String(), line) {
 				t.Fatalf("missing %q in %s", line, out.String())
 			}

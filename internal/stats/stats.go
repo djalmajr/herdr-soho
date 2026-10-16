@@ -15,15 +15,15 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/djalmajr/herdr-soho/internal/collaboration"
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/herdr"
-	"github.com/djalmajr/herdr-soho/internal/jsonjs"
-	"github.com/djalmajr/herdr-soho/internal/platform"
-	"github.com/djalmajr/herdr-soho/internal/reportscan"
-	"github.com/djalmajr/herdr-soho/internal/taskreport"
-	textutil "github.com/djalmajr/herdr-soho/internal/text"
-	"github.com/djalmajr/herdr-soho/internal/wait"
+	"github.com/djalmajr/soho/internal/collaboration"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/herdr"
+	"github.com/djalmajr/soho/internal/jsonjs"
+	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/reportscan"
+	"github.com/djalmajr/soho/internal/taskreport"
+	textutil "github.com/djalmajr/soho/internal/text"
+	"github.com/djalmajr/soho/internal/wait"
 )
 
 var pairRE = regexp.MustCompile(`^(.+)-(\d{8}T\d{6})(-\d+)?$`)
@@ -451,7 +451,7 @@ func CmdStats(args []string, command CommandContext) int {
 	if tmpRoot == "" {
 		tmpRoot = os.TempDir()
 	}
-	tmp := filepath.Join(tmpRoot, "herdr-soho", core.WorkspaceID(ctx, env, cwd), "reports")
+	tmp := filepath.Join(tmpRoot, "soho", core.WorkspaceID(ctx, env, cwd), "reports")
 	pairs := collectPairs(sd, tmp)
 	if len(pairs) == 0 {
 		output("no dispatches recorded under " + filepath.Join(sd, "briefs") + "\n")
@@ -838,7 +838,7 @@ func CmdCollect(args []string, command CommandContext) int {
 	taskPath := ""
 	if pointer != nil {
 		// SyncTaskReport rewrites (or removes) the stable task report, so
-		// under HERDR_SOHO_NOWRITE the read skips it: the pointer is still
+		// under SOHO_NOWRITE the read skips it: the pointer is still
 		// consulted for its path, nothing is written.
 		if !core.Nowrite(env) {
 			_, _ = taskreport.SyncTaskReport(sd, agent)
@@ -881,7 +881,7 @@ func CmdCollect(args []string, command CommandContext) int {
 			return 4
 		}
 		if (st.State == "working" || st.State == "blocked") && !linesSet {
-			core.Warn("'"+agent+"' is "+st.State+" and has no report yet ("+orNone(report)+"); wait for it: herdr-soho wait "+agent, logFile, "collect")
+			core.Warn("'"+agent+"' is "+st.State+" and has no report yet ("+orNone(report)+"); wait for it: soho wait "+agent, logFile, "collect")
 			return 4
 		}
 	}

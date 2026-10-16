@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const configEnv = "HERDR_SOHO_FAKECLI_CONFIG"
+const configEnv = "SOHO_FAKECLI_CONFIG"
 
 type Rule struct {
 	Argv        []string `json:"argv"`

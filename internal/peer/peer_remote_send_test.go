@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/djalmajr/herdr-soho/internal/peer"
-	"github.com/djalmajr/herdr-soho/internal/testutil/fakecli"
+	"github.com/djalmajr/soho/internal/peer"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // Remote-target send: the transcript proof is local to the session's machine
@@ -51,12 +51,12 @@ func TestSendRemoteClaudeTranscriptNotArmed(t *testing.T) {
 	writeClaudeTranscript(t, transcriptPath, `{"type":"user","message":{"content":"earlier conversation"}}`+"\n")
 	f := newFixture(t, rules)
 	f.env["CLAUDE_CONFIG_DIR"] = configRoot
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 	done := appendAfterPrompt(t, filepath.Join(filepath.Dir(f.bin), "herdr.calls.jsonl"), transcriptPath, id, userLine)
 	code, _, stderr := f.run([]string{"send", remotePane, "hello"})
 	// Today's result for a remote send with no sign in its own state or
 	// screen: not 0 on the planted local transcript.
-	want := "herdr-soho: send: windows/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
+	want := "soho: send: windows/w0test:p0a did not confirm taking the message (no sign of it in its state or screen); delivery is uncertain; read its pane for #01020304 or a reply before sending again\n"
 	if code != 15 || stderr != want {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}
@@ -115,7 +115,7 @@ func TestSendRemoteClaudeShortTurnSeqProof(t *testing.T) {
 		{Argv: []string{"--machine", "windows", "agent", "read", "w0test:p0a", "--source", "visible"}, Call: 5, Stdout: postScreen},
 	}
 	f := newFixture(t, rules)
-	f.env["HERDR_SOHO_SEND_WINDOW_MS"], f.env["HERDR_SOHO_SEND_POLL_MS"] = "1", "1"
+	f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 	code, out, stderr := f.run([]string{"send", remotePane, "hello"})
 	if code != 0 || out != "sent to windows/w0test:p0a\n" || stderr != "" {
 		t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)

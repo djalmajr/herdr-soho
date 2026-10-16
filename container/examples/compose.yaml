@@ -1,4 +1,4 @@
-# One container per job, built FROM the herdr-soho base image (or the base
+# One container per job, built FROM the soho base image (or the base
 # itself). Start one Compose project per job so each job gets its own
 # container, network and state volumes:
 #
@@ -10,11 +10,11 @@
 # macos.env.example and windows.env.example show the variables. Nothing here
 # sets a credential: secrets are read-only files under /run/secrets, read by
 # the runner process at exec time (docs/container-image.md, "Credentials").
-name: herdr-soho-job
+name: soho-job
 
 services:
   agent:
-    image: ${HERDR_SOHO_IMAGE:-herdr-soho-base:0.1.0}
+    image: ${SOHO_IMAGE:-soho-base:0.1.0}
     pull_policy: never
     # The image's entrypoint is tini; the default command idles so that
     # runner sessions are started with `exec`, one per Herdr pane.

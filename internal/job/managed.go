@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/djalmajr/herdr-soho/internal/core"
-	"github.com/djalmajr/herdr-soho/internal/platform"
+	"github.com/djalmajr/soho/internal/core"
+	"github.com/djalmajr/soho/internal/platform"
 )
 
 // managed.go binds the private launch context (locator.go) to the current
@@ -20,7 +20,7 @@ import (
 // direct parent is that supervisor (ManagedSelection). Every other command
 // ignores the private names.
 //
-// The binding fences cooperating herdr-soho processes; like the launch
+// The binding fences cooperating soho processes; like the launch
 // record itself it is not an authentication against another process of
 // the same user, which can read or write the private files and the
 // environment. A process start identity has the platform's precision

@@ -89,7 +89,7 @@ func TestSkillDirFindsTheInstalledSkillInHome(t *testing.T) {
 		if origin != "bundled" {
 			t.Fatalf("SkillDirSource() = %q %q; want the bundled fallback", dir, origin)
 		}
-		want := filepath.Join(xdg, "herdr-soho", "bundled")
+		want := filepath.Join(xdg, "soho", "bundled")
 		if !strings.HasPrefix(dir, want+string(filepath.Separator)) {
 			t.Fatalf("bundled skill materialized outside XDG_CACHE_HOME: %q", dir)
 		}
