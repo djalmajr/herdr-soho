@@ -1,9 +1,8 @@
 // Package install is the native Go core of the release installers
 // (install.sh and install.ps1). It downloads the soho artifact for a
 // requested platform from a release base URL, verifies it against
-// SHA256SUMS, and installs the soho binary plus the herdr-soho
-// compatibility copy (the same verified bytes as its own file) inside the
-// requested directory using only the Go standard library.
+// SHA256SUMS, and installs the soho binary inside the requested directory
+// using only the Go standard library.
 //
 // The core never invokes a shell, curl, awk, shasum, PowerShell, Node, or
 // Bun, never changes PATH or the registry, and never executes the
@@ -40,10 +39,6 @@ const (
 	// binaryBaseName is the installed binary's base name (the .exe suffix
 	// is added on windows).
 	binaryBaseName = "soho"
-	// legacyBaseName is the compatibility-window copy installed next to the
-	// binary: its own regular file with the same verified bytes, never a
-	// link, so it works on Windows without privileges.
-	legacyBaseName = "herdr-soho"
 	sumsFileName   = "SHA256SUMS"
 )
 
@@ -67,11 +62,10 @@ type Options struct {
 // lowercase sha256 of the installed bytes. ReleaseURL is the download base
 // (without the artifact or SHA256SUMS suffix) that was requested.
 // Destination is the freshly installed soho binary (what SOHO_BIN points
-// at); LegacyCopy is the herdr-soho compatibility copy next to it.
+// at).
 type Result struct {
 	Artifact    string
 	Destination string
-	LegacyCopy  string
 	Digest      string
 	ReleaseURL  string
 }
@@ -82,16 +76,12 @@ var supportedOS = map[string]bool{"darwin": true, "linux": true, "windows": true
 
 // Run downloads the release artifact for the requested platform, verifies
 // it against SHA256SUMS, and replaces the soho destination in
-// Options.InstallDir, writing the herdr-soho compatibility copy (the same
-// verified bytes as its own file) next to it. Every input is validated
+// Options.InstallDir with the verified bytes. Every input is validated
 // before any network or filesystem mutation. Exclusive temp files are
 // created in the requested directory and removed on every failure and
-// cancellation path, and the existing destinations are preserved when the
-// verification fails. When the second publish (the compatibility copy)
-// fails, the first is undone: a fresh install removes the just-published
-// soho, and an upgrade restores the previous soho bytes captured before
-// the rename — a failure never leaves either file at the new version and
-// never touches a file that is not an install destination.
+// cancellation path, and the existing destination is preserved when the
+// verification fails: a failure never leaves the file at the new version
+// and never touches a file that is not the install destination.
 func Run(ctx context.Context, opts Options) (Result, error) {
 	osName, err := normalizeOS(opts.OS)
 	if err != nil {
@@ -113,7 +103,6 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	artifact := artifactName(osName, arch)
 	destination := installDest(opts.InstallDir, binaryBaseName, osName)
-	legacyDestination := installDest(opts.InstallDir, legacyBaseName, osName)
 	releaseURL := base + "/latest/download"
 	if opts.Version != "" {
 		releaseURL = base + "/download/" + opts.Version
@@ -134,29 +123,19 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("install: creating temp file: %w", err)
 	}
-	copyTmp, err := os.CreateTemp(opts.InstallDir, "."+binaryBaseName+".*.copy.tmp")
-	if err != nil {
-		_ = binTmp.Close()
-		os.Remove(binTmp.Name())
-		return Result{}, fmt.Errorf("install: creating temp file: %w", err)
-	}
 	sumsTmp, err := os.CreateTemp(opts.InstallDir, "."+binaryBaseName+".*.sums")
 	if err != nil {
 		_ = binTmp.Close()
 		os.Remove(binTmp.Name())
-		_ = copyTmp.Close()
-		os.Remove(copyTmp.Name())
 		return Result{}, fmt.Errorf("install: creating temp file: %w", err)
 	}
-	binPath, copyPath, sumsPath := binTmp.Name(), copyTmp.Name(), sumsTmp.Name()
+	binPath, sumsPath := binTmp.Name(), sumsTmp.Name()
 	// removeTemp cleans every temp file on every path. After a successful
 	// rename it is still correct: the missing file fails silently, and the
-	// remaining temps are removed, mirroring the old installers.
+	// remaining temp is removed, mirroring the old installers.
 	removeTemp := func() {
 		_ = binTmp.Close()
 		_ = os.Remove(binPath)
-		_ = copyTmp.Close()
-		_ = os.Remove(copyPath)
 		_ = sumsTmp.Close()
 		_ = os.Remove(sumsPath)
 	}
@@ -189,33 +168,13 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("install: sha256 mismatch for %s", artifact)
 	}
 
-	// The compatibility copy gets the exact verified bytes as its own
-	// regular file (never a link): the copy runs only after the digest
-	// check, so a verification failure writes neither installed file.
-	src, err := os.Open(binPath)
-	if err != nil {
-		return Result{}, fmt.Errorf("install: reading %s: %w", artifact, err)
-	}
-	if _, err := io.Copy(copyTmp, src); err != nil {
-		src.Close()
-		return Result{}, fmt.Errorf("install: writing the compatibility copy: %w", err)
-	}
-	if err := src.Close(); err != nil {
-		return Result{}, fmt.Errorf("install: closing temp file: %w", err)
-	}
-	// Closed before the rename: Windows refuses to rename a file that is
-	// still open.
-	if err := copyTmp.Close(); err != nil {
-		return Result{}, fmt.Errorf("install: closing temp file: %w", err)
-	}
-
-	// Executable mode on POSIX for both files; the renames below carry the
-	// mode to the destinations. Windows needs no mode change.
+	// Executable mode on POSIX; the rename below carries the mode to the
+	// destination. Windows needs no mode change. The temp file was closed
+	// before this point: Windows refuses to rename a file that is still
+	// open.
 	if runtime.GOOS != "windows" {
-		for _, p := range []string{binPath, copyPath} {
-			if err := os.Chmod(p, 0o755); err != nil {
-				return Result{}, fmt.Errorf("install: setting executable mode: %w", err)
-			}
+		if err := os.Chmod(binPath, 0o755); err != nil {
+			return Result{}, fmt.Errorf("install: setting executable mode: %w", err)
 		}
 	}
 	// Same-directory rename: one atomic operation on POSIX. On Windows
@@ -224,40 +183,13 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	// destination. A destination held open by a running process (for
 	// example, an executing copy of the installed binary) may make the
 	// rename fail; the error is surfaced and the old destination is left
-	// untouched, with the temp files cleaned up below. The first rename
-	// publishes the primary binary; when the second (the compatibility
-	// copy) fails, the first is undone: the previous primary bytes are
-	// restored through a temp file and rename (upgrade), or the
-	// just-published file is removed when it did not exist before (fresh
-	// install). The undo never touches any other file.
-	var previousPrimary []byte
-	hadPreviousPrimary := false
-	if data, err := os.ReadFile(destination); err == nil {
-		previousPrimary = data
-		hadPreviousPrimary = true
-	} else if !os.IsNotExist(err) {
-		return Result{}, fmt.Errorf("install: reading %s: %w", destination, err)
-	}
+	// untouched, with the temp files cleaned up below.
 	if err := os.Rename(binPath, destination); err != nil {
 		return Result{}, fmt.Errorf("install: replacing %s: %w", destination, err)
-	}
-	if err := os.Rename(copyPath, legacyDestination); err != nil {
-		var undoErr error
-		if hadPreviousPrimary {
-			undoErr = restorePrimary(opts.InstallDir, destination, previousPrimary)
-		} else {
-			// Fresh install: the published file is the one this run wrote.
-			undoErr = os.Remove(destination)
-		}
-		if undoErr != nil {
-			return Result{}, fmt.Errorf("install: replacing %s: %w; undo of the first publish: %v", legacyDestination, err, undoErr)
-		}
-		return Result{}, fmt.Errorf("install: replacing %s: %w", legacyDestination, err)
 	}
 	return Result{
 		Artifact:    artifact,
 		Destination: destination,
-		LegacyCopy:  legacyDestination,
 		Digest:      digest,
 		ReleaseURL:  releaseURL,
 	}, nil
@@ -270,38 +202,6 @@ func installDest(dir, baseName, osName string) string {
 		return filepath.Join(dir, baseName+".exe")
 	}
 	return filepath.Join(dir, baseName)
-}
-
-// restorePrimary writes previous back over destination through an exclusive
-// temp file and a same-directory rename, so the undo of a failed second
-// publish never leaves a partial file and never removes destination before
-// the replacement is in place. The temp file is removed on every failure.
-func restorePrimary(installDir, destination string, previous []byte) error {
-	tmp, err := os.CreateTemp(installDir, "."+binaryBaseName+".*.restore.tmp")
-	if err != nil {
-		return err
-	}
-	path := tmp.Name()
-	if _, err := tmp.Write(previous); err != nil {
-		_ = tmp.Close()
-		os.Remove(path)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(path)
-		return err
-	}
-	if runtime.GOOS != "windows" {
-		if err := os.Chmod(path, 0o755); err != nil {
-			os.Remove(path)
-			return err
-		}
-	}
-	if err := os.Rename(path, destination); err != nil {
-		os.Remove(path)
-		return err
-	}
-	return nil
 }
 
 // normalizeOS applies the host default and the supported-platform rule.

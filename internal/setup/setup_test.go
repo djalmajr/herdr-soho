@@ -87,7 +87,7 @@ func TestSetupReadCommands(t *testing.T) {
 	})
 	t.Run("// JS: \"detect document reports source layers and stable kind order\"", func(t *testing.T) {
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
-		doc := DetectJSON(ctx, platform.Env{"PATH": "", "HERDR_SOHO_SKILL_DIR": t.TempDir()}, ".")
+		doc := DetectJSON(ctx, platform.Env{"PATH": "", "SOHO_SKILL_DIR": t.TempDir()}, ".")
 		if !strings.Contains(doc, `"recommended_reviewer": null`) || !strings.Contains(doc, `"kind": "claude"`) {
 			t.Fatal(doc)
 		}
@@ -101,7 +101,7 @@ func TestSetupReadCommands(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := fakeEnv(t, bin)
-		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+		env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 		tmp := t.TempDir()
 		env["TMPDIR"] = tmp
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
@@ -196,7 +196,7 @@ func TestDetectRoleConfigKeyNormalizesDotsAndDashes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := detectRoles(ctx, platform.Env{"HERDR_SOHO_SKILL_DIR": skillDir}, root)
+	rows := detectRoles(ctx, platform.Env{"SOHO_SKILL_DIR": skillDir}, root)
 	if len(rows) < 3 {
 		t.Fatalf("roles=%v", rows)
 	}
@@ -226,7 +226,7 @@ func TestSetupDetectJavaScriptCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := fakeEnv(t, bin)
-		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+		env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
 		doc := Detect(ctx, env, t.TempDir())
 		value, _ := doc.Get("kinds")
@@ -241,7 +241,7 @@ func TestSetupDetectJavaScriptCases(t *testing.T) {
 	})
 	t.Run("// JS: \"detectWorkerModelsJson: defaults, project override, env override, unset key\"", func(t *testing.T) { // Mutation captured: worker model precedence and source are part of the setup detect response.
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{"model_pi_worker": {Value: "project/pi", Source: "project"}}, Order: []string{"model_pi_worker"}}
-		env := platform.Env{"PATH": "", "HERDR_SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho"), "HERDR_SOHO_MODEL_GROK_WORKER": "env/grok"}
+		env := platform.Env{"PATH": "", "SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho"), "SOHO_MODEL_GROK_WORKER": "env/grok"}
 		doc := Detect(ctx, env, t.TempDir())
 		config, _ := doc.Get("config")
 		workers, _ := config.(*jsonjs.Object).Get("worker_models")
@@ -259,7 +259,7 @@ func TestSetupDetectJavaScriptCases(t *testing.T) {
 	})
 	t.Run("// JS: \"setupDetectJson: the bash key order and the preset/effective lanes defaults\"", func(t *testing.T) { // Mutation captured: changing key order or default lane/preset values changes the serialized setup contract.
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
-		env := platform.Env{"PATH": "", "HERDR_SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho")}
+		env := platform.Env{"PATH": "", "SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho")}
 		got := DetectJSON(ctx, env, t.TempDir())
 		if strings.Index(got, `"kinds"`) > strings.Index(got, `"recommended_reviewer"`) || strings.Index(got, `"recommended_reviewer"`) > strings.Index(got, `"config"`) || !strings.Contains(got, `"panes"`) || !strings.Contains(got, `"value": "4"`) || !strings.Contains(got, `"effective_lanes"`) || !strings.Contains(got, `"presets"`) {
 			t.Fatalf("detect JSON shape/order=%s", got)
@@ -293,7 +293,7 @@ func TestDetectRespectsConfiguredModelTimeout(t *testing.T) { // Mutation captur
 	env := fakeEnv(t, bin)
 	env["SOHO_MODELS_TIMEOUT"] = "0.01"
 	env["TMPDIR"] = t.TempDir()
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+	env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
 	doc := Detect(ctx, env, os.TempDir())
 	rowsValue, _ := doc.Get("kinds")

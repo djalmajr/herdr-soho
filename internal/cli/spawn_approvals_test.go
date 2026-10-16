@@ -19,7 +19,7 @@ func TestSpawnInvalidApprovalExitsTwo(t *testing.T) {
 	env["PATH"] = bin
 	env["SOHO_FAKECLI_CONFIG"] = bin
 	env["HERDR_ENV"] = "1"
-	env["HERDR_SOHO_LANES"] = "off"
+	env["SOHO_LANES"] = "off"
 	env["HERDR_SOCKET_PATH"] = filepath.Join(t.TempDir(), "missing", "herdr.sock")
 	env["USERPROFILE"] = env["HOME"]
 	code, out, errOut := runIn(t, []string{"spawn", "implementer", "--kind", "pi", "--approvals", "FULL"}, env, repo)

@@ -17,10 +17,6 @@ const (
 	// SohoPluginID is the id of the soho plugin
 	// (plugin/herdr-plugin.toml) and the default for pane opens.
 	SohoPluginID = "djalmajr.soho"
-	// LegacyShimPluginID is the id of the compatibility shim
-	// (plugin-legacy/herdr-plugin.toml). It keeps the old shortcuts
-	// working until the shim is removed after v0.4.0.
-	LegacyShimPluginID = "djalmajr.herdr-soho"
 )
 
 func pickOpenArgs(pluginID string) []string {
@@ -46,20 +42,6 @@ func TeamArguments() []string { return teamOpenArgs(SohoPluginID) }
 
 // TeamDoctorArguments returns the default team-doctor open argv (the soho id).
 func TeamDoctorArguments() []string { return teamDoctorOpenArgs(SohoPluginID) }
-
-// invokingPluginID resolves the id of the plugin that invoked the action
-// from HERDR_PLUGIN_ID, which Herdr injects for action commands (the
-// context JSON itself does not carry the id). Only the soho id and the
-// legacy shim id are accepted; anything else, including an empty value,
-// falls back to the soho id.
-func invokingPluginID(env platform.Env) string {
-	switch id := env.Get("HERDR_PLUGIN_ID"); id {
-	case SohoPluginID, LegacyShimPluginID:
-		return id
-	default:
-		return SohoPluginID
-	}
-}
 
 type BridgeError struct {
 	Code    int
@@ -90,15 +72,14 @@ type Result struct {
 // manifest; team views use overlays. Output belongs to the interactive
 // surface rather than the Herdr log.
 func Bridge(action string, env platform.Env, platformName, executable string) (Result, error) {
-	pluginID := invokingPluginID(env)
 	if action == "pick" || action == "board" {
-		return bridgePaneOpen(env, platformName, pickOpenArgs(pluginID))
+		return bridgePaneOpen(env, platformName, pickOpenArgs(SohoPluginID))
 	}
 	if action == "team" || action == "roster" {
-		return bridgePaneOpen(env, platformName, teamOpenArgs(pluginID))
+		return bridgePaneOpen(env, platformName, teamOpenArgs(SohoPluginID))
 	}
 	if action == "doctor" {
-		return bridgePaneOpen(env, platformName, teamDoctorOpenArgs(pluginID))
+		return bridgePaneOpen(env, platformName, teamDoctorOpenArgs(SohoPluginID))
 	}
 	return Result{}, &BridgeError{Code: ExitInvalidTarget, Message: "unknown subcommand '" + action + "' (use 'doctor', 'roster', 'board' or 'pick'); the 'team' action opens the team panel"}
 }

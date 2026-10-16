@@ -26,7 +26,7 @@ import (
 // environment and this package init handles it before any test or flag
 // parsing runs. The parent test run never sets it, so the init is a
 // no-op there.
-const agentPromptRoleEnv = "HERDR_SOHO_AGENTPROMPT_FIXTURE"
+const agentPromptRoleEnv = "SOHO_AGENTPROMPT_FIXTURE"
 
 func init() {
 	if os.Getenv(agentPromptRoleEnv) == "" {
@@ -49,11 +49,11 @@ func prepareRunHarness(t *testing.T, h *tm3bHarness) {
 	if err := os.WriteFile(filepath.Join(h.ws, "agents.tsv"), []byte("# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\tmode\targs\teffort\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	h.env["HERDR_SOHO_LANES"] = "off"
+	h.env["SOHO_LANES"] = "off"
 	h.env["HERDR_ENV"] = "1"
-	h.env["HERDR_SOHO_LAYOUT"] = "split"
-	h.env["HERDR_SOHO_REUSE_WORKERS"] = "off"
-	h.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+	h.env["SOHO_LAYOUT"] = "split"
+	h.env["SOHO_REUSE_WORKERS"] = "off"
+	h.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 	h.env["SOHO_WAIT_POLL_MS"] = "1"
 	rules := []fakecli.Rule{
 		{Argv: []string{"agent", "list"}, ArgvPrefix: true, Stdout: `{"result":{"agents":[]}}`},
@@ -128,16 +128,16 @@ func configureBuildLane(t *testing.T, state string, env platform.Env) {
 	if err := os.WriteFile(path, []byte("# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\tmode\targs\teffort\nworker\tw0test:p0a\tgrok\timplementer\txai\t0\t"+state+"\tnow\tgrok-4.7\ttask\timplementer\tbuild\t\t\thigh\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env["HERDR_SOHO_LANE_BUILD_ROLES"] = "implementer"
-	env["HERDR_SOHO_LANE_BUILD_KIND"] = "grok"
-	env["HERDR_SOHO_LANE_BUILD_MODEL"] = "grok-4.7"
+	env["SOHO_LANE_BUILD_ROLES"] = "implementer"
+	env["SOHO_LANE_BUILD_KIND"] = "grok"
+	env["SOHO_LANE_BUILD_MODEL"] = "grok-4.7"
 }
 
 func TestDispatchRemainingParityPortedCases(t *testing.T) {
 	t.Run(`JS: "parity dispatch: quota (test-quota.sh)"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0", fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: "RESOURCE_EXHAUSTED\n"})
 		configureBuildLane(t, f.state, f.env)
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--timeout", "3000")
 		if code != 11 || dispatchOutputStatus(t, out) != "quota" || !strings.Contains(out, `"lane":"build"`) || !strings.Contains(out, `"model":"grok-4.7"`) || !strings.Contains(out, `"match":"RESOURCE_EXHAUSTED"`) {
 			t.Fatalf("quota code=%d out=%s", code, out)
@@ -145,7 +145,7 @@ func TestDispatchRemainingParityPortedCases(t *testing.T) {
 	})
 	t.Run(`JS: "parity dispatch: denied, through the $TMPDIR routing (test-status.sh)"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0", fakecli.Rule{Argv: []string{"agent", "get", "worker"}, ArgvPrefix: true, Code: 1, Stderr: "permission denied"})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		roster := "worker\tw0test:p0a\tcodex\timplementer\topenai\t0\t/elsewhere\tnow\tgpt-5\ttask\timplementer\t\t\t\thigh\n"
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
@@ -224,8 +224,8 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_BRIEF_LINT"] = "warn"
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_BRIEF_LINT"] = "warn"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, _, stderr := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || !strings.Contains(stderr, "which the worker in") || !strings.Contains(stderr, outside) {
 			t.Fatalf("code=%d stderr=%s", code, stderr)
@@ -241,7 +241,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		got, _ := dispatchOutputField(t, out, "role")
 		prompt, _ := dispatchOutputField(t, out, "composed_prompt")
@@ -255,7 +255,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		prompt, _ := dispatchOutputField(t, out, "composed_prompt")
 		report, _ := dispatchOutputField(t, out, "report")
@@ -268,7 +268,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 	})
 	t.Run(`JS: "dispatch: a refused prompt leaves the sidecar at failed and keeps the exit 4"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0", fakecli.Rule{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Code: 7, Stderr: "provider refused"})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		prompt, _ := dispatchOutputField(t, out, "composed_prompt")
 		var side map[string]any
@@ -292,7 +292,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.Mkdir(collision, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 4 || !strings.Contains(out, "couldn't write the attempt sidecar") {
 			t.Fatalf("code=%d out=%s", code, out)
@@ -304,7 +304,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 	t.Run(`JS: "dispatch: an accepted prompt with a failed outcome write keeps the result and the attempted sidecar"`, func(t *testing.T) {
 		// Mutation captured: dropping the accepted-write error warning hides the failed outcome while leaving the test green.
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		realWrite := writeDispatchSidecar
 		writes := make([]string, 0, 2)
 		writeDispatchSidecar = func(path, kind, model, effort, submission, arrival, session string) error {
@@ -329,7 +329,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 	t.Run(`JS: "dispatch: a transport error with a failed outcome write keeps the error JSON, the exit 4 and the attempted sidecar"`, func(t *testing.T) {
 		// Mutation captured: dropping the failed-outcome write leaves only one sidecar attempt.
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0", fakecli.Rule{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Code: 1, Stderr: "prompt failed: the fake refused\n"})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		realWrite := writeDispatchSidecar
 		writes := make([]string, 0, 2)
 		writeDispatchSidecar = func(path, kind, model, effort, submission, arrival, session string) error {
@@ -360,7 +360,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.WriteFile(prefix+".md", []byte("previous"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		prompt, _ := dispatchOutputField(t, out, "composed_prompt")
 		if code != 0 || !strings.HasSuffix(prompt, "-2.md") {
@@ -372,7 +372,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 	})
 	t.Run(`JS: "dispatch --amend: the amendment attempt gets its own sidecar; the earlier one stands"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, first, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 {
 			t.Fatalf("first dispatch code=%d %s", code, first)
@@ -402,17 +402,17 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, _, errText := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 5 || !strings.Contains(errText, "shares a model family") {
 			t.Fatalf("strict code=%d stderr=%q", code, errText)
 		}
-		f.env["HERDR_SOHO_FAMILY_CHECK"] = "warn"
+		f.env["SOHO_FAMILY_CHECK"] = "warn"
 		code, _, errText = f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || !strings.Contains(errText, "shares model family") {
 			t.Fatalf("warn code=%d stderr=%q", code, errText)
 		}
-		f.env["HERDR_SOHO_FAMILY_CHECK"] = "off"
+		f.env["SOHO_FAMILY_CHECK"] = "off"
 		code, _, errText = f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || strings.Contains(errText, "shares model family") {
 			t.Fatalf("off code=%d stderr=%q", code, errText)
@@ -428,7 +428,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, _, errText := f.run(t, "worker", f.brief, "--for", "openai", "--no-wait")
 		if code != 5 || !strings.Contains(errText, "slice's author") {
 			t.Fatalf("strict code=%d stderr=%q", code, errText)
@@ -452,7 +452,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, _, errText := f.run(t, "worker", f.brief, "--for", "unknown", "--no-wait")
 		if code != 5 || !strings.Contains(errText, "checked against every edit agent") || !strings.Contains(errText, "ex (codex)") {
 			t.Fatalf("code=%d stderr=%q", code, errText)
@@ -468,21 +468,21 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_ROLE_SLOW_EFFORT"], f.env["HERDR_SOHO_LANES"], f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "max", "off", "0"
+		f.env["SOHO_ROLE_SLOW_EFFORT"], f.env["SOHO_LANES"], f.env["SOHO_PROMPT_CHECK_SECONDS"] = "max", "off", "0"
 		if got := core.RoleTimeoutMs("slow", f.config, f.env, f.root); got != 2000 {
 			t.Fatalf("max timeout=%d, want 2000", got)
 		}
 	})
 	t.Run(`JS: "dispatch: timeout 9 with a working agent, quota 11 with the lane fields"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "working", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--timeout", "1000")
 		if code != 9 || dispatchOutputStatus(t, out) != "timeout" {
 			t.Fatalf("timeout code=%d out=%s", code, out)
 		}
 		quota := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0", fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: "RESOURCE_EXHAUSTED\n"})
 		configureBuildLane(t, quota.state, quota.env)
-		quota.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		quota.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ = quota.run(t, "worker", quota.brief, "--timeout", "2000")
 		if code != 11 || dispatchOutputStatus(t, out) != "quota" || !strings.Contains(out, `"lane":"build"`) || !strings.Contains(out, `"model":"grok-4.7"`) || !strings.Contains(out, `"match":"RESOURCE_EXHAUSTED"`) {
 			t.Fatalf("quota code=%d out=%s", code, out)
@@ -491,7 +491,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 	t.Run(`JS: "dispatch: a provider-error worker exits 14 with the lane, model and cause"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "Error: connect ECONNREFUSED\n", "0")
 		configureBuildLane(t, f.state, f.env)
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, stderr := f.run(t, "worker", f.brief, "--timeout", "3000")
 		if code != 14 || dispatchOutputStatus(t, out) != "provider-error" || !strings.Contains(out, `"lane":"build"`) || !strings.Contains(out, `"model":"grok-4.7"`) || !strings.Contains(out, `"cause":"Error: connect ECONNREFUSED"`) || !strings.Contains(stderr, "provider error") {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, stderr)
@@ -500,9 +500,9 @@ func TestDispatchRemainingCases(t *testing.T) {
 	t.Run(`JS: "dispatch: capacity after one continue exits 14 with the retries"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "Error: 529 overloaded\n", "0")
 		configureBuildLane(t, f.state, f.env)
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
-		f.env["HERDR_SOHO_PROVIDER_RETRIES"] = "1"
-		f.env["HERDR_SOHO_PROVIDER_RETRY_DELAY"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROVIDER_RETRIES"] = "1"
+		f.env["SOHO_PROVIDER_RETRY_DELAY"] = "0"
 		f.env["SOHO_WAIT_POLL_MS"] = "1"
 		code, out, stderr := f.run(t, "worker", f.brief, "--timeout", "5000")
 		if code != 14 || dispatchOutputStatus(t, out) != "capacity" || !strings.Contains(out, `"lane":"build"`) || !strings.Contains(out, `"model":"grok-4.7"`) || !strings.Contains(out, `"retries":1`) || !strings.Contains(out, `"cause":"Error: 529 overloaded"`) {
@@ -511,7 +511,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 	})
 	t.Run(`JS: "dispatch: arrival confirmed by the state turning working → no resend"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "working", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "1"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "1"
 		code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || dispatchOutputStatus(t, out) != "submitted" || countDispatchCalls(mustCalls(t, f), "prompt") != 1 {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
@@ -533,7 +533,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 	})
 	t.Run(`JS: "dispatch: prompt_check_seconds=0 sends one prompt and probes nothing"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		calls := mustCalls(t, f)
 		if code != 0 || dispatchOutputStatus(t, out) != "submitted" || countDispatchCalls(calls, "prompt") != 1 || countDispatchCalls(calls, "get") != 0 || countDispatchCalls(calls, "read") != 0 {
@@ -574,7 +574,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 			fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, ArgvPrefix: true},
 			fakecli.Rule{Argv: []string{"agent", "get", "worker"}, Call: 8, Stdout: `{"result":{"agent":{"agent_status":"working","state_change_seq":2}}}`},
 		)
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "1"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "1"
 		code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || dispatchOutputStatus(t, out) != "submitted" || !strings.Contains(out, `"enter_sent":true`) || !strings.Contains(errText, "sent Enter") {
 			t.Fatalf("code=%d out=%s stderr=%s", code, out, errText)
@@ -617,7 +617,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 			fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Call: 2, ArgvPrefix: true, Stdout: "› Read the file " + composedName() + " in full and execute it.\n"},
 			fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, ArgvPrefix: true},
 		)
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "1"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "1"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 15 || dispatchOutputStatus(t, out) != "not-received" || countDispatchCalls(mustCalls(t, f), "prompt") != 1 || countDispatchCalls(mustCalls(t, f), "send-keys") != 1 {
 			t.Fatalf("code=%d out=%s", code, out)
@@ -631,8 +631,8 @@ func TestDispatchRemainingCases(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
-		f.env["HERDR_SOHO_FAMILY_CHECK"] = "off"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_FAMILY_CHECK"] = "off"
 		code, _, _ := f.run(t, "worker", f.brief, "--no-wait")
 		for _, name := range []string{"worker.not-received", "worker.enter-retry"} {
 			if _, err := os.Stat(filepath.Join(waitDir, name)); !os.IsNotExist(err) {
@@ -664,7 +664,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 	})
 	t.Run(`JS: "dispatch: a delivered prompt leaves no arrival mark in the sidecar"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		prompt, _ := dispatchOutputField(t, out, "composed_prompt")
 		var side map[string]any
@@ -718,7 +718,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		line := "- Only you write this report, once all of the brief is done, including any part you handed to subagents or background tasks; a subagent never writes it. Report every item as it stands in the files, not as a subagent summarized it.\n"
-		for _, prompt := range []string{dispatch.ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/r.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"HERDR_SOHO_SKILL_DIR": t.TempDir()}, "codex", "", false), dispatch.ComposeAmendment("# Amend\nchange", "/r.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{}, "codex", "", false)} {
+		for _, prompt := range []string{dispatch.ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/r.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"SOHO_SKILL_DIR": t.TempDir()}, "codex", "", false), dispatch.ComposeAmendment("# Amend\nchange", "/r.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{}, "codex", "", false)} {
 			if strings.Count(prompt, line) != 1 || strings.Index(prompt, "- Write the report in one go") > strings.Index(prompt, line) {
 				t.Fatalf("report writer line missing or misplaced")
 			}
@@ -731,7 +731,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.WriteFile(role, []byte("---\nname: Role\n---\nBody\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		for _, prompt := range []string{dispatch.ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/r.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"HERDR_SOHO_SKILL_DIR": t.TempDir()}, "codex", "", false), dispatch.ComposeAmendment("# Amend\nchange", "/r.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{}, "codex", "", false)} {
+		for _, prompt := range []string{dispatch.ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/r.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"SOHO_SKILL_DIR": t.TempDir()}, "codex", "", false), dispatch.ComposeAmendment("# Amend\nchange", "/r.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{}, "codex", "", false)} {
 			if strings.Count(prompt, line) != 1 || strings.Index(prompt, "# Report contract") > strings.Index(prompt, line) {
 				t.Fatalf("report scope line missing or misplaced")
 			}
@@ -740,7 +740,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 	t.Run(`JS: "dispatch: a worker that ends in a question exits 7 with the question in the JSON"`, func(t *testing.T) {
 		question := "  1. Use the cache\n  2. Fetch remote\n\nEnter to submit answer, esc to cancel\n"
 		f := newDispatchArrivalFixture(t, "blocked", 1, 1, question, "0", fakecli.Rule{Argv: []string{"agent", "read", "worker", "--source", "visible"}, ArgvPrefix: true, Stdout: question})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--timeout", "3000")
 		if code != 7 || dispatchOutputStatus(t, out) != "question" || !strings.Contains(out, "Use the cache") {
 			t.Fatalf("code=%d out=%s", code, out)
@@ -829,8 +829,8 @@ func TestDispatchRemainingCases(t *testing.T) {
 	})
 	t.Run(`JS: "dispatch: warn mode — an edit role without Owned files warns, a read-only role does not"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_BRIEF_LINT"] = "warn"
-		f.env["HERDR_SOHO_FAMILY_CHECK"] = "off"
+		f.env["SOHO_BRIEF_LINT"] = "warn"
+		f.env["SOHO_FAMILY_CHECK"] = "off"
 		if err := os.WriteFile(filepath.Join(f.root, "roles", "reviewer.md"), []byte("---\nname: Reviewer\nmode: review\n---\nReview.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -842,7 +842,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		_, _, warn := f.run(t, "worker", f.brief, "--no-wait")
 		roster = strings.Replace(roster, "worker\tw0test:p0a\tcodex\timplementer", "worker\tw0test:p0a\tcodex\treviewer", 1)
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
@@ -856,7 +856,7 @@ func TestDispatchRemainingCases(t *testing.T) {
 	t.Run(`JS: "dispatch: lint runs after the role (error order 2 → 3 → 3 → 2; read-only strict passes)"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
 		missing := filepath.Join(f.root, "missing.md")
-		f.env["HERDR_SOHO_BRIEF_LINT"] = "strict"
+		f.env["SOHO_BRIEF_LINT"] = "strict"
 		if code, _, errText := f.run(t, "ghost", missing, "--no-wait"); code != 2 || !strings.Contains(errText, "brief not found") {
 			t.Fatalf("missing precedence: code=%d %q", code, errText)
 		}

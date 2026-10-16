@@ -188,7 +188,7 @@ func runTM10Init(t *testing.T, agent, pane string, paneGetCode, metadataCode int
 		t.Fatal(err)
 	}
 	env = withFakeCLI(env, fakeDir)
-	state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+	state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 	for _, seed := range seeds {
 		seed(repo, state)
 	}

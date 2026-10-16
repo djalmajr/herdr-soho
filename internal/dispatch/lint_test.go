@@ -218,7 +218,7 @@ func TestBriefLintFindingsModesAndWarnings(t *testing.T) {
 		if err := os.WriteFile(file, []byte("# Goal\n# Owned files\nsrc/a.go\n# Forbidden\nNo commit/push.\n# Report\n``\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_BRIEF_LINT_ALIASES": "not-an-alias"}
+		env := platform.Env{"SOHO_BRIEF_LINT_ALIASES": "not-an-alias"}
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 		got := BriefLintFindings(file, ctx, env, BriefLintOptions{})
 		if got.Mode != "warn" || len(got.Warnings) != 2 || got.Warnings[0] != "brief_lint_aliases: ignored 'not-an-alias' (use Section=Heading|Heading)" || !strings.Contains(got.Warnings[1], "line 7 has empty inline code") || !strings.Contains(got.MissingMessage, "[Expected result]") {
@@ -232,8 +232,8 @@ func TestBriefLintFindingsModesAndWarnings(t *testing.T) {
 		}
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 		warn := BriefLintFindings(file, ctx, platform.Env{}, BriefLintOptions{})
-		strict := BriefLintFindings(file, ctx, platform.Env{"HERDR_SOHO_BRIEF_LINT": "strict"}, BriefLintOptions{})
-		off := BriefLintFindings(file, ctx, platform.Env{"HERDR_SOHO_BRIEF_LINT": "off"}, BriefLintOptions{})
+		strict := BriefLintFindings(file, ctx, platform.Env{"SOHO_BRIEF_LINT": "strict"}, BriefLintOptions{})
+		off := BriefLintFindings(file, ctx, platform.Env{"SOHO_BRIEF_LINT": "off"}, BriefLintOptions{})
 		if warn.MissingMessage == "" || strict.MissingMessage != warn.MissingMessage || strict.Mode != "strict" {
 			t.Fatalf("warn/strict findings differ: warn=%#v strict=%#v", warn, strict)
 		}
@@ -286,9 +286,9 @@ func TestLintCorpusMatchesJavaScript(t *testing.T) {
 		warned, clean := 0, 0
 		for _, row := range rows {
 			t.Run(row.Path, func(t *testing.T) {
-				env := platform.Env{"HERDR_SOHO_BRIEF_LINT": "warn"}
+				env := platform.Env{"SOHO_BRIEF_LINT": "warn"}
 				if row.Aliases != "" {
-					env["HERDR_SOHO_BRIEF_LINT_ALIASES"] = row.Aliases
+					env["SOHO_BRIEF_LINT_ALIASES"] = row.Aliases
 				}
 				got := BriefLintFindings(row.Path, ctx, env, BriefLintOptions{})
 				got.MissingMessage = stripUnfilledPlaceholderMarks(got.MissingMessage)

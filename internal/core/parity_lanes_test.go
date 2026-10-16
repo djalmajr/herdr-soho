@@ -36,16 +36,16 @@ func TestParityLanesGolden(t *testing.T) {
 	}
 	roles := []string{"implementer", "designer", "tasker", "scouter", "researcher", "reviewer", "security-reviewer", "ui-reviewer", "inspector", "sub-orchestrator"}
 	cases := []scenario{
-		{name: "preset-4"}, {name: "preset-3", project: "panes=3\n"}, {name: "preset-3-env", env: map[string]string{"HERDR_SOHO_PANES": "3"}},
-		{name: "custom-file", project: "panes=4\nlane.ops.roles=implementer,tasker\n"}, {name: "custom-env", env: map[string]string{"HERDR_SOHO_LANE_OPS_ROLES": "implementer,tasker"}},
-		{name: "hyphen-file-key", project: "lane.ui-review.roles=ui-reviewer,inspector\n"}, {name: "hyphen-env-invisible", env: map[string]string{"HERDR_SOHO_LANE_UI-REVIEW_ROLES": "ui-reviewer,inspector"}},
-		{name: "hyphen-env-plus-file", project: "lane.ui-review.roles=ui-reviewer,inspector\n", env: map[string]string{"HERDR_SOHO_LANE_UI-REVIEW_ROLES": "ui-reviewer,inspector"}},
-		{name: "mixed-file-env", project: "lane.a.roles=scouter\n", env: map[string]string{"HERDR_SOHO_LANE_B_ROLES": "researcher"}}, {name: "lanes-off", env: map[string]string{"HERDR_SOHO_LANES": "off"}},
-		{name: "explicit-max", project: "max_workers=5\n"}, {name: "explicit-max-env", env: map[string]string{"HERDR_SOHO_MAX_WORKERS": "0"}},
-		{name: "empty-roles", project: "lane.empty.roles=\nlane.ops.roles=implementer\n", env: map[string]string{"HERDR_SOHO_LANE_B_ROLES": "researcher"}},
+		{name: "preset-4"}, {name: "preset-3", project: "panes=3\n"}, {name: "preset-3-env", env: map[string]string{"SOHO_PANES": "3"}},
+		{name: "custom-file", project: "panes=4\nlane.ops.roles=implementer,tasker\n"}, {name: "custom-env", env: map[string]string{"SOHO_LANE_OPS_ROLES": "implementer,tasker"}},
+		{name: "hyphen-file-key", project: "lane.ui-review.roles=ui-reviewer,inspector\n"}, {name: "hyphen-env-invisible", env: map[string]string{"SOHO_LANE_UI-REVIEW_ROLES": "ui-reviewer,inspector"}},
+		{name: "hyphen-env-plus-file", project: "lane.ui-review.roles=ui-reviewer,inspector\n", env: map[string]string{"SOHO_LANE_UI-REVIEW_ROLES": "ui-reviewer,inspector"}},
+		{name: "mixed-file-env", project: "lane.a.roles=scouter\n", env: map[string]string{"SOHO_LANE_B_ROLES": "researcher"}}, {name: "lanes-off", env: map[string]string{"SOHO_LANES": "off"}},
+		{name: "explicit-max", project: "max_workers=5\n"}, {name: "explicit-max-env", env: map[string]string{"SOHO_MAX_WORKERS": "0"}},
+		{name: "empty-roles", project: "lane.empty.roles=\nlane.ops.roles=implementer\n", env: map[string]string{"SOHO_LANE_B_ROLES": "researcher"}},
 		{name: "case-order", project: "lane.A.roles=reviewer\nlane.b.roles=scouter\n"},
 		{name: "user-layer", user: "panes=3\nlane.u.roles=implementer\n"}, {name: "user-and-project", user: "lane.u.roles=implementer\n", project: "lane.p.roles=tasker\n"},
-		{name: "space-separated-roles", project: "lane.x.roles=reviewer inspector\n"}, {name: "space-separated-env", env: map[string]string{"HERDR_SOHO_LANE_X_ROLES": "scouter  researcher,reviewer"}},
+		{name: "space-separated-roles", project: "lane.x.roles=reviewer inspector\n"}, {name: "space-separated-env", env: map[string]string{"SOHO_LANE_X_ROLES": "scouter  researcher,reviewer"}},
 		{name: "empty-lane-name", project: "lane..roles=reviewer\nlane.y.roles=scouter\n"},
 	}
 	for _, sc := range cases {
@@ -53,10 +53,10 @@ func TestParityLanesGolden(t *testing.T) {
 			// Mutation captured: changing custom-lane precedence, role splitting, pane presets, or the derived worker cap changes the golden stdout.
 			env, repo := fixture(t)
 			if sc.project != "" {
-				write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), sc.project)
+				write(t, filepath.Join(repo, ".agents", "soho.conf"), sc.project)
 			}
 			if sc.user != "" {
-				write(t, filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config"), sc.user)
+				write(t, filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config"), sc.user)
 			}
 			for k, v := range sc.env {
 				env[k] = v

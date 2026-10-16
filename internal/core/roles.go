@@ -24,12 +24,8 @@ func RoleDirs(env platform.Env, cwd string) []string {
 	if isDir(project) {
 		dirs = append(dirs, project)
 	}
-	// One roles override: SOHO_ROLES when it is present, else the former
-	// HERDR_SOHO_ROLES; never both.
-	extra, present := env.Lookup("SOHO_ROLES")
-	if !present {
-		extra = env.Get("HERDR_SOHO_ROLES")
-	}
+	// One roles override: SOHO_ROLES.
+	extra := env.Get("SOHO_ROLES")
 	if extra != "" && isDir(extra) {
 		dirs = append(dirs, extra)
 	}

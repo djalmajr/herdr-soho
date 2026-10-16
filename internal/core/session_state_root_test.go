@@ -15,7 +15,7 @@ import (
 // pre-session root, so the circular bootstrap reads the session that sits
 // under the root it resolved without the session; the user and project
 // state_dir layers are honored, the defaults layer's state_dir is not, and
-// HERDR_SOHO_DIR wins over every layer.
+// SOHO_DIR wins over every layer.
 func TestSessionStateRootPath(t *testing.T) {
 	// layers builds one hermetic scenario: a non-git project cwd (so the
 	// project root is the cwd), an empty home with its own XDG config dir,
@@ -46,20 +46,20 @@ func TestSessionStateRootPath(t *testing.T) {
 			t.Fatal(err)
 		}
 		env = platform.Env{
-			"PATH":                 gitOnlyDir(t),
-			"HOME":                 home,
-			"XDG_CONFIG_HOME":      conf,
-			"GIT_CONFIG_GLOBAL":    global,
-			"GIT_CONFIG_NOSYSTEM":  "1",
-			"HERDR_SOHO_SKILL_DIR": skill,
-			"HERDR_WORKSPACE_ID":   "w1",
+			"PATH":                gitOnlyDir(t),
+			"HOME":                home,
+			"XDG_CONFIG_HOME":     conf,
+			"GIT_CONFIG_GLOBAL":   global,
+			"GIT_CONFIG_NOSYSTEM": "1",
+			"SOHO_SKILL_DIR":      skill,
+			"HERDR_WORKSPACE_ID":  "w1",
 		}
 		return env, proj, root
 	}
 	// writeUser sets the user layer at the environment's XDG config path.
 	writeUser := func(t *testing.T, env platform.Env, body string) {
 		t.Helper()
-		file := filepath.Join(env.Get("XDG_CONFIG_HOME"), "herdr-soho", "config")
+		file := filepath.Join(env.Get("XDG_CONFIG_HOME"), "soho", "config")
 		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +73,7 @@ func TestSessionStateRootPath(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(proj, ".agents"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(proj, ".agents", "herdr-soho.conf"), []byte(body), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(proj, ".agents", "soho.conf"), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -191,7 +191,7 @@ func TestSessionStateRootPath(t *testing.T) {
 		}
 	})
 
-	t.Run("HERDR_SOHO_DIR wins over user, project and session", func(t *testing.T) {
+	t.Run("SOHO_DIR wins over user, project and session", func(t *testing.T) {
 		env, proj, root := layers(t)
 		writeUser(t, env, "state_dir="+filepath.Join(root, "u-state")+"\n")
 		writeProject(t, proj, "state_dir=proj-state\n")
@@ -200,14 +200,14 @@ func TestSessionStateRootPath(t *testing.T) {
 		// the override the roots would be the project's (the project layer
 		// beats the user's) and the session's.
 		override := filepath.Join(root, "env-dir")
-		env["HERDR_SOHO_DIR"] = override
+		env["SOHO_DIR"] = override
 		writeSession(t, override, "w1", "state_dir="+filepath.Join(root, "session-state")+"\n")
 		for name, got := range map[string]string{
 			"pre-session": SessionStateRootPath(env, proj),
 			"full-load":   fullRoot(t, env, proj),
 		} {
 			if got != override {
-				t.Fatalf("%s root = %q, want the HERDR_SOHO_DIR override %q", name, got, override)
+				t.Fatalf("%s root = %q, want the SOHO_DIR override %q", name, got, override)
 			}
 		}
 	})

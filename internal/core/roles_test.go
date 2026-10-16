@@ -10,7 +10,7 @@ import (
 )
 
 func TestRoleFilesAndFrontmatter(t *testing.T) {
-	// JS: "roleDirs: project dir first, $HERDR_SOHO_ROLES, then the skill roles"
+	// JS: "roleDirs: project dir first, $SOHO_ROLES, then the skill roles"
 	// JS: "resolveRole: project role shadows the skill role"
 	// JS: "fmGet: scalar, list, quoted, missing key, no frontmatter"
 	// JS: "fmGet: frontmatter with CRLF lines parses like LF (decision 7)"
@@ -67,7 +67,7 @@ func TestResolveRoleSettingsLayers(t *testing.T) {
 	// JS: "roles: the frontmatter model is dropped when the kind comes from a config layer"
 	// JS: "roles: effort.<kind> and empty values (dashes, default sources)"
 	env, repo := fixture(t)
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.build.roles=implementer,designer,tasker,scouter,researcher,documenter\nlane.build.kind=pi\nlane.build.model=lane-model\nlane.build.effort=medium\nrole.implementer.model=role-model\n")
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "lane.build.roles=implementer,designer,tasker,scouter,researcher,documenter\nlane.build.kind=pi\nlane.build.model=lane-model\nlane.build.effort=medium\nrole.implementer.model=role-model\n")
 	ctx := LoadConfig(env, repo)
 	r := ResolveRoleSettings("implementer", &ctx, env, repo, RoleFlags{})
 	if r.Lane != "build" || r.Kind != "pi" || r.KindFrom != "lane build (project)" || r.ModelSpec != "lane-model" || r.Effort != "medium" || r.Approvals != "ask" {
@@ -75,7 +75,7 @@ func TestResolveRoleSettingsLayers(t *testing.T) {
 	}
 	// The role model is configured at the same source rank as the lane kind;
 	// it applies after the lane has no model value.
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.build.roles=implementer\nlane.build.kind=pi\nrole.implementer.model=role-model\n")
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "lane.build.roles=implementer\nlane.build.kind=pi\nrole.implementer.model=role-model\n")
 	ctx = LoadConfig(env, repo)
 	r = ResolveRoleSettings("implementer", &ctx, env, repo, RoleFlags{})
 	if r.ModelSpec != "role-model" || r.ModelFrom != "role config (project)" {
@@ -84,8 +84,8 @@ func TestResolveRoleSettingsLayers(t *testing.T) {
 	write(t, platform.UserConfigPath(platform.Current(), env), "role.implementer.model=lower-model\n")
 	customRoles := filepath.Join(t.TempDir(), "roles")
 	write(t, filepath.Join(customRoles, "implementer.md"), "---\nkind: grok\nmodel: front-model\n---\n")
-	env["HERDR_SOHO_ROLES"] = customRoles
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "role.implementer.kind=pi\n")
+	env["SOHO_ROLES"] = customRoles
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "role.implementer.kind=pi\n")
 	ctx = LoadConfig(env, repo)
 	r = ResolveRoleSettings("implementer", &ctx, env, repo, RoleFlags{})
 	if r.Kind != "pi" || r.ModelSpec == "lower-model" || r.ModelSpec == "front-model" {
@@ -123,7 +123,7 @@ func TestRoleTimeoutAndRolesTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(custom, "tasker.md"), "---\nkind: grok\neffort: xhigh\ntimeout: 2000\n---\n")
-	env["HERDR_SOHO_ROLES"] = custom
+	env["SOHO_ROLES"] = custom
 	ctx = LoadConfig(env, repo)
 	if got := RoleTimeoutMs("tasker", &ctx, env, repo); got != 3000 {
 		t.Fatalf("scaled timeout = %d", got)
@@ -139,7 +139,7 @@ func TestCmdRolesUsesUTF16FilenameOrder(t *testing.T) {
 	}
 	write(t, filepath.Join(roles, "\uE000.md"), "---\n---\n")
 	write(t, filepath.Join(roles, "😀.md"), "---\n---\n")
-	env["HERDR_SOHO_ROLES"] = roles
+	env["SOHO_ROLES"] = roles
 	out, errOut := capture(t, func() { CmdRoles(env, repo) })
 	if errOut != "" {
 		t.Fatalf("roles stderr = %q", errOut)
@@ -156,7 +156,7 @@ func TestCmdRoleAlternativesSplitOnSpacesOnly(t *testing.T) { // Mutation captur
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(custom, "implementer.md"), "---\nalternatives: [one,\ttwo]\n---\n")
-	env["HERDR_SOHO_ROLES"] = custom
+	env["SOHO_ROLES"] = custom
 	out, stderr := capture(t, func() { CmdRole([]string{"implementer"}, env, repo) })
 	if stderr != "" {
 		t.Fatalf("role stderr = %q", stderr)

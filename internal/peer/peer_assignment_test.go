@@ -36,7 +36,7 @@ func assignedFixture(t *testing.T, additional []fakecli.Rule) (*fixture, collabo
 		fakecli.Rule{Argv: []string{"agent", "prompt"}, ArgvPrefix: true},
 	)
 	f := newFixtureAt(t, dir, rules)
-	f.env["HERDR_SOHO_SKILL_DIR"] = skill
+	f.env["SOHO_SKILL_DIR"] = skill
 	f.env["HERDR_PANE_ID"] = "ws:p1"
 	t.Chdir(dir)
 	ctx := core.LoadConfig(f.env, dir)
@@ -125,7 +125,7 @@ func TestAssignedSendRefusesBeforePrompt(t *testing.T) {
 			f, s, a := assignedFixture(t, extra)
 			target, typ := "reviewer", "review.question"
 			if kind == "off" {
-				f.env["HERDR_SOHO_WORKER_MESSAGES"] = "off"
+				f.env["SOHO_WORKER_MESSAGES"] = "off"
 			}
 			if kind == "inbound" {
 				file := filepath.Join(f.dir, ".agents", "soho.conf")
@@ -146,7 +146,7 @@ func TestAssignedSendRefusesBeforePrompt(t *testing.T) {
 				f.env["HERDR_PANE_ID"] = "ws:p9"
 			}
 			if kind == "nowrite" {
-				f.env["HERDR_SOHO_NOWRITE"] = "1"
+				f.env["SOHO_NOWRITE"] = "1"
 			}
 			if kind == "session-reused" {
 				_, err := s.Update(a.ID, a.Generation, func(current *collaboration.Assignment) error { current.Reviewer.Session = "old-session"; return nil })

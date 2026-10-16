@@ -14,8 +14,8 @@ func contextWindowDoctorFixture(t *testing.T) (platform.Env, string, *core.Confi
 	root := t.TempDir()
 	env := platform.Env{
 		"HOME": root, "USERPROFILE": root, "PATH": filepath.Join(root, "bin"),
-		"HERDR_SOHO_DIR":   filepath.Join(root, "state"),
-		"HERDR_SOHO_LANES": "off", "HERDR_SOHO_SKILL_DIR": root,
+		"SOHO_DIR":   filepath.Join(root, "state"),
+		"SOHO_LANES": "off", "SOHO_SKILL_DIR": root,
 	}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	return env, root, ctx
@@ -51,7 +51,7 @@ func TestDoctorWarnsContextWindowForInvalidGrokValue(t *testing.T) {
 func TestDoctorContextWindowFromEnvironment(t *testing.T) {
 	t.Run("invalid grok value", func(t *testing.T) {
 		env, cwd, ctx := contextWindowDoctorFixture(t)
-		env["HERDR_SOHO_CONTEXT_WINDOW_GROK"] = "abc"
+		env["SOHO_CONTEXT_WINDOW_GROK"] = "abc"
 		out := doctorContextWindowOut(t, env, cwd, ctx)
 		want := "warn   config: context_window.grok='abc' is not a token count like 500k or 256000 (ignored)"
 		if !strings.Contains(out, want) {
@@ -60,7 +60,7 @@ func TestDoctorContextWindowFromEnvironment(t *testing.T) {
 	})
 	t.Run("non-grok kind", func(t *testing.T) {
 		env, cwd, ctx := contextWindowDoctorFixture(t)
-		env["HERDR_SOHO_CONTEXT_WINDOW_CODEX"] = "500k"
+		env["SOHO_CONTEXT_WINDOW_CODEX"] = "500k"
 		out := doctorContextWindowOut(t, env, cwd, ctx)
 		want := "warn   config: context_window.codex=500k has no effect (only grok uses context_window.<kind>)"
 		if !strings.Contains(out, want) {
@@ -70,7 +70,7 @@ func TestDoctorContextWindowFromEnvironment(t *testing.T) {
 	t.Run("the environment value wins over the file", func(t *testing.T) {
 		env, cwd, ctx := contextWindowDoctorFixture(t)
 		ctx.Entries["context_window_grok"] = core.ConfigEntry{Value: "500k", Source: "project"}
-		env["HERDR_SOHO_CONTEXT_WINDOW_GROK"] = "abc"
+		env["SOHO_CONTEXT_WINDOW_GROK"] = "abc"
 		out := doctorContextWindowOut(t, env, cwd, ctx)
 		if !strings.Contains(out, "warn   config: context_window.grok='abc' is not a token count like 500k or 256000 (ignored)") {
 			t.Fatalf("doctor output missing the env-wins warning:\n%s", out)

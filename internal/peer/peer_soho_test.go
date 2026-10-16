@@ -26,53 +26,48 @@ func TestSohoPeerMarkers(t *testing.T) {
 	}
 }
 
-func TestSohoPeerLegacyAcceptance(t *testing.T) {
+// DJA-318: the herdr-soho generation's markers are no longer read or
+// accepted. A message that opens with the legacy marker is not a peer
+// message: every recognition point treats it the same as ordinary text,
+// while the soho marker keeps proving delivery.
+func TestSohoPeerLegacyMarkersNotAccepted(t *testing.T) {
 	id := "01020304"
 	legacyEnd := "[/herdr-soho:peer] #" + id + " end of message"
 	legacyOpen := "[herdr-soho:peer] #" + id + " Message from another agent — local/w1:p1."
+	plainEnd := "Some other text #" + id + " end of message"
+	plainOpen := "Some other text #" + id + " Message from another agent — local/w1:p1."
 	currentEnd := "[/soho:peer] #" + id + " end of message"
 	currentOpen := "[soho:peer] #" + id + " Message from another agent — local/w1:p1."
-	t.Run("the exact end line proves delivery in both formats", func(t *testing.T) {
-		for _, line := range []string{legacyEnd, "› " + legacyEnd, currentEnd, "› " + currentEnd} {
-			if !peerEndLineIn(line, id) {
-				t.Fatalf("peerEndLineIn(%q)=%v, want the end line to prove delivery", line, false)
-			}
+	legacyScreen := "› " + legacyOpen + "\n• working\n" + legacyEnd + "\n• done\n"
+	plainScreen := "› " + plainOpen + "\n• working\n" + plainEnd + "\n• done\n"
+	currentScreen := "› " + currentOpen + "\n• working\n" + currentEnd + "\n• done\n"
+	t.Run("the legacy closing line is recognized the way an ordinary line is", func(t *testing.T) {
+		if got, plain := peerEndLineIn(legacyEnd, id), peerEndLineIn(plainEnd, id); got || got != plain {
+			t.Fatalf("peerEndLineIn: legacy %q=%v, ordinary %q=%v; want both false", legacyEnd, got, plainEnd, plain)
+		}
+		if peerEndLineIn("> "+legacyEnd, id) {
+			t.Fatal("a quoted legacy closing line counted as an end line")
 		}
 	})
-	t.Run("the opening header is a receipt marker in both formats", func(t *testing.T) {
-		for _, line := range []string{legacyOpen, "› " + legacyOpen, currentOpen, "› " + currentOpen} {
-			if !receiptLineIn(line, id) {
-				t.Fatalf("receiptLineIn(%q)=%v, want the header to count", line, false)
+	t.Run("the legacy opening header is recognized the way an ordinary line is", func(t *testing.T) {
+		for name, fn := range map[string]func(string, string) bool{"receiptLineIn": receiptLineIn, "composerHeaderLineIn": composerHeaderLineIn} {
+			if got, plain := fn(legacyOpen, id), fn(plainOpen, id); got || got != plain {
+				t.Fatalf("%s: legacy %q=%v, ordinary %q=%v; want both false", name, legacyOpen, got, plainOpen, plain)
 			}
 		}
-	})
-	t.Run("a longer id with the same prefix is not this message, in either format", func(t *testing.T) {
-		for _, line := range []string{"[herdr-soho:peer] #01020304abcd Message from another agent — local/w1:p1.", "[soho:peer] #01020304abcd Message from another agent — local/w1:p1."} {
-			if receiptLineIn(line, id) {
-				t.Fatalf("receiptLineIn(%q) counted a longer id", line)
-			}
+		if receiptLineIn("> "+legacyOpen, id) || composerHeaderLineIn("> "+legacyOpen, id) {
+			t.Fatal("a quoted legacy opening header counted as a marker")
 		}
 	})
-	t.Run("quoted lines never count, in both formats", func(t *testing.T) {
-		for _, line := range []string{"> " + legacyEnd, "  > " + currentEnd, "> " + legacyOpen, "  > " + currentOpen} {
-			if peerEndLineIn(line, id) || receiptLineIn(line, id) || receiptLineInText(line, id) {
-				t.Fatalf("quoted line %q counted as a receipt marker", line)
-			}
+	t.Run("a legacy codex history turn is read the way an ordinary turn is", func(t *testing.T) {
+		if got, plain := peerMessageInHistory(legacyScreen, id), peerMessageInHistory(plainScreen, id); got || got != plain {
+			t.Fatalf("peerMessageInHistory: legacy screen=%v, ordinary screen=%v; want both false", got, plain)
 		}
 	})
-	t.Run("the composer header and the codex history recognition accept both formats", func(t *testing.T) {
-		if !composerHeaderLineIn(legacyOpen, id) || !composerHeaderLineIn(currentOpen, id) {
-			t.Fatalf("composerHeaderLineIn must accept both formats: legacy=%v current=%v", composerHeaderLineIn(legacyOpen, id), composerHeaderLineIn(currentOpen, id))
-		}
-		if composerHeaderLineIn("> "+legacyOpen, id) || composerHeaderLineIn("> "+currentOpen, id) {
-			t.Fatal("composerHeaderLineIn counted a quoted line")
-		}
-		// A codex history turn: the closing line (either format) plus a turn
-		// line after it proves the message was delivered.
-		legacyScreen := "› " + legacyOpen + "\n• working\n" + legacyEnd + "\n• done\n"
-		currentScreen := "› " + currentOpen + "\n• working\n" + currentEnd + "\n• done\n"
-		if !peerMessageInHistory(legacyScreen, id) || !peerMessageInHistory(currentScreen, id) {
-			t.Fatalf("peerMessageInHistory must accept both formats: legacy=%v current=%v", peerMessageInHistory(legacyScreen, id), peerMessageInHistory(currentScreen, id))
+	t.Run("the soho marker still proves delivery (control)", func(t *testing.T) {
+		if !peerEndLineIn(currentEnd, id) || !receiptLineIn(currentOpen, id) || !composerHeaderLineIn(currentOpen, id) || !peerMessageInHistory(currentScreen, id) {
+			t.Fatalf("the soho marker stopped proving delivery: end=%v header=%v composer=%v history=%v",
+				peerEndLineIn(currentEnd, id), receiptLineIn(currentOpen, id), composerHeaderLineIn(currentOpen, id), peerMessageInHistory(currentScreen, id))
 		}
 	})
 }

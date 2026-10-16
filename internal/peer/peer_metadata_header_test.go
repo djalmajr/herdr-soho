@@ -170,7 +170,7 @@ func TestReceiptLineInNewHeaderOpening(t *testing.T) {
 	if receiptLineIn("  > "+open, id) {
 		t.Fatalf("an indented quoted copy proved receipt: %q", open)
 	}
-	if receiptLineIn("[herdr-soho:peer] #01020304abcd Message from another agent — local/w14:p9.", id) {
+	if receiptLineIn("[soho:peer] #01020304abcd Message from another agent — local/w14:p9.", id) {
 		t.Fatal("a longer id with this one as a prefix proved receipt")
 	}
 }
@@ -206,7 +206,7 @@ func TestSendHeaderModelFromRoster(t *testing.T) {
 			rules = append([]fakecli.Rule{{Argv: []string{"agent", "get", "w0test:p0b"}, Stdout: senderJSON}}, rules...)
 			f := newFixture(t, rules)
 			f.env["HERDR_PANE_ID"] = "w0test:p0b"
-			stateDir := filepath.Join(f.env["HERDR_SOHO_DIR"], "ws-test")
+			stateDir := filepath.Join(f.env["SOHO_DIR"], "ws-test")
 			if err := os.MkdirAll(stateDir, 0o700); err != nil {
 				t.Fatal(err)
 			}

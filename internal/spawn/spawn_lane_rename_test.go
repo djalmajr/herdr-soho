@@ -39,7 +39,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "rename", "w0test:p0a", "review"}, Stdout: `{"result":{}}`},
 		})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.roster(t, laneReuseRow("review-2", f.cwd))
 		code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"reviewer", "--name", "review"})
 		if code != 0 {
@@ -78,7 +78,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "rename", "w0test:p0a", "review-2"}, Stdout: `{"result":{}}`},
 		})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.roster(t, laneReuseRow("review", f.cwd))
 		code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"reviewer", "--name", "review-2"})
 		if code != 0 {
@@ -109,7 +109,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "review-2"}, Stdout: `{"result":{"agent":{"name":"review-2","agent_status":"idle"}}}`},
 		})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.roster(t, laneReuseRow("review-2", f.cwd))
 		code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"reviewer", "--name", "review-2"})
 		if code != 0 {
@@ -135,7 +135,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "rename", "w0test:p0a", "review"}, Stderr: `{"error":{"code":"agent_name_taken","message":"an agent named review already exists"}}`, Code: 1},
 		})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.roster(t, laneReuseRow("review-2", f.cwd))
 		code, message, _ := runCmdSpawnExpectError(t, f, []string{"reviewer", "--name", "review"})
 		want := "spawn: could not rename worker 'review-2' to 'review': agent_name_taken: an agent named review already exists"
@@ -159,7 +159,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "review-2"}, Stdout: `{"result":{"agent":{"name":"review-2","agent_status":"idle"}}}`},
 		})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.roster(t, laneReuseRow("review-2", f.cwd))
 		code, message, calls := runCmdSpawnExpectError(t, f, []string{"reviewer", "--name", "Review"})
 		want := "invalid agent name 'Review' (must match [a-z][a-z0-9_-]{0,31})"
@@ -186,7 +186,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "review-2"}, Stdout: `{"result":{"agent":{"name":"review-2","agent_status":"idle"}}}`},
 		})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.roster(t, laneReuseRow("review-2", f.cwd))
 		code, message, calls := runCmdSpawnExpectError(t, f, []string{"reviewer", "--name", "rev\tiew"})
 		want := "invalid agent name 'rev\tiew' (must match [a-z][a-z0-9_-]{0,31})"
@@ -218,7 +218,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "rename", "w0test:p0a", "review"}, Stdout: `{"result":{}}`},
 		})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.roster(t, laneReuseRow("review-2", f.cwd))
 		sd := filepath.Join(f.state, "ws")
 		report := filepath.Join(sd, "reports", "review-2-old.md")
@@ -303,7 +303,7 @@ func TestSpawnLaneReuseRenameJavaScriptCases(t *testing.T) {
 			{Argv: []string{"agent", "rename", "w0test:p0a", "review"}, Stdout: `{"result":{}}`},
 		})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.roster(t, laneReuseRow("review-2", f.cwd))
 		sd := filepath.Join(f.state, "ws")
 		// a directory where the pointer file should land blocks os.Rename.

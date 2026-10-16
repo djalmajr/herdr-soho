@@ -114,10 +114,10 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 		}
 		f.env["HERDR_PANE_ID"] = "c"
 		f.env["HERDR_TAB_ID"] = "t-main"
-		f.env["HERDR_SOHO_LANES"] = "off"
-		f.env["HERDR_SOHO_LAYOUT"] = "split"
-		f.env["HERDR_SOHO_SPLIT_MAX_PANES"] = "3"
-		f.env["HERDR_SOHO_MAX_WORKERS"] = "4"
+		f.env["SOHO_LANES"] = "off"
+		f.env["SOHO_LAYOUT"] = "split"
+		f.env["SOHO_SPLIT_MAX_PANES"] = "3"
+		f.env["SOHO_MAX_WORKERS"] = "4"
 		f.runSteps(t, golden)
 	})
 	t.Run(`JS: "parity spawn: fresh worker, lane reuse, kind mismatch, lane-kind reuse"`, func(t *testing.T) {
@@ -179,7 +179,7 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 				}
 			}
 			if i == 5 {
-				f.env["HERDR_SOHO_LANES"] = "off"
+				f.env["SOHO_LANES"] = "off"
 			}
 			tm11SpawnInstallStateRules(t, f, status)
 		})
@@ -188,7 +188,7 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 		golden := tm11RequireSpawnGolden(t, goldens, "layers")
 		f := newTM11SpawnFixture(t, nil)
 		f.runStepsPreparedChecked(t, golden, func(i int) {
-			delete(f.env, "HERDR_SOHO_LANE_BUILD_KIND")
+			delete(f.env, "SOHO_LANE_BUILD_KIND")
 			user, project := "", ""
 			switch i {
 			case 0:
@@ -202,7 +202,7 @@ func TestTM11SpawnCommandParity(t *testing.T) {
 				tm11SpawnReset(t, f)
 				user = "lane.build.model = \"gpt-6-luna\"\nlane.build.model.pi.worker = \"my-provider/my-model\"\n"
 				project = "lane.build.kind = \"pi\"\n"
-				f.env["HERDR_SOHO_LANE_BUILD_KIND"] = "pi"
+				f.env["SOHO_LANE_BUILD_KIND"] = "pi"
 			case 3:
 				tm11SpawnReset(t, f)
 				user = "lane.build.kind = \"codex\"\nlane.build.effort = \"high\"\n"
@@ -293,19 +293,19 @@ func newTM11SpawnFixture(t *testing.T, herdrRules []fakecli.Rule) *tm11SpawnFixt
 		t.Fatal(err)
 	}
 	clean := envFrom(testutil.CleanEnv(t))
-	for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "HERDR_SOHO_SKILL_DIR", "HERDR_WORKSPACE_ID"} {
+	for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "SOHO_SKILL_DIR", "HERDR_WORKSPACE_ID"} {
 		clean[key] = env.Get(key)
 	}
 	clean["PATH"] = bin
 	clean["TMPDIR"] = t.TempDir()
 	clean["USERPROFILE"] = env.Get("HOME")
 	clean["HERDR_ENV"] = "1"
-	clean["HERDR_SOHO_DIR"] = state
+	clean["SOHO_DIR"] = state
 	clean["HERDR_WORKSPACE_ID"] = "ws"
-	clean["HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT"] = "0"
-	clean["HERDR_SOHO_PRESSURE_SWAP_PERCENT"] = "0"
-	clean["HERDR_SOHO_LAYOUT"] = "tab"
-	clean["HERDR_SOHO_REGRID"] = "off"
+	clean["SOHO_PRESSURE_DISK_FREE_PERCENT"] = "0"
+	clean["SOHO_PRESSURE_SWAP_PERCENT"] = "0"
+	clean["SOHO_LAYOUT"] = "tab"
+	clean["SOHO_REGRID"] = "off"
 	clean["SOHO_WAIT_POLL_MS"] = "1"
 	clean = withFakeCLI(clean, bin)
 	return &tm11SpawnFixture{env: clean, cwd: cwd, state: filepath.Join(state, "ws"), bin: bin, herdrLog: filepath.Join(bin, "herdr.log")}

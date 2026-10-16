@@ -12,7 +12,7 @@ import (
 
 func TestWaitShortTimeoutWarnsOnceAndProceeds(t *testing.T) { // --timeout 45 means 45 ms: one warning with the seconds fix, then the wait loop still runs
 	f := newQueuedProbeFixture(t, "working", "5", "Busy on the task 30%\n", nil)
-	f.env["HERDR_SOHO_DIR"] = filepath.Dir(f.sd)
+	f.env["SOHO_DIR"] = filepath.Dir(f.sd)
 	f.env["HERDR_WORKSPACE_ID"] = filepath.Base(f.sd)
 	SetFrictionLogFile(filepath.Join(f.sd, "friction.log"))
 	oldOut, oldErr := platform.Stdout, platform.Stderr

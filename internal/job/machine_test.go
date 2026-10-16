@@ -39,7 +39,7 @@ func TestMachineConfig(t *testing.T) {
 	})
 
 	t.Run("known keys and timeout bounds", func(t *testing.T) {
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skillDir(t)}
+		env := platform.Env{"SOHO_SKILL_DIR": skillDir(t)}
 		cwd := t.TempDir()
 		for _, key := range []string{"machine_label", "job_orgs", "job_repos_root", "job_timeout", "job_blocked_timeout", "job_wake_cmd"} {
 			if !core.ConfigKeyOk(key) {
@@ -199,7 +199,7 @@ func TestMachineConfig(t *testing.T) {
 		for k, v := range f.env {
 			env[k] = v
 		}
-		env["HERDR_SOHO_JOB_FINISHING_TIMEOUT"] = "27"
+		env["SOHO_JOB_FINISHING_TIMEOUT"] = "27"
 		got, err := LoadMachine("linux", env)
 		if err != nil || got.FinishingTimeoutMin != 25 {
 			t.Fatalf("layers: FinishingTimeoutMin = %d err %v, want the user file's 25", got.FinishingTimeoutMin, err)
@@ -243,12 +243,12 @@ func TestMachineConfig(t *testing.T) {
 			env[name] = value
 		}
 		env["HERDR_WORKSPACE_ID"] = "ws1"
-		env["HERDR_SOHO_MACHINE_LABEL"] = "env-label"
-		env["HERDR_SOHO_JOB_ORGS"] = "env-org"
-		env["HERDR_SOHO_JOB_REPOS_ROOT"] = "/data/env"
-		env["HERDR_SOHO_JOB_TIMEOUT"] = "45"
-		env["HERDR_SOHO_JOB_BLOCKED_TIMEOUT"] = "450"
-		env["HERDR_SOHO_JOB_WAKE_CMD"] = "echo env"
+		env["SOHO_MACHINE_LABEL"] = "env-label"
+		env["SOHO_JOB_ORGS"] = "env-org"
+		env["SOHO_JOB_REPOS_ROOT"] = "/data/env"
+		env["SOHO_JOB_TIMEOUT"] = "45"
+		env["SOHO_JOB_BLOCKED_TIMEOUT"] = "450"
+		env["SOHO_JOB_WAKE_CMD"] = "echo env"
 		got, err := LoadMachine("linux", env)
 		if err != nil {
 			t.Fatal(err)
@@ -282,12 +282,12 @@ func TestMachineConfig(t *testing.T) {
 
 	t.Run("environment alone leaves all defaults", func(t *testing.T) {
 		f := newMachineFix(t)
-		f.env["HERDR_SOHO_MACHINE_LABEL"] = "env-label"
-		f.env["HERDR_SOHO_JOB_ORGS"] = "env-org"
-		f.env["HERDR_SOHO_JOB_REPOS_ROOT"] = "/data/env"
-		f.env["HERDR_SOHO_JOB_TIMEOUT"] = "45"
-		f.env["HERDR_SOHO_JOB_BLOCKED_TIMEOUT"] = "450"
-		f.env["HERDR_SOHO_JOB_WAKE_CMD"] = "echo env"
+		f.env["SOHO_MACHINE_LABEL"] = "env-label"
+		f.env["SOHO_JOB_ORGS"] = "env-org"
+		f.env["SOHO_JOB_REPOS_ROOT"] = "/data/env"
+		f.env["SOHO_JOB_TIMEOUT"] = "45"
+		f.env["SOHO_JOB_BLOCKED_TIMEOUT"] = "450"
+		f.env["SOHO_JOB_WAKE_CMD"] = "echo env"
 		got := f.must(t, "linux")
 		if got.Label != "" || len(got.Orgs) != 0 || got.ReposRoot != filepath.Join(f.home, "repo.git") || got.TimeoutMin != 120 || got.BlockedTimeoutMin != 1440 || got.WakeCmd != "" {
 			t.Fatalf("machine = %+v", got)
@@ -325,7 +325,7 @@ func TestMachineConfig(t *testing.T) {
 		profile := filepath.Join(root, "profile")
 		env := platform.Env{
 			"APPDATA": appdata, "HOME": home, "USERPROFILE": profile,
-			"HERDR_SOHO_SKILL_DIR": skillDir(t), "PATH": filepath.Join(root, "bin"),
+			"SOHO_SKILL_DIR": skillDir(t), "PATH": filepath.Join(root, "bin"),
 		}
 		newUser := filepath.Join(appdata, "soho", "config")
 		writeTeamFile(t, newUser, "machine_label=from-appdata\njob_orgs=appdata-org\n")
@@ -346,8 +346,8 @@ func TestMachineConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Label != "from-legacy" {
-			t.Fatalf("legacy = %+v", got)
+		if got.Label == "from-legacy" {
+			t.Fatalf("former user config is still read: %+v", got)
 		}
 		if platform.UserConfigPath("win32", env) != newUser {
 			t.Fatalf("UserConfigPath changed: %s", platform.UserConfigPath("win32", env))
@@ -375,7 +375,7 @@ func newMachineFix(t *testing.T) machineFix {
 	}
 	f.env = platform.Env{
 		"HOME": f.home, "USERPROFILE": f.profile, "XDG_CONFIG_HOME": filepath.Join(root, "xdg"),
-		"HERDR_SOHO_SKILL_DIR": skillDir(t), "PATH": filepath.Join(root, "bin"),
+		"SOHO_SKILL_DIR": skillDir(t), "PATH": filepath.Join(root, "bin"),
 	}
 	return f
 }

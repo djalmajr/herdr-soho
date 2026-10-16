@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/djalmajr/soho/internal/core"
 	"github.com/djalmajr/soho/internal/platform"
 	"github.com/djalmajr/soho/internal/testutil"
 )
@@ -39,8 +38,8 @@ func commandFixture(t *testing.T) (platform.Env, string) {
 	}
 	skillDir := testSkillDir(t)
 	return platform.Env{
-		"HOME": home, "XDG_CONFIG_HOME": conf, "HERDR_SOHO_DIR": state,
-		"HERDR_SOHO_SKILL_DIR": skillDir, "HERDR_WORKSPACE_ID": "ws", "PATH": os.Getenv("PATH"),
+		"HOME": home, "XDG_CONFIG_HOME": conf, "SOHO_DIR": state,
+		"SOHO_SKILL_DIR": skillDir, "HERDR_WORKSPACE_ID": "ws", "PATH": os.Getenv("PATH"),
 	}, repo
 }
 
@@ -122,10 +121,10 @@ func TestParityConfigGolden(t *testing.T) {
 				}
 			}
 			if name == "session-errors-seeded" {
-				if err := os.MkdirAll(filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws"), 0o700); err != nil {
+				if err := os.MkdirAll(filepath.Join(env.Get("SOHO_DIR"), "ws"), 0o700); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf"), []byte("lane.build.kind=pi\n"), 0o600); err != nil {
+				if err := os.WriteFile(filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf"), []byte("lane.build.kind=pi\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -134,7 +133,7 @@ func TestParityConfigGolden(t *testing.T) {
 					if golden.Steps[i].Env == nil {
 						golden.Steps[i].Env = make(map[string]string)
 					}
-					golden.Steps[i].Env["HERDR_SOHO_DIR"] = ""
+					golden.Steps[i].Env["SOHO_DIR"] = ""
 				}
 			}
 			for i, want := range golden.Steps {
@@ -146,7 +145,7 @@ func TestParityConfigGolden(t *testing.T) {
 					stepEnv["HERDR_WORKSPACE_ID"] = ""
 				}
 				if name == "precedence" && i == 2 {
-					stepEnv["HERDR_SOHO_LANE_BUILD_KIND"] = "grok"
+					stepEnv["SOHO_LANE_BUILD_KIND"] = "grok"
 				}
 				code, out, errOut := runIn(t, want.Args, stepEnv, cwd)
 				out = strings.ReplaceAll(out, root, "<ROOT>")
@@ -393,16 +392,16 @@ func TestConfigSetArgumentForms(t *testing.T) {
 	})
 }
 
-func TestSessionCommandRoutesToGoAndLegacyEnvIsApplied(t *testing.T) {
+func TestSessionCommandRoutesToGoAndEnvIsApplied(t *testing.T) {
 	// JS: "session set writes the session file in the state dir"
 	// JS: "config shows the session value with source `session`"
 	env, cwd := commandFixture(t)
-	env["HERDR_SOHO_LAYOUT"] = "columns"
+	env["SOHO_LAYOUT"] = "columns"
 	code, out, errOut := runIn(t, []string{"session", "set", "lane.build.kind=codex"}, env, cwd)
 	if code != 0 || errOut != "" || !strings.Contains(out, "session: this Herdr workspace only") {
 		t.Fatalf("session set code=%d out=%q err=%q", code, out, errOut)
 	}
-	session := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+	session := filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 	content, err := os.ReadFile(session)
 	if err != nil || string(content) != "lane.build.kind=codex\n" {
 		t.Fatalf("session file=%q err=%v", content, err)
@@ -421,7 +420,7 @@ func TestSessionSetJoinsDashPrefixedValues(t *testing.T) {
 	// Mutation captured: session set joins later arguments when the first value begins with a dash.
 	env, cwd := commandFixture(t)
 	code, _, errOut := runIn(t, []string{"session", "set", "args.codex", "-c", "a=b"}, env, cwd)
-	path := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+	path := filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 	data, err := os.ReadFile(path)
 	if code != 0 || errOut != "" || err != nil || string(data) != "args.codex=-c a=b\n" {
 		t.Fatalf("session dash value code=%d err=%q file=%q readErr=%v", code, errOut, data, err)
@@ -431,7 +430,7 @@ func TestSessionSetJoinsDashPrefixedValues(t *testing.T) {
 func TestNowriteRejectsPortedCommandsBeforeWriting(t *testing.T) {
 	// JS: "nowrite: the entry guard rejects non-exact invocations before any project write"
 	env, cwd := commandFixture(t)
-	env["HERDR_SOHO_NOWRITE"] = "1"
+	env["SOHO_NOWRITE"] = "1"
 	code, out, errOut := runIn(t, []string{"config", "set", "max_workers", "5"}, env, cwd)
 	if code != 2 || out != "" || !strings.Contains(errOut, "SOHO_NOWRITE=1 is read-only") {
 		t.Fatalf("NOWRITE code=%d out=%q err=%q", code, out, errOut)
@@ -445,7 +444,7 @@ func TestNowriteRejectsConfigSetWithTheNewMessage(t *testing.T) {
 	// DJA-331: the exact config is now an accepted NOWRITE read; config set stays
 	// refused with the message that lists the accepted reads (config and roles included).
 	env, cwd := commandFixture(t)
-	env["HERDR_SOHO_NOWRITE"] = "1"
+	env["SOHO_NOWRITE"] = "1"
 	code, out, errOut := runIn(t, []string{"config", "set", "panes", "3"}, env, cwd)
 	wantErr := "soho: soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: config (3 extra arguments not allowed) — unset SOHO_NOWRITE to write\n"
 	if code != 2 || out != "" || errOut != wantErr {
@@ -462,7 +461,7 @@ func TestSessionClearDanglingSymlinkIsEmpty(t *testing.T) {
 		t.Skip("symlink creation requires privileges on Windows")
 	}
 	env, cwd := commandFixture(t)
-	sessionFile := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+	sessionFile := filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 	if err := os.MkdirAll(filepath.Dir(sessionFile), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -478,8 +477,9 @@ func TestSessionClearDanglingSymlinkIsEmpty(t *testing.T) {
 	}
 }
 
-func TestLegacyConfigMigratesThroughConfigSet(t *testing.T) {
-	// Mutation captured: skipping migration, deleting the source, or omitting its warning changes config set's observable contract.
+func TestFormerConfigIsNotMigratedThroughConfigSet(t *testing.T) {
+	// The former herdr-soho config is no longer read: config set writes the
+	// current file only, leaves the former file untouched and warns nothing.
 	for _, where := range []string{"project", "user"} {
 		t.Run(where, func(t *testing.T) {
 			env, cwd := commandFixture(t)
@@ -500,32 +500,18 @@ func TestLegacyConfigMigratesThroughConfigSet(t *testing.T) {
 				t.Fatal(err)
 			}
 			code, listing, listErr := runIn(t, []string{"config"}, env, cwd)
-			fileLabel := "project file: "
-			if where == "user" {
-				fileLabel = "user file:    "
-			}
-			if code != 0 || listErr != "" || !strings.Contains(listing, fileLabel+oldPath+" (legacy)") {
-				t.Fatalf("legacy listing code=%d out=%q err=%q", code, listing, listErr)
+			if code != 0 || listErr != "" || !strings.Contains(listing, newPath) || strings.Contains(listing, oldPath) {
+				t.Fatalf("listing code=%d out=%q err=%q; want only the current file named", code, listing, listErr)
 			}
 			code, out, errOut := runIn(t, args, env, cwd)
 			oldData, oldErr := os.ReadFile(oldPath)
 			newData, newErr := os.ReadFile(newPath)
-			if code != 0 || out == "" || !strings.Contains(errOut, "warning: copied legacy config "+oldPath+" to "+newPath) || oldErr != nil || string(oldData) != "# old\npanes=2\n" || newErr != nil || string(newData) != "# old\npanes=2\nlayout=tab\n" {
-				t.Fatalf("first write code=%d out=%q err=%q old=%q/%v new=%q/%v", code, out, errOut, oldData, oldErr, newData, newErr)
-			}
-			if info, err := os.Stat(newPath); err != nil || (runtime.GOOS == "windows" && info.Mode().Perm()&0o200 == 0) || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o640) {
-				t.Fatalf("copied mode=%v err=%v", info, err)
-			}
-			code, _, errOut = runIn(t, args, env, cwd)
-			if code != 0 || errOut != "" {
-				t.Fatalf("second write code=%d err=%q", code, errOut)
-			}
-			if got := core.EffectiveConfigFile(newPath, oldPath); got != newPath {
-				t.Fatalf("effective file after migration=%q", got)
+			if code != 0 || out == "" || errOut != "" || oldErr != nil || string(oldData) != "# old\npanes=2\n" || newErr != nil || string(newData) != "layout=tab\n" {
+				t.Fatalf("code=%d out=%q err=%q old=%q/%v new=%q/%v; want a plain write to the current file with the former file untouched", code, out, errOut, oldData, oldErr, newData, newErr)
 			}
 		})
 	}
-	t.Run("legacy symlink is followed and retained", func(t *testing.T) {
+	t.Run("former symlinked config is not read", func(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			t.Skip("symlink creation requires privileges on Windows")
 		}
@@ -545,14 +531,15 @@ func TestLegacyConfigMigratesThroughConfigSet(t *testing.T) {
 		code, _, errOut := runIn(t, []string{"config", "set", "layout", "tab"}, env, cwd)
 		link, linkErr := os.Readlink(oldPath)
 		newData, newErr := os.ReadFile(newPath)
-		if code != 0 || errOut == "" || linkErr != nil || link != target || newErr != nil || string(newData) != "panes=2\nlayout=tab\n" {
-			t.Fatalf("symlink migration code=%d err=%q link=%q/%v new=%q/%v", code, errOut, link, linkErr, newData, newErr)
+		if code != 0 || errOut != "" || linkErr != nil || link != target || newErr != nil || string(newData) != "layout=tab\n" {
+			t.Fatalf("code=%d err=%q link=%q/%v new=%q/%v; want the write without reading the former file", code, errOut, link, linkErr, newData, newErr)
 		}
 	})
 }
 
-func TestLegacyUnreadableConfigSetDoesNotCreateNewFile(t *testing.T) {
-	// Mutation captured: swallowing a legacy read failure creates a shadow config and loses the legacy layer.
+func TestFormerUnreadableConfigDoesNotBlockConfigSet(t *testing.T) {
+	// The former config is not read at all, so an unreadable former file
+	// neither blocks the write nor leaves the new file absent.
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("permission denial is not observable for this process")
 	}
@@ -569,17 +556,18 @@ func TestLegacyUnreadableConfigSetDoesNotCreateNewFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errOut := runIn(t, []string{"config", "set", "layout", "tab"}, env, cwd)
-	if code != 4 || out != "" || !strings.Contains(errOut, "config set: could not read legacy config "+oldPath+" (file left untouched)") {
-		t.Fatalf("unreadable legacy code=%d out=%q err=%q", code, out, errOut)
+	if code != 0 || out == "" || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q; want the plain write (the former file is not read)", code, out, errOut)
 	}
-	if _, err := os.Lstat(newPath); !os.IsNotExist(err) {
-		t.Fatalf("new config exists after failed migration: %v", err)
+	newData, newErr := os.ReadFile(newPath)
+	if newErr != nil || string(newData) != "layout=tab\n" {
+		t.Fatalf("new file = %q/%v", newData, newErr)
 	}
 	if err := os.Chmod(oldPath, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(oldPath); err != nil || string(got) != "lane.build.kind=codex\n" {
-		t.Fatalf("legacy layer changed: %q err=%v", got, err)
+		t.Fatalf("former file changed: %q err=%v", got, err)
 	}
 }
 
@@ -659,7 +647,7 @@ func TestConfigAndSessionIOFailuresUseCommandExitCode(t *testing.T) {
 	})
 	t.Run("session state parent is a file", func(t *testing.T) {
 		env, cwd := commandFixture(t)
-		state := env.Get("HERDR_SOHO_DIR")
+		state := env.Get("SOHO_DIR")
 		if err := os.RemoveAll(state); err != nil {
 			t.Fatal(err)
 		}
@@ -674,7 +662,7 @@ func TestConfigAndSessionIOFailuresUseCommandExitCode(t *testing.T) {
 	})
 	t.Run("session file directory", func(t *testing.T) {
 		env, cwd := commandFixture(t)
-		file := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+		file := filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 		if err := os.MkdirAll(file, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -691,7 +679,7 @@ func TestConfigAndSessionIOFailuresUseCommandExitCode(t *testing.T) {
 			t.Skip("permission denial is not observable for this process")
 		}
 		env, cwd := commandFixture(t)
-		file := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+		file := filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -714,7 +702,7 @@ func TestConfigAndSessionIOFailuresUseCommandExitCode(t *testing.T) {
 	})
 	t.Run("session set destination directory", func(t *testing.T) {
 		env, cwd := commandFixture(t)
-		file := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+		file := filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 		if err := os.MkdirAll(file, 0o700); err != nil {
 			t.Fatal(err)
 		}

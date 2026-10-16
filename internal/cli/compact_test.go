@@ -61,10 +61,10 @@ func newCompactFixture(t *testing.T, kind string, rules []fakecli.Rule) *compact
 		}
 	}
 	env["HERDR_ENV"] = "1"
-	env["HERDR_SOHO_DIR"] = state
+	env["SOHO_DIR"] = state
 	env["HERDR_WORKSPACE_ID"] = "ws"
-	env["HERDR_SOHO_ROLES"] = roles
-	env["HERDR_SOHO_SKILL_DIR"] = skill
+	env["SOHO_ROLES"] = roles
+	env["SOHO_SKILL_DIR"] = skill
 	env["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing.sock")
 	env["HOME"] = home
 	env["USERPROFILE"] = home

@@ -543,7 +543,7 @@ func TestMutationCopy(t *testing.T) {
 		if got.Source != f.source {
 			t.Fatalf("source=%q; want the worktree root %q", got.Source, f.source)
 		}
-		prefix := filepath.Join(f.tmp, "herdr-soho-mutation-")
+		prefix := filepath.Join(f.tmp, "soho-mutation-")
 		if !strings.HasPrefix(got.Copy, prefix) {
 			t.Fatalf("copy=%q; want under %q", got.Copy, prefix)
 		}

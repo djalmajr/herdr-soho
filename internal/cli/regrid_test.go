@@ -15,8 +15,8 @@ import (
 func regridCommandFixture(t *testing.T, rules []fakecli.Rule) (platform.Env, string, string) {
 	t.Helper()
 	env, cwd := commandFixture(t)
-	env["HERDR_ENV"], env["HERDR_SOHO_REGRID"], env["HERDR_WORKSPACE_ID"] = "1", "on", "ws"
-	state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+	env["HERDR_ENV"], env["SOHO_REGRID"], env["HERDR_WORKSPACE_ID"] = "1", "on", "ws"
+	state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -68,8 +68,8 @@ func TestReleaseAutomaticRegridLifecycle(t *testing.T) {
 			{Argv: []string{"pane", "close", "r-new"}},
 		}
 		env, _ := commandFixture(t)
-		env["HERDR_ENV"], env["HERDR_SOHO_REGRID"], env["HERDR_WORKSPACE_ID"] = "1", "on", "ws"
-		state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+		env["HERDR_ENV"], env["SOHO_REGRID"], env["HERDR_WORKSPACE_ID"] = "1", "on", "ws"
+		state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 		if err := os.MkdirAll(filepath.Join(state, "reports"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -113,8 +113,8 @@ func TestReleaseAutomaticRegridLifecycle(t *testing.T) {
 			{Argv: []string{"pane", "move"}, ArgvPrefix: true, Code: 1},
 		}
 		env, _ := commandFixture(t)
-		env["HERDR_ENV"], env["HERDR_SOHO_REGRID"], env["HERDR_WORKSPACE_ID"] = "1", "on", "ws"
-		state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+		env["HERDR_ENV"], env["SOHO_REGRID"], env["HERDR_WORKSPACE_ID"] = "1", "on", "ws"
+		state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 		if err := os.MkdirAll(filepath.Join(state, "reports"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -153,8 +153,8 @@ func TestReleaseAutomaticRegridLifecycle(t *testing.T) {
 			{Argv: []string{"pane", "list", "--workspace", "ws"}, ArgvPrefix: true, Stdout: `{"result":{"panes":[]}}`},
 		}
 		env, _ := commandFixture(t)
-		env["HERDR_ENV"], env["HERDR_SOHO_REGRID"], env["HERDR_WORKSPACE_ID"] = "1", "on", "ws"
-		state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+		env["HERDR_ENV"], env["SOHO_REGRID"], env["HERDR_WORKSPACE_ID"] = "1", "on", "ws"
+		state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 		if err := os.MkdirAll(filepath.Join(state, "reports"), 0o700); err != nil {
 			t.Fatal(err)
 		}

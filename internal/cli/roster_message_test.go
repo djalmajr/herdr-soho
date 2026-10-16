@@ -12,7 +12,7 @@ import (
 
 func TestA13bRosterMessageNamesStateDir(t *testing.T) {
 	f := newReleaseFixture(t, "", "")
-	state := filepath.Join(f.env.Get("HERDR_SOHO_DIR"), "ws")
+	state := filepath.Join(f.env.Get("SOHO_DIR"), "ws")
 
 	// release: the refusal names the state dir it searched.
 	r := f.run(t, "nobody")

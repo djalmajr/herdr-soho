@@ -58,7 +58,7 @@ func newPiDispatchFixture(t *testing.T, mode string, seq int, sessionKind, sessi
 	if err := os.WriteFile(filepath.Join(base.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	base.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "2"
+	base.env["SOHO_PROMPT_CHECK_SECONDS"] = "2"
 	base.env["SOHO_WAIT_POLL_MS"] = "100"
 	f := &piDispatchFixture{
 		dispatchArrivalFixture: base,

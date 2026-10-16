@@ -171,7 +171,7 @@ func TestSetupPlanJavaScriptCases(t *testing.T) {
 		}},
 		{"e2e: the .gitignore entry is planned (not written) when the state dir would not be ignored", func(t *testing.T) {
 			root, env, ctx := localPlanFixture(t)
-			env["HERDR_SOHO_DIR"] = "state-cache"
+			env["SOHO_DIR"] = "state-cache"
 			code, out, _, msg := runPlanStreams([]string{"--no-hooks"}, ctx, env, root)
 			if code != 0 || msg != "" || !strings.Contains(out, ".gitignore") || !strings.Contains(out, "state-cache") {
 				t.Fatalf("code=%d msg=%q out=%q", code, msg, out)

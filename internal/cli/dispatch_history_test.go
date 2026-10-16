@@ -56,7 +56,7 @@ func readPointerTaskReport(t *testing.T, f *dispatchArrivalFixture, agent string
 // and returns its composed brief and report paths.
 func firstDispatch(t *testing.T, f *dispatchArrivalFixture) (composed, report string) {
 	t.Helper()
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	if code != 0 {
 		t.Fatalf("first dispatch code=%d out=%s stderr=%s", code, out, errText)
@@ -85,7 +85,7 @@ func TestDispatchHistorySidecarFields(t *testing.T) {
 	})
 	t.Run("dispatch: an amendment's sidecar keeps the current task's task_report", func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		firstDispatch(t, f)
 		firstTask := readPointerTaskReport(t, f, "worker")
 		amend := filepath.Join(f.root, "amend.md")

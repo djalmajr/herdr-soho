@@ -13,7 +13,7 @@ import (
 
 func TestStatusQueuedPromptRouting(t *testing.T) {
 	env, cwd := commandFixture(t)
-	state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+	state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 	if err := os.MkdirAll(filepath.Join(state, "wait"), 0o700); err != nil {
 		t.Fatal(err)
 	}

@@ -84,7 +84,7 @@ func TestCmdRegridRegisteredCallerIsNeverRelocated(t *testing.T) {
 			{Argv: []string{"pane", "list", "--workspace", "ws"}, Call: 3, Stdout: after},
 		}
 		env, ctx, cwd, dir := layoutFake(t, rules)
-		env["HERDR_TAB_ID"], env["HERDR_PANE_ID"], env["HERDR_SOHO_SPLIT_MAX_PANES"] = "t-old", "C", "4"
+		env["HERDR_TAB_ID"], env["HERDR_PANE_ID"], env["SOHO_SPLIT_MAX_PANES"] = "t-old", "C", "4"
 		roster := "sub\tC\tgrok\tsub-orchestrator\nw1\tp1\tgrok\timplementer\nw2\tp2\tgrok\tscouter\n"
 		if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
@@ -164,7 +164,7 @@ func TestCmdRegridGenuineSubOrchestratorStillCounts(t *testing.T) {
 			{Argv: []string{"tab", "rename", "t2", "scout"}},
 		}
 		env, ctx, cwd, dir := layoutFake(t, rules)
-		env["HERDR_TAB_ID"], env["HERDR_PANE_ID"], env["HERDR_SOHO_SPLIT_MAX_PANES"] = "t0", "C", "3"
+		env["HERDR_TAB_ID"], env["HERDR_PANE_ID"], env["SOHO_SPLIT_MAX_PANES"] = "t0", "C", "3"
 		roster := "sub\tC\tgrok\tsub-orchestrator\ns1\tq1\tgrok\tsub-orchestrator\nw2\tp2\tgrok\tscouter\nw3\tp3\tgrok\tscouter\n"
 		if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)

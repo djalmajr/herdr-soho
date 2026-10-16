@@ -15,6 +15,7 @@ import (
 	"github.com/djalmajr/soho/internal/platform"
 	"github.com/djalmajr/soho/internal/setuptext"
 	"github.com/djalmajr/soho/internal/testutil"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 func setupWriteFixture(t *testing.T) (string, platform.Env, *core.Config) {
@@ -28,18 +29,11 @@ func setupWriteFixture(t *testing.T) (string, platform.Env, *core.Config) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
-	env := platform.Env{}
-	for _, item := range testutil.CleanEnv(t) {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
-			env[key] = value
-		}
-	}
-	env["PATH"] = filepath.Dir(git) + string(os.PathListSeparator) + env.Get("PATH")
+	env := isolatedHerdrEnv(t, git)
 	env["HOME"] = t.TempDir()
 	env["XDG_CONFIG_HOME"] = filepath.Join(env["HOME"], ".config")
-	env["HERDR_SOHO_DIR"] = ".soho"
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+	env["SOHO_DIR"] = ".soho"
+	env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	delete(env, "HERDR_WORKSPACE_ID")
 	delete(env, "HERDR_ENV")
 	ctx := core.LoadConfig(env, root)
@@ -263,13 +257,13 @@ func TestSetupWriteLocalPreflightRefusalsLeaveDiskUntouched(t *testing.T) {
 			if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
 				t.Skipf("symlink unavailable: %v", err)
 			}
-			env["HERDR_SOHO_DIR"] = filepath.Join("link", "cache")
+			env["SOHO_DIR"] = filepath.Join("link", "cache")
 		}},
 		{name: "backslash state name on POSIX", want: "contains git-ignore metacharacters", setup: func(t *testing.T, root string, env platform.Env) {
 			if runtime.GOOS == "windows" {
 				t.Skip("backslash is a path separator on Windows")
 			}
-			env["HERDR_SOHO_DIR"] = `foo\bar`
+			env["SOHO_DIR"] = `foo\bar`
 		}},
 		{name: "exclude parent is not writable by process", want: "cannot write the git exclude file", setup: func(t *testing.T, root string, env platform.Env) {
 			if runtime.GOOS == "windows" {
@@ -462,7 +456,7 @@ func TestSetupLocalCommandJavaScriptCases(t *testing.T) {
 		}},
 		{"setup --local with the state dir inside the repo ignores it via exclude, not .gitignore", func(t *testing.T) {
 			root, env, ctx := setupWriteFixture(t)
-			env["HERDR_SOHO_DIR"] = "state cache"
+			env["SOHO_DIR"] = "state cache"
 			code, out, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, root)
 			if code != 0 || !strings.Contains(out, "state dir ignored") {
 				t.Fatalf("code=%d out=%q msg=%q", code, out, msg)
@@ -736,4 +730,26 @@ func TestSetupPresetCreatesConfigWithDefaultFileMode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// isolatedHerdrEnv is the clean test environment with a fake herdr that
+// answers every call with no output in front of PATH, then git's
+// directory, then the rest of PATH: setup's plugin migration must never
+// reach the machine's real Herdr from a test.
+func isolatedHerdrEnv(t *testing.T, git string) platform.Env {
+	t.Helper()
+	bin := t.TempDir()
+	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{AnyArgs: true}}); err != nil {
+		t.Fatal(err)
+	}
+	env := platform.Env{}
+	for _, item := range fakecli.Env(testutil.CleanEnv(t), bin, fakecli.EnvOptions{IncludeBasePath: true}) {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	sep := string(os.PathListSeparator)
+	env["PATH"] = bin + sep + filepath.Dir(git) + sep + strings.TrimPrefix(env.Get("PATH"), bin+sep)
+	return env
 }

@@ -42,7 +42,7 @@ type collabFixtureOptions struct {
 	// workspaceID is put in the env when non-empty; empty exercises the
 	// once-at-entry derivation through `pane current --current`.
 	workspaceID string
-	// policyMode is the HERDR_SOHO_WORKER_MESSAGES value; empty omits it
+	// policyMode is the SOHO_WORKER_MESSAGES value; empty omits it
 	// (mode off by default).
 	policyMode string
 	extraRules []fakecli.Rule
@@ -75,7 +75,7 @@ func newCollabFixture(t *testing.T, options collabFixtureOptions) collabFixture 
 		}
 	}
 	// The defaults layer of the config resolution: an empty file keeps the
-	// mode coming from the HERDR_SOHO_WORKER_MESSAGES env var alone.
+	// mode coming from the SOHO_WORKER_MESSAGES env var alone.
 	if err := os.WriteFile(filepath.Join(skill, "config.defaults"), []byte(""), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -109,19 +109,19 @@ func newCollabFixture(t *testing.T, options collabFixtureOptions) collabFixture 
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"PATH":                 bin,
-		"HERDR_ENV":            "1",
-		"HERDR_SOHO_DIR":       state,
-		"HERDR_SOHO_SKILL_DIR": skill,
-		"HERDR_SOCKET_PATH":    filepath.Join(base, "none.sock"),
-		"SOHO_FAKECLI_CONFIG":  bin,
-		"SOHO_WAIT_POLL_MS":    "5",
+		"PATH":                bin,
+		"HERDR_ENV":           "1",
+		"SOHO_DIR":            state,
+		"SOHO_SKILL_DIR":      skill,
+		"HERDR_SOCKET_PATH":   filepath.Join(base, "none.sock"),
+		"SOHO_FAKECLI_CONFIG": bin,
+		"SOHO_WAIT_POLL_MS":   "5",
 	}
 	if options.workspaceID != "" {
 		env["HERDR_WORKSPACE_ID"] = options.workspaceID
 	}
 	if options.policyMode != "" {
-		env["HERDR_SOHO_WORKER_MESSAGES"] = options.policyMode
+		env["SOHO_WORKER_MESSAGES"] = options.policyMode
 	}
 	f := collabFixture{
 		cwd:   cwd,
@@ -608,12 +608,12 @@ func TestFinalizedCollaborationFallsBackToTraditional(t *testing.T) {
 	})
 }
 
-// TestNowriteStatusActiveCollaboration: under HERDR_SOHO_NOWRITE=1 the
+// TestNowriteStatusActiveCollaboration: under SOHO_NOWRITE=1 the
 // active-collaboration read prints the line and changes nothing in the
 // project or the state tree (paths, sizes and mtimes).
 func TestNowriteStatusActiveCollaboration(t *testing.T) {
 	f, _ := activeStatusFixture(t, collabFixtureOptions{workspaceID: "ws", policyMode: "policy"}, collaboration.Reviewing, "received")
-	f.env["HERDR_SOHO_NOWRITE"] = "1"
+	f.env["SOHO_NOWRITE"] = "1"
 
 	type entry struct {
 		size int64

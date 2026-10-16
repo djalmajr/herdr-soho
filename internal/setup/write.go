@@ -120,6 +120,10 @@ func writeHooksSection(root string, env platform.Env) {
 	}
 }
 
+// BuildVersion is the version the CLI was built with ("dev" outside a
+// release). The plugin migration installs the soho plugin at this tag.
+var BuildVersion = "dev"
+
 func CmdSetup(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	wantPlan, wantProbe := false, false
 	for _, arg := range args {
@@ -179,6 +183,14 @@ func CmdSetup(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	// refuse them inside the skill before anything is written.
 	if skill := core.StatePathInSkill(env, root); skill != "" {
 		platform.DieFriction(core.StateInSkillMessage("setup", root, skill), 2)
+	}
+	// Migrate the herdr-soho and herdr-agents names before anything else is
+	// computed: everything after reads and writes only the soho names.
+	for _, line := range migrateNames(ctx, env, cwd, dry) {
+		_, _ = fmt.Fprintln(platform.Stdout, line)
+	}
+	for _, line := range migratePlugin(env, BuildVersion, dry) {
+		_, _ = fmt.Fprintln(platform.Stdout, line)
 	}
 	modeLocal := resolveSetupMode(local, target, ctx, env, "setup")
 	localFile := ""
@@ -288,7 +300,7 @@ func CmdSetup(args []string, ctx *core.Config, env platform.Env, cwd string) {
 			_, _ = fmt.Fprintf(platform.Stdout, "state dir outside the repository: %s (no repository Git exclusion is needed)\n", stateShown)
 		}
 		_, _ = fmt.Fprintln(platform.Stdout, "note: only Claude Code reads CLAUDE.local.md and runs the hooks; Codex, Grok, Cursor and agy need a separate local instruction route.")
-		promptConfigNotice(root, conf, true)
+		promptConfigNotice(conf, true)
 		return
 	}
 	_, _ = fmt.Fprintf(platform.Stdout, "block %s: %s\n", setupWriteBlock(target), target)
@@ -307,7 +319,7 @@ func CmdSetup(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	writeCanonicalStateIgnore(ctx, env, cwd)
 	_, _ = fmt.Fprintf(platform.Stdout, "state dir ignored: %s/\n", core.StateDirSetting(ctx, env, cwd))
 	_, _ = fmt.Fprintln(platform.Stdout, "note: Codex, Grok, Cursor and agy read the instruction file; only Claude Code runs the hooks.")
-	promptConfigNotice(root, conf, false)
+	promptConfigNotice(conf, false)
 }
 
 func withoutSetupArg(args []string, remove string) []string {
@@ -341,8 +353,8 @@ func applySetupPreset(conf, panes string, lanes []core.LaneSpec, env platform.En
 	}
 }
 
-func promptConfigNotice(root, conf string, local bool) {
-	path := core.EffectiveConfigFile(conf, core.LegacyProjectConfigPath(root))
+func promptConfigNotice(conf string, local bool) {
+	path := conf
 	if !projectNeedsConfigPrompt(path) {
 		return
 	}

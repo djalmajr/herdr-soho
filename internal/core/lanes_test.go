@@ -25,12 +25,12 @@ func TestLanePresetsCapacityAndNames(t *testing.T) {
 	if LaneCapacity(&ctx, "build", env) != 2 || LaneCapacity(&ctx, "review", env) != 1 || MaxWorkers(&ctx, env) != "3" {
 		t.Fatal("4-panel capacity derivation changed")
 	}
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "panes=2\n")
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "panes=2\n")
 	ctx = LoadConfig(env, repo)
 	if got := LaneNames(&ctx, env); len(got) != 1 || LaneOfRole(&ctx, "reviewer", env) != "" || LaneCapacity(&ctx, "build", env) != 1 || MaxWorkers(&ctx, env) != "1" {
 		t.Fatalf("2-panel preset invalid: lanes=%v reviewer=%q max=%s", got, LaneOfRole(&ctx, "reviewer", env), MaxWorkers(&ctx, env))
 	}
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "panes=2\npane_mode=flex\n")
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "panes=2\npane_mode=flex\n")
 	ctx = LoadConfig(env, repo)
 	if got := LaneNames(&ctx, env); len(got) != 3 || LaneCapacity(&ctx, "review", env) != 0 || LaneCapacity(&ctx, "docs", env) != 0 || MaxWorkers(&ctx, env) != "2" {
 		t.Fatalf("flex preset invalid: lanes=%v max=%s", got, MaxWorkers(&ctx, env))
@@ -38,12 +38,12 @@ func TestLanePresetsCapacityAndNames(t *testing.T) {
 	if PresetSignature("2", "flex") != PresetSignature("4", "flex") || PresetRolesFlat("3", "flex") != "implementer,designer,tasker,scouter,researcher,reviewer,security-reviewer,ui-reviewer,inspector,documenter" {
 		t.Fatal("flex preset signature/role flattening changed")
 	}
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.ops.roles=implementer tasker\nlane.ops.panes=3\n")
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "lane.ops.roles=implementer tasker\nlane.ops.panes=3\n")
 	ctx = LoadConfig(env, repo)
 	if LaneOfRole(&ctx, "tasker", env) != "ops" || LaneOfRole(&ctx, "scouter", env) != "" || LaneCapacity(&ctx, "ops", env) != 3 {
 		t.Fatal("custom lane did not replace preset or apply capacity")
 	}
-	env["HERDR_SOHO_LANE_B_ROLES"] = "scouter"
+	env["SOHO_LANE_B_ROLES"] = "scouter"
 	ctx = LoadConfig(env, repo)
 	if got := LaneNames(&ctx, env); len(got) != 2 || got[0] != "b" || got[1] != "ops" {
 		t.Fatalf("file/env custom lane sort = %#v", got)
@@ -53,23 +53,23 @@ func TestLanePresetsCapacityAndNames(t *testing.T) {
 func TestLaneNamesRequireNonOverlappingRoleSuffix(t *testing.T) {
 	// Mutation captured: prefix/suffix matching without a middle lane name suppresses preset lanes.
 	env, repo := fixture(t)
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.roles=x\n")
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "lane.roles=x\n")
 	ctx := LoadConfig(env, repo)
 	if got := LaneNames(&ctx, env); strings.Join(got, ",") != "build,review" {
 		t.Fatalf("overlapping file key lanes=%v", got)
 	}
-	env["HERDR_SOHO_LANE_ROLES"] = "x"
+	env["SOHO_LANE_ROLES"] = "x"
 	ctx = LoadConfig(env, repo)
 	if got := LaneNames(&ctx, env); strings.Join(got, ",") != "build,review" {
 		t.Fatalf("overlapping env key lanes=%v", got)
 	}
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.build.roles=x\n")
-	delete(env, "HERDR_SOHO_LANE_ROLES")
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "lane.build.roles=x\n")
+	delete(env, "SOHO_LANE_ROLES")
 	ctx = LoadConfig(env, repo)
 	if got := LaneNames(&ctx, env); strings.Join(got, ",") != "build" {
 		t.Fatalf("valid file lane=%v", got)
 	}
-	env["HERDR_SOHO_LANE_BUILD_ROLES"] = "x"
+	env["SOHO_LANE_BUILD_ROLES"] = "x"
 	ctx = LoadConfig(env, repo)
 	if got := LaneNames(&ctx, env); strings.Join(got, ",") != "build" {
 		t.Fatalf("valid env lane=%v", got)
@@ -81,7 +81,7 @@ func TestLaneLayerRulesAndSpecs(t *testing.T) {
 	// JS: "setupLaneSpec: valid specs and every rejection (code 2)"
 	// Mutation captured: a model or effort from below the effective kind layer must be discarded, and an explicit kind flag has rank 5.
 	env, repo := fixture(t)
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.ops.roles=implementer\nlane.ops.kind=pi\nlane.ops.model=project-model\n")
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "lane.ops.roles=implementer\nlane.ops.kind=pi\nlane.ops.model=project-model\n")
 	ctx := LoadConfig(env, repo)
 	rank := SpawnKindLayer(&ctx, "implementer", "ops", false, env)
 	if rank != 2 || LaneAttr(&ctx, "ops", "model", nil, env) != "project-model" {
@@ -89,7 +89,7 @@ func TestLaneLayerRulesAndSpecs(t *testing.T) {
 	}
 	user := platform.UserConfigPath(platform.Current(), env)
 	write(t, user, "lane.ops.model=user-model\n")
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.ops.roles=implementer\nlane.ops.kind=pi\n")
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "lane.ops.roles=implementer\nlane.ops.kind=pi\n")
 	ctx = LoadConfig(env, repo)
 	if LaneAttr(&ctx, "ops", "model", &rank, env) != "" {
 		t.Fatal("lower-layer model was not dropped")
@@ -119,7 +119,7 @@ func TestLaneFileMigrationAndSignatures(t *testing.T) {
 	// JS: "applyLaneFile: the old presets are treated as preset files (not custom)"
 	// Mutation captured: a preset reconfiguration must stop freezing lane roles, while custom lanes retain roles and capacity.
 	env, repo := fixture(t)
-	file := filepath.Join(repo, ".agents", "herdr-soho.conf")
+	file := filepath.Join(repo, ".agents", "soho.conf")
 	write(t, file, "# keep\npanes=4\nlane.build.roles=implementer,designer,tasker,scouter,researcher,documenter\nlane.review.roles=reviewer,security-reviewer,ui-reviewer,inspector\nlane.read.kind=codex\nlane.explore.model=gpt\nmax_workers=8\nsplit_max_panes=9\n")
 	lines := ApplyLaneFile(file, "3", env, repo)
 	raw, _ := os.ReadFile(file)
@@ -164,7 +164,7 @@ func TestReviewLaneLocksAnEditor(t *testing.T) {
 	// JS: "laneDecide: full lane (busy, --fresh candidate, locked), pending-report, reuse by name"
 	// Mutation captured: removing the edit-history lock would incorrectly allow a reviewer to reuse a worker that wrote code.
 	env, repo := fixture(t)
-	write(t, filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.review.roles=reviewer\n")
+	write(t, filepath.Join(repo, ".agents", "soho.conf"), "lane.review.roles=reviewer\n")
 	bin := t.TempDir()
 	_, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"idle"}}}`}})
 	if err != nil {

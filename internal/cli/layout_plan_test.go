@@ -30,11 +30,11 @@ func layoutPlanEnv(t *testing.T) platform.Env {
 		}
 	}
 	return platform.Env{
-		"HERDR_SOHO_SKILL_DIR": testSkillDir(t),
-		"HOME":                 filepath.Join(root, "home"),
-		"USERPROFILE":          filepath.Join(root, "userprofile"),
-		"XDG_CONFIG_HOME":      filepath.Join(root, "xdg"),
-		"APPDATA":              filepath.Join(root, "appdata"),
+		"SOHO_SKILL_DIR":  testSkillDir(t),
+		"HOME":            filepath.Join(root, "home"),
+		"USERPROFILE":     filepath.Join(root, "userprofile"),
+		"XDG_CONFIG_HOME": filepath.Join(root, "xdg"),
+		"APPDATA":         filepath.Join(root, "appdata"),
 	}
 }
 
@@ -77,7 +77,7 @@ func TestLayoutPlanFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := layoutPlanEnv(t)
-		env["HERDR_SOHO_SPLIT_MAX_PANES"] = "6"
+		env["SOHO_SPLIT_MAX_PANES"] = "6"
 		ctx := core.LoadConfig(env, dir)
 		old := platform.Stdout
 		var out bytes.Buffer
@@ -106,7 +106,7 @@ func TestLayoutPlanFullFixtureMatrix(t *testing.T) {
 			}
 			env := layoutPlanEnv(t)
 			if cap != "" {
-				env["HERDR_SOHO_SPLIT_MAX_PANES"] = cap
+				env["SOHO_SPLIT_MAX_PANES"] = cap
 			}
 			ctx := core.LoadConfig(env, filepath.Dir(file))
 			old := platform.Stdout
@@ -150,7 +150,7 @@ func TestLayoutPlanRejectsMalformedLayoutDocument(t *testing.T) {
 				t.Errorf("restore cwd: %v", err)
 			}
 		})
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HOME": t.TempDir(), "PATH": t.TempDir()}
+		env := platform.Env{"SOHO_SKILL_DIR": skill, "HOME": t.TempDir(), "PATH": t.TempDir()}
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var out, errOut bytes.Buffer
 		platform.Stdout, platform.Stderr = &out, &errOut
@@ -249,7 +249,7 @@ func TestParityLayoutPlanSixFixturesByteForByte(t *testing.T) {
 			}
 			env := layoutPlanEnv(t)
 			if fixture.cap != "" {
-				env["HERDR_SOHO_SPLIT_MAX_PANES"] = fixture.cap
+				env["SOHO_SPLIT_MAX_PANES"] = fixture.cap
 			}
 			oldOut, oldErr := platform.Stdout, platform.Stderr
 			var out, stderr bytes.Buffer
@@ -320,7 +320,7 @@ func TestLayoutPlanFromInsideTheSkillGitCheckout(t *testing.T) {
 	}
 	home := t.TempDir()
 	env["HERDR_ENV"], env["HERDR_PANE_ID"], env["HERDR_WORKSPACE_ID"] = "1", "C", "ws"
-	env["HERDR_SOHO_SKILL_DIR"] = skill
+	env["SOHO_SKILL_DIR"] = skill
 	env["HOME"], env["USERPROFILE"] = home, home
 	oldOut, oldErr := platform.Stdout, platform.Stderr
 	var out, errOut bytes.Buffer

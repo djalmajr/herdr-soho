@@ -14,7 +14,7 @@ import (
 func TestExplainTextAndRecommendation(t *testing.T) {
 	t.Run("explainRecommendation: the 2, 3 and 4 panel texts and the lanes-off note", func(t *testing.T) { // JS: "explainRecommendation: the 2, 3 and 4 panel texts and the lanes-off note"
 		// Mutation captured: replacing the 2-panel recommendation or omitting the lanes-off note changes the asserted output.
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": testSkillDir(t), "HERDR_WORKSPACE_ID": "ws"}
+		env := platform.Env{"SOHO_SKILL_DIR": testSkillDir(t), "HERDR_WORKSPACE_ID": "ws"}
 		repo := t.TempDir()
 		if err := os.MkdirAll(filepath.Join(repo, ".agents"), 0o700); err != nil {
 			t.Fatal(err)
@@ -59,7 +59,7 @@ func TestExplainTextAndRecommendation(t *testing.T) {
 		}
 	})
 	t.Run("explainPrintRunning: the panel count, the preset order and the idle paragraph", func(t *testing.T) { // JS: "explainPrintRunning: the panel count, the preset order and the idle paragraph"
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": testSkillDir(t), "HERDR_WORKSPACE_ID": "ws"}
+		env := platform.Env{"SOHO_SKILL_DIR": testSkillDir(t), "HERDR_WORKSPACE_ID": "ws"}
 		repo := t.TempDir()
 		if err := os.MkdirAll(filepath.Join(repo, ".agents"), 0o700); err != nil {
 			t.Fatal(err)
@@ -129,7 +129,7 @@ func TestExplainCommandRosterActivity(t *testing.T) {
 	})
 	t.Run("parity: explain --json dies 2 (test-friendly.sh)", func(t *testing.T) { // JS: "parity: explain --json dies 2 (test-friendly.sh)"
 		root := t.TempDir()
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": testSkillDir(t), "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "HOME": root}
+		env := platform.Env{"SOHO_SKILL_DIR": testSkillDir(t), "SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "HOME": root}
 		code, out, stderr := runIn(t, []string{"explain", "--json"}, env, root)
 		if code != 2 || out != "" || !strings.Contains(stderr, "explain: takes no arguments") {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, out, stderr)

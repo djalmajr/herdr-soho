@@ -20,7 +20,7 @@ func commandFakeEnv(t *testing.T, rules map[string][]fakecli.Rule) platform.Env 
 			t.Fatal(err)
 		}
 	}
-	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+	env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "TMPDIR": t.TempDir(), "SOHO_FAKECLI_CONFIG": bin, "SOHO_SKILL_DIR": t.TempDir()}
 	env["GORACE"] = fakecli.RaceOptions(env.List())
 	return env
 }
@@ -76,7 +76,7 @@ func TestKindsCommands(t *testing.T) {
 		env := commandFakeEnv(t, map[string][]fakecli.Rule{"git": {{Argv: []string{"-C", filepath.Join(os.TempDir(), "skill"), "log", "-1", "--format=%h %cs"}, Stdout: "abc1234 2026-09-24\n"}}, "herdr": {{Argv: []string{"--version"}, Stdout: "herdr 1.0\n"}}, "grok": {{Argv: []string{"--version"}, Stdout: "Grok 4\nbuild\n"}}})
 		// Control SkillDir separately for the git argv contract.
 		skill := filepath.Join(os.TempDir(), "skill")
-		env["HERDR_SOHO_SKILL_DIR"] = skill
+		env["SOHO_SKILL_DIR"] = skill
 		oldOut := platform.Stdout
 		var out bytes.Buffer
 		platform.Stdout = &out

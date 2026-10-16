@@ -60,7 +60,7 @@ func newNotInRosterFixture(t *testing.T, rosterRows string, rules []fakecli.Rule
 		env: platform.Env{
 			"PATH":                bin,
 			"HERDR_ENV":           "1",
-			"HERDR_SOHO_DIR":      state,
+			"SOHO_DIR":            state,
 			"HERDR_WORKSPACE_ID":  "ws",
 			"HERDR_SOCKET_PATH":   filepath.Join(base, "none.sock"),
 			"SOHO_FAKECLI_CONFIG": bin,

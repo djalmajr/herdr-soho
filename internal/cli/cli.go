@@ -122,7 +122,6 @@ func Run(args []string, env platform.Env) (code int) {
 	launch := job.ReadLaunchLocators(env)
 	env = job.WithoutLaunchLocators(env)
 	decisionEnv := env.Clone()
-	applyLegacyEnv(decisionEnv)
 	command := ""
 	if len(args) != 0 {
 		command = args[0]
@@ -258,6 +257,7 @@ func Run(args []string, env platform.Env) (code int) {
 		return 0
 	}
 	if command == "setup" {
+		setup.BuildVersion = version
 		setup.CmdSetup(args[1:], configCtx, decisionEnv, commandCwd)
 		return 0
 	}
@@ -468,8 +468,4 @@ func withoutArg(args []string, target string) []string {
 		}
 	}
 	return out
-}
-
-func applyLegacyEnv(env platform.Env) {
-	core.ApplyLegacyEnv(env)
 }

@@ -54,9 +54,9 @@ func tm6DoctorEnv(t *testing.T) (platform.Env, string) {
 	clean["HOME"], clean["USERPROFILE"], clean["PATH"] = home, home, bin
 	clean["TMPDIR"] = tmp
 	clean["HERDR_ENV"] = "1"
-	clean["HERDR_SOHO_DIR"] = state
-	clean["HERDR_SOHO_ROLES"] = roles
-	clean["HERDR_SOHO_SKILL_DIR"] = skill
+	clean["SOHO_DIR"] = state
+	clean["SOHO_ROLES"] = roles
+	clean["SOHO_SKILL_DIR"] = skill
 	clean["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing.sock")
 	return platform.Env(clean), root
 }
@@ -385,8 +385,8 @@ func TestDoctorTM6LaneWarnings(t *testing.T) {
 	t.Run(`nowrite: doctor reports an absent state dir as absent, never creates it, and keeps the warning for unwritable or inaccessible state`, func(t *testing.T) { // JS: "nowrite: doctor reports an absent state dir as absent, never creates it, and keeps the warning for unwritable or inaccessible state"
 		// Mutation captured: creating state under no-write mode violates the observable absent-state contract.
 		env, root := tm6DoctorEnv(t)
-		env["HERDR_SOHO_NOWRITE"] = "1"
-		state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+		env["SOHO_NOWRITE"] = "1"
+		state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 		env["HERDR_WORKSPACE_ID"] = "ws"
 		out := tm6DoctorOutput(t, tm6DoctorConfig(nil, "defaults"), env, root)
 		if !strings.Contains(out, "state dir absent (no-write mode, not created)") {

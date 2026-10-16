@@ -18,7 +18,7 @@ func TestRosterWorkspaceScopeAndExplicitServer(t *testing.T) {
 				{Argv: []string{"tab", "list", "--workspace", "ws"}, Stdout: `{"result":{"tabs":[{"tab_id":"ws:t1","label":"work"}]}}`},
 			})
 			env := f.env.Clone()
-			env["HERDR_SOHO_NOWRITE"] = "1"
+			env["SOHO_NOWRITE"] = "1"
 			before := nowriteTreeSnapshot(t, f.root)
 			args := []string{"roster"}
 			if scope == "server" {
@@ -46,7 +46,7 @@ func TestRosterScopeRejectsUnknownOptions(t *testing.T) {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			f := newCopiesFixture(t, nil)
 			env := f.env.Clone()
-			env["HERDR_SOHO_NOWRITE"] = "1"
+			env["SOHO_NOWRITE"] = "1"
 			before := nowriteTreeSnapshot(t, f.root)
 			code, _, _ := f.run(t, env, append([]string{"roster"}, args...)...)
 			if code != 2 || !reflect.DeepEqual(before, nowriteTreeSnapshot(t, f.root)) {

@@ -19,7 +19,7 @@ func TestSetupProbeJavaScriptCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := fakeEnv(t, bin)
-		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+		env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 		return env
 	}
 	tests := []struct {
@@ -38,7 +38,7 @@ func TestSetupProbeJavaScriptCases(t *testing.T) {
 		}},
 		{"probeTimeout: an invalid env value is a usage error 2, not a fallback", func(t *testing.T) {
 			env := fakeEnv(t, t.TempDir())
-			env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+			env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 			for _, value := range []string{"0", "-1", "1.5", "abc"} {
 				env["SOHO_PROBE_TIMEOUT"] = value
 				func() {
@@ -99,7 +99,7 @@ func TestSetupProbeJavaScriptCases(t *testing.T) {
 		}},
 		{"probeKind: not installed (no CLI on the PATH)", func(t *testing.T) {
 			env := fakeEnv(t, t.TempDir())
-			env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+			env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 			got := probeOne(nil, "claude", "", "configured", 1, env, os.TempDir())
 			if got.Status != "error" || got.Cause != "not installed" {
 				t.Fatalf("probe=%+v", got)
@@ -128,7 +128,7 @@ func TestSetupProbeJavaScriptCases(t *testing.T) {
 		}},
 		{"e2e: the aggregate probe — shape, statuses, reviewer, flags, empty stdin, no state", func(t *testing.T) {
 			env := fakeEnv(t, t.TempDir())
-			env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+			env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 			ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
 			old := platform.Stdout
 			var out bytes.Buffer

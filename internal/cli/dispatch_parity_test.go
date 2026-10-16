@@ -15,7 +15,7 @@ import (
 func TestDispatchParityPortedCases(t *testing.T) {
 	t.Run(`JS: "parity dispatch: the pane title (test-quota.sh)"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || !strings.Contains(out, `"role":"implementer"`) {
 			t.Fatalf("code=%d out=%s", code, out)
@@ -57,7 +57,7 @@ func TestDispatchParityPortedCases(t *testing.T) {
 		if err := os.WriteFile(badBrief, []byte("# Goal\nDo it.\n# Owned files\nx.go\n# Forbidden\nNo commit or push.\n# Report\ndone.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_BRIEF_LINT"] = "strict"
+		f.env["SOHO_BRIEF_LINT"] = "strict"
 		code, out, errText = f.run(t, "rev", badBrief, "--allow-same-family", "--no-wait")
 		if code != 2 || out != "" || !strings.Contains(errText, "is missing sections: [Expected result]") {
 			t.Fatalf("strict lint code=%d out=%q stderr=%q", code, out, errText)
@@ -65,7 +65,7 @@ func TestDispatchParityPortedCases(t *testing.T) {
 	})
 	t.Run(`JS: "parity dispatch: the role comes from column 4 (test-multi-role.sh)"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 || !strings.Contains(out, `"role":"implementer"`) {
 			t.Fatalf("code=%d out=%s", code, out)
@@ -78,7 +78,7 @@ func TestDispatchParityPortedCases(t *testing.T) {
 	})
 	t.Run(`JS: "dispatch: an untitled brief is titled by its file name"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		if err := os.WriteFile(f.brief, []byte("# Goal\n\nRun it.\n# Expected result\n\nDone.\n# Owned files\n\nnone\n# Forbidden\n\nNo commit or push.\n# Report\n\nDone.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +94,7 @@ func TestDispatchParityPortedCases(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0",
 			fakecli.Rule{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Code: 7, Stderr: "provider refused"},
 		)
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 4 || !strings.Contains(out, `"error"`) || !strings.Contains(out, "provider refused") {
 			t.Fatalf("code=%d out=%s", code, out)
@@ -110,7 +110,7 @@ func TestDispatchParityPortedCases(t *testing.T) {
 	})
 	t.Run(`JS: "dispatch: the attempt sidecar records the roster metadata and the accepted submission"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 {
 			t.Fatalf("code=%d out=%s", code, out)
@@ -128,7 +128,7 @@ func TestDispatchParityPortedCases(t *testing.T) {
 	})
 	t.Run(`JS: "dispatch: a brief naming a different report path — the composed prompt keeps the generated path authoritative"`, func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		brief := "# Goal\n\nRun it.\n# Expected result\n\nDone.\n# Owned files\n\nnone\n# Forbidden\n\nNo commit or push.\n# Report\n\nWrite your report as Markdown to `/tmp/user-selected.md`.\n"
 		if err := os.WriteFile(f.brief, []byte(brief), 0o600); err != nil {
 			t.Fatal(err)

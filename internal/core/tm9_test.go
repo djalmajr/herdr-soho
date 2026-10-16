@@ -43,9 +43,9 @@ func TestTM9CoreCases(t *testing.T) {
 			t.Fatalf("project config path=%q want %q", got, want)
 		}
 	})
-	t.Run("lanes only via the HERDR_SOHO_LANE_<X>_ROLES env var", func(t *testing.T) { // JS: "lanes only via the HERDR_SOHO_LANE_<X>_ROLES env var"
+	t.Run("lanes only via the SOHO_LANE_<X>_ROLES env var", func(t *testing.T) { // JS: "lanes only via the HERDR_SOHO_LANE_<X>_ROLES env var"
 		env, repo := fixture(t)
-		env["HERDR_SOHO_LANE_OPS_ROLES"] = "implementer"
+		env["SOHO_LANE_OPS_ROLES"] = "implementer"
 		ctx := LoadConfig(env, repo)
 		if got := strings.Join(LaneNames(&ctx, env), ","); got != "ops" || LaneOfRole(&ctx, "implementer", env) != "ops" {
 			t.Fatalf("env lane resolution=%q role lane=%q", got, LaneOfRole(&ctx, "implementer", env))
@@ -62,7 +62,7 @@ func TestTM9CoreCases(t *testing.T) {
 	t.Run("panesValue: 2, 3 and 4 pass, anything else is 4", func(t *testing.T) { // JS: "panesValue: 2, 3 and 4 pass, anything else is 4"
 		env, repo := fixture(t)
 		for _, value := range []string{"2", "3", "4", "0", "5", "bad"} {
-			env["HERDR_SOHO_PANES"] = value
+			env["SOHO_PANES"] = value
 			want := value
 			if value == "0" || value == "5" || value == "bad" {
 				want = "4"
@@ -77,12 +77,12 @@ func TestTM9CoreCases(t *testing.T) {
 		env, repo := fixture(t)
 		write(t, platform.UserConfigPath(platform.Current(), env), "max_workers=4\n")
 		write(t, filepath.Join(repo, ".agents", "soho.conf"), "max_workers=5\n")
-		write(t, filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf"), "max_workers=6\n")
+		write(t, filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf"), "max_workers=6\n")
 		ctx := LoadConfig(env, repo)
 		if got := MaxWorkers(&ctx, env); got != "6" {
 			t.Fatalf("session max workers=%q", got)
 		}
-		env["HERDR_SOHO_MAX_WORKERS"] = "7"
+		env["SOHO_MAX_WORKERS"] = "7"
 		if got := MaxWorkers(&ctx, env); got != "7" {
 			t.Fatalf("env max workers=%q", got)
 		}
@@ -90,7 +90,7 @@ func TestTM9CoreCases(t *testing.T) {
 	t.Run("maxWorkers: the sum of the lane capacities (3/2/1 for panes 4/3/2)", func(t *testing.T) { // JS: "maxWorkers: the sum of the lane capacities (3/2/1 for panes 4/3/2)"
 		env, repo := fixture(t)
 		for _, tc := range []struct{ panes, want string }{{"4", "3"}, {"3", "2"}, {"2", "1"}} {
-			env["HERDR_SOHO_PANES"] = tc.panes
+			env["SOHO_PANES"] = tc.panes
 			ctx := LoadConfig(env, repo)
 			if got := MaxWorkers(&ctx, env); got != tc.want {
 				t.Errorf("panes %s max workers=%s want %s", tc.panes, got, tc.want)
@@ -321,14 +321,14 @@ func tm9LiveWorkerFixture(t *testing.T, rows []string, rules []fakecli.Rule) (pl
 			env[key] = value
 		}
 	}
-	env["HERDR_SOHO_SKILL_DIR"] = testSkillDir(t)
+	env["SOHO_SKILL_DIR"] = testSkillDir(t)
 	env["HERDR_WORKSPACE_ID"] = "ws"
 	env["HOME"] = filepath.Join(root, "home")
 	env["USERPROFILE"] = env.Get("HOME")
 	env["XDG_CONFIG_HOME"] = filepath.Join(root, "config")
-	env["HERDR_SOHO_DIR"] = filepath.Join(root, "state")
+	env["SOHO_DIR"] = filepath.Join(root, "state")
 	env["TMPDIR"] = filepath.Join(root, "tmp")
-	for _, dir := range []string{env.Get("HOME"), env.Get("XDG_CONFIG_HOME"), env.Get("HERDR_SOHO_DIR"), env.Get("TMPDIR")} {
+	for _, dir := range []string{env.Get("HOME"), env.Get("XDG_CONFIG_HOME"), env.Get("SOHO_DIR"), env.Get("TMPDIR")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -381,7 +381,7 @@ func TestTM9ParentTitleSubtests(t *testing.T) {
 		{"layer rule: cases 1-4, 7, 8 and the --kind flag", "TestLaneLayerRulesAndSpecs"},
 		{"setupLaneSpec: valid specs and every rejection (code 2)", "TestLaneLayerRulesAndSpecs"},
 		{"laneDecide: full lane (busy, --fresh candidate, locked), pending-report, reuse by name", "TestReviewLaneLocksAnEditor"},
-		{"roleDirs: project dir first, $HERDR_SOHO_ROLES, then the skill roles", "TestRoleFilesAndFrontmatter"},
+		{"roleDirs: project dir first, $SOHO_ROLES, then the skill roles", "TestRoleFilesAndFrontmatter"},
 		{"resolveRole: project role shadows the skill role", "TestRoleFilesAndFrontmatter"},
 		{"fmGet: scalar, list, quoted, missing key, no frontmatter", "TestRoleFilesAndFrontmatter"},
 		{"fmGet: frontmatter with CRLF lines parses like LF (decision 7)", "TestRoleFilesAndFrontmatter"},

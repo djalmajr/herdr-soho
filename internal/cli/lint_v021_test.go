@@ -44,18 +44,18 @@ func lintV021Fixture(t *testing.T, briefBody string) (root, brief string, env pl
 		t.Fatal(err)
 	}
 	return root, brief, platform.Env{
-		"PATH":                 os.Getenv("PATH"),
-		"HOME":                 filepath.Join(root, "home"),
-		"XDG_CONFIG_HOME":      filepath.Join(root, "config"),
-		"HERDR_SOHO_DIR":       filepath.Join(root, "state"),
-		"HERDR_SOHO_SKILL_DIR": skillDir,
+		"PATH":            os.Getenv("PATH"),
+		"HOME":            filepath.Join(root, "home"),
+		"XDG_CONFIG_HOME": filepath.Join(root, "config"),
+		"SOHO_DIR":        filepath.Join(root, "state"),
+		"SOHO_SKILL_DIR":  skillDir,
 	}
 }
 
 func TestLintCommandPortugueseDefault(t *testing.T) {
 	t.Run("the five Portuguese titles and the 'Sem commit' line lint clean", func(t *testing.T) {
 		_, brief, env := lintV021Fixture(t, ptBRLintBrief)
-		env["HERDR_SOHO_BRIEF_LINT"] = "warn"
+		env["SOHO_BRIEF_LINT"] = "warn"
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var stdout, stderr bytes.Buffer
 		platform.Stdout, platform.Stderr = &stdout, &stderr
@@ -64,7 +64,7 @@ func TestLintCommandPortugueseDefault(t *testing.T) {
 			t.Fatalf("clean Portuguese lint: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		// strict agrees: the brief has no mark to refuse
-		env["HERDR_SOHO_BRIEF_LINT"] = "strict"
+		env["SOHO_BRIEF_LINT"] = "strict"
 		stdout.Reset()
 		stderr.Reset()
 		if code := Run([]string{"lint", brief}, env); code != 0 || stderr.Len() != 0 {
@@ -79,7 +79,7 @@ func TestLintCommandPortugueseDefault(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, ".agents", "soho.conf"), []byte("brief_lint_aliases=Goal=Task\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env["HERDR_SOHO_BRIEF_LINT"] = "warn"
+		env["SOHO_BRIEF_LINT"] = "warn"
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var stdout, stderr bytes.Buffer
 		platform.Stdout, platform.Stderr = &stdout, &stderr
@@ -93,7 +93,7 @@ func TestLintCommandPortugueseDefault(t *testing.T) {
 func TestLintCommandUnfilledPlaceholder(t *testing.T) {
 	t.Run("warn prints the mark with the right line and exits 1", func(t *testing.T) {
 		_, brief, env := lintV021Fixture(t, placeholderLintBrief)
-		env["HERDR_SOHO_BRIEF_LINT"] = "warn"
+		env["SOHO_BRIEF_LINT"] = "warn"
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var stdout, stderr bytes.Buffer
 		platform.Stdout, platform.Stderr = &stdout, &stderr
@@ -105,7 +105,7 @@ func TestLintCommandUnfilledPlaceholder(t *testing.T) {
 	})
 	t.Run("strict refuses with exit 2", func(t *testing.T) {
 		_, brief, env := lintV021Fixture(t, placeholderLintBrief)
-		env["HERDR_SOHO_BRIEF_LINT"] = "strict"
+		env["SOHO_BRIEF_LINT"] = "strict"
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var stdout, stderr bytes.Buffer
 		platform.Stdout, platform.Stderr = &stdout, &stderr
@@ -116,7 +116,7 @@ func TestLintCommandUnfilledPlaceholder(t *testing.T) {
 	})
 	t.Run("the same marker inside a fenced code block lints clean", func(t *testing.T) {
 		_, brief, env := lintV021Fixture(t, strings.Replace(placeholderLintBrief, "worktree: WORKTREE_PATH", "```\nworktree: WORKTREE_PATH\n```", 1))
-		env["HERDR_SOHO_BRIEF_LINT"] = "strict"
+		env["SOHO_BRIEF_LINT"] = "strict"
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var stdout, stderr bytes.Buffer
 		platform.Stdout, platform.Stderr = &stdout, &stderr
@@ -133,7 +133,7 @@ func TestLintCommandUnfilledPlaceholder(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, ".agents", "soho.conf"), []byte("brief_lint_placeholders=MY_SLOT\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env["HERDR_SOHO_BRIEF_LINT"] = "strict"
+		env["SOHO_BRIEF_LINT"] = "strict"
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var stdout, stderr bytes.Buffer
 		platform.Stdout, platform.Stderr = &stdout, &stderr
@@ -155,7 +155,7 @@ func TestDispatchStrictRefusesUnfilledPlaceholder(t *testing.T) {
 		if err := os.WriteFile(f.brief, append(data, []byte("worktree: WORKTREE_PATH\n")...), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_BRIEF_LINT"] = "strict"
+		f.env["SOHO_BRIEF_LINT"] = "strict"
 		code, _, errText := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 2 || !strings.Contains(errText, "unfilled placeholder 'WORKTREE_PATH' (line 16)") || !strings.Contains(errText, "(brief_lint=strict)") {
 			t.Fatalf("refusal: code=%d stderr=%q", code, errText)

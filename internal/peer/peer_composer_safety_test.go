@@ -133,7 +133,7 @@ func TestComposerSafetyNoKeysOnRefusedShapes(t *testing.T) {
 		// carries the codex question UI. The current startup/blocked
 		// protections do not catch this at status idle; the shared
 		// classifier (provider.DialogUI) does: no Enter.
-		post := "› [herdr-soho:peer] #" + id + " Message from another agent\n" +
+		post := "› [soho:peer] #" + id + " Message from another agent\n" +
 			"Enter to submit answer:\n"
 		f := newFixture(t, stalledSafetyRules("codex", pre, post, prompt))
 		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
@@ -147,7 +147,7 @@ func TestComposerSafetyNoKeysOnRefusedShapes(t *testing.T) {
 		// screen carries the claude approval UI. Only the shared
 		// classifier catches this shape (no startup trust pattern, status
 		// not blocked): no Enter.
-		post := sep + "\n❯ [herdr-soho:peer] #" + id + " Message from another agent\n" + sep + "\nDo you want to continue with the refactor?\n"
+		post := sep + "\n❯ [soho:peer] #" + id + " Message from another agent\n" + sep + "\nDo you want to continue with the refactor?\n"
 		f := newFixture(t, stalledSafetyRules("claude", pre, post, prompt))
 		f.env["SOHO_SEND_WINDOW_MS"], f.env["SOHO_SEND_POLL_MS"] = "1", "1"
 		assertNoKeysStalled15(t, f)
@@ -157,9 +157,9 @@ func TestComposerSafetyNoKeysOnRefusedShapes(t *testing.T) {
 		// The delivered message sits in the history above a real empty
 		// composer: no Enter goes, and the receipt (history plus the
 		// recent marker) proves the arrival: sent, exit 0.
-		post := "› [herdr-soho:peer] #" + id + " Message from another agent\n" +
+		post := "› [soho:peer] #" + id + " Message from another agent\n" +
 			"  > hello\n" +
-			"  [/herdr-soho:peer] #" + id + " end of message\n" +
+			"  [/soho:peer] #" + id + " end of message\n" +
 			"• Working (3s • esc to interrupt)\n" +
 			"› Ask Codex to do anything\n" +
 			"  GPT-6.1-Sol high · ~/repo\n" +

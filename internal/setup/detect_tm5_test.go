@@ -32,7 +32,7 @@ func tm5DetectFixture(t *testing.T) (string, string, platform.Env, *core.Config)
 			t.Fatal(err)
 		}
 	}
-	env := platform.Env{"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": conf, "TMPDIR": tmp, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "PATH": "", "HERDR_SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho")}
+	env := platform.Env{"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": conf, "TMPDIR": tmp, "SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "PATH": "", "SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho")}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
 	return root, home, env, ctx
 }
@@ -175,7 +175,7 @@ func TestSetupDetectTM5OwnProviderCases(t *testing.T) {
 	})
 	t.Run(`// JS: "piOwnModels: the trap warnings per model (literal key, headroom, defaults, effort.pi)"`, func(t *testing.T) {
 		_, home, env, ctx := tm5DetectFixture(t)
-		env["HERDR_SOHO_EFFORT_PI"] = "medium"
+		env["SOHO_EFFORT_PI"] = "medium"
 		if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -275,7 +275,7 @@ func TestSetupDetectTM5PolicyCases(t *testing.T) {
 		}
 		home := t.TempDir()
 		env["HOME"], env["USERPROFILE"], env["XDG_CONFIG_HOME"], env["TMPDIR"] = home, home, filepath.Join(home, ".config"), t.TempDir()
-		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+		env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 		delete(env, "SOHO_MODELS_TIMEOUT")
 		started := time.Now()
 		row := tm5DetectKind(t, tm5DetectDoc(t, ctx, env, root), "grok")
@@ -309,7 +309,7 @@ func TestSetupDetectTM5PolicyCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(extra, "scouter.md"), []byte("---\nkind: grok\n---\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env["HERDR_SOHO_ROLES"] = extra
+		env["SOHO_ROLES"] = extra
 		if err := os.MkdirAll(filepath.Join(home, ".config", "herdr-soho"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -405,8 +405,8 @@ func runDetectTM5Golden(t *testing.T, name string) {
 		}
 	}
 	env["HOME"], env["USERPROFILE"], env["XDG_CONFIG_HOME"], env["TMPDIR"] = home, home, conf, tmp
-	env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = filepath.Join(fixture, "state"), "ws"
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+	env["SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = filepath.Join(fixture, "state"), "ws"
+	env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	env["SOHO_MODELS_TIMEOUT"], env["OPENCODE_CONFIG"] = "30", ""
 	write := func(path, body string) {
 		t.Helper()
@@ -438,13 +438,13 @@ func runDetectTM5Golden(t *testing.T, name string) {
 	case "detect-lanes":
 		install("pi", []fakecli.Rule{{AnyArgs: true}})
 		install("grok", listing([]string{"models"}, grokOutput))
-		write(filepath.Join(repo, ".agents", "herdr-soho.conf"), "lane.build.roles=implementer,designer\nlane.build.kind=codex\nlane.review.roles=reviewer\n")
+		write(filepath.Join(repo, ".agents", "soho.conf"), "lane.build.roles=implementer,designer\nlane.build.kind=codex\nlane.review.roles=reviewer\n")
 	case "detect-layers":
 		install("pi", []fakecli.Rule{{AnyArgs: true}})
 		install("grok", listing([]string{"models"}, grokOutput))
-		write(filepath.Join(conf, "herdr-soho", "config"), "role.reviewer.kind=codex\n")
-		write(filepath.Join(repo, ".agents", "herdr-soho.conf"), "role.implementer.kind=codex\nmodel.pi.worker=custom/pi-model\n")
-		env["HERDR_SOHO_MODEL_GROK_WORKER"] = "grok-4.7"
+		write(filepath.Join(conf, "soho", "config"), "role.reviewer.kind=codex\n")
+		write(filepath.Join(repo, ".agents", "soho.conf"), "role.implementer.kind=codex\nmodel.pi.worker=custom/pi-model\n")
+		env["SOHO_MODEL_GROK_WORKER"] = "grok-4.7"
 	case "detect-oc-env":
 		env["OPENCODE_CONFIG"] = filepath.Join(fixture, "oc-env.json")
 		write(filepath.Join(repo, "opencode.json"), `{"provider":{"pp":{"models":{"pm":{},"dup":{}}},"sp":{"models":{"sm":{}}}}}`)

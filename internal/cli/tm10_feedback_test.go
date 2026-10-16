@@ -24,7 +24,7 @@ func tm10FeedbackFixture(t *testing.T, extra platform.Env) (string, platform.Env
 	if err := os.WriteFile(report, []byte("report bytes\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HERDR_ENV": "1", "HERDR_SOHO_FEEDBACK": "local", "HERDR_SOHO_FEEDBACK_DIR": feedbackDir}
+	env := platform.Env{"HERDR_ENV": "1", "SOHO_FEEDBACK": "local", "SOHO_FEEDBACK_DIR": feedbackDir}
 	for k, v := range extra {
 		env[k] = v
 	}
@@ -34,12 +34,12 @@ func tm10FeedbackFixture(t *testing.T, extra platform.Env) (string, platform.Env
 func TestTM10FeedbackCases(t *testing.T) {
 	t.Run(`JS: "feedback send: a policy other than local dies 2 with the exact message"`, func(t *testing.T) {
 		for _, policy := range []string{"ask", "on", "off"} {
-			report, env := tm10FeedbackFixture(t, platform.Env{"HERDR_SOHO_FEEDBACK": policy})
+			report, env := tm10FeedbackFixture(t, platform.Env{"SOHO_FEEDBACK": policy})
 			code, out, stderr, _ := runTM10(t, []string{"feedback", "send", report, "stuck pane"}, nil, env)
 			if code != 2 || out != "" || !strings.Contains(stderr, "feedback="+policy) {
 				t.Fatalf("policy=%s code=%d out=%q err=%q", policy, code, out, stderr)
 			}
-			entries, _ := os.ReadDir(env.Get("HERDR_SOHO_FEEDBACK_DIR"))
+			entries, _ := os.ReadDir(env.Get("SOHO_FEEDBACK_DIR"))
 			if len(entries) != 0 {
 				t.Fatalf("policy=%s wrote files: %#v", policy, entries)
 			}
@@ -47,7 +47,7 @@ func TestTM10FeedbackCases(t *testing.T) {
 	})
 	t.Run(`JS: "feedback send: feedback_dir empty or not a directory dies 2 naming the key"`, func(t *testing.T) {
 		report, env := tm10FeedbackFixture(t, nil)
-		env["HERDR_SOHO_FEEDBACK_DIR"] = ""
+		env["SOHO_FEEDBACK_DIR"] = ""
 		code, _, stderr, _ := runTM10(t, []string{"feedback", "send", report, "summary"}, nil, env)
 		if code != 2 || !strings.Contains(stderr, "set feedback_dir") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -89,7 +89,7 @@ func TestTM10FeedbackCases(t *testing.T) {
 		}
 	})
 	t.Run(`JS: "feedback send: with feedback_to it prompts the one line to that pane"`, func(t *testing.T) {
-		report, env := tm10FeedbackFixture(t, platform.Env{"HERDR_SOHO_FEEDBACK_TO": "w9:p2"})
+		report, env := tm10FeedbackFixture(t, platform.Env{"SOHO_FEEDBACK_TO": "w9:p2"})
 		rules := []fakecli.Rule{{ArgvPrefix: true, Argv: []string{"agent", "prompt", "w9:p2"}, Stdout: `{"result":{"submitted":true}}`}}
 		code, out, stderr, calls := runTM10(t, []string{"feedback", "send", report, "lane review"}, rules, env)
 		if code != 0 || stderr != "" || !strings.Contains(out, `"notified":"w9:p2"`) || len(calls) != 1 || len(calls[0].Argv) != 4 || !strings.Contains(calls[0].Argv[3], "lane review") {
@@ -111,7 +111,7 @@ func TestTM10FeedbackCases(t *testing.T) {
 		}
 	})
 	t.Run(`JS: "feedback send: \\r, \\n and \\t in the summary become spaces (one prompt line)"`, func(t *testing.T) {
-		report, env := tm10FeedbackFixture(t, platform.Env{"HERDR_SOHO_FEEDBACK_TO": "w9:p2"})
+		report, env := tm10FeedbackFixture(t, platform.Env{"SOHO_FEEDBACK_TO": "w9:p2"})
 		rules := []fakecli.Rule{{ArgvPrefix: true, Argv: []string{"agent", "prompt", "w9:p2"}, Stdout: `{"result":{"submitted":true}}`}}
 		_, _, _, calls := runTM10(t, []string{"feedback", "send", report, "first\r\nsecond\tthird"}, rules, env)
 		if len(calls) != 1 || !strings.Contains(calls[0].Argv[3], "): first second third — ") || strings.ContainsAny(calls[0].Argv[3], "\r\n\t") {
@@ -142,11 +142,11 @@ func TestTM10FeedbackCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		base["HOME"], base["USERPROFILE"], base["XDG_CONFIG_HOME"] = root, root, filepath.Join(root, "config")
-		base["HERDR_SOHO_DIR"], base["HERDR_SOHO_SKILL_DIR"], base["HERDR_WORKSPACE_ID"] = stateDir, testSkillDir(t), "ws"
+		base["SOHO_DIR"], base["SOHO_SKILL_DIR"], base["HERDR_WORKSPACE_ID"] = stateDir, testSkillDir(t), "ws"
 		base["HERDR_ENV"], base["PATH"] = "1", fakeDir
 		base["SOHO_FAKECLI_CONFIG"] = filepath.Join(fakeDir, "herdr.json")
 		base["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing.sock")
-		base["HERDR_SOHO_FEEDBACK"], base["HERDR_SOHO_FEEDBACK_DIR"], base["HERDR_SOHO_FEEDBACK_TO"] = "local", feedbackDir, "w9:p2"
+		base["SOHO_FEEDBACK"], base["SOHO_FEEDBACK_DIR"], base["SOHO_FEEDBACK_TO"] = "local", feedbackDir, "w9:p2"
 		var out, stderr bytes.Buffer
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		platform.Stdout, platform.Stderr = &out, &stderr
@@ -184,8 +184,8 @@ func TestTM10FeedbackCases(t *testing.T) {
 		if _, err := fakecli.Install(t, fakeDir, "herdr", rules); err != nil {
 			t.Fatal(err)
 		}
-		configEnv := platform.Env{"HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "XDG_CONFIG_HOME": filepath.Join(t.TempDir(), "config"), "HERDR_SOHO_SKILL_DIR": testSkillDir(t), "HERDR_SOHO_DIR": filepath.Join(t.TempDir(), "state"), "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1", "PATH": fakeDir, "SOHO_FAKECLI_CONFIG": filepath.Join(fakeDir, "herdr.json"), "HERDR_SOCKET_PATH": filepath.Join(t.TempDir(), "missing.sock")}
-		for _, args := range [][]string{{"config", "set", "feedback_dir", env.Get("HERDR_SOHO_FEEDBACK_DIR")}, {"config", "set", "feedback_to", "w9:p2"}} {
+		configEnv := platform.Env{"HOME": t.TempDir(), "USERPROFILE": t.TempDir(), "XDG_CONFIG_HOME": filepath.Join(t.TempDir(), "config"), "SOHO_SKILL_DIR": testSkillDir(t), "SOHO_DIR": filepath.Join(t.TempDir(), "state"), "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1", "PATH": fakeDir, "SOHO_FAKECLI_CONFIG": filepath.Join(fakeDir, "herdr.json"), "HERDR_SOCKET_PATH": filepath.Join(t.TempDir(), "missing.sock")}
+		for _, args := range [][]string{{"config", "set", "feedback_dir", env.Get("SOHO_FEEDBACK_DIR")}, {"config", "set", "feedback_to", "w9:p2"}} {
 			oldOut, oldErr := platform.Stdout, platform.Stderr
 			var out, stderr bytes.Buffer
 			platform.Stdout, platform.Stderr = &out, &stderr
@@ -196,7 +196,7 @@ func TestTM10FeedbackCases(t *testing.T) {
 			}
 		}
 		feedbackEnv := configEnv
-		feedbackEnv["HERDR_SOHO_FEEDBACK"] = "local"
+		feedbackEnv["SOHO_FEEDBACK"] = "local"
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var out, stderr bytes.Buffer
 		platform.Stdout, platform.Stderr = &out, &stderr

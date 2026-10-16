@@ -27,8 +27,7 @@ import (
 
 const (
 	// launchConfigBaseVar carries the base directory of the starter's own
-	// user-configuration selection: the directory that holds
-	// soho/config and the legacy herdr-soho/config.
+	// user-configuration selection: the directory that holds soho/config.
 	launchConfigBaseVar = "_SOHO_LAUNCH_CONFIG_BASE"
 	// launchHomeVar carries the home the starter expands a home-relative
 	// job_repos_root from; it is sent only for such a root.
@@ -47,9 +46,8 @@ func errLocator() error {
 // supervisorLocatorEnv returns the private locators for the supervisor:
 //
 //   - launchConfigBaseVar, always, set to the base directory of the
-//     starter's own selection (UserConfigPath and LegacyUserConfigPath
-//     share it on every platform, so this one value fixes the selection
-//     and the current-then-legacy file choice made from it);
+//     starter's own selection (this one value fixes the selection and the
+//     file choice made from it);
 //   - launchHomeVar, the home resolved as the starter resolved it, only
 //     when job_repos_root is home-relative (reposRootHome), so ~ expands to
 //     the same root.

@@ -49,8 +49,8 @@ func newSkillWriteFixture(t *testing.T) *skillWriteFixture {
 	env := platform.Env{
 		"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": xdg,
 		"PATH": bin, "SOHO_FAKECLI_CONFIG": bin,
-		"HERDR_WORKSPACE_ID":   "ws",
-		"HERDR_SOHO_SKILL_DIR": skill,
+		"HERDR_WORKSPACE_ID": "ws",
+		"SOHO_SKILL_DIR":     skill,
 	}
 	return &skillWriteFixture{
 		root: root, skill: skill, bin: bin, xdg: xdg, env: env,
@@ -259,7 +259,7 @@ func TestSessionSetWithAbsoluteStateDirStillWorksInsideTheSkill(t *testing.T) {
 	before := f.skillEntries(t)
 	state := filepath.Join(f.root, "state")
 	env := f.env.Clone()
-	env["HERDR_SOHO_DIR"] = state
+	env["SOHO_DIR"] = state
 	code, out, errOut := runIn(t, []string{"session", "set", "lane.build.kind", "grok"}, env, f.skill)
 	if code != 0 || errOut != "" || !strings.Contains(out, "set lane.build.kind=grok in ") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)

@@ -55,7 +55,7 @@ func TestRetirementNegativeContracts(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(project, ".agents"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(project, ".agents", "herdr-soho.conf"), []byte("inbound=off\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(project, ".agents", "soho.conf"), []byte("inbound=off\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		// The agent get that resolves the target is the legitimate read the
@@ -74,7 +74,7 @@ func TestRetirementNegativeContracts(t *testing.T) {
 				t.Fatalf("the refused send still drove the target: %#v", call)
 			}
 		}
-		log, err := os.ReadFile(filepath.Join(f.env.Get("HERDR_SOHO_DIR"), "peer-messages.tsv"))
+		log, err := os.ReadFile(filepath.Join(f.env.Get("SOHO_DIR"), "peer-messages.tsv"))
 		if err == nil && strings.Contains(string(log), "secret body") {
 			t.Fatalf("the refusal logged the payload: %q", log)
 		}

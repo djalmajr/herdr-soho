@@ -14,7 +14,6 @@ import (
 
 	"github.com/djalmajr/soho/internal/core"
 	"github.com/djalmajr/soho/internal/platform"
-	"github.com/djalmajr/soho/internal/testutil"
 )
 
 //go:linkname platformRenameFile github.com/djalmajr/soho/internal/platform.renameFile
@@ -50,18 +49,11 @@ func localPlanFixture(t *testing.T) (string, platform.Env, *core.Config) {
 	}
 	home := t.TempDir()
 	tmp := t.TempDir()
-	env := platform.Env{}
-	for _, item := range testutil.CleanEnv(t) {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
-			env[key] = value
-		}
-	}
-	env["PATH"] = filepath.Dir(git) + string(os.PathListSeparator) + env.Get("PATH")
+	env := isolatedHerdrEnv(t, git)
 	env["HOME"] = home
 	env["XDG_CONFIG_HOME"] = filepath.Join(home, ".config")
 	env["TMPDIR"] = tmp
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+	env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	ctx := core.LoadConfig(env, root)
 	return root, env, &ctx
 }
@@ -102,14 +94,15 @@ func runPlanStreams(args []string, ctx *core.Config, env platform.Env, cwd strin
 	return 0, out.String(), errOut.String(), ""
 }
 
-func TestPlanLegacyConfigTemporaryNameMatchesJavaScript(t *testing.T) { // Mutation captured: renaming the simulated legacy config changes the warning in stderr.
-	// DJA-318: the recognized legacy config is the pre-rename herdr-soho.conf; the herdr-agents generation is retired.
+func TestPlanLegacyConfigTemporaryNameMatchesJavaScript(t *testing.T) { // Mutation captured: renaming the simulated project config changes the warning in stderr.
+	// The simulated project config is the current .agents/soho.conf (the
+	// former herdr-soho.conf is no longer read).
 	root, env, _ := localPlanFixture(t)
-	legacyPath := filepath.Join(root, ".agents", "herdr-soho.conf")
-	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+	projectPath := filepath.Join(root, ".agents", "soho.conf")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(legacyPath, []byte("lane.build.roles=scouter,implementer\n"), 0o600); err != nil {
+	if err := os.WriteFile(projectPath, []byte("lane.build.roles=scouter,implementer\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ctx := core.LoadConfig(env, root)
@@ -143,13 +136,13 @@ func TestPlanLocalRefusals(t *testing.T) {
 		classify := func(value string) stateClassification {
 			t.Helper()
 			caseEnv := env.Clone()
-			caseEnv["HERDR_SOHO_DIR"] = value
+			caseEnv["SOHO_DIR"] = value
 			return classifyLocalState(root, ctx, caseEnv, root)
 		}
 		classifyAt := func(worktree, value string) stateClassification {
 			t.Helper()
 			caseEnv := env.Clone()
-			caseEnv["HERDR_SOHO_DIR"] = value
+			caseEnv["SOHO_DIR"] = value
 			return classifyLocalState(worktree, ctx, caseEnv, worktree)
 		}
 		check := func(label, value string, want stateClassification) {
@@ -252,9 +245,9 @@ func TestPlanLocalRefusals(t *testing.T) {
 		check("external", filepath.Join(base, "elsewhere"), stateClassification{kind: "external", shown: filepath.Join(base, "elsewhere")})
 		check("missing tail", filepath.Join("deep", "cache"), stateClassification{kind: "inside", rel: filepath.Join("deep", "cache"), shown: "deep/cache/"})
 	})
-	t.Run("unsafe state-dir glob is refused before plan output", func(t *testing.T) { // JS: "setup --plan --local refuses an unsafe HERDR_SOHO_DIR (rc 4) with no output or mutation"; Mutation captured: allowing glob metacharacters can hide unrelated root files.
+	t.Run("unsafe state-dir glob is refused before plan output", func(t *testing.T) { // JS: "setup --plan --local refuses an unsafe SOHO_DIR (rc 4) with no output or mutation"; Mutation captured: allowing glob metacharacters can hide unrelated root files.
 		root, env, ctx := localPlanFixture(t)
-		env["HERDR_SOHO_DIR"] = "*"
+		env["SOHO_DIR"] = "*"
 		before := setupFilesystemSnapshot(t, root)
 		requireLocalRefusal(t, root, env, ctx, "refusing to ignore state path")
 		if !reflect.DeepEqual(before, setupFilesystemSnapshot(t, root)) {
@@ -263,12 +256,12 @@ func TestPlanLocalRefusals(t *testing.T) {
 	})
 	t.Run("state-dir trailing whitespace is refused before plan output", func(t *testing.T) { // Mutation captured: git strips the trailing space and the state directory remains visible.
 		root, env, ctx := localPlanFixture(t)
-		env["HERDR_SOHO_DIR"] = "cache "
+		env["SOHO_DIR"] = "cache "
 		requireLocalRefusal(t, root, env, ctx, "ends in whitespace")
 	})
 	t.Run("worktree root is refused before plan output", func(t *testing.T) { // Mutation captured: excluding the root would hide the complete worktree.
 		root, env, ctx := localPlanFixture(t)
-		env["HERDR_SOHO_DIR"] = "."
+		env["SOHO_DIR"] = "."
 		requireLocalRefusal(t, root, env, ctx, "root of a git work tree")
 	})
 	t.Run("in-repository symlink traversal is refused", func(t *testing.T) { // Mutation captured: git cannot ignore paths reached through an in-repository symlink.
@@ -282,7 +275,7 @@ func TestPlanLocalRefusals(t *testing.T) {
 		if err := os.Symlink(filepath.Join(root, "cache"), filepath.Join(root, "alias")); err != nil {
 			t.Skipf("symlink unavailable: %v", err)
 		}
-		env["HERDR_SOHO_DIR"] = "alias/child"
+		env["SOHO_DIR"] = "alias/child"
 		requireLocalRefusal(t, root, env, ctx, "path traverses the symlink")
 	})
 	t.Run("in-repository symlink reached through an outside alias is refused", func(t *testing.T) { // Mutation captured: resolving an outside alias must still find an in-repository symlink component.
@@ -298,7 +291,7 @@ func TestPlanLocalRefusals(t *testing.T) {
 			t.Skipf("symlink unavailable: %v", err)
 		}
 		value := filepath.Join(outside, "alias", "loop", "cache")
-		env["HERDR_SOHO_DIR"] = value
+		env["SOHO_DIR"] = value
 		wantLink := filepath.Join(outside, "alias", "loop")
 		if code, out, msg := runPlanResult([]string{"--local"}, ctx, env, root); code != 4 || out != "" || !strings.Contains(msg, "the path traverses the symlink '") || !strings.Contains(msg, wantLink) {
 			t.Fatalf("code=%d stdout=%q message=%q", code, out, msg)
@@ -313,7 +306,7 @@ func TestPlanLocalRefusals(t *testing.T) {
 		if err := os.Symlink(outside, filepath.Join(root, "external-state")); err != nil {
 			t.Skipf("symlink unavailable: %v", err)
 		}
-		env["HERDR_SOHO_DIR"] = filepath.Join(root, "external-state")
+		env["SOHO_DIR"] = filepath.Join(root, "external-state")
 		code, out, msg := runPlanResult([]string{"--local"}, ctx, env, root)
 		if code != 0 || msg != "" || !strings.Contains(strings.Join(localRels(root, ctx, env, root), ","), "external-state") {
 			t.Fatalf("code=%d message=%q output=%q", code, msg, out)
@@ -333,7 +326,7 @@ func TestPlanLocalRefusals(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env["HERDR_SOHO_DIR"] = filepath.Join(wt, "state")
+		env["SOHO_DIR"] = filepath.Join(wt, "state")
 		wtCtx := *ctx
 		code, out, msg := runPlanResult([]string{"--local"}, &wtCtx, env, wt)
 		if code != 0 || msg != "" || !strings.Contains(out, common) || !strings.Contains(out, "/state") {
@@ -427,7 +420,7 @@ func TestPlanLocalRefusals(t *testing.T) {
 		if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
 			t.Skipf("symlink unavailable: %v", err)
 		}
-		env["HERDR_SOHO_DIR"] = filepath.Join("link", "cache")
+		env["SOHO_DIR"] = filepath.Join("link", "cache")
 		requireLocalRefusal(t, root, env, ctx, "path traverses the symlink")
 	})
 	t.Run("backslash state name is rejected on POSIX and plain name is accepted", func(t *testing.T) {
@@ -435,9 +428,9 @@ func TestPlanLocalRefusals(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			return // Backslash is a path separator on Windows.
 		}
-		env["HERDR_SOHO_DIR"] = `foo\bar`
+		env["SOHO_DIR"] = `foo\bar`
 		requireLocalRefusal(t, root, env, ctx, "contains git-ignore metacharacters")
-		env["HERDR_SOHO_DIR"] = "cache"
+		env["SOHO_DIR"] = "cache"
 		code, out, message := runPlanResult([]string{"--local"}, ctx, env, root)
 		if code != 0 || message != "" || !strings.Contains(out, "/cache") {
 			t.Fatalf("plain name: code=%d stdout=%q message=%q", code, out, message)
@@ -504,7 +497,7 @@ func TestLocalPlanAndDryRunLeaveGitMetadataUntouched(t *testing.T) {
 func TestLocalFinalExcludeRenameFailureDoesNotClaimSetup(t *testing.T) {
 	// JS: "setup --local --panes: a final exclude rename failure dies 4 with the tracked config byte-identical and no success claimed"
 	root, env, ctx := localPlanFixture(t)
-	conf := filepath.Join(root, ".agents", "herdr-soho.conf")
+	conf := filepath.Join(root, ".agents", "soho.conf")
 	if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +508,7 @@ func TestLocalFinalExcludeRenameFailureDoesNotClaimSetup(t *testing.T) {
 	if !ok {
 		t.Skip("git is required for local setup tests")
 	}
-	for _, args := range [][]string{{"add", ".agents/herdr-soho.conf"}, {"commit", "-qm", "tracked setup config"}} {
+	for _, args := range [][]string{{"add", ".agents/soho.conf"}, {"commit", "-qm", "tracked setup config"}} {
 		cmd := exec.Command(git, append([]string{"-C", root}, args...)...)
 		cmd.Env = env.List()
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -629,11 +622,11 @@ func TestSetupLocalJavaScriptHelperCases(t *testing.T) {
 		}},
 		{"localRels: the instruction file plus the state dir only when it lives under the root", func(t *testing.T) {
 			root, env, ctx := localPlanFixture(t)
-			env["HERDR_SOHO_DIR"] = "nested/cache"
+			env["SOHO_DIR"] = "nested/cache"
 			if got := strings.Join(localRels(root, ctx, env, root), ","); got != "CLAUDE.local.md,nested/cache" {
 				t.Fatalf("inside rels=%q", got)
 			}
-			env["HERDR_SOHO_DIR"] = t.TempDir()
+			env["SOHO_DIR"] = t.TempDir()
 			if got := strings.Join(localRels(root, ctx, env, root), ","); got != "CLAUDE.local.md" {
 				t.Fatalf("external rels=%q", got)
 			}
@@ -671,7 +664,7 @@ func TestSetupLocalJavaScriptHelperCases(t *testing.T) {
 	}
 }
 
-func TestPlanUsesLegacyProjectConfigAsBeforeState(t *testing.T) { // Mutation captured: ignoring the legacy source loses the prior custom lane roles from the simulated plan.
+func TestPlanIgnoresFormerProjectConfig(t *testing.T) {
 	root, env, ctx := localPlanFixture(t)
 	legacy := core.LegacyProjectConfigPath(root)
 	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
@@ -685,11 +678,10 @@ func TestPlanUsesLegacyProjectConfigAsBeforeState(t *testing.T) { // Mutation ca
 	platform.Stdout = &out
 	defer func() { platform.Stdout = old }()
 	CmdPlan([]string{"--panes", "4"}, ctx, env, root)
-	project := core.ConfigFileFor("project", env, root)
-	if !strings.Contains(out.String(), project+"\n") || !strings.Contains(out.String(), "  lane.build.roles     (unset) → scouter,implementer") {
-		t.Fatalf("plan did not show the legacy before-state at the new destination path:\n%s", out.String())
+	if strings.Contains(out.String(), "scouter,implementer") {
+		t.Fatalf("plan read the former project config:\n%s", out.String())
 	}
-	if _, err := os.Stat(project); !os.IsNotExist(err) {
+	if _, err := os.Stat(core.ConfigFileFor("project", env, root)); !os.IsNotExist(err) {
 		t.Fatalf("plan wrote the new project file: %v", err)
 	}
 }

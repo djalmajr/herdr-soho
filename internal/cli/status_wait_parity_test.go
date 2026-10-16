@@ -311,7 +311,7 @@ func TestWaitTaskReportFailureRestoreCase(t *testing.T) {
 	t.Run("failed transport restores last-report, pointer and stable copy byte-for-byte", func(t *testing.T) { // JS: "failed transport restores last-report, pointer and stable copy byte-for-byte"
 		// Mutation captured: publishing the new last-report pointer before prompt acceptance leaks a failed dispatch into the next wait.
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0", fakecli.Rule{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Code: 1, Stderr: "transport failed"})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		reports := filepath.Join(f.state, "ws", "reports")
 		if err := os.MkdirAll(reports, 0o700); err != nil {
 			t.Fatal(err)
@@ -363,7 +363,7 @@ func TestWaitQuestionAndApprovalRemainingCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"blocked"}}}`},
 			{Argv: []string{"agent", "read", "worker", "--source", "visible", "--lines", "40"}, Stdout: question},
 		})
-		f.env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+		f.env["SOHO_AUTO_APPROVE"] = "on"
 		code, out, _ := f.runWait(t, "worker", "--timeout", "5000")
 		if code != 7 || !strings.Contains(out, `"status":"question"`) || !strings.Contains(out, `"question":"  1. Use the local cache`) {
 			t.Fatalf("code=%d out=%q", code, out)
@@ -380,7 +380,7 @@ func TestWaitQuestionAndApprovalRemainingCases(t *testing.T) {
 			{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"blocked"}}}`},
 			{Argv: []string{"agent", "read", "worker", "--source", "visible", "--lines", "40"}, Stdout: approval},
 		})
-		f.env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+		f.env["SOHO_AUTO_APPROVE"] = "on"
 		code, out, _ := f.runWait(t, "worker", "--timeout", "5000")
 		count := 0
 		for _, call := range f.calls(t) {
@@ -405,7 +405,7 @@ func TestWaitQuestionAndApprovalRemainingCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "worker", "--source", "visible", "--lines", "40"}, Stdout: screen},
 			{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: screen},
 		})
-		f.env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+		f.env["SOHO_AUTO_APPROVE"] = "on"
 		hash := strconv.FormatUint(uint64(waitpkg.CksumField(waitpkg.NormalizeApproveScreen(screen))), 10)
 		if err := os.WriteFile(filepath.Join(f.state, "wait", "worker.blocked"), []byte(""), 0o600); err != nil {
 			t.Fatal(err)
@@ -540,9 +540,9 @@ func TestWaitDefaultRoleTimeoutCase(t *testing.T) {
 			{Argv: []string{"agent", "read", "w1", "--source", "visible", "--lines", "20"}, Stdout: "busy\n"},
 			{Argv: []string{"agent", "read", "w2", "--source", "visible", "--lines", "20"}, Stdout: "busy\n"},
 		})
-		f.env["HERDR_SOHO_ROLES"] = rolesDir
-		f.env["HERDR_SOHO_ROLE_T1_EFFORT"] = "high"
-		f.env["HERDR_SOHO_ROLE_T2_EFFORT"] = "xhigh"
+		f.env["SOHO_ROLES"] = rolesDir
+		f.env["SOHO_ROLE_T1_EFFORT"] = "high"
+		f.env["SOHO_ROLE_T2_EFFORT"] = "xhigh"
 		code, out, stderr := f.runWait(t, "w1", "w2")
 		if code != 9 || strings.Count(out, `"status":"timeout"`) != 2 || !strings.Contains(stderr, "soho wait w1 --timeout 2400") || !strings.Contains(stderr, "soho wait w2 --timeout 2400") {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -561,7 +561,7 @@ func TestWaitCapacityCommandRemainingCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped", "--lines", "40"}, Stdout: capacityScreen},
 			{Argv: []string{"agent", "prompt", "worker"}, ArgvPrefix: true, Stdout: `{"result":{"submitted":true}}`},
 		})
-		f.env["HERDR_SOHO_PROVIDER_RETRY_DELAY"] = "0"
+		f.env["SOHO_PROVIDER_RETRY_DELAY"] = "0"
 		return f
 	}
 	t.Run("wait: capacity sends the continue prompt and the report settles done", func(t *testing.T) { // JS: "wait: capacity sends the continue prompt and the report settles done"
@@ -614,7 +614,7 @@ func TestWaitCapacityCommandRemainingCases(t *testing.T) {
 	})
 	t.Run("wait: capacity exhausted at provider_retries=1 exits 14 with the retries", func(t *testing.T) { // JS: "wait: capacity exhausted at provider_retries=1 exits 14 with the retries"
 		f := makeCapacity(t)
-		f.env["HERDR_SOHO_PROVIDER_RETRIES"] = "1"
+		f.env["SOHO_PROVIDER_RETRIES"] = "1"
 		report := filepath.Join(f.state, "reports", "worker-report.md")
 		if err := os.WriteFile(filepath.Join(f.state, "last-report-worker"), []byte(report+"\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -710,7 +710,7 @@ func TestWaitRetryThenDoneCommandCase(t *testing.T) {
 			{Argv: []string{"agent", "read", "worker", "--source", "recent-unwrapped", "--lines", "40"}, Stdout: box},
 			{Argv: []string{"agent", "send-keys", "worker", "enter"}},
 		})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		report := filepath.Join(f.state, "reports", "worker.md")
 		if err := os.WriteFile(filepath.Join(f.state, "last-report-worker"), []byte(report+"\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -760,7 +760,7 @@ func TestWaitCheckpointCommandRemainingCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "worker", "--source", "visible", "--lines", "20"}, Stdout: screen},
 			{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: screen},
 		})
-		f.env["HERDR_SOHO_STUCK_WARN_MINUTES"] = "1"
+		f.env["SOHO_STUCK_WARN_MINUTES"] = "1"
 		hash := strconv.FormatUint(uint64(waitpkg.CksumField(waitpkg.NormalizeScreen(screen))), 10)
 		if err := os.WriteFile(filepath.Join(f.state, "wait", "worker.stuck-hash"), []byte(hash+"\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -816,7 +816,7 @@ func TestWaitCheckpointCommandRemainingCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "worker", "--source", "visible", "--lines", "20"}, Stdout: screen},
 			{Argv: []string{"agent", "read", "worker", "--source", "visible"}, Stdout: screen},
 		})
-		f.env["HERDR_SOHO_STUCK_WARN_MINUTES"] = "0"
+		f.env["SOHO_STUCK_WARN_MINUTES"] = "0"
 		if err := os.WriteFile(filepath.Join(f.state, "wait", "worker.stuck-hash"), []byte(strconv.FormatUint(uint64(waitpkg.CksumField(waitpkg.NormalizeScreen("Another screen from before\n"))), 10)+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}

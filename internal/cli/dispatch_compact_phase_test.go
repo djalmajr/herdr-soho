@@ -83,21 +83,21 @@ func newCompactPhaseDispatchFixture(t *testing.T, root string, clockStep time.Du
 		bin:      bin,
 		brief:    brief,
 		env: platform.Env{
-			"PATH":                             bin + string(os.PathListSeparator) + "/usr/bin:/bin",
-			"SOHO_FAKECLI_CONFIG":              bin,
-			"HERDR_ENV":                        "1",
-			"HERDR_SOHO_DIR":                   state,
-			"HERDR_WORKSPACE_ID":               "ws",
-			"HERDR_SOHO_ROLES":                 roles,
-			"HERDR_SOHO_SKILL_DIR":             filepath.Join(root, "skill"),
-			"HERDR_SOHO_PROMPT_CHECK_SECONDS":  "0",
-			"HERDR_SOHO_PROMPT_SETTLE_SECONDS": "0",
-			"HERDR_SOHO_BRIEF_LINT":            "off",
-			"SOHO_WAIT_POLL_MS":                "50",
-			"FAKECLI_WAIT_FILE_TIMEOUT_MS":     "15000",
-			"TMPDIR":                           root,
-			"HOME":                             filepath.Join(root, "home"),
-			"HERDR_SOCKET_PATH":                filepath.Join(root, "missing.sock"),
+			"PATH":                         bin + string(os.PathListSeparator) + "/usr/bin:/bin",
+			"SOHO_FAKECLI_CONFIG":          bin,
+			"HERDR_ENV":                    "1",
+			"SOHO_DIR":                     state,
+			"HERDR_WORKSPACE_ID":           "ws",
+			"SOHO_ROLES":                   roles,
+			"SOHO_SKILL_DIR":               filepath.Join(root, "skill"),
+			"SOHO_PROMPT_CHECK_SECONDS":    "0",
+			"SOHO_PROMPT_SETTLE_SECONDS":   "0",
+			"SOHO_BRIEF_LINT":              "off",
+			"SOHO_WAIT_POLL_MS":            "50",
+			"FAKECLI_WAIT_FILE_TIMEOUT_MS": "15000",
+			"TMPDIR":                       root,
+			"HOME":                         filepath.Join(root, "home"),
+			"HERDR_SOCKET_PATH":            filepath.Join(root, "missing.sock"),
 		},
 	}
 	// A race-instrumented fake child otherwise pauses for one second on
@@ -771,7 +771,7 @@ func TestDispatchCompactSigKILLKeepsTheInterruptedMarker(t *testing.T) {
 	env := platform.Env{
 		"PATH":               "/usr/bin:/bin",
 		"HERDR_ENV":          "1",
-		"HERDR_SOHO_DIR":     filepath.Join(root, "state"),
+		"SOHO_DIR":           filepath.Join(root, "state"),
 		"HERDR_WORKSPACE_ID": "ws",
 	}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
@@ -834,13 +834,13 @@ func newCompactPhaseStatusFixture(t *testing.T, withStaleReport bool) *compactPh
 		briefPath: briefPath,
 		ctx:       &core.Config{Entries: map[string]core.ConfigEntry{}},
 		env: platform.Env{
-			"PATH":                 bin + string(os.PathListSeparator) + "/usr/bin:/bin",
-			"HERDR_ENV":            "1",
-			"HERDR_SOHO_DIR":       state,
-			"HERDR_WORKSPACE_ID":   "ws",
-			"HERDR_SOCKET_PATH":    filepath.Join(root, "none.sock"),
-			"SOHO_FAKECLI_CONFIG":  bin,
-			"HERDR_SOHO_SKILL_DIR": skill,
+			"PATH":                bin + string(os.PathListSeparator) + "/usr/bin:/bin",
+			"HERDR_ENV":           "1",
+			"SOHO_DIR":            state,
+			"HERDR_WORKSPACE_ID":  "ws",
+			"HERDR_SOCKET_PATH":   filepath.Join(root, "none.sock"),
+			"SOHO_FAKECLI_CONFIG": bin,
+			"SOHO_SKILL_DIR":      skill,
 		},
 		cwd: cwd,
 	}
@@ -1094,7 +1094,7 @@ func TestStatusCompactPhaseUnderNowriteWritesNothing(t *testing.T) {
 			for k, v := range f.env {
 				env[k] = v
 			}
-			env["HERDR_SOHO_NOWRITE"] = "1"
+			env["SOHO_NOWRITE"] = "1"
 			oldOut, oldErr := platform.Stdout, platform.Stderr
 			var out, errOut bytes.Buffer
 			platform.Stdout, platform.Stderr = &out, &errOut

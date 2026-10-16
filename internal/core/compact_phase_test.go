@@ -665,7 +665,7 @@ func TestCompactPhaseReadPathWritesNothingUnderNowrite(t *testing.T) {
 	if err := os.WriteFile(path, []byte(compactPhaseMarker(t, "tok", "p1", "/abs/brief.md", os.Getpid(), compactPhaseSelfStarted(t, env), compactPhaseNowRFC3339(t))), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env["HERDR_SOHO_NOWRITE"] = "1"
+	env["SOHO_NOWRITE"] = "1"
 	snapshot := func() map[string]string {
 		out := map[string]string{}
 		var walk func(dir string)

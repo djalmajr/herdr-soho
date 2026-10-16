@@ -79,20 +79,20 @@ func newBusyDispatchFixture(t *testing.T) *busyDispatchFixture {
 		brief:      brief,
 		openReport: filepath.Join(state, "ws", "reports", "worker-20261003T100000.md"),
 		env: platform.Env{
-			"PATH":                             bin,
-			"SOHO_FAKECLI_CONFIG":              bin,
-			"HERDR_ENV":                        "1",
-			"HERDR_SOHO_DIR":                   state,
-			"HERDR_WORKSPACE_ID":               "ws",
-			"HERDR_SOHO_ROLES":                 roles,
-			"HERDR_SOHO_SKILL_DIR":             "../../skills/soho",
-			"HERDR_SOHO_PROMPT_CHECK_SECONDS":  "1",
-			"HERDR_SOHO_PROMPT_SETTLE_SECONDS": "0",
-			"HERDR_SOHO_BRIEF_LINT":            "off",
-			"SOHO_WAIT_POLL_MS":                "50",
-			"TMPDIR":                           root,
-			"HOME":                             filepath.Join(root, "home"),
-			"HERDR_SOCKET_PATH":                filepath.Join(root, "missing.sock"),
+			"PATH":                       bin,
+			"SOHO_FAKECLI_CONFIG":        bin,
+			"HERDR_ENV":                  "1",
+			"SOHO_DIR":                   state,
+			"HERDR_WORKSPACE_ID":         "ws",
+			"SOHO_ROLES":                 roles,
+			"SOHO_SKILL_DIR":             "../../skills/soho",
+			"SOHO_PROMPT_CHECK_SECONDS":  "1",
+			"SOHO_PROMPT_SETTLE_SECONDS": "0",
+			"SOHO_BRIEF_LINT":            "off",
+			"SOHO_WAIT_POLL_MS":          "50",
+			"TMPDIR":                     root,
+			"HOME":                       filepath.Join(root, "home"),
+			"HERDR_SOCKET_PATH":          filepath.Join(root, "missing.sock"),
 		},
 	}
 	// A race-instrumented fake child otherwise pauses for one second on
@@ -282,7 +282,7 @@ func (f *busyDispatchFixture) queuedRules() []fakecli.Rule {
 func TestDispatchBusyQueueKeepsTodayBehavior(t *testing.T) {
 	f := newBusyDispatchFixture(t)
 	f.openPointer(t)
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "1"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "1"
 	f.install(t, f.queuedRules())
 	code, out, errText := f.run(t, "worker", f.brief, "--queue", "--no-wait")
 	if code != 0 {
@@ -317,7 +317,7 @@ func TestDispatchBusyAmendKeepsTodayBehavior(t *testing.T) {
 	if err := os.WriteFile(amendBrief, []byte("# Amendment\n\nFix the report path.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "1"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "1"
 	f.install(t, f.queuedRules())
 	code, out, errText := f.run(t, "worker", amendBrief, "--amend", "--no-wait")
 	if code != 0 {
@@ -368,7 +368,7 @@ func TestDispatchBusyWithAClosedTaskKeepsTodayBehavior(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.openPointer(t)
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "1"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "1"
 	f.install(t, f.queuedRules())
 	code, out, errText := f.run(t, "worker", f.brief, "--no-wait")
 	if code != 0 {
@@ -390,7 +390,7 @@ func TestDispatchIdleWithAnOpenTaskKeepsTodayBehavior(t *testing.T) {
 	f.openPointer(t)
 	// prompt_check_seconds=0: the check makes no agent get, and the
 	// dispatch types the brief as today.
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 	f.install(t, []fakecli.Rule{
 		{Argv: []string{"agent", "list"}, ArgvPrefix: true, Stdout: `{"result":{"agents":[]}}`},
 		{Argv: []string{"agent", "get", "worker"}, Stdout: busyStateJSON("idle", 1)},

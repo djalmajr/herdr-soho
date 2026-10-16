@@ -45,8 +45,8 @@ func fixture(t *testing.T) (platform.Env, string) {
 	}
 	skillDir := testSkillDir(t)
 	env := platform.Env{
-		"HOME": home, "XDG_CONFIG_HOME": conf, "HERDR_SOHO_DIR": state,
-		"HERDR_SOHO_SKILL_DIR": skillDir, "HERDR_WORKSPACE_ID": "ws",
+		"HOME": home, "XDG_CONFIG_HOME": conf, "SOHO_DIR": state,
+		"SOHO_SKILL_DIR": skillDir, "HERDR_WORKSPACE_ID": "ws",
 		// Restricted PATH: the production code under test resolves git
 		// from the environment, and nothing else; a directory holding
 		// only the system git keeps the env hermetic (no shell, no
@@ -131,8 +131,8 @@ func TestLoadConfigPrecedence(t *testing.T) {
 	// JS: "precedence: session > project, env > session"
 	env, cwd := fixture(t)
 	user := platform.UserConfigPath(platform.Current(), env)
-	project := filepath.Join(cwd, ".agents", "herdr-soho.conf")
-	session := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+	project := filepath.Join(cwd, ".agents", "soho.conf")
+	session := filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 	write(t, user, "layout=columns\nmax_workers=1\n")
 	write(t, project, "layout=split\nmax_workers=2\n")
 	write(t, session, "max_workers=3\n")
@@ -143,7 +143,7 @@ func TestLoadConfigPrecedence(t *testing.T) {
 	if got := Cfg(&ctx, "max_workers", "", env); got != "3" || CfgSource(&ctx, "max_workers", env) != "session" {
 		t.Fatalf("session = %q from %q", got, CfgSource(&ctx, "max_workers", env))
 	}
-	env["HERDR_SOHO_MAX_WORKERS"] = "4"
+	env["SOHO_MAX_WORKERS"] = "4"
 	if got := Cfg(&ctx, "max_workers", "", env); got != "4" || CfgSource(&ctx, "max_workers", env) != "env" {
 		t.Fatalf("env = %q from %q", got, CfgSource(&ctx, "max_workers", env))
 	}
@@ -200,8 +200,8 @@ func TestConfigValidation(t *testing.T) {
 func TestConfigSurvivingMutationInputs(t *testing.T) {
 	// Mutation captured: empty env values keep the stored source, and malformed or out-of-range input stays harmless and invalid.
 	env, cwd := fixture(t)
-	write(t, filepath.Join(cwd, ".agents", "herdr-soho.conf"), "panes=3\nlayout=\"\nfeedback=ask\u00a0\ninbound=off\ufeff\n")
-	env["HERDR_SOHO_PANES"] = ""
+	write(t, filepath.Join(cwd, ".agents", "soho.conf"), "panes=3\nlayout=\"\nfeedback=ask\u00a0\ninbound=off\ufeff\n")
+	env["SOHO_PANES"] = ""
 	ctx := LoadConfig(env, cwd)
 	if got := CfgSource(&ctx, "panes", env); got != "project" {
 		t.Fatalf("empty env source=%q, want project", got)
@@ -236,7 +236,7 @@ func TestConfigRolesTrimWhitespaceAroundNames(t *testing.T) {
 	env, cwd := fixture(t)
 	roles := filepath.Join(t.TempDir(), "roles")
 	write(t, filepath.Join(roles, "reviewer.md"), "role\n")
-	env["HERDR_SOHO_ROLES"] = roles
+	env["SOHO_ROLES"] = roles
 	if !ConfigValueOk("lane.build.roles", " reviewer ", env, cwd) {
 		t.Fatal("valid role surrounded by whitespace was rejected")
 	}
@@ -247,7 +247,7 @@ func TestConfigFileParsingAndEmptySource(t *testing.T) {
 	// JS: "empty file values fall back but keep their layer as source"
 	// JS: "surrounding double quotes are stripped once (no escape handling)"
 	env, cwd := fixture(t)
-	file := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+	file := filepath.Join(cwd, ".agents", "soho.conf")
 	write(t, file, "layout=\"\" # empty\r\nmax_workers=2\r\nmax_workers=3\r\nmodel.claude.worker=\"a\\\\b\"\r\n")
 	ctx := LoadConfig(env, cwd)
 	if got := Cfg(&ctx, "layout", "split", env); got != "split" || CfgSource(&ctx, "layout", env) != "project" {
@@ -261,66 +261,10 @@ func TestConfigFileParsingAndEmptySource(t *testing.T) {
 	}
 }
 
-func TestLegacyEnvPrecedence(t *testing.T) {
-	// JS: "applyLegacyEnv: a non-empty HERDR_SOHO_* wins and nothing is copied"
-	// JS: "applyLegacyEnv: an empty HERDR_SOHO_* value is replaced; empty old values and other names are ignored"
-	env := platform.Env{
-		"HERDR_SOHO_LAYOUT": "legacy", "SOHO_LAYOUT": "current",
-		"HERDR_SOHO_EMPTY": "", "SOHO_EMPTY": "", "HERDR_SOHOX_LAYOUT": "ignored",
-	}
-	copied := ApplyLegacyEnv(env)
-	if env.Get("SOHO_LAYOUT") != "current" || env.Get("SOHO_EMPTY") != "" || len(copied) != 0 {
-		t.Fatalf("non-empty new values should win: copied=%v env=%v", copied, env)
-	}
-	env["SOHO_LAYOUT"] = ""
-	copied = ApplyLegacyEnv(env)
-	if env.Get("SOHO_LAYOUT") != "legacy" || len(copied) != 1 || copied[0] != "HERDR_SOHO_LAYOUT" {
-		t.Fatalf("empty new value should be replaced: copied=%v env=%v", copied, env)
-	}
-}
-
-func TestLegacyEnvCopiedUsesUTF16Order(t *testing.T) {
-	// Mutation captured: byte sorting reverses the emoji and U+E000 variable names.
-	env := platform.Env{
-		"HERDR_SOHO_\uE000": "private-use",
-		"HERDR_SOHO_😀":      "emoji",
-	}
-	got := ApplyLegacyEnv(env)
-	want := "HERDR_SOHO_😀,HERDR_SOHO_\uE000"
-	if strings.Join(got, ",") != want {
-		t.Fatalf("ApplyLegacyEnv() copied = %q, want %q", strings.Join(got, ","), want)
-	}
-}
-
-func TestLegacyEnvCopiedWarningsRemainObservable(t *testing.T) {
-	// Mutation captured: forgetting the copied-variable list drops the compatibility warning from later doctor output.
-	env, cwd := fixture(t)
-	env["HERDR_SOHO_LAYOUT"] = "columns"
-	ApplyLegacyEnv(env)
-	warnings := strings.Join(LegacyDoctorWarnings(env, cwd, platform.Current()), "\n")
-	if !strings.Contains(warnings, "legacy environment variable HERDR_SOHO_LAYOUT is read as SOHO_LAYOUT; rename it") {
-		t.Fatalf("legacy env warning missing: %q", warnings)
-	}
-}
-
-func TestLegacyPathAndDefaultStateSelection(t *testing.T) {
-	// JS: "legacy config paths: the old directory and file names next to the new ones"
-	// JS: "defaultStateDirName: .herdr-soho only while .soho is absent and .herdr-soho is a directory"
+func TestLegacyPaths(t *testing.T) {
 	env, cwd := fixture(t)
 	root := platform.ProjectRoot(env, cwd)
 	legacy := filepath.Join(root, ".herdr-soho")
-	if err := os.MkdirAll(legacy, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if got := DefaultStateDirName(root); got != ".herdr-soho" {
-		t.Fatalf("legacy default = %q", got)
-	}
-	if err := os.MkdirAll(filepath.Join(root, ".soho"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if got := DefaultStateDirName(root); got != ".soho" {
-		t.Fatalf("new default = %q", got)
-	}
 	if got := LegacyProjectConfigPath(root); got != filepath.Join(root, ".agents", "herdr-soho.conf") {
 		t.Fatalf("legacy project config = %q", got)
 	}
@@ -334,8 +278,8 @@ func TestDottedKeyNameRestoresKnownRoleAndLaneSpellings(t *testing.T) {
 	env, cwd := fixture(t)
 	roles := filepath.Join(t.TempDir(), "roles")
 	write(t, filepath.Join(roles, "build-ui_v2.md"), "role\n")
-	env["HERDR_SOHO_ROLES"] = roles
-	write(t, filepath.Join(cwd, ".agents", "herdr-soho.conf"), "lane.build-ui_v2.roles=reviewer\n")
+	env["SOHO_ROLES"] = roles
+	write(t, filepath.Join(cwd, ".agents", "soho.conf"), "lane.build-ui_v2.roles=reviewer\n")
 	ctx := LoadConfig(env, cwd)
 	for key, want := range map[string]string{
 		"role_build_ui_v2_effort": "role.build-ui_v2.effort",
@@ -353,7 +297,7 @@ func TestConfigWritePair(t *testing.T) {
 	// JS: "config set preserves whole-line and trailing comments, collapses duplicates"
 	// JS: "config set appends a missing key and does not duplicate existing ones"
 	env, cwd := fixture(t)
-	file := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+	file := filepath.Join(cwd, ".agents", "soho.conf")
 	write(t, file, "# keep this comment\nmax_workers=3 # live cap\n# tail comment\nreuse_workers=on\n\nmax_workers=1\n")
 	ConfigWritePair(file, "max_workers", "5", env, cwd)
 	content, err := os.ReadFile(file)
@@ -378,7 +322,7 @@ func TestConfigWritePairJavaScriptLineTerminatorsInComments(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, cwd := fixture(t)
-			file := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+			file := filepath.Join(cwd, ".agents", "soho.conf")
 			write(t, file, "panes=2"+tc.comment+"\nlayout=tab\n")
 			ConfigWritePair(file, "panes", "3", env, cwd)
 			got, err := os.ReadFile(file)
@@ -410,74 +354,6 @@ func TestConfigReadAndClearJavaScriptLineTerminatorsInComments(t *testing.T) {
 	}
 }
 
-func TestEffectiveConfigFilePrefersNewThenLegacy(t *testing.T) {
-	// Mutation captured: preferring legacy or ignoring it changes the selected user-visible config file.
-	dir := t.TempDir()
-	newPath, legacyPath := filepath.Join(dir, "new"), filepath.Join(dir, "legacy")
-	if got := EffectiveConfigFile(newPath, legacyPath); got != newPath {
-		t.Fatalf("neither exists: %q", got)
-	}
-	write(t, legacyPath, "old=1\n")
-	if got := EffectiveConfigFile(newPath, legacyPath); got != legacyPath {
-		t.Fatalf("legacy only: %q", got)
-	}
-	if err := os.Remove(legacyPath); err != nil {
-		t.Fatal(err)
-	}
-	write(t, newPath, "new=1\n")
-	if got := EffectiveConfigFile(newPath, legacyPath); got != newPath {
-		t.Fatalf("new only: %q", got)
-	}
-	write(t, legacyPath, "old=1\n")
-	if got := EffectiveConfigFile(newPath, legacyPath); got != newPath {
-		t.Fatalf("both exist: %q", got)
-	}
-}
-
-func TestLegacyEnvironmentAndMigration(t *testing.T) {
-	// JS: "applyLegacyEnv: a lone HERDR_SOHO_* is copied, the old name stays, and the list is remembered"
-	// JS: "applyLegacyEnv: a non-empty HERDR_SOHO_* wins and nothing is copied"
-	// JS: "migrateLegacyConfigFile: the user and project new paths copy byte for byte with the legacy mode"
-	env, cwd := fixture(t)
-	env["HERDR_SOHO_LAYOUT"] = "legacy"
-	env["SOHO_LAYOUT"] = ""
-	copied := ApplyLegacyEnv(env)
-	found := false
-	for _, name := range copied {
-		if name == "HERDR_SOHO_LAYOUT" {
-			found = true
-		}
-	}
-	if env.Get("SOHO_LAYOUT") != "legacy" || env.Get("HERDR_SOHO_LAYOUT") != "legacy" || !found {
-		t.Fatalf("legacy env result: %#v copied=%v", env, copied)
-	}
-	root := platform.ProjectRoot(env, cwd)
-	oldPath := LegacyProjectConfigPath(root)
-	newPath := filepath.Join(root, ".agents", "soho.conf")
-	write(t, oldPath, "# legacy\nlayout=split\n")
-	if err := os.Chmod(oldPath, 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if !MigrateLegacyConfigFile(newPath, env, cwd) {
-		t.Fatal("legacy file was not copied")
-	}
-	got, err := os.ReadFile(newPath)
-	if err != nil || string(got) != "# legacy\nlayout=split\n" {
-		t.Fatalf("copied content=%q err=%v", got, err)
-	}
-	info, _ := os.Stat(newPath)
-	if runtime.GOOS == "windows" {
-		if info.Mode().Perm()&0o200 == 0 {
-			t.Fatalf("copied file is read-only: mode=%o", info.Mode().Perm())
-		}
-	} else if info.Mode().Perm() != 0o640 {
-		t.Fatalf("copied mode = %o", info.Mode().Perm())
-	}
-	if MigrateLegacyConfigFile(newPath, env, cwd) {
-		t.Fatal("second migration overwrote the destination")
-	}
-}
-
 func TestSessionCommands(t *testing.T) {
 	// JS: "session set writes the session file in the state dir"
 	// JS: "session show lists the session entries"
@@ -485,7 +361,7 @@ func TestSessionCommands(t *testing.T) {
 	// JS: "session clear (no key) removes the layer; config falls back to project"
 	env, cwd := fixture(t)
 	ctx := LoadConfig(env, cwd)
-	file := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+	file := filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 	out, _ := capture(t, func() { CmdSession([]string{"set", "lane.build.kind=pi"}, &ctx, env, cwd) })
 	content, err := os.ReadFile(file)
 	if err != nil || string(content) != "lane.build.kind=pi\n" || !strings.Contains(out, "session: this Herdr workspace only") {
@@ -540,7 +416,7 @@ func TestSessionPathUsesHerdrFallback(t *testing.T) {
 	env["PATH"] = bin + string(os.PathListSeparator) + env.Get("PATH")
 	env["SOHO_FAKECLI_CONFIG"] = bin
 	ctx := LoadConfig(env, cwd)
-	want := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws-from-herdr", "session.conf")
+	want := filepath.Join(env.Get("SOHO_DIR"), "ws-from-herdr", "session.conf")
 	if got := SessionConfPath(&ctx, env, cwd); got != want {
 		t.Fatalf("session path = %q, want %q", got, want)
 	}
@@ -556,7 +432,7 @@ func TestConfigOutputSources(t *testing.T) {
 			t.Fatalf("multi_role row = %q", line)
 		}
 	}
-	if !strings.Contains(out, "layers read: defaults") || !strings.Contains(out, "session file: "+filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")) {
+	if !strings.Contains(out, "layers read: defaults") || !strings.Contains(out, "session file: "+filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")) {
 		t.Fatalf("config output missing source/path:\n%s", out)
 	}
 }
@@ -564,9 +440,9 @@ func TestConfigOutputSources(t *testing.T) {
 func TestConfigOutputUsesEffectiveStateAndUTF16Width(t *testing.T) {
 	// Mutation captured: config displays the legacy-aware default state directory and pads astral values by UTF-16 units.
 	env, cwd := fixture(t)
-	delete(env, "HERDR_SOHO_DIR")
-	env["HERDR_SOHO_ARGS_CODEX"] = "-c a=b"
-	env["HERDR_SOHO_EFFORT_XHIGH"] = ""
+	delete(env, "SOHO_DIR")
+	env["SOHO_ARGS_CODEX"] = "-c a=b"
+	env["SOHO_EFFORT_XHIGH"] = ""
 	write(t, filepath.Join(cwd, ".agents", "soho.conf"), "model.codex.worker=😀\n")
 	if err := os.MkdirAll(filepath.Join(cwd, ".herdr-soho"), 0o700); err != nil {
 		t.Fatal(err)
@@ -577,7 +453,7 @@ func TestConfigOutputUsesEffectiveStateAndUTF16Width(t *testing.T) {
 	if !strings.Contains(out, wantValueRow) {
 		t.Fatalf("astral config row missing %q:\n%s", wantValueRow, out)
 	}
-	if !strings.Contains(out, "state_dir          .herdr-soho                    defaults") {
+	if !strings.Contains(out, "state_dir          .soho                          defaults") {
 		t.Fatalf("legacy-aware state_dir row missing:\n%s", out)
 	}
 	if !strings.Contains(out, "args.codex") || strings.Contains(out, "effort.xhigh") {
@@ -598,7 +474,7 @@ func TestStateRootGitignoreSideEffect(t *testing.T) {
 	// JS: "stateRoot: the .gitignore entry is added once, only on a definite not ignored"
 	t.Run(`stateRoot: the .gitignore entry is added once, only on a definite "not ignored"`, func(t *testing.T) { // JS: "stateRoot: the .gitignore entry is added once, only on a definite \"not ignored\""
 		env, cwd := fixture(t)
-		env["HERDR_SOHO_DIR"] = ""
+		env["SOHO_DIR"] = ""
 		ctx := LoadConfig(env, cwd)
 		want := filepath.Join(platform.StateProjectRoot(env, cwd), ".soho")
 		if got := StateRoot(&ctx, env, cwd); got != want {
@@ -614,8 +490,8 @@ func TestStateRootGitignoreSideEffect(t *testing.T) {
 	})
 	t.Run("NOWRITE leaves the ignore file alone", func(t *testing.T) {
 		env, cwd := fixture(t)
-		env["HERDR_SOHO_DIR"] = ""
-		env["HERDR_SOHO_NOWRITE"] = "1"
+		env["SOHO_DIR"] = ""
+		env["SOHO_NOWRITE"] = "1"
 		ctx := LoadConfig(env, cwd)
 		StateRoot(&ctx, env, cwd)
 		if _, err := os.Stat(filepath.Join(cwd, ".gitignore")); !os.IsNotExist(err) {
@@ -624,8 +500,8 @@ func TestStateRootGitignoreSideEffect(t *testing.T) {
 	})
 	t.Run("NOWRITE only applies to the exact value one", func(t *testing.T) {
 		env, cwd := fixture(t)
-		env["HERDR_SOHO_DIR"] = ""
-		env["HERDR_SOHO_NOWRITE"] = "0"
+		env["SOHO_DIR"] = ""
+		env["SOHO_NOWRITE"] = "0"
 		ctx := LoadConfig(env, cwd)
 		if Nowrite(env) {
 			t.Fatal("NOWRITE=0 was treated as read-only")

@@ -11,13 +11,9 @@ import (
 // exposed over an injected lookup so the root CLI keeps owning the
 // environment and its precedence rules.
 const (
-	// EnvInstallDir overrides the default install directory. The legacy
-	// HERDR_SOHO_INSTALL_DIR is copied to this name at the start of Run by
-	// the root CLI's environment layer.
+	// EnvInstallDir overrides the default install directory.
 	EnvInstallDir = "SOHO_INSTALL_DIR"
-	// EnvReleaseBase overrides the release download base URL. The legacy
-	// HERDR_SOHO_RELEASE_BASE is copied to this name at the start of Run by
-	// the root CLI's environment layer.
+	// EnvReleaseBase overrides the release download base URL.
 	EnvReleaseBase = "SOHO_RELEASE_BASE"
 )
 

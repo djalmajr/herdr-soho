@@ -24,7 +24,7 @@ func TestReviewFailedEnterStopsAfterThreeAttempts(t *testing.T) {
 	f := newQueuedProbeFixture(t, "idle", "5", screen, map[string]string{
 		"not-received": "1999999900 5 " + prompt + "\n",
 	}, fail)
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 	var last string
 	for probe := 1; probe <= 4; probe++ {
 		if probe > 1 {
@@ -58,7 +58,7 @@ func TestReviewQueuedFailedEnterStopsAfterThreeAttempts(t *testing.T) {
 	f := newQueuedProbeFixture(t, "idle", "5", screen, map[string]string{
 		"queued": "1 5 " + prompt + "\n",
 	}, fail)
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 	var last string
 	for probe := 1; probe <= 4; probe++ {
 		if probe > 1 {

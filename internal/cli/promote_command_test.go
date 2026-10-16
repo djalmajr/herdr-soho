@@ -36,7 +36,7 @@ func TestPromotePublicCommand(t *testing.T) {
 		promoteRoster(t, sd, "sub-orch")
 		before := rosterRaw(t, sd)
 		env := f.env.Clone()
-		env["HERDR_SOHO_NOWRITE"] = "1"
+		env["SOHO_NOWRITE"] = "1"
 		code, out, stderr := runIn(t, []string{"promote"}, env, f.cwd)
 		if code != 2 || out != "" || !strings.Contains(stderr, "read-only") || rosterRaw(t, sd) != before || len(promoteCalls(t, f.env)) != 0 {
 			t.Fatalf("read-only refusal: code=%d out=%q stderr=%q calls=%v", code, out, stderr, promoteCalls(t, f.env))

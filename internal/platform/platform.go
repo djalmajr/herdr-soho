@@ -44,14 +44,10 @@ func (e Env) Clone() Env {
 }
 
 // nowriteGate is the read-only gate read at the platform layer: when
-// SOHO_NOWRITE is defined it decides alone (even the value 0), and the
-// legacy HERDR_SOHO_NOWRITE only applies when the new name is absent —
-// the same rule as core.Nowrite, which the platform layer cannot import.
+// SOHO_NOWRITE is defined it decides alone (even the value 0) — the same
+// rule as core.Nowrite, which the platform layer cannot import.
 func nowriteGate(env Env) bool {
-	if value, ok := env.Lookup("SOHO_NOWRITE"); ok {
-		return value == "1"
-	}
-	return env.Get("HERDR_SOHO_NOWRITE") == "1"
+	return env.Get("SOHO_NOWRITE") == "1"
 }
 
 func (e Env) List() []string {
@@ -383,12 +379,11 @@ func SkillDir(env Env) string {
 
 // SkillDirSource returns the skill directory and its origin: "SOHO_SKILL_DIR"
 // for the configured value, "executable" for a skill tree beside the executable,
-// "home" for <home>/.agents/skills/soho or <home>/.claude/skills/soho, then the
-// legacy <home>/.agents/skills/herdr-soho or <home>/.claude/skills/herdr-soho
-// (each pair tried in that order; <home> is HOME, USERPROFILE on Windows),
-// "bundled" for the embedded skill materialized into the cache derived from
-// the env. It dies with the same message as before when no source holds a
-// skill and no usable cache can be derived from the env.
+// "home" for <home>/.agents/skills/soho or <home>/.claude/skills/soho (the pair
+// tried in that order; <home> is HOME, USERPROFILE on Windows), and "bundled"
+// for the embedded skill materialized into the cache derived from the env. It
+// dies with the same message as before when no source holds a skill and no
+// usable cache can be derived from the env.
 func SkillDirSource(env Env) (string, string) {
 	dir, source := SkillDirSourceOrEmpty(env)
 	if dir != "" {
@@ -411,9 +406,6 @@ func SkillDirSourceOrEmpty(env Env) (string, string) {
 	if configured := env.Get("SOHO_SKILL_DIR"); configured != "" {
 		return configured, "SOHO_SKILL_DIR"
 	}
-	if configured := env.Get("HERDR_SOHO_SKILL_DIR"); configured != "" {
-		return configured, "HERDR_SOHO_SKILL_DIR"
-	}
 	executable, err := currentExecutable()
 	if err == nil {
 		if dir := skillDirFromExecutable(executable); dir != "" {
@@ -428,10 +420,6 @@ func SkillDirSourceOrEmpty(env Env) (string, string) {
 		for _, dir := range []string{
 			filepath.Join(home, ".agents", "skills", "soho"),
 			filepath.Join(home, ".claude", "skills", "soho"),
-			// Legacy: the herdr-soho generation installed the skill under the
-			// old name; a soho tree wins, an old-only install still works.
-			filepath.Join(home, ".agents", "skills", "herdr-soho"),
-			filepath.Join(home, ".claude", "skills", "herdr-soho"),
 		} {
 			if isSkillDir(dir) {
 				return dir, "home"
@@ -494,9 +482,6 @@ func bundledSkillCacheBase(env Env) string {
 // validated by stat and header bytes only: they are never executed.
 func LauncherPath(env Env) string {
 	if bin := strings.TrimSpace(env.Get("SOHO_BIN")); bin != "" {
-		return validatedNativeBinary(bin)
-	}
-	if bin := strings.TrimSpace(env.Get("HERDR_SOHO_BIN")); bin != "" {
 		return validatedNativeBinary(bin)
 	}
 	executable, err := currentExecutable()
@@ -956,7 +941,7 @@ func runResolved(resolved string, args []string, opts RunOptions) (result RunRes
 			return tempFileError(result, tmpErr)
 		}
 		openTemp := func(suffix string) (*os.File, string, error) {
-			f, err := os.CreateTemp(tmpDir, ".herdr-soho-out-*")
+			f, err := os.CreateTemp(tmpDir, ".soho-out-*")
 			if err != nil {
 				return nil, "", err
 			}

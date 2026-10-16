@@ -317,7 +317,7 @@ func TestCollectCollaborationNowriteLeavesNoTrace(t *testing.T) {
 		}
 	}
 	env := f.env.Clone()
-	env["HERDR_SOHO_NOWRITE"] = "1"
+	env["SOHO_NOWRITE"] = "1"
 	code, out, errOut := f.run(t, env, "collect", "author")
 	if code != 0 || !strings.Contains(out, `"status":"collaborating"`) {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)

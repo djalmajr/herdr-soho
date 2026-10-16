@@ -116,7 +116,7 @@ func runSetupTM5InitGolden(t *testing.T, name string, seedConfig bool) {
 			program += ".cmd"
 		}
 		// The setup guidance now names the native executable (platform.LauncherPath
-		// of the running test binary, no HERDR_SOHO_BIN override), not the
+		// of the running test binary, no SOHO_BIN override), not the
 		// obsolete scripts launcher; both map to the golden's PROG token.
 		launcher := platform.LauncherPath(env)
 		stdoutText = strings.ReplaceAll(stdoutText, launcher, "PROG")
@@ -231,7 +231,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 	t.Run(`// JS: "doctor: a valid local block is enough; setup_target=local without one points at setup --local"`, func(t *testing.T) {
 		env, repo := setupTM5CommandFixture(t)
 		env["HERDR_ENV"] = "1"
-		env["HERDR_SOHO_SKILL_DIR"] = setupTM5SkillDir(t)
+		env["SOHO_SKILL_DIR"] = setupTM5SkillDir(t)
 		old, err := os.Getwd()
 		if err != nil {
 			t.Fatal(err)
@@ -273,7 +273,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 	t.Run(`// JS: "doctor: missing hooks point at setup --local for local setups, canonical otherwise (exact text, no tracked mutation)"`, func(t *testing.T) {
 		env, repo := setupTM5CommandFixture(t)
 		env["HERDR_ENV"] = "1"
-		env["HERDR_SOHO_SKILL_DIR"] = setupTM5SkillDir(t)
+		env["SOHO_SKILL_DIR"] = setupTM5SkillDir(t)
 		old, err := os.Getwd()
 		if err != nil {
 			t.Fatal(err)
@@ -299,7 +299,7 @@ func TestSetupTM5LocalDoctorCases(t *testing.T) {
 		}
 		beforeTracked, _ := os.ReadFile(tracked)
 		// The setup guidance names the native executable (the running test
-		// binary; no HERDR_SOHO_BIN override in this fixture env), not the
+		// binary; no SOHO_BIN override in this fixture env), not the
 		// obsolete skill scripts launcher.
 		entry := platform.LauncherPath(env)
 		run := func() string {

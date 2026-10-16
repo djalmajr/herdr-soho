@@ -22,7 +22,7 @@ import (
 // WaitFile rule runs. This adds an observable lifecycle handshake without a
 // second fake engine or a shell fixture.
 func init() {
-	if file := os.Getenv("HERDR_SOHO_FIND_REMOTE_PID"); file != "" &&
+	if file := os.Getenv("SOHO_FIND_REMOTE_PID"); file != "" &&
 		strings.Join(os.Args[1:], " ") == "--machine slow api snapshot" {
 		if err := os.WriteFile(file, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 			os.Exit(91)
@@ -61,7 +61,7 @@ func TestFindStreamPublishesBeforeDeadlineAndStopsRemoteProcess(t *testing.T) {
 		{Argv: []string{"--machine", "slow", "api", "snapshot"}, WaitFile: filepath.Join(dir, "never-remote")},
 	})
 	pidFile := filepath.Join(dir, "remote.pid")
-	f.env["HERDR_SOHO_FIND_REMOTE_PID"] = pidFile
+	f.env["SOHO_FIND_REMOTE_PID"] = pidFile
 	f.env["FAKECLI_WAIT_FILE_TIMEOUT_MS"] = "10000"
 	processEnv := f.env.Clone()
 	if runtime.GOOS != "windows" {

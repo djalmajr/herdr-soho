@@ -1176,7 +1176,7 @@ func jobStart(args []string, env platform.Env, cwd string) int {
 	}
 	// The rendered brief lints against the checkout config when the checkout
 	// exists, else the cwd config; the temp file is removed before returning.
-	tmp, err := os.CreateTemp("", "herdr-soho-job-brief-*.md")
+	tmp, err := os.CreateTemp("", "soho-job-brief-*.md")
 	if err != nil {
 		platform.Die("job start: cannot create temp brief: "+err.Error(), 2)
 	}

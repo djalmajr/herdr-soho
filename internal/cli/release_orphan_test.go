@@ -19,8 +19,8 @@ func newOrphanReleaseFixture(t *testing.T, agentsJSON, panesJSON, orchestratorPa
 	t.Helper()
 	env, cwd := commandFixture(t)
 	env["HERDR_ENV"] = "1"
-	env["HERDR_SOHO_REGRID"] = "off"
-	state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+	env["SOHO_REGRID"] = "off"
+	state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 	if err := os.MkdirAll(filepath.Join(state, "wait"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestReleaseCloseSkillRoleNameIsNotAnOrphan(t *testing.T) {
 		{Argv: []string{"agent", "get", "sub-orchestrator"}, Stdout: `{"result":{"agent":{"name":"sub-orchestrator","agent_status":"idle"}}}`},
 		{Argv: []string{"pane", "close", "ws:p3"}},
 	})
-	f.env["HERDR_SOHO_LANES"] = "off"
+	f.env["SOHO_LANES"] = "off"
 	r := f.run(t, "sub-orchestrator", "--close")
 	if r.code != 3 || !strings.Contains(r.stderr, "agent 'sub-orchestrator' is not in the roster") || len(callsTo(r.calls, "pane", "close", "ws:p3")) != 0 {
 		t.Fatalf("release status=%d stderr=%q calls=%#v", r.code, r.stderr, r.calls)
@@ -384,14 +384,14 @@ func TestReleaseWithoutCloseRefusedInsideSkill(t *testing.T) {
 	// the skill dir; the release dies with the refusal and nothing is written.
 	env, cwd := commandFixture(t)
 	env["HERDR_ENV"] = "1"
-	env["HERDR_SOHO_REGRID"] = "off"
-	env["HERDR_SOHO_DIR"] = env.Get("HERDR_SOHO_SKILL_DIR")
+	env["SOHO_REGRID"] = "off"
+	env["SOHO_DIR"] = env.Get("SOHO_SKILL_DIR")
 	fakeDir := t.TempDir()
 	if _, err := fakecli.Install(t, fakeDir, "herdr", []fakecli.Rule{{AnyArgs: true}}); err != nil {
 		t.Fatal(err)
 	}
 	env = withFakeCLI(env, fakeDir)
-	state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+	state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 	oldOut, oldErr := platform.Stdout, platform.Stderr
 	var out, stderr strings.Builder
 	platform.Stdout, platform.Stderr = &out, &stderr

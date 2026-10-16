@@ -55,10 +55,10 @@ func TestTM11RegridCommandParity(t *testing.T) {
 				env["HERDR_TAB_ID"], env["HERDR_PANE_ID"] = "t0", "C"
 			}
 			if tc.golden == "herd" {
-				env["HERDR_SOHO_LAYOUT"] = "tab"
+				env["SOHO_LAYOUT"] = "tab"
 			}
 			if tc.golden == "pull" {
-				env["HERDR_SOHO_SPLIT_MAX_PANES"] = "4"
+				env["SOHO_SPLIT_MAX_PANES"] = "4"
 			}
 			_ = panes
 			old := platform.Stdout

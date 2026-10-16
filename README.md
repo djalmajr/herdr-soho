@@ -38,17 +38,23 @@ Run `soho env` once to resolve or materialize the embedded skill. To expose the 
 
 All commands, including `collaborate`, `send` and `find`, run through the same Go CLI. The [guide](docs/guide.md#worker-collaboration) documents the review cycle and `worker_messages` policy, and the [ephemeral job contract](docs/job-contract.md) specifies the dispatcher-driven `job` family (ephemeral jobs on a machine, with a draft pull request kept by the job supervisor). [VALIDATION.md](VALIDATION.md) describes how a maintainer validates a pull request before merge with a real job run on the exact pull request head.
 
-## Renamed from herdr-soho
+## Migrating from herdr-soho
 
-`soho` was named `herdr-soho` until this rename. A compatibility window keeps the old names working until the `v0.4.0` release, and no project loses its configuration or state in the meantime:
+`soho` was named `herdr-soho` until `v0.3.0`. No former name is read anymore: not the `HERDR_SOHO_*` variables, the `herdr-soho` configuration files, the `.herdr-soho/` state directory, the `[herdr-soho:peer]` markers nor the `djalmajr.herdr-soho` plugin. Migrate each machine and project once:
 
-- The installer also installs a `herdr-soho` copy of the binary alongside `soho`.
-- The `HERDR_SOHO_*` variables are accepted while the `SOHO_*` ones are absent, and the job wake hook receives both the `SOHO_JOB_*` and the `HERDR_SOHO_JOB_*` variables.
-- The `herdr-soho` configuration files and the `.herdr-soho/` state directory are read while their `soho` counterparts are absent; `soho setup` migrates the instruction blocks and hooks the old skill wrote.
-- Peer messages still accept the legacy `[herdr-soho:peer]` markers.
-- The plugin links a `djalmajr.herdr-soho` shim next to `djalmajr.soho`, so a shortcut bound to the old action id keeps working.
+1. Install `soho` as described above. The installer leaves an old `herdr-soho` binary alone; remove it from your `PATH` (`soho doctor` shows where it is). On Windows its default directory was `LOCALAPPDATA/Programs/herdr-soho`.
+2. Run `soho setup` from each project root, in the mode the project already uses (`--local` or not). Without overwriting anything, it moves:
+   - the user configuration directory `herdr-soho` (or the older `herdr-agents`) into `soho`, `teams/` included;
+   - `.agents/herdr-soho.conf` (or `.agents/herdr-agents.conf`) to `.agents/soho.conf`;
+   - the `.herdr-soho/` state directory to `.soho/`, once no worker is left in its roster;
+   - the `<!-- herdr-soho:start -->` block and the `herdr-soho hook …` commands to their `soho` versions;
+   - the `djalmajr.herdr-soho` plugin to `djalmajr.soho`: for a release binary it installs the new plugin, points the Herdr shortcuts at `djalmajr.soho.*` (keeping a backup of `config.toml`) and unregisters the old plugin.
 
-When the window closes at `v0.4.0`, move the shortcut to the qualified `djalmajr.soho.pick` and run `herdr plugin unlink djalmajr.herdr-soho`.
+   `soho setup --dry-run` lists the moves first. A name that exists on both sides is left in place and reported.
+3. Rename each `HERDR_SOHO_<NAME>` variable to `SOHO_<NAME>`.
+4. Run `soho doctor`; it lists the former files, directories, variables and binary that are still present.
+
+Agents and scripts that called `herdr-soho` call `soho` with the same subcommands, and a job wake hook reads `SOHO_JOB_ID`, `SOHO_JOB_SEQ`, `SOHO_JOB_EVENT` and `SOHO_JOB_IDEMPOTENCY_KEY`.
 
 ## Optional Herdr plugin
 
@@ -67,7 +73,7 @@ Or install it from GitHub, for example with the tag of the installed release:
 herdr plugin install djalmajr/soho/plugin --ref <tag>
 ```
 
-A checkout linked before the rename is registered as `djalmajr.herdr-soho`; unlink it and link the checkout again so Herdr loads `djalmajr.soho`.
+A `djalmajr.herdr-soho` plugin registered before the rename is replaced by `soho setup`; see [Migrating from herdr-soho](#migrating-from-herdr-soho).
 
 The `team`, `roster` and `doctor` actions open the team panel on the workspace currently focused in Herdr (which can differ from the invoking shell's `HERDR_*` variables): `team` and `roster` start on the team view, `doctor` starts on the doctor view. The panel names the resolved workspace and cwd on its first line, and never refreshes by itself (`r` reloads). Its only writes are `x` (release the selected worker) and `g` (`gc --yes`), and only after their on-screen confirmation; every other CLI call runs with `SOHO_NOWRITE=1`.
 

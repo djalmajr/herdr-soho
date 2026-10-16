@@ -97,18 +97,18 @@ func newCopiesFixture(t *testing.T, agentRules []fakecli.Rule) *copiesFixture {
 		}
 	}
 	env := platform.Env{
-		"HOME":                 home,
-		"USERPROFILE":          home,
-		"XDG_CONFIG_HOME":      filepath.Join(root, "conf"),
-		"TMPDIR":               tmp,
-		"HERDR_ENV":            "1",
-		"HERDR_WORKSPACE_ID":   "ws",
-		"HERDR_PANE_ID":        "p-worker",
-		"HERDR_SOHO_DIR":       state,
-		"HERDR_SOHO_SKILL_DIR": skill,
-		"HERDR_SOHO_REGRID":    "off",
-		"SOHO_FAKECLI_CONFIG":  fakeDir,
-		"PATH":                 strings.Join([]string{fakeDir, gitBin, "/usr/bin", "/bin"}, string(os.PathListSeparator)),
+		"HOME":                home,
+		"USERPROFILE":         home,
+		"XDG_CONFIG_HOME":     filepath.Join(root, "conf"),
+		"TMPDIR":              tmp,
+		"HERDR_ENV":           "1",
+		"HERDR_WORKSPACE_ID":  "ws",
+		"HERDR_PANE_ID":       "p-worker",
+		"SOHO_DIR":            state,
+		"SOHO_SKILL_DIR":      skill,
+		"SOHO_REGRID":         "off",
+		"SOHO_FAKECLI_CONFIG": fakeDir,
+		"PATH":                strings.Join([]string{fakeDir, gitBin, "/usr/bin", "/bin"}, string(os.PathListSeparator)),
 	}
 	// A race-instrumented fake child otherwise pauses for one second on
 	// exit; the fixture sets only GORACE and leaves the rest of the env as built.
@@ -216,7 +216,7 @@ func TestMutationCopyRegistersTheCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(f.root, "mcopy")
-	overrides := platform.Env{"HERDR_SOHO_DIR": state, "HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HERDR_PANE_ID": "p-worker"}
+	overrides := platform.Env{"SOHO_DIR": state, "SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HERDR_PANE_ID": "p-worker"}
 	code, out, errOut := runMutationCopyCmd(t, f, f.source, overrides, "--source", f.source, "--dest", dest)
 	if code != 0 || errOut != "" {
 		t.Fatalf("code=%d out=%q err=%q; want a silent success with today's stdout", code, out, errOut)
@@ -279,7 +279,7 @@ func TestMutationCopyOutsideHerdrKeepsTodayOutput(t *testing.T) {
 	}
 	dest := filepath.Join(f.root, "mcopy")
 	// No HERDR_WORKSPACE_ID and a PATH without the herdr CLI: outside Herdr.
-	overrides := platform.Env{"PATH": gitBin, "HERDR_SOHO_DIR": state, "HERDR_SOHO_SKILL_DIR": skill}
+	overrides := platform.Env{"PATH": gitBin, "SOHO_DIR": state, "SOHO_SKILL_DIR": skill}
 	code, out, errOut := runMutationCopyCmd(t, f, f.source, overrides, "--source", f.source, "--dest", dest)
 	if code != 0 {
 		t.Fatalf("code=%d err=%q; want 0 outside Herdr", code, errOut)
@@ -607,7 +607,7 @@ func gcFixture(t *testing.T) (*copiesFixture, gcLayout) {
 		youngOrphan: filepath.Join(f.tmp, "young-orphan"),
 		owned:       filepath.Join(f.tmp, "owned"),
 		missing:     filepath.Join(f.tmp, "missing"),
-		unreg:       filepath.Join(f.tmp, "herdr-soho-mutation-abc"),
+		unreg:       filepath.Join(f.tmp, "soho-mutation-abc"),
 	}
 	for _, dir := range []string{layout.oldOrphan, layout.youngOrphan, layout.owned, layout.missing, layout.unreg} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -739,7 +739,7 @@ func TestGc(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(target, "t.txt"), []byte("0123456789"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		link := filepath.Join(f.tmp, "herdr-soho-mutation-link")
+		link := filepath.Join(f.tmp, "soho-mutation-link")
 		if err := os.Symlink(target, link); err != nil {
 			t.Fatal(err)
 		}
@@ -830,7 +830,7 @@ func TestGc(t *testing.T) {
 
 	t.Run("dry run with only unregistered copies names the include flag", func(t *testing.T) {
 		f := gcEmptyFixture(t)
-		unreg := filepath.Join(f.tmp, "herdr-soho-mutation-zeta")
+		unreg := filepath.Join(f.tmp, "soho-mutation-zeta")
 		if err := os.MkdirAll(unreg, 0o700); err != nil {
 			t.Fatal(err)
 		}

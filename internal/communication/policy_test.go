@@ -12,7 +12,7 @@ import (
 )
 
 // policyFixture isolates the config stack: user under XDG_CONFIG_HOME,
-// project under repo/.agents, session under HERDR_SOHO_DIR, defaults from
+// project under repo/.agents, session under SOHO_DIR, defaults from
 // the skill checked out with this tree. The process chdirs to repo so
 // Load resolves the same files LoadConfig read.
 func policyFixture(t *testing.T) (platform.Env, string) {
@@ -30,8 +30,8 @@ func policyFixture(t *testing.T) (platform.Env, string) {
 	}
 	t.Chdir(repo)
 	env := platform.Env{
-		"HOME": home, "XDG_CONFIG_HOME": conf, "HERDR_SOHO_DIR": state,
-		"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws",
+		"HOME": home, "XDG_CONFIG_HOME": conf, "SOHO_DIR": state,
+		"SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws",
 		"PATH": os.Getenv("PATH"),
 	}
 	return env, repo
@@ -270,7 +270,7 @@ func TestPartialHigherLayerRefused(t *testing.T) {
 			"worker_messages.rules.review.to=role:reviewer\n"+
 			"worker_messages.rules.review.types=review.ready\n"+
 			"worker_messages.rules.review.scope=assignment\n")
-	writePolicyFile(t, filepath.Join(cwd, ".agents", "herdr-soho.conf"),
+	writePolicyFile(t, filepath.Join(cwd, ".agents", "soho.conf"),
 		"worker_messages.rules.review.types=review.result\n")
 	loadExpectErr(t, env, cwd, "partial (missing from, to, scope)")
 	// And the partial layer must be the one named in the error (project).
@@ -290,7 +290,7 @@ func TestTombstone(t *testing.T) {
 			"worker_messages.rules.review.to=role:reviewer\n"+
 			"worker_messages.rules.review.types=review.ready\n"+
 			"worker_messages.rules.review.scope=assignment\n")
-	state := env.Get("HERDR_SOHO_DIR")
+	state := env.Get("SOHO_DIR")
 	writePolicyFile(t, filepath.Join(state, "ws", "session.conf"),
 		"worker_messages.rules.review.enabled=off\n")
 	pol := mustLoad(t, env, cwd)
@@ -352,10 +352,10 @@ func TestEnvRuleLayer(t *testing.T) {
 			"worker_messages.rules.review.to=role:reviewer\n"+
 			"worker_messages.rules.review.types=review.ready\n"+
 			"worker_messages.rules.review.scope=assignment\n")
-	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_REQUEST_FROM"] = "role:env"
-	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_REQUEST_TO"] = "role:env"
-	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_REQUEST_TYPES"] = "review.result"
-	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_REQUEST_SCOPE"] = "assignment"
+	env["SOHO_WORKER_MESSAGES_RULES_REVIEW_REQUEST_FROM"] = "role:env"
+	env["SOHO_WORKER_MESSAGES_RULES_REVIEW_REQUEST_TO"] = "role:env"
+	env["SOHO_WORKER_MESSAGES_RULES_REVIEW_REQUEST_TYPES"] = "review.result"
+	env["SOHO_WORKER_MESSAGES_RULES_REVIEW_REQUEST_SCOPE"] = "assignment"
 	pol := mustLoad(t, env, cwd)
 	rule := ruleOf(t, pol, "review_request")
 	if rule.Source != "env" || rule.From != "role:env" || rule.To != "role:env" || rule.Types != "review.result" {
@@ -370,15 +370,15 @@ func TestEnvRuleLayer(t *testing.T) {
 		t.Fatalf("env rule: got %v, want allowed", err)
 	}
 	// A partial env rule replaces the file rule and fails visibly.
-	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_FROM"] = "role:env"
+	env["SOHO_WORKER_MESSAGES_RULES_REVIEW_FROM"] = "role:env"
 	loadExpectErr(t, env, cwd, "partial (missing to, types, scope)")
 }
 
 func TestSohoEnvRuleNames(t *testing.T) {
-	// DJA-318 C2b: the rule layer reads the SOHO_ names. With the mode and
-	// the rules only in SOHO_* the review.question is authorized; with only
-	// the legacy HERDR_SOHO_* names it is authorized too (the legacy bridge
-	// still serves); with both, the new value wins field by field.
+	// DJA-318: the rule layer reads only the SOHO_ names. With the
+	// mode and the rules only in SOHO_* the review.question is authorized;
+	// with only the former HERDR_SOHO_* names no rule is created; with both,
+	// the new rule stands alone (the former names are ignored).
 	t.Run("soho names authorize", func(t *testing.T) {
 		env, cwd := policyFixture(t)
 		env["SOHO_WORKER_MESSAGES"] = "policy"
@@ -395,38 +395,42 @@ func TestSohoEnvRuleNames(t *testing.T) {
 			t.Fatalf("SOHO_ rules: got %v, want allowed", err)
 		}
 	})
-	t.Run("legacy names authorize", func(t *testing.T) {
+	t.Run("legacy names alone create no rule", func(t *testing.T) {
+		// DJA-318: the HERDR_SOHO_ rule names are no longer read: with
+		// the mode on the SOHO_ name and only legacy rule vars, no rule
+		// exists and nothing is authorized.
 		env, cwd := policyFixture(t)
-		env["HERDR_SOHO_WORKER_MESSAGES"] = "policy"
+		env["SOHO_WORKER_MESSAGES"] = "policy"
 		env["HERDR_SOHO_WORKER_MESSAGES_RULES_Q_FROM"] = "role:implementer"
 		env["HERDR_SOHO_WORKER_MESSAGES_RULES_Q_TO"] = "role:reviewer"
 		env["HERDR_SOHO_WORKER_MESSAGES_RULES_Q_TYPES"] = "review.question"
 		env["HERDR_SOHO_WORKER_MESSAGES_RULES_Q_SCOPE"] = "assignment"
 		pol := mustLoad(t, env, cwd)
+		if len(pol.Rules) != 0 {
+			t.Fatalf("legacy rule vars created rules: %+v", pol.Rules)
+		}
 		req := reqFromTo(Participant{Role: "implementer"}, Participant{Role: "reviewer"}, "review.question")
-		if err := pol.Authorize(req); err != nil {
-			t.Fatalf("legacy rules: got %v, want allowed", err)
+		if err := pol.Authorize(req); err == nil {
+			t.Fatalf("the legacy rule vars authorized a message: %v", pol)
 		}
 	})
-	t.Run("the new rule wins field by field", func(t *testing.T) {
+	t.Run("the new rule stands alone when the former names are set too", func(t *testing.T) {
 		env, cwd := policyFixture(t)
 		env["SOHO_WORKER_MESSAGES"] = "policy"
-		for _, prefix := range []string{"SOHO_", "HERDR_SOHO_"} {
-			env[prefix+"WORKER_MESSAGES_RULES_Q_FROM"] = "role:implementer"
-			env[prefix+"WORKER_MESSAGES_RULES_Q_TO"] = "role:reviewer"
-			env[prefix+"WORKER_MESSAGES_RULES_Q_SCOPE"] = "assignment"
-		}
+		env["SOHO_WORKER_MESSAGES_RULES_Q_FROM"] = "role:implementer"
+		env["SOHO_WORKER_MESSAGES_RULES_Q_TO"] = "role:reviewer"
+		env["SOHO_WORKER_MESSAGES_RULES_Q_SCOPE"] = "assignment"
 		env["SOHO_WORKER_MESSAGES_RULES_Q_TYPES"] = "review.question"
 		env["HERDR_SOHO_WORKER_MESSAGES_RULES_Q_TYPES"] = "review.finding"
 		pol := mustLoad(t, env, cwd)
 		if rule := ruleOf(t, pol, "q"); rule.Types != "review.question" {
-			t.Fatalf("rule types = %q, want the SOHO_ value over the legacy one", rule.Types)
+			t.Fatalf("rule types = %q, want the SOHO_ value whole (the former name is ignored)", rule.Types)
 		}
 		if err := pol.Authorize(reqFromTo(Participant{Role: "implementer"}, Participant{Role: "reviewer"}, "review.question")); err != nil {
 			t.Fatalf("new type: got %v, want allowed", err)
 		}
 		if err := pol.Authorize(reqFromTo(Participant{Role: "implementer"}, Participant{Role: "reviewer"}, "review.finding")); err == nil {
-			t.Fatalf("legacy type authorized: the SOHO_ types list must win whole")
+			t.Fatalf("former name's type authorized: the SOHO_ types list must stand whole")
 		}
 	})
 }
@@ -437,14 +441,14 @@ func TestEnvRuleFailures(t *testing.T) {
 		vars map[string]string
 		want string
 	}{
-		{"unknown suffix", map[string]string{"HERDR_SOHO_WORKER_MESSAGES_RULES_X_BOGUS": "1"}, "unknown rule field"},
-		{"bad name", map[string]string{"HERDR_SOHO_WORKER_MESSAGES_RULES_9X_FROM": "role:a"}, "invalid rule name"},
-		{"no name", map[string]string{"HERDR_SOHO_WORKER_MESSAGES_RULES_FROM": "role:a"}, "unknown rule field"},
+		{"unknown suffix", map[string]string{"SOHO_WORKER_MESSAGES_RULES_X_BOGUS": "1"}, "unknown rule field"},
+		{"bad name", map[string]string{"SOHO_WORKER_MESSAGES_RULES_9X_FROM": "role:a"}, "invalid rule name"},
+		{"no name", map[string]string{"SOHO_WORKER_MESSAGES_RULES_FROM": "role:a"}, "unknown rule field"},
 		{"invalid selector value", map[string]string{
-			"HERDR_SOHO_WORKER_MESSAGES_RULES_X_FROM":  "role:*",
-			"HERDR_SOHO_WORKER_MESSAGES_RULES_X_TO":    "role:b",
-			"HERDR_SOHO_WORKER_MESSAGES_RULES_X_TYPES": "review.ready",
-			"HERDR_SOHO_WORKER_MESSAGES_RULES_X_SCOPE": "assignment",
+			"SOHO_WORKER_MESSAGES_RULES_X_FROM":  "role:*",
+			"SOHO_WORKER_MESSAGES_RULES_X_TO":    "role:b",
+			"SOHO_WORKER_MESSAGES_RULES_X_TYPES": "review.ready",
+			"SOHO_WORKER_MESSAGES_RULES_X_SCOPE": "assignment",
 		}, "wildcard"},
 	}
 	for _, tc := range cases {
@@ -473,7 +477,7 @@ func TestEnvRuleEmptyValueUnset(t *testing.T) {
 			"worker_messages.rules.review.to=role:reviewer\n"+
 			"worker_messages.rules.review.types=review.ready\n"+
 			"worker_messages.rules.review.scope=assignment\n")
-	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_FROM"] = ""
+	env["SOHO_WORKER_MESSAGES_RULES_REVIEW_FROM"] = ""
 	pol := mustLoad(t, env, cwd)
 	if rule := ruleOf(t, pol, "review"); rule.Source != "user" {
 		t.Fatalf("rule source = %q, want user (empty env value is unset)", rule.Source)
@@ -502,8 +506,7 @@ func TestRuleNameHoldingFieldSuffix(t *testing.T) {
 }
 
 func TestUnreadableExistingFileRefused(t *testing.T) {
-	// The policy refuses an existing config file it cannot read, while the
-	// legacy Cfg resolution keeps the lower layer (compatibility).
+	// The policy refuses an existing config file it cannot read.
 	env, cwd := policyFixture(t)
 	user := platform.UserConfigPath(platform.Current(), env)
 	writePolicyFile(t, user,
@@ -512,7 +515,7 @@ func TestUnreadableExistingFileRefused(t *testing.T) {
 			"worker_messages.rules.review.to=role:reviewer\n"+
 			"worker_messages.rules.review.types=review.ready\n"+
 			"worker_messages.rules.review.scope=assignment\n")
-	project := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+	project := filepath.Join(cwd, ".agents", "soho.conf")
 	// A directory at the expected file path is unreadable as configuration
 	// on every supported OS, including Windows and privileged test users.
 	if err := os.MkdirAll(project, 0700); err != nil {

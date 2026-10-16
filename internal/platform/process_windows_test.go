@@ -25,8 +25,8 @@ func TestRunCliWindowsTreeKill(t *testing.T) {
 	setTestPath(env, dir+";"+testPath(env))
 	env["PATHEXT"] = ".EXE;.CMD;.BAT;.COM"
 	env["TMPDIR"] = dir
-	env["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "parent"
-	env["HERDR_SOHO_TREEKILL_PID_FILE"] = pidFile
+	env["SOHO_TREEKILL_FAKE_MODE"] = "parent"
+	env["SOHO_TREEKILL_PID_FILE"] = pidFile
 	if env.Get("COMSPEC") == "" {
 		env["COMSPEC"] = `C:\Windows\System32\cmd.exe`
 	}
@@ -75,7 +75,7 @@ func TestRunCliWindowsTreeKill(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runEnv := env.Clone()
-			runEnv["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "complete"
+			runEnv["SOHO_TREEKILL_FAKE_MODE"] = "complete"
 			got := RunCli("wrapper", nil, RunOptions{Env: runEnv, Platform: "win32", Cwd: dir, Input: tc.options.Input, MergeOutput: tc.options.MergeOutput, OutputFiles: tc.options.OutputFiles, TimeoutMs: tc.options.TimeoutMs})
 			if got.Status == nil || *got.Status != 0 || got.Signal != "" || got.TimedOut || got.Error != "" {
 				t.Fatalf("completion result = %#v", got)
@@ -90,7 +90,7 @@ func TestRunCliWindowsTreeKill(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".herdr-soho-out-") {
+		if strings.HasPrefix(entry.Name(), ".soho-out-") {
 			t.Errorf("temporary output file remained: %s", entry.Name())
 		}
 	}
@@ -130,9 +130,9 @@ func TestRunCliWindowsTreeKill(t *testing.T) {
 	} {
 		t.Run("timeout "+tc.name, func(t *testing.T) {
 			runEnv := env.Clone()
-			runEnv["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "parent"
-			runEnv["HERDR_SOHO_TREEKILL_PID_FILE"] = filepath.Join(dir, "pids-"+strings.ReplaceAll(tc.name, " ", "-")+".txt")
-			t.Cleanup(func() { cleanupRecordedProcesses(runEnv.Get("HERDR_SOHO_TREEKILL_PID_FILE")) })
+			runEnv["SOHO_TREEKILL_FAKE_MODE"] = "parent"
+			runEnv["SOHO_TREEKILL_PID_FILE"] = filepath.Join(dir, "pids-"+strings.ReplaceAll(tc.name, " ", "-")+".txt")
+			t.Cleanup(func() { cleanupRecordedProcesses(runEnv.Get("SOHO_TREEKILL_PID_FILE")) })
 			got := RunCli("wrapper", nil, RunOptions{Env: runEnv, Platform: "win32", Cwd: dir, Input: tc.options.Input, MergeOutput: tc.options.MergeOutput, OutputFiles: tc.options.OutputFiles, TimeoutMs: tc.options.TimeoutMs})
 			if got.Status != nil || got.Signal != "SIGTERM" || !got.TimedOut || got.Error != "ETIMEDOUT" {
 				t.Fatalf("timeout result = %#v", got)
@@ -140,15 +140,15 @@ func TestRunCliWindowsTreeKill(t *testing.T) {
 			if !strings.Contains(got.Stdout, tc.wantOut) || (tc.wantErr != "" && !strings.Contains(got.Stderr, tc.wantErr)) || (tc.wantErr == "" && got.Stderr != "") {
 				t.Fatalf("streams = stdout %q, stderr %q", got.Stdout, got.Stderr)
 			}
-			assertRecordedProcessesGone(t, runEnv.Get("HERDR_SOHO_TREEKILL_PID_FILE"))
+			assertRecordedProcessesGone(t, runEnv.Get("SOHO_TREEKILL_PID_FILE"))
 		})
 	}
 
 	t.Run("root exit closes the job and releases descendant-held pipes", func(t *testing.T) {
 		runEnv := env.Clone()
 		pidPath := filepath.Join(dir, "pids-natural.txt")
-		runEnv["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "parent-exits"
-		runEnv["HERDR_SOHO_TREEKILL_PID_FILE"] = pidPath
+		runEnv["SOHO_TREEKILL_FAKE_MODE"] = "parent-exits"
+		runEnv["SOHO_TREEKILL_PID_FILE"] = pidPath
 		t.Cleanup(func() { cleanupRecordedProcesses(pidPath) })
 		started := time.Now()
 		got := RunCli("wrapper", nil, RunOptions{Env: runEnv, Platform: "win32", Cwd: dir, TimeoutMs: 5000})
@@ -246,8 +246,8 @@ func TestRunCliWindowsTaskkillFallbackKillsGrandchild(t *testing.T) { // Mutatio
 	setTestPath(env, dir+";"+testPath(env))
 	env["PATHEXT"] = ".EXE;.CMD;.BAT;.COM"
 	env["TMPDIR"] = dir
-	env["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "parent"
-	env["HERDR_SOHO_TREEKILL_PID_FILE"] = pidFile
+	env["SOHO_TREEKILL_FAKE_MODE"] = "parent"
+	env["SOHO_TREEKILL_PID_FILE"] = pidFile
 	env[treeKillForceFallbackEnv] = "1"
 	if env.Get("COMSPEC") == "" {
 		env["COMSPEC"] = `C:\Windows\System32\cmd.exe`
@@ -269,13 +269,13 @@ func TestRunCliWindowsTaskkillFallbackKillsGrandchild(t *testing.T) { // Mutatio
 // the helper mode, its pid file, PATHEXT, and whether the fixture dir is
 // first on PATH.
 func treeKillChildEnv(env Env) string {
-	pidFile := env.Get("HERDR_SOHO_TREEKILL_PID_FILE")
+	pidFile := env.Get("SOHO_TREEKILL_PID_FILE")
 	pathFirst := false
 	if dir := filepath.Dir(pidFile); dir != "" && dir != "." {
 		pathFirst = strings.HasPrefix(env.Get("PATH"), dir+";")
 	}
 	return fmt.Sprintf("mode=%s pidFile=%s PATHEXT=%s pathFirst=%v",
-		env.Get("HERDR_SOHO_TREEKILL_FAKE_MODE"), filepath.Base(pidFile), env.Get("PATHEXT"), pathFirst)
+		env.Get("SOHO_TREEKILL_FAKE_MODE"), filepath.Base(pidFile), env.Get("PATHEXT"), pathFirst)
 }
 
 func treeKillStatus(result RunResult) string {

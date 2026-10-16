@@ -13,7 +13,7 @@ import (
 
 // insideSkillFixture builds a hermetic env whose skill dir (SKILL.md only) is
 // the project root the state would resolve to: with cwd inside the skill and
-// no HERDR_SOHO_DIR the state root is <skill>/.soho.
+// no SOHO_DIR the state root is <skill>/.soho.
 func insideSkillFixture(t *testing.T) (root, skill string, env platform.Env) {
 	t.Helper()
 	root = t.TempDir()
@@ -34,7 +34,7 @@ func insideSkillFixture(t *testing.T) (root, skill string, env platform.Env) {
 	env = platform.Env{
 		"HOME": home, "USERPROFILE": home, "PATH": bin,
 		"HERDR_ENV": "1", "SOHO_FAKECLI_CONFIG": bin,
-		"HERDR_SOHO_SKILL_DIR": skill,
+		"SOHO_SKILL_DIR": skill,
 	}
 	return root, skill, env
 }
@@ -74,7 +74,7 @@ func TestDoctorWarnsWhenTheStateDirIsInsideTheSkill(t *testing.T) {
 	if err := os.MkdirAll(proj, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	env["HERDR_SOHO_DIR"] = filepath.Join(filepath.Dir(skill), "state")
+	env["SOHO_DIR"] = filepath.Join(filepath.Dir(skill), "state")
 	var out2 strings.Builder
 	DoctorCheck(&ctx, env, proj, &out2)
 	if !strings.Contains(out2.String(), "state dir writable: "+filepath.Join(filepath.Dir(skill), "state")+"\n") {

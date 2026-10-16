@@ -16,7 +16,7 @@ import (
 )
 
 // policyFixture builds an isolated config stack (user under XDG_CONFIG_HOME,
-// project under repo/.agents, session under HERDR_SOHO_DIR, defaults from
+// project under repo/.agents, session under SOHO_DIR, defaults from
 // the skill checked out with this tree) and points the process at repo, so
 // communication.Load resolves the same files core.LoadConfig read.
 func policyFixture(t *testing.T) (platform.Env, string) {
@@ -42,8 +42,8 @@ func policyFixture(t *testing.T) (platform.Env, string) {
 	}
 	t.Chdir(repo)
 	env := platform.Env{
-		"HOME": home, "XDG_CONFIG_HOME": conf, "HERDR_SOHO_DIR": state,
-		"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws",
+		"HOME": home, "XDG_CONFIG_HOME": conf, "SOHO_DIR": state,
+		"SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws",
 		"PATH": os.Getenv("PATH"),
 	}
 	return env, repo
@@ -80,11 +80,11 @@ func userConfig(env platform.Env) string {
 }
 
 func projectConfig(cwd string) string {
-	return filepath.Join(cwd, ".agents", "herdr-soho.conf")
+	return filepath.Join(cwd, ".agents", "soho.conf")
 }
 
 func sessionConfig(env platform.Env) string {
-	return filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+	return filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 }
 
 func ruleOf(t *testing.T, pol communication.Policy, name string) communication.Rule {
@@ -112,10 +112,10 @@ func TestWorkerMessagesConfigPrecedence(t *testing.T) {
 	if got := core.CfgSource(&ctx, "worker_messages", env); got != "user" {
 		t.Fatalf("mode source = %q, want user", got)
 	}
-	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_FROM"] = "role:env"
-	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_TO"] = "role:env"
-	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_TYPES"] = "review.question"
-	env["HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_SCOPE"] = "assignment"
+	env["SOHO_WORKER_MESSAGES_RULES_REVIEW_FROM"] = "role:env"
+	env["SOHO_WORKER_MESSAGES_RULES_REVIEW_TO"] = "role:env"
+	env["SOHO_WORKER_MESSAGES_RULES_REVIEW_TYPES"] = "review.question"
+	env["SOHO_WORKER_MESSAGES_RULES_REVIEW_SCOPE"] = "assignment"
 	pol, err := communication.Load(&ctx, env)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -133,10 +133,10 @@ func TestWorkerMessagesConfigPrecedence(t *testing.T) {
 	// The session layer defined only types for review: the env layer named
 	// the rule first, so the session partial is not consulted at all. Drop
 	// the env rule and the session layer (which alone is partial) must fail.
-	delete(env, "HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_FROM")
-	delete(env, "HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_TO")
-	delete(env, "HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_TYPES")
-	delete(env, "HERDR_SOHO_WORKER_MESSAGES_RULES_REVIEW_SCOPE")
+	delete(env, "SOHO_WORKER_MESSAGES_RULES_REVIEW_FROM")
+	delete(env, "SOHO_WORKER_MESSAGES_RULES_REVIEW_TO")
+	delete(env, "SOHO_WORKER_MESSAGES_RULES_REVIEW_TYPES")
+	delete(env, "SOHO_WORKER_MESSAGES_RULES_REVIEW_SCOPE")
 	if _, err := communication.Load(&ctx, env); err == nil || !strings.Contains(err.Error(), "session") {
 		t.Fatalf("partial session layer must be a visible error, got %v", err)
 	}
@@ -156,7 +156,7 @@ func TestWorkerMessagesConfigPrecedence(t *testing.T) {
 
 func TestWorkerMessagesSessionUsesConfiguredStateDir(t *testing.T) {
 	env, cwd := policyFixture(t)
-	delete(env, "HERDR_SOHO_DIR")
+	delete(env, "SOHO_DIR")
 	custom := filepath.Join(t.TempDir(), "custom-state")
 	writePolicy(t, userConfig(env), "state_dir="+custom+"\nworker_messages=policy\n")
 	first := core.LoadConfig(env, cwd)
@@ -195,7 +195,7 @@ func TestWorkerMessagesLoadsCurrentWorkspaceSessionOnce(t *testing.T) {
 	}
 	env["PATH"] = bin + string(os.PathListSeparator) + env["PATH"]
 	env["SOHO_FAKECLI_CONFIG"] = bin
-	writePolicy(t, filepath.Join(env["HERDR_SOHO_DIR"], "probe-ws", "session.conf"), "layout=stack\n")
+	writePolicy(t, filepath.Join(env["SOHO_DIR"], "probe-ws", "session.conf"), "layout=stack\n")
 	ctx := core.LoadConfig(env, cwd)
 	if core.Cfg(&ctx, "layout", "", env) != "stack" {
 		t.Fatal("current workspace session was not read")
@@ -210,7 +210,7 @@ func TestWorkerMessagesLoadsCurrentWorkspaceSessionOnce(t *testing.T) {
 }
 
 func envPrefix(name, field string) string {
-	return "HERDR_SOHO_WORKER_MESSAGES_RULES_" + strings.ToUpper(name) + "_" + strings.ToUpper(field)
+	return "SOHO_WORKER_MESSAGES_RULES_" + strings.ToUpper(name) + "_" + strings.ToUpper(field)
 }
 
 func TestWorkerMessagesConfigTombstone(t *testing.T) {
@@ -307,7 +307,7 @@ func TestWorkerMessagesConfigInvalidMode(t *testing.T) {
 		t.Fatalf("invalid mode must be a visible error, got %v", err)
 	}
 	// The env mode follows Cfg and beats the files.
-	env["HERDR_SOHO_WORKER_MESSAGES"] = "policy"
+	env["SOHO_WORKER_MESSAGES"] = "policy"
 	pol, err := communication.Load(&ctx, env)
 	if err != nil {
 		t.Fatalf("Load with env mode: %v", err)
@@ -315,7 +315,7 @@ func TestWorkerMessagesConfigInvalidMode(t *testing.T) {
 	if pol.Mode != communication.ModePolicy {
 		t.Fatalf("mode = %q, want policy from env", pol.Mode)
 	}
-	env["HERDR_SOHO_WORKER_MESSAGES"] = "off"
+	env["SOHO_WORKER_MESSAGES"] = "off"
 	pol, err = communication.Load(&ctx, env)
 	if err != nil {
 		t.Fatalf("Load with env mode off: %v", err)
@@ -434,7 +434,7 @@ func TestWorkerMessagesTraditionalCfgUnchanged(t *testing.T) {
 	if got := core.CfgSource(&ctx, "layout", env); got != "session" {
 		t.Fatalf("layout source = %q, want session", got)
 	}
-	env["HERDR_SOHO_LAYOUT"] = "split"
+	env["SOHO_LAYOUT"] = "split"
 	if got := core.Cfg(&ctx, "layout", "", env); got != "split" {
 		t.Fatalf("layout with env = %q, want split (env wins, as before)", got)
 	}

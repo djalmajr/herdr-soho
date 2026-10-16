@@ -23,7 +23,7 @@ func tm9CommandFixture(t *testing.T) (platform.Env, string) {
 		t.Fatal(err)
 	}
 	clean := envFrom(testutil.CleanEnv(t))
-	for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "HERDR_SOHO_DIR", "HERDR_SOHO_SKILL_DIR", "HERDR_WORKSPACE_ID"} {
+	for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "SOHO_DIR", "SOHO_SKILL_DIR", "HERDR_WORKSPACE_ID"} {
 		clean[key] = env.Get(key)
 	}
 	clean["USERPROFILE"] = env.Get("HOME")
@@ -124,7 +124,7 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("seed session code=%d", code)
 		}
-		path := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")
+		path := filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")
 		before, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -157,7 +157,7 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 				t.Fatalf("args=%v code=%d stderr=%q", args, code, stderr)
 			}
 		}
-		for _, path := range []string{filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf"), filepath.Join(cwd, ".agents", "soho.conf")} {
+		for _, path := range []string{filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf"), filepath.Join(cwd, ".agents", "soho.conf")} {
 			if _, err := os.Stat(path); err != nil {
 				t.Errorf("expected file %s: %v", path, err)
 			}
@@ -169,14 +169,14 @@ func TestTM9ConfigAndSessionCommands(t *testing.T) {
 		if code != 2 || !strings.Contains(stderr, "arrived as one argument; pass the key and the value as two arguments or as key=value") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
-		if _, err := os.Stat(filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf")); !os.IsNotExist(err) {
 			t.Fatalf("unsplit input wrote session file: %v", err)
 		}
 	})
 	t.Run("session set writes the args keys with dash-led values", func(t *testing.T) { // JS: "session set writes the args keys with dash-led values"
 		env, cwd := tm9CommandFixture(t)
 		code, _, stderr := runIn(t, []string{"session", "set", "role.reviewer.args", "-c", "a=b"}, env, cwd)
-		data, err := os.ReadFile(filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "session.conf"))
+		data, err := os.ReadFile(filepath.Join(env.Get("SOHO_DIR"), "ws", "session.conf"))
 		if code != 0 || stderr != "" || err != nil || string(data) != "role.reviewer.args=-c a=b\n" {
 			t.Fatalf("code=%d stderr=%q data=%q err=%v", code, stderr, data, err)
 		}
@@ -244,7 +244,7 @@ func TestTM9StatusUsesExplicitWorkingDirectory(t *testing.T) { // JS: "status re
 			t.Fatal(err)
 		}
 	}
-	env["HERDR_SOHO_DIR"] = ".status-state"
+	env["SOHO_DIR"] = ".status-state"
 	state := filepath.Join(requested, ".status-state", "ws")
 	if err := os.MkdirAll(filepath.Join(state, "reports"), 0o700); err != nil {
 		t.Fatal(err)

@@ -242,6 +242,17 @@ func writePair(raw, key, value string) string {
 
 // CmdPlan simulates config/session writes in memory and emits the instruction/hook diffs; it never mutates the checkout.
 func CmdPlan(args []string, ctx *core.Config, env platform.Env, cwd string) {
+	// The plan shows what the migration would move, without moving it.
+	// Inside the skill the previews never run: they would call herdr, and
+	// the plan's own writes keep the refusal that follows.
+	if core.StatePathInSkill(env, platform.ProjectRoot(env, cwd)) == "" {
+		for _, line := range migrateNames(ctx, env, cwd, true) {
+			_, _ = fmt.Fprintln(platform.Stdout, line)
+		}
+		for _, line := range migratePlugin(env, BuildVersion, true) {
+			_, _ = fmt.Fprintln(platform.Stdout, line)
+		}
+	}
 	var panes, target string
 	local, hooks := false, true
 	var proj, user, sess [][2]string
@@ -348,7 +359,7 @@ func CmdPlan(args []string, ctx *core.Config, env platform.Env, cwd string) {
 		file, source string
 		pairs        [][2]string
 		touched      bool
-	}{{file: projectFile, source: core.EffectiveConfigFile(projectFile, core.LegacyProjectConfigPath(root)), pairs: proj, touched: panes != "" || len(laneSpecs) > 0 || len(proj) > 0}, {file: userFile, source: core.EffectiveConfigFile(userFile, core.LegacyUserConfigPath(platform.Current(), env)), pairs: user, touched: len(user) > 0}, {file: sessionFile, source: sessionFile, pairs: sess, touched: len(sess) > 0}}
+	}{{file: projectFile, source: projectFile, pairs: proj, touched: panes != "" || len(laneSpecs) > 0 || len(proj) > 0}, {file: userFile, source: userFile, pairs: user, touched: len(user) > 0}, {file: sessionFile, source: sessionFile, pairs: sess, touched: len(sess) > 0}}
 	sectionAfter := make([]string, len(sections))
 	tempNames := []string{"proj.conf", "user.conf", "session.conf"}
 	for i, section := range sections {

@@ -9,24 +9,21 @@ import (
 	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
-// TestBridgePaneOpenUsesTheInvokingPluginID: `plugin pane open` must open
-// the pane under the id of the plugin that invoked the action. Herdr
-// injects that id as HERDR_PLUGIN_ID for action commands (it is not part
-// of HERDR_PLUGIN_CONTEXT_JSON). The legacy shim
-// (djalmajr.herdr-soho) must open its own panes during the compatibility
-// window; the soho plugin (djalmajr.soho) is the default, and any other
-// value falls back to it.
-func TestBridgePaneOpenUsesTheInvokingPluginID(t *testing.T) {
+// TestBridgePaneOpenAlwaysUsesTheSohoPluginID (DJA-318 N2, negative): the
+// bridge opens every pane under the soho plugin id (djalmajr.soho),
+// whatever HERDR_PLUGIN_ID the invoking plugin carried: a leftover shim id
+// (djalmajr.herdr-soho), the soho id, an unknown id, or an unset variable
+// all open with --plugin djalmajr.soho.
+func TestBridgePaneOpenAlwaysUsesTheSohoPluginID(t *testing.T) {
 	actions := []string{"pick", "team", "roster", "doctor"}
 	cases := []struct {
 		name     string
 		pluginID string // HERDR_PLUGIN_ID value; "" leaves the variable unset
-		wantID   string
 	}{
-		{"shim invocation", "djalmajr.herdr-soho", "djalmajr.herdr-soho"},
-		{"soho invocation", "djalmajr.soho", "djalmajr.soho"},
-		{"unknown id falls back to soho", "djalmajr.someone-else", "djalmajr.soho"},
-		{"missing id falls back to soho", "", "djalmajr.soho"},
+		{"leftover shim id", "djalmajr.herdr-soho"},
+		{"soho id", "djalmajr.soho"},
+		{"unknown id", "djalmajr.someone-else"},
+		{"missing id", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,8 +49,8 @@ func TestBridgePaneOpenUsesTheInvokingPluginID(t *testing.T) {
 						pluginID = argv[j+1]
 					}
 				}
-				if pluginID != tc.wantID {
-					t.Fatalf("%s pane open argv=%#v want --plugin %s", action, argv, tc.wantID)
+				if pluginID != plugin.SohoPluginID {
+					t.Fatalf("%s pane open argv=%#v want --plugin %s", action, argv, plugin.SohoPluginID)
 				}
 			}
 		})

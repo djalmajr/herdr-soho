@@ -142,7 +142,7 @@ func TestKindRules(t *testing.T) {
 	t.Run("dotted spec swaps dots for dashes and picks the newest candidate", func(t *testing.T) {
 		seed := func(ids ...string) platform.Env {
 			tmp := t.TempDir()
-			if err := os.WriteFile(filepath.Join(tmp, "herdr-soho-models-claude.txt"), []byte(strings.Join(ids, "\n")+"\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(tmp, "soho-models-claude.txt"), []byte(strings.Join(ids, "\n")+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			return platform.Env{"TMPDIR": tmp}

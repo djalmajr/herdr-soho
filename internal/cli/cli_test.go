@@ -43,13 +43,13 @@ func hostileRuntimeEnv(t *testing.T, override string) (platform.Env, []string) {
 		}
 	}
 	env := platform.Env{
-		"PATH":                 bin,
-		"PATHEXT":              ".EXE;.CMD;.BAT;.COM",
-		"SOHO_FAKECLI_CONFIG":  bin,
-		"HERDR_SOHO_SKILL_DIR": "/skill",
-		"HOME":                 t.TempDir(),
-		"XDG_CONFIG_HOME":      t.TempDir(),
-		"USERPROFILE":          t.TempDir(),
+		"PATH":                bin,
+		"PATHEXT":             ".EXE;.CMD;.BAT;.COM",
+		"SOHO_FAKECLI_CONFIG": bin,
+		"SOHO_SKILL_DIR":      "/skill",
+		"HOME":                t.TempDir(),
+		"XDG_CONFIG_HOME":     t.TempDir(),
+		"USERPROFILE":         t.TempDir(),
 	}
 	if runtime.GOOS == "windows" {
 		env["SystemRoot"] = os.Getenv("SystemRoot")
@@ -196,24 +196,21 @@ func TestHelpAndUnknown(t *testing.T) {
 	}
 }
 
-func TestNowriteAndLegacyEnv(t *testing.T) {
+func TestNowriteAndFormerEnv(t *testing.T) {
 	// Mutation captured: allowing extra arguments after doctor or roster bypasses NOWRITE.
 	var errOut bytes.Buffer
 	oldErr := platform.Stderr
 	platform.Stderr = &errOut
-	code := Run([]string{"kinds"}, platform.Env{"HERDR_SOHO_NOWRITE": "1", "HERDR_SOHO_SOCKET_PATH": "legacy"})
+	code := Run([]string{"kinds"}, platform.Env{"SOHO_NOWRITE": "1", "HERDR_SOHO_SOCKET_PATH": "legacy"})
 	platform.Stderr = oldErr
 	if code != 2 || !strings.Contains(errOut.String(), "SOHO_NOWRITE=1 is read-only") || !strings.Contains(errOut.String(), "rejected: kinds") {
 		t.Fatalf("code=%d err=%q", code, errOut.String())
 	}
-	if got := applyLegacyForTest(platform.Env{"HERDR_SOHO_SOCKET_PATH": "legacy"}); got != "legacy" {
-		t.Fatalf("legacy mapped to %q", got)
-	}
 	for _, args := range [][]string{{"doctor", "--fix"}, {"roster", "extra"}} {
 		var stderr bytes.Buffer
-		oldErr := platform.Stderr
+		oldErr = platform.Stderr
 		platform.Stderr = &stderr
-		got := Run(args, platform.Env{"HERDR_SOHO_NOWRITE": "1"})
+		got := Run(args, platform.Env{"SOHO_NOWRITE": "1"})
 		platform.Stderr = oldErr
 		if got != 2 || !strings.Contains(stderr.String(), "extra argument") {
 			t.Errorf("NOWRITE args=%v code=%d stderr=%q", args, got, stderr.String())
@@ -224,12 +221,7 @@ func TestNowriteAndLegacyEnv(t *testing.T) {
 	platform.Stderr = &stderr
 	got := Run([]string{"kinds"}, platform.Env{"HERDR_SOHO_NOWRITE": "1"})
 	platform.Stderr = oldErr
-	if got != 2 || !strings.Contains(stderr.String(), "SOHO_NOWRITE=1") {
-		t.Errorf("legacy NOWRITE code=%d stderr=%q", got, stderr.String())
+	if got != 0 || stderr.String() != "" {
+		t.Errorf("former NOWRITE code=%d stderr=%q", got, stderr.String())
 	}
-}
-
-func applyLegacyForTest(env platform.Env) string {
-	applyLegacyEnv(env)
-	return env.Get("SOHO_SOCKET_PATH")
 }

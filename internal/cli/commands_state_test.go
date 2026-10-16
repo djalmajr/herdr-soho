@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 func TestStateCommandParity(t *testing.T) {
 	t.Run("roster reads live agent objects and records panes before skipping nameless rows", func(t *testing.T) { // Mutation captured: refusing *jsonjs.Object makes the worker gone and lists the nameless pane owner.
 		env, _ := commandFixture(t)
-		state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+		state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 		if err := os.MkdirAll(filepath.Join(state, "wait"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +59,7 @@ func TestStateCommandParity(t *testing.T) {
 	})
 	t.Run("roster pane and tab identifiers compare with JavaScript strict equality", func(t *testing.T) { // Mutation captured: fmt.Sprint equality treats numeric pane IDs as strings.
 		env, _ := commandFixture(t)
-		state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+		state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 		if err := os.MkdirAll(filepath.Join(state, "wait"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +88,7 @@ func TestStateCommandParity(t *testing.T) {
 	})
 	t.Run("clean preserves live objects and does not match null pane IDs to empty panes", func(t *testing.T) { // Mutation captured: coercing null pane_id to an empty string keeps the dead row and drops the live one.
 		env, _ := commandFixture(t)
-		state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+		state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 		if err := os.MkdirAll(filepath.Join(state, "wait"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -137,7 +137,7 @@ func TestStateCommandParity(t *testing.T) {
 		platform.Stdout, platform.Stderr = &out, &stderr
 		code := Run([]string{"friction", "bogus"}, env)
 		platform.Stdout, platform.Stderr = oldOut, oldErr
-		log, readErr := os.ReadFile(filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "friction.log"))
+		log, readErr := os.ReadFile(filepath.Join(env.Get("SOHO_DIR"), "ws", "friction.log"))
 		if code != 2 || readErr != nil || strings.Count(string(log), "error(exit 2)\tfriction\tfriction: unknown subcommand 'bogus'\n") != 1 || stderr.String() != "soho: friction: unknown subcommand 'bogus'\n" {
 			t.Fatalf("code=%d log=%q stderr=%q readErr=%v", code, log, stderr.String(), readErr)
 		}
@@ -159,7 +159,7 @@ func TestStateCommandParity(t *testing.T) {
 		if code != 0 || stderr.String() != "" || out.String() != "recorded\n" {
 			t.Fatalf("code=%d out=%q err=%q", code, out.String(), stderr.String())
 		}
-		log, err := os.ReadFile(filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "friction.log"))
+		log, err := os.ReadFile(filepath.Join(env.Get("SOHO_DIR"), "ws", "friction.log"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -209,7 +209,7 @@ func TestStateCommandParity(t *testing.T) {
 	})
 	t.Run("clean drops gone roster rows and reports old file cleanup", func(t *testing.T) { // Mutation captured: removing the .current.md exclusion and last-report keep check deletes protected files.
 		env, cwd := commandFixture(t)
-		state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+		state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 		if err := os.MkdirAll(filepath.Join(state, "wait"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -286,7 +286,7 @@ func TestStateCommandParity(t *testing.T) {
 		if err := os.WriteFile(report, []byte{'a', 0xff, 0xfe, 0xc3, 'b'}, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_FEEDBACK": "local", "HERDR_SOHO_FEEDBACK_DIR": dir, "HERDR_SOHO_DIR": filepath.Join(root, "state")}
+		env := platform.Env{"HERDR_WORKSPACE_ID": "ws", "SOHO_FEEDBACK": "local", "SOHO_FEEDBACK_DIR": dir, "SOHO_DIR": filepath.Join(root, "state")}
 		oldOut := platform.Stdout
 		var out bytes.Buffer
 		platform.Stdout = &out
@@ -325,7 +325,7 @@ func TestStateCommandParity(t *testing.T) {
 			}
 			_ = os.WriteFile(filepath.Join(dir, name), []byte("existing"), 0o600)
 		}
-		env := platform.Env{"HERDR_SOHO_FEEDBACK": "local", "HERDR_SOHO_FEEDBACK_DIR": dir}
+		env := platform.Env{"SOHO_FEEDBACK": "local", "SOHO_FEEDBACK_DIR": dir}
 		var recovered any
 		func() {
 			defer func() { recovered = recover() }()
@@ -346,7 +346,7 @@ func TestStateCommandParity(t *testing.T) {
 		if err := os.Mkdir(filepath.Join(state, "friction.log"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_NOWRITE": "1"}
+		env := platform.Env{"SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "SOHO_NOWRITE": "1"}
 		var recovered any
 		func() {
 			defer func() { recovered = recover() }()
@@ -371,7 +371,7 @@ func TestStateCommandParity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := withFakeCLI(platform.Env{"HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_NOWRITE": "1"}, fakeDir)
+		env := withFakeCLI(platform.Env{"SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "SOHO_NOWRITE": "1"}, fakeDir)
 		env["HERDR_ENV"] = "1"
 		var recovered any
 		func() {
@@ -393,8 +393,8 @@ func TestStateCommandParity(t *testing.T) {
 		}
 		report := filepath.Join(t.TempDir(), "report.md")
 		_ = os.WriteFile(report, []byte("report contents\n"), 0o600)
-		env["HERDR_SOHO_FEEDBACK"] = "local"
-		env["HERDR_SOHO_FEEDBACK_DIR"] = dir
+		env["SOHO_FEEDBACK"] = "local"
+		env["SOHO_FEEDBACK_DIR"] = dir
 		env["HERDR_ENV"] = "1"
 		fakeDir := t.TempDir()
 		_, err := fakecli.Install(t, fakeDir, "herdr", nil)

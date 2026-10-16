@@ -47,13 +47,13 @@ func newMarkFixture(t *testing.T) *markFixture {
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"HOME":                 filepath.Join(root, "home"),
-		"USERPROFILE":          filepath.Join(root, "home"),
-		"XDG_CONFIG_HOME":      filepath.Join(root, "xdg"),
-		"PATH":                 filepath.Join(root, "bin"),
-		"HERDR_WORKSPACE_ID":   "ws",
-		"HERDR_SOHO_DIR":       filepath.Join(root, "state"),
-		"HERDR_SOHO_SKILL_DIR": skill,
+		"HOME":               filepath.Join(root, "home"),
+		"USERPROFILE":        filepath.Join(root, "home"),
+		"XDG_CONFIG_HOME":    filepath.Join(root, "xdg"),
+		"PATH":               filepath.Join(root, "bin"),
+		"HERDR_WORKSPACE_ID": "ws",
+		"SOHO_DIR":           filepath.Join(root, "state"),
+		"SOHO_SKILL_DIR":     skill,
 	}
 	return &markFixture{root: root, skill: skill, ws: ws, cwd: cwd, env: env, ctx: &core.Config{Entries: map[string]core.ConfigEntry{}}}
 }
@@ -364,7 +364,7 @@ func TestMarkInsideTheSkill(t *testing.T) { // mutation: skipping the StateDir r
 			t.Fatal(err)
 		}
 		env := f.env.Clone()
-		env["HERDR_SOHO_DIR"] = filepath.Join(f.skill, ".herdr-soho")
+		env["SOHO_DIR"] = filepath.Join(f.skill, ".herdr-soho")
 		oldCwd, err := os.Getwd()
 		if err != nil {
 			t.Fatal(err)

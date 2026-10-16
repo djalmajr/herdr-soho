@@ -47,7 +47,7 @@ func newJobFix(t *testing.T) *jobFix {
 	}
 	f.env = platform.Env{
 		"HOME": f.home, "USERPROFILE": f.home, "XDG_CONFIG_HOME": filepath.Join(root, "xdg"),
-		"HERDR_SOHO_SKILL_DIR": "../../skills/soho", "PATH": filepath.Join(root, "bin"),
+		"SOHO_SKILL_DIR": "../../skills/soho", "PATH": filepath.Join(root, "bin"),
 	}
 	userFile := platform.UserConfigPath(platform.Current(), f.env)
 	if err := os.MkdirAll(filepath.Dir(userFile), 0o700); err != nil {
@@ -938,7 +938,7 @@ func TestJobNowrite(t *testing.T) {
 	for name, value := range f.env {
 		env[name] = value
 	}
-	env["HERDR_SOHO_NOWRITE"] = "1"
+	env["SOHO_NOWRITE"] = "1"
 
 	tree := treeSnapshot(t, f.root)
 	for _, args := range [][]string{
@@ -1449,7 +1449,7 @@ func TestJobSuperviseCLIRefusals(t *testing.T) {
 	for name, value := range herdr {
 		nowrite[name] = value
 	}
-	nowrite["HERDR_SOHO_NOWRITE"] = "1"
+	nowrite["SOHO_NOWRITE"] = "1"
 	code, out, errOut = f.runEnv(t, nowrite, "supervise", "--id", "job-1")
 	if code != 2 || out != "" || !strings.Contains(errOut, "SOHO_NOWRITE=1 is read-only: job supervise writes") {
 		t.Fatalf("NOWRITE code=%d out=%q err=%q", code, out, errOut)
@@ -1589,7 +1589,7 @@ func TestJobSuperviseRunsTheSupervisor(t *testing.T) {
 		}
 	}
 	env["HERDR_ENV"] = "1"
-	env["HERDR_SOHO_BIN"] = real
+	env["SOHO_BIN"] = real
 
 	code, out, errOut := f.runEnv(t, env, "supervise", "--id", "job-1")
 	if code != 0 || errOut != "" {

@@ -35,8 +35,8 @@ import (
 )
 
 func main() {
-	mode := os.Getenv("HERDR_SOHO_TREEKILL_FAKE_MODE")
-	pidFile := os.Getenv("HERDR_SOHO_TREEKILL_PID_FILE")
+	mode := os.Getenv("SOHO_TREEKILL_FAKE_MODE")
+	pidFile := os.Getenv("SOHO_TREEKILL_PID_FILE")
 	if pidFile != "" {
 		_ = os.WriteFile(pidFile+"."+mode+".started", []byte(fmt.Sprint(os.Getpid())), 0o600)
 	}
@@ -58,11 +58,11 @@ func main() {
 		child := exec.Command(os.Args[0])
 		childEnv := make([]string, 0, len(os.Environ())+1)
 		for _, entry := range os.Environ() {
-			if !strings.HasPrefix(strings.ToUpper(entry), "HERDR_SOHO_TREEKILL_FAKE_MODE=") {
+			if !strings.HasPrefix(strings.ToUpper(entry), "SOHO_TREEKILL_FAKE_MODE=") {
 				childEnv = append(childEnv, entry)
 			}
 		}
-		child.Env = append(childEnv, "HERDR_SOHO_TREEKILL_FAKE_MODE=grandchild")
+		child.Env = append(childEnv, "SOHO_TREEKILL_FAKE_MODE=grandchild")
 		child.Stdout, child.Stderr = os.Stdout, os.Stderr
 		if err := child.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "tree helper: start descendant: %v (mode=%s pidFile=%s)\n", err, mode, pidFile)
@@ -233,8 +233,8 @@ func treeKillChainReady(t *testing.T, env Env, dir string) {
 	readyPidFile := filepath.Join(dir, "ready-pids.txt")
 	marker := readyPidFile + ".parent.started"
 	readyEnv := env.Clone()
-	readyEnv["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "parent"
-	readyEnv["HERDR_SOHO_TREEKILL_PID_FILE"] = readyPidFile
+	readyEnv["SOHO_TREEKILL_FAKE_MODE"] = "parent"
+	readyEnv["SOHO_TREEKILL_PID_FILE"] = readyPidFile
 	t.Cleanup(func() { cleanupRecordedProcesses(readyPidFile) })
 	started := time.Now()
 	done := make(chan RunResult, 1)

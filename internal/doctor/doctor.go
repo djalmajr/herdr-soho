@@ -152,9 +152,6 @@ func CmdInit(ctx *core.Config, env platform.Env, cwd string) {
 func ProjectIsFirstRun(ctx *core.Config, env platform.Env, cwd string) bool {
 	root := platform.ProjectRoot(env, cwd)
 	file := filepath.Join(root, ".agents", "soho.conf")
-	if !isFile(file) {
-		file = core.LegacyProjectConfigPath(root)
-	}
 	if raw, e := platform.ReadTextFile(file); e == nil {
 		for _, line := range strings.Split(raw, "\n") {
 			line = inlineComment.ReplaceAllString(line, "")
@@ -201,7 +198,7 @@ func CmdDoctor(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	}
 	if fix {
 		doctorFix(where, panes, ctx, env, cwd)
-		if env.Get("SOHO_LIB") == "1" || env.Get("HERDR_SOHO_LIB") == "1" {
+		if env.Get("SOHO_LIB") == "1" {
 			return
 		}
 		fresh := core.LoadConfig(env, cwd)
@@ -235,13 +232,7 @@ func doctorFix(where, panes string, ctx *core.Config, env platform.Env, cwd stri
 		platform.DieFriction("doctor --fix: --panes must be 2, 3 or 4", 2)
 	}
 	if panes == "" {
-		legacy := dest
-		if where == "project" {
-			legacy = core.LegacyProjectConfigPath(platform.ProjectRoot(env, cwd))
-		} else if where == "user" {
-			legacy = core.LegacyUserConfigPath(platform.Current(), env)
-		}
-		panes = core.FileKeyValue(core.EffectiveConfigFile(dest, legacy), "panes")
+		panes = core.FileKeyValue(dest, "panes")
 	}
 	if panes != "2" && panes != "3" && panes != "4" {
 		if panes == "" {
@@ -365,7 +356,7 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 	} else {
 		s.Ok("project config: " + projectConfig)
 	}
-	for _, w := range core.LegacyDoctorWarnings(env, cwd, platform.Current()) {
+	for _, w := range core.LegacyLeftovers(env, cwd, platform.Current()) {
 		s.Warning(w)
 	}
 	layoutName := core.Cfg(ctx, "layout", "split", env)

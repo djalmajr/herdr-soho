@@ -149,7 +149,7 @@ func TestDispatchHintsR3DirectoryLint(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h.env["HERDR_SOHO_BRIEF_LINT"] = "warn"
+	h.env["SOHO_BRIEF_LINT"] = "warn"
 	options := dispatch.BriefLintOptions{WorkerCwd: filepath.Join(h.root, "worker"), OrchestratorCwd: h.root}
 	a := dispatch.BriefLintFindings(h.brief, h.ctx, h.env, options)
 	body, err := os.ReadFile(h.brief)

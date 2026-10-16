@@ -52,7 +52,7 @@ func newOwnFix(t *testing.T, underRoot bool) *ownFix {
 		}
 	}
 	// t.Chdir moves the process away from the package directory that
-	// newJobFix's relative HERDR_SOHO_SKILL_DIR resolves against, so the
+	// newJobFix's relative SOHO_SKILL_DIR resolves against, so the
 	// fixture pins the skill directory to an absolute path for the
 	// chdir'd runs.
 	skillDir, err := filepath.Abs(filepath.Join("..", "..", "skills", "soho"))
@@ -60,7 +60,7 @@ func newOwnFix(t *testing.T, underRoot bool) *ownFix {
 		t.Fatal(err)
 	}
 	env := withEnv(f.env,
-		"HERDR_SOHO_SKILL_DIR", skillDir,
+		"SOHO_SKILL_DIR", skillDir,
 		"GIT_CONFIG_GLOBAL", globalCfg,
 		"GIT_CONFIG_SYSTEM", systemCfg)
 	gitEnv := withEnv(env, "GIT_CONFIG_NOSYSTEM", "1")

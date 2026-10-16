@@ -21,14 +21,10 @@ func TestSkillDirSourceOrEmptyDoesNotDie(t *testing.T) {
 		if dir != configured || origin != "SOHO_SKILL_DIR" {
 			t.Fatalf("SkillDirSourceOrEmpty() = %q %q; want %q SOHO_SKILL_DIR", dir, origin, configured)
 		}
-		legacy, legacyOrigin := SkillDirSourceOrEmpty(Env{"HERDR_SOHO_SKILL_DIR": configured})
-		if legacy != configured || legacyOrigin != "HERDR_SOHO_SKILL_DIR" {
-			t.Fatalf("legacy configured value = %q %q; want %q HERDR_SOHO_SKILL_DIR", legacy, legacyOrigin, configured)
-		}
 	})
 	t.Run("the home skill is found without a Die", func(t *testing.T) {
 		home := t.TempDir()
-		agents := filepath.Join(home, ".agents", "skills", "herdr-soho")
+		agents := filepath.Join(home, ".agents", "skills", "soho")
 		writeSkillTree(t, agents)
 		dir, origin := SkillDirSourceOrEmpty(homeSkillFixture(t, home))
 		if dir != agents || origin != "home" {
@@ -92,28 +88,24 @@ func TestSkillDirSourceOrEmptyDoesNotDie(t *testing.T) {
 			}
 		}
 	})
-	t.Run("native and legacy NOWRITE only reuse an already published bundle", func(t *testing.T) {
-		for _, key := range []string{"SOHO_NOWRITE", "HERDR_SOHO_NOWRITE"} {
-			t.Run(key, func(t *testing.T) {
-				home := t.TempDir()
-				env := homeSkillFixture(t, home)
-				env[key] = "1"
-				value := capturePanic(func() { SkillDirSource(env) })
-				if exit, ok := value.(*ExitError); !ok || exit.Code != 2 {
-					t.Fatalf("readonly missing cache panic = %#v", value)
-				}
-				entries, err := os.ReadDir(home)
-				if err != nil || len(entries) != 0 {
-					t.Fatalf("readonly created cache: %v %v", entries, err)
-				}
-				delete(env, key)
-				dir, source := SkillDirSource(env)
-				env[key] = "1"
-				again, origin := SkillDirSource(env)
-				if source != "bundled" || again != dir || origin != source {
-					t.Fatalf("readonly reuse = %q %q; want %q %q", again, origin, dir, source)
-				}
-			})
+	t.Run("NOWRITE only reuses an already published bundle", func(t *testing.T) {
+		home := t.TempDir()
+		env := homeSkillFixture(t, home)
+		env["SOHO_NOWRITE"] = "1"
+		value := capturePanic(func() { SkillDirSource(env) })
+		if exit, ok := value.(*ExitError); !ok || exit.Code != 2 {
+			t.Fatalf("readonly missing cache panic = %#v", value)
+		}
+		entries, err := os.ReadDir(home)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("readonly created cache: %v %v", entries, err)
+		}
+		delete(env, "SOHO_NOWRITE")
+		dir, source := SkillDirSource(env)
+		env["SOHO_NOWRITE"] = "1"
+		again, origin := SkillDirSource(env)
+		if source != "bundled" || again != dir || origin != source {
+			t.Fatalf("readonly reuse = %q %q; want %q %q", again, origin, dir, source)
 		}
 	})
 	t.Run("a corrupt cache is refused without overwrite and dies with the old message", func(t *testing.T) {

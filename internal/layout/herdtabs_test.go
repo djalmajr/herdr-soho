@@ -76,7 +76,7 @@ func parityTabFixture(t *testing.T, withTab bool) (platform.Env, *core.Config, s
 		}
 	}
 	env["HOME"], env["USERPROFILE"] = home, home
-	env["XDG_CONFIG_HOME"], env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = conf, state, "ws"
+	env["XDG_CONFIG_HOME"], env["SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = conf, state, "ws"
 	env["HERDR_TAB_ID"], env["HERDR_ENV"], env["TMPDIR"] = "caller", "1", tmp
 	ctx := labelContext(t, env)
 	return env, ctx, repo, filepath.Join(state, "ws", "herd-tab"), filepath.Join(bin, "herdr.calls.jsonl")
@@ -159,7 +159,7 @@ func TestParityTabLabelGoldenScenarios(t *testing.T) {
 
 func labelContext(t *testing.T, env platform.Env) *core.Config {
 	t.Helper()
-	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/soho"
+	env["SOHO_SKILL_DIR"] = "../../skills/soho"
 	ctx := core.LoadConfig(env, ".")
 	return &ctx
 }
@@ -215,7 +215,7 @@ func TestHerdTabFileWhitespaceMatchesBash(t *testing.T) {
 func TestHerdAutoLabel(t *testing.T) {
 	// JS: "herdAutoLabel: cut to 16, strip dangling separators, \" 2\"/\" 3\" suffixes"
 	t.Run(`herdAutoLabel: cut to 16, strip dangling separators, " 2"/" 3" suffixes`, func(t *testing.T) { // JS: "herdAutoLabel: cut to 16, strip dangling separators, \" 2\"/\" 3\" suffixes"
-		env := platform.Env{"HERDR_SOHO_HERD_LABEL_MAX": "16"}
+		env := platform.Env{"SOHO_HERD_LABEL_MAX": "16"}
 		ctx := labelContext(t, env)
 		if got := HerdAutoLabel("impl", []string{"impl"}, ctx, env); got != "impl 2" {
 			t.Fatalf("repeat label=%q", got)
@@ -223,12 +223,12 @@ func TestHerdAutoLabel(t *testing.T) {
 		if got := HerdAutoLabel("impl+rev", nil, ctx, env); got != "impl+rev" {
 			t.Fatalf("base label=%q", got)
 		}
-		env["HERDR_SOHO_HERD_LABEL_MAX"] = "6"
+		env["SOHO_HERD_LABEL_MAX"] = "6"
 		if got := HerdAutoLabel("impl+rev", nil, ctx, env); got != "impl+r" {
 			t.Fatalf("cut label=%q", got)
 		}
 		// Mutation captured: RE2's ASCII-only \s drops the NBSP that JavaScript trims.
-		env["HERDR_SOHO_HERD_LABEL_MAX"] = "5"
+		env["SOHO_HERD_LABEL_MAX"] = "5"
 		if got := HerdAutoLabel("impl\u00a0rev", nil, ctx, env); got != "impl" {
 			t.Fatalf("NBSP cut label=%q", got)
 		}
@@ -279,7 +279,7 @@ func TestTabLabelAutoPrintsStoredDash(t *testing.T) {
 		{Argv: []string{"tab", "get", "t1"}, Stdout: `{"result":{"tab":{"label":""}}}`},
 	}
 	env, ctx, cwd, dir := layoutFake(t, rules)
-	env["HERDR_SOHO_HERD_LABEL_MAX"] = "0"
+	env["SOHO_HERD_LABEL_MAX"] = "0"
 	if err := os.WriteFile(filepath.Join(dir, "herd-tab"), []byte("t1\t-\tauto\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +443,7 @@ func TestHerdTabPaneJSContract(t *testing.T) {
 				{Argv: []string{"pane", "split", "w4", "--direction", "down", "--cwd", "/tmp", "--no-focus"}, Stdout: `{"result":{"pane":{"pane_id":"split-w4"}}}`},
 			}
 			env, ctx, cwd, dir := layoutFake(t, rules)
-			env["HERDR_SOHO_SPLIT_MAX_PANES"] = "2"
+			env["SOHO_SPLIT_MAX_PANES"] = "2"
 			if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte("worker\tw4\tcursor\tdesigner\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -473,7 +473,7 @@ func TestHerdTabPaneJSContract(t *testing.T) {
 				{Argv: []string{"tab", "create", "--workspace", "ws", "--cwd", cwd, "--label", "onda 2 ·2", "--no-focus"}, Stdout: `{"result":{"tab":{"tab_id":"t2"},"root_pane":{"pane_id":"root-t2"}}}`},
 			}
 			env, ctx, _, dir := layoutFake(t, rules)
-			env["HERDR_SOHO_SPLIT_MAX_PANES"] = "2"
+			env["SOHO_SPLIT_MAX_PANES"] = "2"
 			if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte("one\tw1\tcursor\timplementer\ntwo\tw2\tcursor\timplementer\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -499,7 +499,7 @@ func TestHerdTabPaneJSContract(t *testing.T) {
 				{Argv: []string{"tab", "create", "--workspace", "ws", "--cwd", root, "--label", "impl", "--no-focus"}, Stdout: `{"result":{"tab":{"tab_id":"t2"},"root_pane":{"pane_id":"root-t2"}}}`},
 			}
 			env, ctx, cwd, dir := layoutFake(t, rules)
-			env["HERDR_SOHO_SPLIT_MAX_PANES"] = "2"
+			env["SOHO_SPLIT_MAX_PANES"] = "2"
 			if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte("one\tp1\tcursor\timplementer\ntwo\tp2\tcursor\timplementer\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -534,7 +534,7 @@ func TestHerdTabsChooseSecondTabAfterMigration(t *testing.T) {
 			{Argv: []string{"pane", "split", "w3", "--direction", "down", "--cwd", "/tmp", "--no-focus"}, Stdout: `{"result":{"pane":{"pane_id":"split-w3"}}}`},
 		}
 		env, ctx, cwd, dir := layoutFake(t, rules)
-		env["HERDR_SOHO_SPLIT_MAX_PANES"] = "2"
+		env["SOHO_SPLIT_MAX_PANES"] = "2"
 		if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte("one\tw1\tcursor\timplementer\ntwo\tw2\tcursor\timplementer\nthree\tw3\tcursor\treviewer\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}

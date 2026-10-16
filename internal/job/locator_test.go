@@ -192,8 +192,8 @@ func TestSupervisorLocator(t *testing.T) {
 			"HOME":                  home,
 			"GH_TOKEN":              "gh-secret",
 			"AWS_SECRET_ACCESS_KEY": "aws-secret",
-			"HERDR_SOHO_DIR":        "/state/soho",
-			"HERDR_SOHO_STATE_DIR":  "/state/soho2",
+			"SOHO_DIR":              "/state/soho",
+			"SOHO_STATE_DIR":        "/state/soho2",
 			"APPDATA":               `C:\appdata`,
 			"PATH":                  "/usr/bin:/bin",
 			"SSH_AUTH_SOCK":         "/run/user/1000/ssh-agent.sock",
@@ -214,8 +214,8 @@ func TestSupervisorLocator(t *testing.T) {
 				}
 			}
 			for _, secret := range []string{
-				env["GH_TOKEN"], env["AWS_SECRET_ACCESS_KEY"], env["HERDR_SOHO_DIR"],
-				env["HERDR_SOHO_STATE_DIR"], env["APPDATA"], env["PATH"], env["SSH_AUTH_SOCK"],
+				env["GH_TOKEN"], env["AWS_SECRET_ACCESS_KEY"], env["SOHO_DIR"],
+				env["SOHO_STATE_DIR"], env["APPDATA"], env["PATH"], env["SSH_AUTH_SOCK"],
 			} {
 				for _, value := range got {
 					if value == secret {
@@ -289,7 +289,7 @@ type parityDirs struct {
 func TestLocatorSelectionParity(t *testing.T) {
 	const osName = "linux"
 	starterEffective := func(env platform.Env) string {
-		return core.EffectiveConfigFile(platform.UserConfigPath(osName, env), core.LegacyUserConfigPath(osName, env))
+		return platform.UserConfigPath(osName, env)
 	}
 	for _, tc := range []struct {
 		name       string
@@ -309,13 +309,13 @@ func TestLocatorSelectionParity(t *testing.T) {
 			files:   []string{"current"},
 		},
 		{
-			name:    "legacy file only",
+			name:    "former user file only: the soho path is selected",
 			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home} },
 			server:  func(d parityDirs) platform.Env { return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.home} },
 			files:   []string{"legacy"},
 		},
 		{
-			name:    "both files current wins",
+			name:    "both files: the soho path is selected",
 			starter: func(d parityDirs) platform.Env { return platform.Env{"HOME": d.home} },
 			server:  func(d parityDirs) platform.Env { return platform.Env{"XDG_CONFIG_HOME": d.serverXDG, "HOME": d.home} },
 			files:   []string{"current", "legacy"},
@@ -528,10 +528,9 @@ func TestLocatorSelectionParity(t *testing.T) {
 					t.Fatalf("selection = %+v, want non-zero", sel)
 				}
 				wantCurrent := platform.UserConfigPath("win32", tc.starter)
-				wantLegacy := core.LegacyUserConfigPath("win32", tc.starter)
-				gotCurrent, gotLegacy := core.UserConfigFiles("win32", tc.server, sel)
-				if gotCurrent != wantCurrent || gotLegacy != wantLegacy {
-					t.Fatalf("server selection = (%q, %q), want the starter's (%q, %q)", gotCurrent, gotLegacy, wantCurrent, wantLegacy)
+				gotCurrent := core.UserConfigFiles("win32", tc.server, sel)
+				if gotCurrent != wantCurrent {
+					t.Fatalf("server selection = %q, want the starter's %q", gotCurrent, wantCurrent)
 				}
 			})
 		}

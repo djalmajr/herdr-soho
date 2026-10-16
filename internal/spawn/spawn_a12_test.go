@@ -24,7 +24,7 @@ func a12Fixture(t *testing.T, rules []fakecli.Rule, panes string) spawnFixture {
 	t.Helper()
 	f := newSpawnFixture(t, rules)
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_LANES"] = "on"
+	f.env["SOHO_LANES"] = "on"
 	f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
 	f.ctx.Entries["lane_build_kind"] = core.ConfigEntry{Value: "grok", Source: "project"}
 	if panes != "" {

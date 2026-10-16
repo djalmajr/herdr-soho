@@ -17,7 +17,7 @@ import (
 
 // exportFixture holds a project directory (a plain dir, not a git repo, so
 // the project root resolves to the cwd itself) and an env whose
-// HERDR_SOHO_DIR points at a state root with the given
+// SOHO_DIR points at a state root with the given
 // <workspace>/metrics.jsonl fixtures. HOME points at an empty dir and PATH
 // is absent, so no skill is found and no git is run.
 type exportFixture struct {
@@ -41,8 +41,8 @@ func newExportFixture(t *testing.T, stateFiles map[string]string) *exportFixture
 		}
 	}
 	env := platform.Env{
-		"HERDR_SOHO_DIR": state,
-		"HOME":           filepath.Join(t.TempDir(), "home"),
+		"SOHO_DIR": state,
+		"HOME":     filepath.Join(t.TempDir(), "home"),
 	}
 	return &exportFixture{
 		proj:  proj,
@@ -466,7 +466,7 @@ func TestExportProjectLabel(t *testing.T) {
 		return &exportFixture{
 			proj:  proj,
 			state: state,
-			env:   platform.Env{"HERDR_SOHO_DIR": state, "HOME": filepath.Join(t.TempDir(), "home")},
+			env:   platform.Env{"SOHO_DIR": state, "HOME": filepath.Join(t.TempDir(), "home")},
 			cfg:   &core.Config{Entries: map[string]core.ConfigEntry{}},
 		}
 	}
@@ -555,7 +555,7 @@ func TestExportNoFiles(t *testing.T) {
 	t.Run("missing state root", func(t *testing.T) {
 		f := newExportFixture(t, nil)
 		missing := filepath.Join(t.TempDir(), "no-such-state")
-		f.env["HERDR_SOHO_DIR"] = missing
+		f.env["SOHO_DIR"] = missing
 		before := treeSnapshot(t, f.proj)
 		stdout, stderr, code, _ := f.run(t)
 		if code != 0 || stdout != "" || stderr != "" {
@@ -590,8 +590,8 @@ func TestExportInSkillRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := newExportFixture(t, nil)
-	f.env["HERDR_SOHO_SKILL_DIR"] = skill
-	f.env["HERDR_SOHO_DIR"] = state
+	f.env["SOHO_SKILL_DIR"] = skill
+	f.env["SOHO_DIR"] = state
 	before := treeSnapshot(t, skill)
 	stdout, stderr, code, message := f.run(t)
 	if code != 2 {

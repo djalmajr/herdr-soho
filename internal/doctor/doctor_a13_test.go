@@ -90,8 +90,8 @@ func a13LinkedWorktree(t *testing.T) (string, string) {
 func TestA13DoctorProjectConfigAndStateDirLines(t *testing.T) {
 	repo, wt := a13LinkedWorktree(t)
 	state := filepath.Join(filepath.Dir(repo), "state")
-	mainConf := filepath.Join(repo, ".agents", "herdr-soho.conf")
-	wtConf := filepath.Join(wt, ".agents", "herdr-soho.conf")
+	mainConf := filepath.Join(repo, ".agents", "soho.conf")
+	wtConf := filepath.Join(wt, ".agents", "soho.conf")
 	remove := func(paths ...string) {
 		t.Helper()
 		for _, p := range paths {
@@ -105,9 +105,9 @@ func TestA13DoctorProjectConfigAndStateDirLines(t *testing.T) {
 		home := t.TempDir()
 		env := platform.Env{
 			"HOME": home, "USERPROFILE": home,
-			"PATH":                 a13GitOnlyPath(t),
-			"HERDR_SOHO_DIR":       state,
-			"HERDR_SOHO_SKILL_DIR": a13SkillDir(t),
+			"PATH":           a13GitOnlyPath(t),
+			"SOHO_DIR":       state,
+			"SOHO_SKILL_DIR": a13SkillDir(t),
 		}
 		ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 		var out strings.Builder

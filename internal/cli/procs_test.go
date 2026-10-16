@@ -216,9 +216,9 @@ func newProcsFixture(t *testing.T) *procsFixture {
 	env, cwd := commandFixture(t)
 	env["HERDR_ENV"] = "1"
 	env["HERDR_PANE_ID"] = "p-worker"
-	env["HERDR_SOHO_REGRID"] = "off"
+	env["SOHO_REGRID"] = "off"
 	env["TMPDIR"] = t.TempDir()
-	state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+	state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 	if err := os.MkdirAll(filepath.Join(state, "wait"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -891,7 +891,7 @@ func TestProcsNowrite(t *testing.T) {
 	started, name, _ := platform.ProcInfo(pid, f.env)
 	f.writeProcs(t, core.ProcRow{Pid: pid, Started: started, Name: name, Owner: "worker", Pane: "p-worker", Created: core.FrictionISO(platform.Now())})
 	env := f.env.Clone()
-	env["HERDR_SOHO_NOWRITE"] = "1"
+	env["SOHO_NOWRITE"] = "1"
 	t.Run("the exact procs runs read-only", func(t *testing.T) {
 		code, out, errOut := f.runWithEnv(t, env, "procs")
 		if code != 0 || errOut != "" {

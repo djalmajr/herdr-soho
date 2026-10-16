@@ -134,10 +134,10 @@ type retirementFixture struct {
 }
 
 // newRetirementFixture builds the POSIX parity fixture: temporary git repo,
-// temporary HOME/XDG/HERDR_SOHO_DIR/TMPDIR, HERDR_WORKSPACE_ID=ws, a fakecli
+// temporary HOME/XDG/SOHO_DIR/TMPDIR, HERDR_WORKSPACE_ID=ws, a fakecli
 // herdr (the scenario rules plus the generic list/pane/tab answers) and a
 // fake git so the CLI's git probes resolve the fixture repo exactly like the
-// legacy fixture. HERDR_SOHO_SKILL_DIR points at the repository's real skill
+// legacy fixture. SOHO_SKILL_DIR points at the repository's real skill
 // dir, so the composed prompt uses the native role files (the legacy
 // composed prose is superseded: it is compared structurally, not pinned).
 func newRetirementFixture(t *testing.T, rules []fakecli.Rule, seed func(*retirementFixture)) *retirementFixture {
@@ -207,14 +207,14 @@ func newRetirementFixture(t *testing.T, rules []fakecli.Rule, seed func(*retirem
 	env["USERPROFILE"] = home
 	env["XDG_CONFIG_HOME"] = conf
 	env["TMPDIR"] = tmp
-	env["HERDR_SOHO_DIR"] = state
-	env["HERDR_SOHO_SKILL_DIR"] = skill
+	env["SOHO_DIR"] = state
+	env["SOHO_SKILL_DIR"] = skill
 	env["HERDR_WORKSPACE_ID"] = "ws"
 	env["HERDR_ENV"] = "1"
 	// The legacy scenario env: the arrival check and the regrid are off, the
 	// wait polls fast.
-	env["HERDR_SOHO_REGRID"] = "off"
-	env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+	env["SOHO_REGRID"] = "off"
+	env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 	env["SOHO_WAIT_POLL_MS"] = "1"
 	f.env = withFakeCLI(env, bin)
 	return f
@@ -984,7 +984,7 @@ func TestRetirementDispatchGolden(t *testing.T) {
 				retireAgentGetRule("build", "idle"),
 				{Argv: []string{"agent", "read", "build"}, ArgvPrefix: true, Stdout: "RESOURCE_EXHAUSTED\n"},
 			},
-			stepEnv: []map[string]string{{"HERDR_SOHO_BRIEF_LINT": "off"}},
+			stepEnv: []map[string]string{{"SOHO_BRIEF_LINT": "off"}},
 			seed: func(f *retirementFixture) {
 				retireWriteRoster(t, f, retireR12+build12(f))
 				writeBrief(f, "brief.md", retireBrief)
@@ -1035,7 +1035,7 @@ func TestRetirementDispatchGolden(t *testing.T) {
 				{Argv: []string{"agent", "get", "worker"}, Code: 1, Stderr: retireDeniedOS + "\n"},
 				retireScreenRule("worker", "terminal-fallback"),
 			},
-			stepEnv: []map[string]string{{"HERDR_SOHO_BRIEF_LINT": "off"}},
+			stepEnv: []map[string]string{{"SOHO_BRIEF_LINT": "off"}},
 			seed: func(f *retirementFixture) {
 				retireWriteRoster(t, f, retireR8+retireWorker8)
 				writeBrief(f, "brief.md", retireBrief)
@@ -1058,7 +1058,7 @@ func TestRetirementDispatchGolden(t *testing.T) {
 				retireAgentGetRule("rev", "idle"),
 				retireScreenRule("rev", "terminal-fallback"),
 			},
-			stepEnv: []map[string]string{{}, {}, {"HERDR_SOHO_BRIEF_LINT": "strict"}, {}},
+			stepEnv: []map[string]string{{}, {}, {"SOHO_BRIEF_LINT": "strict"}, {}},
 			seed: func(f *retirementFixture) {
 				retireWriteRoster(t, f, retireR11+
 					"rev\tp9\tcodex\treviewer\topenai\t1\t/work\tnow\tgpt-5\ttask\treviewer\n"+
@@ -1075,7 +1075,7 @@ func TestRetirementDispatchGolden(t *testing.T) {
 				retireAgentGetRule("res", "idle"),
 				retireScreenRule("res", "terminal-fallback"),
 			},
-			stepEnv: []map[string]string{{"HERDR_SOHO_BRIEF_LINT": "off"}},
+			stepEnv: []map[string]string{{"SOHO_BRIEF_LINT": "off"}},
 			seed: func(f *retirementFixture) {
 				retireWriteRoster(t, f, retireR11+"res\tp3\tgrok\tresearcher\txai\t1\t/work\tnow\tgrok-4.7\task\tresearcher\n")
 				writeBrief(f, "brief.md", retireBriefMR)
@@ -1092,7 +1092,7 @@ func TestRetirementDispatchGolden(t *testing.T) {
 				retireAgentGetRule("build", "idle"),
 				retireScreenRule("build", "terminal-fallback"),
 			},
-			stepEnv: []map[string]string{{"HERDR_SOHO_LAYOUT": "tab"}},
+			stepEnv: []map[string]string{{"SOHO_LAYOUT": "tab"}},
 			seed: func(f *retirementFixture) {
 				retireWriteRoster(t, f, retireR12)
 				writeBrief(f, "brief.md", retireFullBrief)
@@ -1171,7 +1171,7 @@ func runRetirementRunWait(t *testing.T, goldens map[string]json.RawMessage) {
 		role:    "implementer",
 		agent:   "build",
 		brief:   retireFullBrief,
-		stepEnv: []map[string]string{{"HERDR_SOHO_LAYOUT": "tab"}},
+		stepEnv: []map[string]string{{"SOHO_LAYOUT": "tab"}},
 	}
 	f := newRetirementFixture(t, sc.rules, func(f *retirementFixture) {
 		retireWriteRoster(t, f, retireR12)
@@ -1347,7 +1347,7 @@ func TestRetirementDispatchFamilyOrderUTF16(t *testing.T) {
 			}
 		}
 	})
-	code, out, errOut := f.run(t, retireStep{Args: []string{"dispatch", "rev", "brief.md", "--for", "build", "--no-wait"}, Env: map[string]string{"HERDR_SOHO_BRIEF_LINT": "off"}})
+	code, out, errOut := f.run(t, retireStep{Args: []string{"dispatch", "rev", "brief.md", "--for", "build", "--no-wait"}, Env: map[string]string{"SOHO_BRIEF_LINT": "off"}})
 	if code != 2 {
 		t.Fatalf("code=%d out=%q err=%q, want the family-conflict refusal 2", code, out, errOut)
 	}
