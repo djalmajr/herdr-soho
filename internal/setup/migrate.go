@@ -115,6 +115,14 @@ func migrateNames(ctx *core.Config, env platform.Env, cwd string, dry bool) []st
 		}
 	}
 
+	// Ignore rule: once the new project config is in place (or projected
+	// in dry), the rule that ignored a former config extends itself with
+	// the soho name in the same file, so the migrated file is not left
+	// untracked.
+	if lstatExists(novoProject) || projected[novoProject] {
+		lines = append(lines, migrateIgnoreRule(root, env, dry)...)
+	}
+
 	// Reload after the config steps so the rest of the command reads the
 	// migrated files; a dry run moved nothing, so it never reloads.
 	if moved && !dry {
