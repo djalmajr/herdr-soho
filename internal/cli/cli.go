@@ -257,6 +257,7 @@ func Run(args []string, env platform.Env) (code int) {
 		return 0
 	}
 	if command == "setup" {
+		setup.BuildVersion = version
 		setup.CmdSetup(args[1:], configCtx, decisionEnv, commandCwd)
 		return 0
 	}

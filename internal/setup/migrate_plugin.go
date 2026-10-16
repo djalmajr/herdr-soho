@@ -53,8 +53,16 @@ type herdrPluginRef struct {
 // and runs nothing that writes when dry is true.
 func migratePlugin(env platform.Env, version string, dry bool) []string {
 	list := herdrPluginCall(env, "plugin", "list", "--json")
+	if list.NotFound {
+		// Without Herdr there is no plugin registration to migrate.
+		return nil
+	}
 	if !herdrCallOK(list) {
 		return []string{fmt.Sprintf("migrate: plugin: skipped (herdr plugin list failed: %s)", herdrCallReason(list))}
+	}
+	if strings.TrimSpace(list.Stdout) == "" {
+		// A list that succeeds with no output registers nothing to migrate.
+		return nil
 	}
 	plugins, ok := parsePluginList(list.Stdout)
 	if !ok {

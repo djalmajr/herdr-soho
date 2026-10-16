@@ -505,7 +505,7 @@ func TestLocalPlanAndDryRunLeaveGitMetadataUntouched(t *testing.T) {
 func TestLocalFinalExcludeRenameFailureDoesNotClaimSetup(t *testing.T) {
 	// JS: "setup --local --panes: a final exclude rename failure dies 4 with the tracked config byte-identical and no success claimed"
 	root, env, ctx := localPlanFixture(t)
-	conf := filepath.Join(root, ".agents", "herdr-soho.conf")
+	conf := filepath.Join(root, ".agents", "soho.conf")
 	if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func TestLocalFinalExcludeRenameFailureDoesNotClaimSetup(t *testing.T) {
 	if !ok {
 		t.Skip("git is required for local setup tests")
 	}
-	for _, args := range [][]string{{"add", ".agents/herdr-soho.conf"}, {"commit", "-qm", "tracked setup config"}} {
+	for _, args := range [][]string{{"add", ".agents/soho.conf"}, {"commit", "-qm", "tracked setup config"}} {
 		cmd := exec.Command(git, append([]string{"-C", root}, args...)...)
 		cmd.Env = env.List()
 		if out, err := cmd.CombinedOutput(); err != nil {

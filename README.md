@@ -52,7 +52,7 @@ All commands, including `collaborate`, `send` and `find`, run through the same G
 
    `soho setup --dry-run` lists the moves first. A name that exists on both sides is left in place and reported.
 3. Rename each `HERDR_SOHO_<NAME>` variable to `SOHO_<NAME>`.
-4. Run `soho doctor`; it lists whatever former name is still present.
+4. Run `soho doctor`; it lists the former files, directories, variables and binary that are still present.
 
 Agents and scripts that called `herdr-soho` call `soho` with the same subcommands, and a job wake hook reads `SOHO_JOB_ID`, `SOHO_JOB_SEQ`, `SOHO_JOB_EVENT` and `SOHO_JOB_IDEMPOTENCY_KEY`.
 

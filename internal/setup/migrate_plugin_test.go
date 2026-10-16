@@ -336,7 +336,8 @@ func TestMigratePlugin(t *testing.T) {
 			noFake bool
 		}{
 			{"list exits non-zero", fakecli.Rule{Argv: []string{"plugin", "list", "--json"}, Code: 2}, "migrate: plugin: skipped (herdr plugin list failed: exit 2)", false},
-			{"herdr is not on PATH", fakecli.Rule{}, "migrate: plugin: skipped (herdr plugin list failed: herdr not found)", true},
+			{"herdr is not on PATH: nothing to migrate, no line", fakecli.Rule{}, "", true},
+			{"list succeeds with no output: nothing to migrate, no line", fakecli.Rule{Argv: []string{"plugin", "list", "--json"}, Stdout: ""}, "", false},
 			{"list prints invalid JSON", fakecli.Rule{Argv: []string{"plugin", "list", "--json"}, Stdout: "not json\n"}, "migrate: plugin: skipped (herdr plugin list failed: invalid JSON)", false},
 			{"list misses the result envelope", fakecli.Rule{Argv: []string{"plugin", "list", "--json"}, Stdout: `{"id":"cli:plugin"}`}, "migrate: plugin: skipped (herdr plugin list failed: invalid JSON)", false},
 		} {
@@ -348,7 +349,11 @@ func TestMigratePlugin(t *testing.T) {
 					t.Fatal(err)
 				}
 				lines := migratePlugin(env, "v0.3.0", false)
-				if len(lines) != 1 || lines[0] != tc.want {
+				if tc.want == "" {
+					if len(lines) != 0 {
+						t.Fatalf("lines=%v want none", lines)
+					}
+				} else if len(lines) != 1 || lines[0] != tc.want {
 					t.Fatalf("lines=%v want %q", lines, tc.want)
 				}
 				if !tc.noFake {
