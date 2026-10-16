@@ -134,7 +134,7 @@ func migrateNames(ctx *core.Config, env platform.Env, cwd string, dry bool) []st
 		switch {
 		case stateDirExplicitlyPinned(ctx, env) || efetivo != novoState:
 			lines = append(lines, fmt.Sprintf("migrate: kept %s: the state dir is set to %s", antigoState, efetivo))
-		case lstatExists(novoState):
+		case lstatExists(novoState) && !emptyDir(novoState):
 			lines = append(lines, fmt.Sprintf("migrate: kept %s: %s already exists; remove %s once its reports are no longer needed", antigoState, novoState, antigoState))
 		default:
 			hasWorkers, inspectErr := formerRosterInspection(antigoState)
@@ -147,6 +147,15 @@ func migrateNames(ctx *core.Config, env platform.Env, cwd string, dry bool) []st
 				break
 			}
 			if !dry {
+				if lstatExists(novoState) {
+					// An empty soho state dir (for example one the doctor
+					// created before the setup) counts as absent: remove it
+					// so the rename can land there.
+					if err := os.Remove(novoState); err != nil {
+						lines = append(lines, fmt.Sprintf("migrate: kept %s: %v", antigoState, err))
+						break
+					}
+				}
 				if err := os.Rename(antigoState, novoState); err != nil {
 					lines = append(lines, fmt.Sprintf("migrate: kept %s: %v", antigoState, err))
 					break
@@ -164,6 +173,19 @@ func migrateNames(ctx *core.Config, env platform.Env, cwd string, dry bool) []st
 func lstatExists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
+}
+
+// emptyDir reports whether path is a real directory with no entries: the
+// Lstat must say directory and not a symlink, and the ReadDir must come
+// back clean and empty. Only that case counts as absent for the state
+// step.
+func emptyDir(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	entries, err := os.ReadDir(path)
+	return err == nil && len(entries) == 0
 }
 
 // stateDirExplicitlyPinned reports whether the state dir was fixed by the
