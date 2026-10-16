@@ -39,6 +39,8 @@ var (
 	// command key whose value starts with the former plugin id. Comments and
 	// other keys keep the former id untouched.
 	formerShortcutLine = regexp.MustCompile(`^\s*command\s*=\s*"djalmajr\.herdr-soho\.`)
+	// sohoShortcutLine matches a shortcut bound to a djalmajr.soho action.
+	sohoShortcutLine = regexp.MustCompile(`^\s*command\s*=\s*"djalmajr\.soho\.`)
 )
 
 // herdrPluginRef is one row of 'herdr plugin list --json' that the migration
@@ -97,17 +99,26 @@ func migratePlugin(env platform.Env, version string, dry bool) []string {
 	}
 	// Without a config file Herdr has no custom shortcut to move.
 	if readErr == nil {
-		if updated, count := replaceFormerShortcuts(string(data)); count > 0 {
+		content := string(data)
+		updated, count := replaceFormerShortcuts(content)
+		if count > 0 {
 			if dry {
 				lines = append(lines, fmt.Sprintf("migrate: plugin: would replace %d shortcut(s) in %s", count, config))
-				lines = append(lines, "migrate: plugin: would run: herdr server reload-config")
 			} else if backup := writeFormerConfigBackup(config, data); backup == "" || platform.AtomicWrite(config, updated) != nil {
 				return append(lines, fmt.Sprintf("migrate: plugin: could not update %s; the former plugin is kept", config))
 			} else {
 				lines = append(lines, fmt.Sprintf("migrate: plugin: %d shortcut(s) now call djalmajr.soho (backup %s)", count, backup))
-				if reload := herdrPluginCall(env, "server", "reload-config"); !herdrCallOK(reload) {
-					return append(lines, fmt.Sprintf("migrate: plugin: herdr server reload-config failed: %s; the former plugin is kept until Herdr loads the new shortcuts: restart Herdr and run soho setup again", herdrCallReason(reload)))
-				}
+			}
+			content = updated
+		}
+		// A shortcut on djalmajr.soho, written now or by an earlier run,
+		// works only once Herdr reloads its config: the former plugin goes
+		// only after a successful reload.
+		if hasSohoShortcut(content) {
+			if dry {
+				lines = append(lines, "migrate: plugin: would run: herdr server reload-config")
+			} else if reload := herdrPluginCall(env, "server", "reload-config"); !herdrCallOK(reload) {
+				return append(lines, fmt.Sprintf("migrate: plugin: herdr server reload-config failed: %s; the former plugin is kept until Herdr loads the djalmajr.soho shortcuts: restart Herdr and run soho setup again", herdrCallReason(reload)))
 			}
 		}
 	}
@@ -224,6 +235,17 @@ func herdrConfigToml(env platform.Env) string {
 		dir = filepath.Dir(dir)
 	}
 	return filepath.Join(dir, "config.toml")
+}
+
+// hasSohoShortcut reports whether a Herdr config binds a shortcut to a
+// djalmajr.soho action (a command = "djalmajr.soho.*" line).
+func hasSohoShortcut(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if sohoShortcutLine.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 // replaceFormerShortcuts rewrites the former plugin prefix to the new one on

@@ -446,7 +446,7 @@ func TestMigratePlugin(t *testing.T) {
 				if len(lines) > 0 {
 					last = lines[len(lines)-1]
 				}
-				if !strings.HasSuffix(last, "the former plugin is kept") && !strings.Contains(last, "the former plugin is kept until Herdr loads the new shortcuts") {
+				if !strings.Contains(last, "the former plugin is kept") {
 					t.Fatalf("lines=%v: the last line must say the former plugin is kept", lines)
 				}
 				if tc.want != nil && !reflect.DeepEqual(lines, tc.want) {
@@ -456,6 +456,53 @@ func TestMigratePlugin(t *testing.T) {
 					t.Fatalf("calls=%#v want %#v (no unlink or uninstall)", got, tc.calls)
 				}
 			})
+		}
+	})
+	t.Run(`a later run still needs a successful reload before the removal`, func(t *testing.T) {
+		env, _, bin, configToml, configDir := migratePluginFixture(t)
+		mustWritePluginConfig(t, configToml, mpConfigOneShortcut)
+		install := func(reloadCode int) {
+			t.Helper()
+			// A second install replaces the fake's rules; the fake binary
+			// itself refuses to be overwritten.
+			exe := "herdr"
+			if runtime.GOOS == "windows" {
+				exe += ".exe"
+			}
+			if err := os.Remove(filepath.Join(bin, exe)); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{
+				{Argv: []string{"plugin", "list", "--json"}, Stdout: mpListJSON(mpFormerLocal + "," + mpSohoPlugin)},
+				{Argv: []string{"plugin", "config-dir", "djalmajr.soho"}, Stdout: configDir},
+				{Argv: []string{"server", "reload-config"}, Code: reloadCode, Stderr: "server down\n"},
+				{Argv: []string{"plugin", "unlink", "djalmajr.herdr-soho"}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		unlinked := func() bool {
+			for _, call := range mpCalls(t, bin) {
+				if len(call) > 1 && call[0] == "plugin" && call[1] == "unlink" {
+					return true
+				}
+			}
+			return false
+		}
+		install(1)
+		first := migratePlugin(env, "v0.3.0", false)
+		if len(first) != 2 || !strings.Contains(first[0], "1 shortcut(s) now call djalmajr.soho") || !strings.Contains(first[1], "the former plugin is kept") || unlinked() {
+			t.Fatalf("first run lines=%v unlinked=%v", first, unlinked())
+		}
+		// The file is migrated now; the server still did not reload it.
+		second := migratePlugin(env, "v0.3.0", false)
+		if len(second) != 1 || !strings.Contains(second[0], "reload-config failed") || !strings.Contains(second[0], "the former plugin is kept") || unlinked() {
+			t.Fatalf("second run lines=%v unlinked=%v", second, unlinked())
+		}
+		install(0)
+		third := migratePlugin(env, "v0.3.0", false)
+		if want := []string{"migrate: plugin: removed the former djalmajr.herdr-soho (unlink)"}; !reflect.DeepEqual(third, want) || !unlinked() {
+			t.Fatalf("third run lines=%v unlinked=%v", third, unlinked())
 		}
 	})
 	t.Run(`config without former shortcuts: no rename line, no reload, no backup`, func(t *testing.T) {
