@@ -619,9 +619,9 @@ func TestMigrateNamesDryProjectedDestinations(t *testing.T) {
 			t.Fatalf("dry run changed the tree")
 		}
 		want := []string{
-			"migrate: would move " + oldSo + "/config to " + novo + "/config",
+			"migrate: would move " + filepath.Join(oldSo, "config") + " to " + filepath.Join(novo, "config"),
 			"migrate: would remove the empty " + oldSo,
-			"migrate: kept " + oldAg + "/config: " + novo + "/config already exists; merge by hand",
+			"migrate: kept " + filepath.Join(oldAg, "config") + ": " + filepath.Join(novo, "config") + " already exists; merge by hand",
 		}
 		if !reflect.DeepEqual(dry, want) {
 			t.Fatalf("dry lines = %v, want %v", dry, want)
