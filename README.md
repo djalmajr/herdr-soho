@@ -50,7 +50,7 @@ All commands, including `collaborate`, `send` and `find`, run through the same G
    - the `<!-- herdr-soho:start -->` block and the `herdr-soho hook …` commands to their `soho` versions;
    - the `djalmajr.herdr-soho` plugin to `djalmajr.soho`: for a release binary it installs the new plugin, points the Herdr shortcuts at `djalmajr.soho.*` (keeping a backup of `config.toml`) and unregisters the old plugin.
 
-   `soho setup --dry-run` lists the moves first. A name that exists on both sides is left in place and reported.
+   `soho setup --dry-run` lists the moves first. A name that exists on both sides is left in place and reported. Run it before any other `soho` command in that project: until the move, the commands that open the state dir refuse with exit 2, and `doctor` and `send` write nothing under `.soho/`.
 3. Rename each `HERDR_SOHO_<NAME>` variable to `SOHO_<NAME>`.
 4. Run `soho doctor`; it lists the former files, directories, variables and binary that are still present.
 

@@ -326,9 +326,14 @@ func DoctorCheck(ctx *core.Config, env platform.Env, cwd string, out io.Writer) 
 		s.Ok("own providers: no known trap")
 	}
 	// A state dir inside the skill is a warn, not a probe: no StateRoot, no
-	// MkdirAll, and the doctor goes on.
+	// MkdirAll, and the doctor goes on. The former state dir waiting for the
+	// setup migration is the same: probing would create the target and touch
+	// the .gitignore, so the check says the dir is intentionally not created
+	// and runs no StateRoot and no MkdirAll (nowrite keeps today's branch).
 	if skill := core.StateInSkill(ctx, env, cwd); skill != "" {
 		s.Warning(fmt.Sprintf("state dir: '%s' would be inside the soho skill ('%s'); run soho from the project's directory", core.StateRootPath(ctx, env, cwd), skill))
+	} else if former, target, waiting := core.FormerStateWaiting(ctx, env, cwd); waiting && !core.Nowrite(env) {
+		s.Ok(fmt.Sprintf("state dir not created: 'soho setup' moves %s to %s", former, target))
 	} else {
 		d := core.StateRoot(ctx, env, cwd)
 		if core.Nowrite(env) {
