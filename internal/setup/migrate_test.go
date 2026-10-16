@@ -12,6 +12,7 @@ import (
 
 	"github.com/djalmajr/soho/internal/core"
 	"github.com/djalmajr/soho/internal/platform"
+	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
 // migrateEnv keeps the migration tests hermetic: home and the config
@@ -457,4 +458,233 @@ func TestMigrateNamesNoFormerNames(t *testing.T) {
 			t.Fatalf("lines = %v, want none", lines)
 		}
 	})
+}
+
+// TestMigrateNamesUnreadableRosterKeepsState: a roster that cannot be
+// inspected keeps the former state dir: an unreadable agents.tsv and a
+// state dir whose entries cannot be listed both end in the kept line with
+// the short error; a missing agents.tsv still counts as empty.
+func TestMigrateNamesUnreadableRosterKeepsState(t *testing.T) {
+	t.Run("an unreadable agents.tsv keeps the state", func(t *testing.T) {
+		env, cwd := migrateEnv(t)
+		old := filepath.Join(cwd, ".herdr-soho")
+		roster := filepath.Join(old, "ws", "agents.tsv")
+		mustWriteFile(t, roster, "# roster\nworker\tidle\n")
+		if err := os.Chmod(roster, 0); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(roster, 0o600)
+		if _, err := os.ReadFile(roster); err == nil {
+			t.Skip("permission denial unavailable on this platform")
+		}
+		ctx := core.LoadConfig(env, cwd)
+		lines := migrateNames(&ctx, env, cwd, false)
+		assertUnreadableRosterKept(t, old, lines)
+	})
+
+	t.Run("a state dir whose entries cannot be listed keeps the state", func(t *testing.T) {
+		env, cwd := migrateEnv(t)
+		old := filepath.Join(cwd, ".herdr-soho")
+		mustWriteFile(t, filepath.Join(old, "ws", "agents.tsv"), "# roster\nworker\tidle\n")
+		if err := os.Chmod(old, 0o200); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(old, 0o700)
+		if _, err := os.ReadDir(old); err == nil {
+			t.Skip("a write-only dir still lists entries on this platform")
+		}
+		ctx := core.LoadConfig(env, cwd)
+		lines := migrateNames(&ctx, env, cwd, false)
+		assertUnreadableRosterKept(t, old, lines)
+	})
+}
+
+// assertUnreadableRosterKept checks the kept line's fixed shape (the short
+// error sits between the fixed phrases) and that the state dir stayed.
+func assertUnreadableRosterKept(t *testing.T, old string, lines []string) {
+	t.Helper()
+	if len(lines) != 1 {
+		t.Fatalf("lines = %v, want the single kept line", lines)
+	}
+	const head = "migrate: kept "
+	const mid = ": could not read its roster ("
+	const tail = "); release the workers and run 'soho setup' again"
+	line := lines[0]
+	if !strings.HasPrefix(line, head+old+mid) || !strings.HasSuffix(line, tail) {
+		t.Fatalf("line = %q, want the kept line with a short error", line)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("former state dir moved despite the uninspectable roster: %v", err)
+	}
+	mustNotExist(t, filepath.Join(filepath.Dir(old), ".soho"))
+}
+
+// TestMigrateNamesReloadAfterStateMoveSeesSession: after the state dir
+// moves, the config reloads so the rest of the command sees the moved
+// session layer.
+func TestMigrateNamesReloadAfterStateMoveSeesSession(t *testing.T) {
+	env, cwd := migrateEnv(t)
+	env["HERDR_WORKSPACE_ID"] = "ws"
+	old := filepath.Join(cwd, ".herdr-soho")
+	mustWriteFile(t, filepath.Join(old, "ws", "agents.tsv"), "# roster\n")
+	mustWriteFile(t, filepath.Join(old, "ws", "session.conf"), "setup_target=local\n")
+	ctx := core.LoadConfig(env, cwd)
+	lines := migrateNames(&ctx, env, cwd, false)
+	want := []string{"migrate: moved " + old + " to " + filepath.Join(cwd, ".soho")}
+	if !reflect.DeepEqual(lines, want) {
+		t.Fatalf("lines = %v, want %v", lines, want)
+	}
+	if got := core.Cfg(&ctx, "setup_target", "canonical", env); got != "local" {
+		t.Fatalf("setup_target = %q after the state move, want local from the moved session.conf", got)
+	}
+	if got := core.CfgSource(&ctx, "setup_target", env); got != "session" {
+		t.Fatalf("setup_target source = %q, want session", got)
+	}
+}
+
+// TestMigrateNamesExplicitStatePinKeepsOld: an explicitly pinned state dir
+// keeps the former state even when the pin resolves to the default
+// <root>/.soho: SOHO_DIR, SOHO_STATE_DIR and the state_dir entry.
+func TestMigrateNamesExplicitStatePinKeepsOld(t *testing.T) {
+	for _, mode := range []string{"SOHO_DIR", "SOHO_STATE_DIR", "state_dir config"} {
+		t.Run(mode, func(t *testing.T) {
+			env, cwd := migrateEnv(t)
+			old := filepath.Join(cwd, ".herdr-soho")
+			mustWriteFile(t, filepath.Join(old, "ws", "agents.tsv"), "# roster\n")
+			switch mode {
+			case "SOHO_DIR":
+				env["SOHO_DIR"] = filepath.Join(cwd, ".soho")
+			case "SOHO_STATE_DIR":
+				env["SOHO_STATE_DIR"] = ".soho"
+			default:
+				mustWriteFile(t, filepath.Join(cwd, ".agents", "soho.conf"), "state_dir=.soho\n")
+			}
+			ctx := core.LoadConfig(env, cwd)
+			lines := migrateNames(&ctx, env, cwd, false)
+			want := []string{"migrate: kept " + old + ": the state dir is set to " + filepath.Join(cwd, ".soho")}
+			if !reflect.DeepEqual(lines, want) {
+				t.Fatalf("lines = %v, want %v", lines, want)
+			}
+			if _, err := os.Stat(old); err != nil {
+				t.Fatalf("former state dir moved despite the explicit pin: %v", err)
+			}
+		})
+	}
+}
+
+// TestMigrateNamesDryProjectedDestinations: a dry run projects the
+// destinations it would write, so the second former entry targeting one of
+// them shows the same kept line the real run produces.
+func TestMigrateNamesDryProjectedDestinations(t *testing.T) {
+	t.Run("two former project configs: the second is kept in dry and in the real run", func(t *testing.T) {
+		env, cwd := migrateEnv(t)
+		old1 := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+		old2 := filepath.Join(cwd, ".agents", "herdr-agents.conf")
+		soho := filepath.Join(cwd, ".agents", "soho.conf")
+		mustWriteFile(t, old1, "layout=tab\n")
+		mustWriteFile(t, old2, "layout=split\n")
+		before := treeListing(t, cwd)
+		ctx := core.LoadConfig(env, cwd)
+		dry := migrateNames(&ctx, env, cwd, true)
+		if got := treeListing(t, cwd); got != before {
+			t.Fatalf("dry run changed the tree")
+		}
+		keptLine := "migrate: kept " + old2 + ": " + soho + " already exists; merge by hand"
+		wantDry := []string{"migrate: would move " + old1 + " to " + soho, keptLine}
+		if !reflect.DeepEqual(dry, wantDry) {
+			t.Fatalf("dry lines = %v, want %v", dry, wantDry)
+		}
+		actual := migrateNames(&ctx, env, cwd, false)
+		wantActual := []string{"migrate: moved " + old1 + " to " + soho, keptLine}
+		if !reflect.DeepEqual(actual, wantActual) {
+			t.Fatalf("actual lines = %v, want %v", actual, wantActual)
+		}
+		if got := mustReadFile(t, soho); got != "layout=tab\n" {
+			t.Fatalf("soho.conf = %q, want the first former file", got)
+		}
+		mustExist(t, old2)
+	})
+
+	t.Run("user dirs with a projected conflict: the second is kept in dry", func(t *testing.T) {
+		env, cwd := migrateEnv(t)
+		oldSo, novo := formerUserDirs(t, env)
+		oldAg := filepath.Join(filepath.Dir(novo), "herdr-agents")
+		mustWriteFile(t, filepath.Join(oldSo, "config"), "a=1\n")
+		mustWriteFile(t, filepath.Join(oldAg, "config"), "b=2\n")
+		root := filepath.Dir(env.Get("HOME"))
+		before := treeListing(t, root)
+		ctx := core.LoadConfig(env, cwd)
+		dry := migrateNames(&ctx, env, cwd, true)
+		if got := treeListing(t, root); got != before {
+			t.Fatalf("dry run changed the tree")
+		}
+		want := []string{
+			"migrate: would move " + oldSo + "/config to " + novo + "/config",
+			"migrate: would remove the empty " + oldSo,
+			"migrate: kept " + oldAg + "/config: " + novo + "/config already exists; merge by hand",
+		}
+		if !reflect.DeepEqual(dry, want) {
+			t.Fatalf("dry lines = %v, want %v", dry, want)
+		}
+		mustExist(t, filepath.Join(oldSo, "config"))
+		mustExist(t, filepath.Join(oldAg, "config"))
+	})
+}
+
+// TestCmdPlanInsideSkillSkipsMigrationPreviews: with the project root
+// inside the skill, --plan runs no migration preview and makes no herdr
+// call; the plan itself still prints.
+func TestCmdPlanInsideSkillSkipsMigrationPreviews(t *testing.T) {
+	env, cwd := migrateEnv(t)
+	env["SOHO_SKILL_DIR"] = cwd
+	bin := t.TempDir()
+	env["PATH"] = bin
+	env["SOHO_FAKECLI_CONFIG"] = bin
+	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{AnyArgs: true}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := core.LoadConfig(env, cwd)
+	code, out, msg := runSetupWrite([]string{"--plan", "--no-hooks"}, &ctx, env, cwd)
+	calls, err := fakecli.ReadCalls(filepath.Join(bin, "herdr.calls.jsonl"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("reading the call log: %v", err)
+	}
+	t.Logf("code=%d calls=%v message=%q", code, calls, msg)
+	if len(calls) != 0 {
+		t.Fatalf("plan invoked herdr inside the skill: %v", calls)
+	}
+	if strings.Contains(out, "migrate: ") {
+		t.Fatalf("plan printed migration lines inside the skill: %q", out)
+	}
+	if code != 0 {
+		t.Fatalf("code = %d, message = %q; the plan itself is not refused inside the skill", code, msg)
+	}
+	if !strings.HasPrefix(out, "plan (nothing is written):") {
+		t.Fatalf("plan output = %q, want the plan header", out)
+	}
+}
+
+// TestMigrateNamesRenameFailureKeepsSource: a refused rename leaves the
+// source byte-identical, creates no destination, and reports the kept line
+// with the error.
+func TestMigrateNamesRenameFailureKeepsSource(t *testing.T) {
+	env, cwd := migrateEnv(t)
+	old := filepath.Join(cwd, ".agents", "herdr-soho.conf")
+	mustWriteFile(t, old, "# keep\nlayout=tab\n")
+	parent := filepath.Dir(old)
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(parent, 0o700)
+	ctx := core.LoadConfig(env, cwd)
+	lines := migrateNames(&ctx, env, cwd, false)
+	if _, err := os.Stat(filepath.Join(parent, "soho.conf")); err == nil {
+		t.Skip("a read-only dir does not refuse the rename on this platform")
+	}
+	if got := mustReadFile(t, old); got != "# keep\nlayout=tab\n" {
+		t.Fatalf("source changed after the refused rename: %q", got)
+	}
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "migrate: kept "+old+": ") {
+		t.Fatalf("lines = %v, want the single kept line with the error", lines)
+	}
 }

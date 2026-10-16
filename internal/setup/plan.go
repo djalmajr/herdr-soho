@@ -243,11 +243,15 @@ func writePair(raw, key, value string) string {
 // CmdPlan simulates config/session writes in memory and emits the instruction/hook diffs; it never mutates the checkout.
 func CmdPlan(args []string, ctx *core.Config, env platform.Env, cwd string) {
 	// The plan shows what the migration would move, without moving it.
-	for _, line := range migrateNames(ctx, env, cwd, true) {
-		_, _ = fmt.Fprintln(platform.Stdout, line)
-	}
-	for _, line := range migratePlugin(env, BuildVersion, true) {
-		_, _ = fmt.Fprintln(platform.Stdout, line)
+	// Inside the skill the previews never run: they would call herdr, and
+	// the plan's own writes keep the refusal that follows.
+	if core.StatePathInSkill(env, platform.ProjectRoot(env, cwd)) == "" {
+		for _, line := range migrateNames(ctx, env, cwd, true) {
+			_, _ = fmt.Fprintln(platform.Stdout, line)
+		}
+		for _, line := range migratePlugin(env, BuildVersion, true) {
+			_, _ = fmt.Fprintln(platform.Stdout, line)
+		}
 	}
 	var panes, target string
 	local, hooks := false, true
