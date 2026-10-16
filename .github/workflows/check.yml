@@ -14,13 +14,17 @@ concurrency:
 
 jobs:
   check:
-    name: Go (${{ matrix.os }})
+    name: Go (${{ matrix.os }}, ${{ matrix.suite }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
+        # The native and race suites run as separate jobs, each with its own
+        # time budget and disk: one after the other they no longer fit the
+        # Windows runner.
+        suite: [native, race]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
       GOTOOLCHAIN: auto
       GOMAXPROCS: 2
@@ -58,7 +62,17 @@ jobs:
             Select-Object -First 1
           if (-not $bin) { throw "Go is not on PATH and a native Go 1.25 toolcache entry was not found" }
           Add-Content -Path $env:GITHUB_PATH -Value $bin
+      - name: Keep the Go build cache on the work drive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cache = Join-Path $env:RUNNER_TEMP 'go-build'
+          $tmp = Join-Path $env:RUNNER_TEMP 'go-tmp'
+          New-Item -ItemType Directory -Force -Path $cache, $tmp | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "GOCACHE=$cache"
+          Add-Content -Path $env:GITHUB_ENV -Value "GOTMPDIR=$tmp"
       - name: Formatting and vet
+        if: matrix.suite == 'native'
         shell: pwsh
         run: |
           $files = @(git ls-files '*.go')
@@ -68,11 +82,13 @@ jobs:
           go vet ./...
           if ($LASTEXITCODE -ne 0) { throw "go vet failed" }
       - name: Native tests
+        if: matrix.suite == 'native'
         shell: pwsh
         run: |
           go test -timeout=30m ./...
           if ($LASTEXITCODE -ne 0) { throw "go test failed" }
       - name: Race detector
+        if: matrix.suite == 'race'
         shell: pwsh
         run: |
           go test -race -timeout=30m ./...
