@@ -49,7 +49,7 @@ const (
 // user configuration file (the current path, else the legacy one) through
 // core.ReadConfigFilePairs, falling back to the defaults above. osName
 // selects the user file and the home directory used to expand a leading ~
-// or %USERPROFILE%. Project and session files and HERDR_SOHO_* environment
+// or %USERPROFILE%. Project and session files and SOHO_* environment
 // variables never change these seven values. An unreadable user file, an
 // invalid timeout, an invalid blocked timeout, an invalid finishing
 // timeout, or an invalid organization token is *platform.ExitError

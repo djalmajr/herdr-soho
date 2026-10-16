@@ -17,7 +17,7 @@ func appendPeerLog(stateDir, from, to, result string, chars int, id string, env 
 
 func TestSendRefusesTheSkillDir(t *testing.T) {
 	// The state dir (root/state) lives inside the fixture root, which these
-	// tests point HERDR_SOHO_SKILL_DIR at: send must refuse before any herdr
+	// tests point SOHO_SKILL_DIR at: send must refuse before any herdr
 	// call, and the path named in the refusal is the state root.
 	for _, tc := range []struct{ name, ws string }{
 		{"workspace set", "ws-test"},
@@ -26,7 +26,7 @@ func TestSendRefusesTheSkillDir(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			f := newFixtureAt(t, root, nil)
-			f.env["HERDR_SOHO_SKILL_DIR"] = root
+			f.env["SOHO_SKILL_DIR"] = root
 			if tc.ws == "" {
 				delete(f.env, "HERDR_WORKSPACE_ID")
 			}
@@ -59,7 +59,7 @@ func TestAppendPeerLogSkipsTheSkillDir(t *testing.T) {
 	if err := os.MkdirAll(skill, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HOME": root, "USERPROFILE": root}
+	env := platform.Env{"SOHO_SKILL_DIR": skill, "HOME": root, "USERPROFILE": root}
 
 	// Defense: a state dir inside the skill never gets the log written.
 	inside := filepath.Join(skill, "ws")

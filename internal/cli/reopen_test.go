@@ -108,7 +108,7 @@ func TestReopenClosesAndReopensWithRosterValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	setReopenRules(t, f)
-	f.env["HERDR_SOHO_LAYOUT"] = "split"
+	f.env["SOHO_LAYOUT"] = "split"
 
 	run := f.reopen(t, "worker")
 	if run.code != 0 {

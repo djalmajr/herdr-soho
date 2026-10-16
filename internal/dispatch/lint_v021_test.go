@@ -114,7 +114,7 @@ func TestShippedPortugueseDefaultAliases(t *testing.T) {
 		}
 		// The environment still wins over the project value: the env value
 		// (the shipped default, which carries 'Aceite') replaces 'Goal=Task'.
-		findings = BriefLintFindings(file, defaultsCtx(t, overrides), platform.Env{"HERDR_SOHO_BRIEF_LINT_ALIASES": shippedBriefLintDefaults(t)["brief_lint_aliases"]}, BriefLintOptions{})
+		findings = BriefLintFindings(file, defaultsCtx(t, overrides), platform.Env{"SOHO_BRIEF_LINT_ALIASES": shippedBriefLintDefaults(t)["brief_lint_aliases"]}, BriefLintOptions{})
 		if strings.Contains(findings.MissingMessage, "[Expected result]") {
 			t.Fatalf("env value did not replace the project value: %q", findings.MissingMessage)
 		}
@@ -196,11 +196,11 @@ func TestUnfilledPlaceholderMarks(t *testing.T) {
 	t.Run("warn and strict agree on the mark; off produces nothing", func(t *testing.T) {
 		file := write(t, body)
 		warn := BriefLintFindings(file, defaultsCtx(t, nil), platform.Env{}, BriefLintOptions{})
-		strict := BriefLintFindings(file, defaultsCtx(t, nil), platform.Env{"HERDR_SOHO_BRIEF_LINT": "strict"}, BriefLintOptions{})
+		strict := BriefLintFindings(file, defaultsCtx(t, nil), platform.Env{"SOHO_BRIEF_LINT": "strict"}, BriefLintOptions{})
 		if strict.MissingMessage != warn.MissingMessage || strict.Mode != "strict" || warn.Mode != "warn" {
 			t.Fatalf("warn/strict differ: warn=%#v strict=%#v", warn, strict)
 		}
-		off := BriefLintFindings(file, defaultsCtx(t, nil), platform.Env{"HERDR_SOHO_BRIEF_LINT": "off"}, BriefLintOptions{})
+		off := BriefLintFindings(file, defaultsCtx(t, nil), platform.Env{"SOHO_BRIEF_LINT": "off"}, BriefLintOptions{})
 		if off.MissingMessage != "" || len(off.Warnings) != 0 {
 			t.Fatalf("off findings = %#v", off)
 		}

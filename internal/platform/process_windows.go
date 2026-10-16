@@ -100,7 +100,7 @@ func runWindowsCmdTreeKill(resolved string, invocation CmdInvocationResult, opts
 		if code != "" {
 			return tempFileError(result, code), true
 		}
-		outputTemp, err = os.CreateTemp(tempDir, ".herdr-soho-out-*")
+		outputTemp, err = os.CreateTemp(tempDir, ".soho-out-*")
 		if err != nil {
 			return tempFileError(result, windowsErrorCode(err)), true
 		}
@@ -110,7 +110,7 @@ func runWindowsCmdTreeKill(resolved string, invocation CmdInvocationResult, opts
 			_ = os.Remove(outputTemp.Name())
 		}()
 		if opts.OutputFiles && !opts.MergeOutput {
-			errorTemp, err = os.CreateTemp(tempDir, ".herdr-soho-out-*")
+			errorTemp, err = os.CreateTemp(tempDir, ".soho-out-*")
 			if err != nil {
 				return tempFileError(result, windowsErrorCode(err)), true
 			}
@@ -224,19 +224,19 @@ func runWindowsCmdTreeKill(resolved string, invocation CmdInvocationResult, opts
 	if opts.OnStart != nil {
 		opts.OnStart(int(process.ProcessId))
 	}
-	stdinFile := os.NewFile(uintptr(stdinWrite), "herdr-soho-stdin")
+	stdinFile := os.NewFile(uintptr(stdinWrite), "soho-stdin")
 	var stdout, stderr bytes.Buffer
 	var stdoutDone chan struct{}
 	var stderrDone chan struct{}
 	if !fileOutput {
-		stdoutFile := os.NewFile(uintptr(stdoutRead), "herdr-soho-stdout")
+		stdoutFile := os.NewFile(uintptr(stdoutRead), "soho-stdout")
 		stdoutDone = make(chan struct{})
 		go func() {
 			_, _ = io.Copy(&stdout, stdoutFile)
 			_ = stdoutFile.Close()
 			close(stdoutDone)
 		}()
-		stderrFile := os.NewFile(uintptr(stderrRead), "herdr-soho-stderr")
+		stderrFile := os.NewFile(uintptr(stderrRead), "soho-stderr")
 		stderrDone = make(chan struct{})
 		go func() {
 			_, _ = io.Copy(&stderr, stderrFile)

@@ -5,9 +5,8 @@
 # call `soho plugin bridge <subcommand>`; the bridge resolves the
 # focused target from HERDR_PLUGIN_CONTEXT_JSON, validates the pane with
 # HERDR_BIN_PATH, and opens the team panel over the focused pane (`plugin
-# pane open`). The bridge opens the pane under the id of the plugin that
-# invoked the action (HERDR_PLUGIN_ID), so the same binary also serves
-# the legacy shim in plugin-legacy/herdr-plugin.toml. The panel itself
+# pane open`). The bridge opens the pane under the soho plugin id
+# (djalmajr.soho). The panel itself
 # runs the soho reads (explain, roster, doctor, friction, gc) with
 # SOHO_NOWRITE=1; only `x` and `g`, after their confirmation, run a
 # release or `gc --yes`. The `pick` action opens the unified session

@@ -47,11 +47,11 @@ func TestSpawnMapsConfiguredArgumentsAndWritesRoster(t *testing.T) {
 	}
 	env := platform.Env{
 		"PATH": bin, "HOME": root, "TMPDIR": root, "SOHO_FAKECLI_CONFIG": bin,
-		"HERDR_SOHO_SKILL_DIR": filepath.Join(root, "skill"), "HERDR_SOHO_ROLES": roles,
-		"HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1",
-		"HERDR_PANE_ID": "p1", "HERDR_SOHO_LANES": "off", "HERDR_SOHO_LAYOUT": "split",
-		"HERDR_SOHO_REGRID": "off", "HERDR_SOHO_ARGS_GROK": "--config-arg value",
-		"HERDR_SOHO_ROLE_WORKER_ARGS": "--role-arg", "SOHO_WAIT_POLL_MS": "1",
+		"SOHO_SKILL_DIR": filepath.Join(root, "skill"), "SOHO_ROLES": roles,
+		"SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1",
+		"HERDR_PANE_ID": "p1", "SOHO_LANES": "off", "SOHO_LAYOUT": "split",
+		"SOHO_REGRID": "off", "SOHO_ARGS_GROK": "--config-arg value",
+		"SOHO_ROLE_WORKER_ARGS": "--role-arg", "SOHO_WAIT_POLL_MS": "1",
 	}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	oldOut, oldErr := platform.Stdout, platform.Stderr
@@ -156,7 +156,7 @@ func TestExplicitKindDropsConfiguredModelAndEffortClampsToKindCeiling(t *testing
 	if err := os.WriteFile(filepath.Join(roles, "worker.md"), []byte("---\nkind: grok\nmodel: grok-4.7\neffort: max\n---\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"SOHO_ROLES": roles, "SOHO_SKILL_DIR": root}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{"role_worker_model": {Value: "configured-model", Source: "user"}}}
 	resolved := core.ResolveRoleSettings("worker", ctx, env, root, core.RoleFlags{Kind: "claude"})
 	if resolved.ModelSpec != "" {
@@ -184,17 +184,17 @@ func TestLowerLayerLaneModelIsDiscardedByHigherLaneKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := "lane.build.roles=worker\nlane.build.kind=pi\n"
-	if err := os.WriteFile(filepath.Join(repo, ".agents", "herdr-soho.conf"), []byte(project), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".agents", "soho.conf"), []byte(project), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	configDir := filepath.Join(home, ".config", "herdr-soho")
+	configDir := filepath.Join(home, ".config", "soho")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(configDir, "config"), []byte("lane.build.model=lower-model\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HOME": home, "HERDR_SOHO_SKILL_DIR": skill}
+	env := platform.Env{"HOME": home, "SOHO_SKILL_DIR": skill}
 	ctx := core.LoadConfig(env, repo)
 	resolved := core.ResolveRoleSettings("worker", &ctx, env, repo, core.RoleFlags{})
 	if resolved.Kind != "pi" || resolved.ModelSpec != "" {
@@ -225,7 +225,7 @@ func TestChangedNativeArgsDeclineOtherwiseReusableWorker(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"idle"}}}`}}); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": skill, "HERDR_SOHO_ROLE_WORKER_ARGS": "--new-arg"}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "SOHO_ROLES": roles, "SOHO_SKILL_DIR": skill, "SOHO_ROLE_WORKER_ARGS": "--new-arg"}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	name, unavailable, blocked := FindReusable("worker", "grok", cwd, "", "", "ask", ctx, env, cwd)
 	if name != "" || unavailable != "" || blocked {
@@ -284,7 +284,7 @@ func TestBlockedTrustStartupKeepsPaneAndExitsSeven(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HOME": root, "TMPDIR": root, "HERDR_SOHO_SKILL_DIR": skill, "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1", "HERDR_SOHO_LANES": "off", "HERDR_SOHO_NOWRITE": "0"}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HOME": root, "TMPDIR": root, "SOHO_SKILL_DIR": skill, "SOHO_ROLES": roles, "SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_ENV": "1", "SOHO_LANES": "off", "SOHO_NOWRITE": "0"}
 	ctx := &core.Config{Entries: map[string]core.ConfigEntry{}}
 	oldOut, oldErr := platform.Stdout, platform.Stderr
 	var out, stderr bytes.Buffer
@@ -330,7 +330,7 @@ func TestConfigNativeArgsStayBoundToResolvedKind(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(skillDir, "roles"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HERDR_SOHO_SKILL_DIR": skillDir}
+	env := platform.Env{"SOHO_SKILL_DIR": skillDir}
 	var dropped string
 	if got := ConfigNativeArgs("codex", "", "worker", ctx, env, t.TempDir(), func(key, own string) { dropped = key + ":" + own }); got != "" || dropped != "role.worker.args:claude" {
 		t.Fatalf("args=%q dropped=%q", got, dropped)

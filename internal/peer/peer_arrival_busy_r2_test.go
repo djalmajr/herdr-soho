@@ -55,7 +55,7 @@ func TestSendArrivalBusyR2ComposerSequence(t *testing.T) {
 	prompt := newPrompt(t)
 	// The one-shot proof read: the marker sits in the composer while the
 	// sequence has moved from the idle baseline.
-	boxScreen := strings.Replace(r2PreScreen, "› Ask Codex to do anything", "› [herdr-soho:peer] #"+id+" Message from another agent", 1)
+	boxScreen := strings.Replace(r2PreScreen, "› Ask Codex to do anything", "› [soho:peer] #"+id+" Message from another agent", 1)
 	rules := []fakecli.Rule{
 		remoteGets(1, "idle", "1"),
 		remoteVisible(1, r2PreScreen),

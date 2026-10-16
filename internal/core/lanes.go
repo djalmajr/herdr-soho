@@ -64,13 +64,11 @@ func laneRolesName(key, prefix, suffix string) (string, bool) {
 	return key[len(prefix) : len(key)-len(suffix)], true
 }
 
-// laneEnvName extracts the lane name from a SOHO_LANE_<n>_ROLES or
-// HERDR_SOHO_LANE_<n>_ROLES environment variable name; "" when k is neither.
+// laneEnvName extracts the lane name from a SOHO_LANE_<n>_ROLES
+// environment variable name; "" when k is not one.
 func laneEnvName(k string) string {
-	for _, prefix := range []string{"SOHO_LANE_", "HERDR_SOHO_LANE_"} {
-		if name, ok := laneRolesName(k, prefix, "_ROLES"); ok {
-			return name
-		}
+	if name, ok := laneRolesName(k, "SOHO_LANE_", "_ROLES"); ok {
+		return name
 	}
 	return ""
 }
@@ -904,7 +902,6 @@ func dropPresetFileExtras(file, panes string, lines *[]string, mode string) {
 	}
 }
 func ApplyLaneFile(file, panes string, env platform.Env, cwd string) []string {
-	MigrateLegacyConfigFile(file, env, cwd)
 	if _, e := os.Stat(file); os.IsNotExist(e) {
 		if e = os.MkdirAll(filepath.Dir(file), 0o755); e != nil {
 			platform.Die(fmt.Sprintf("config set: could not rewrite %s (file left untouched)", file), 4)

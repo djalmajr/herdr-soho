@@ -83,7 +83,7 @@ func TestSpawnIdleReuseWarningDescribesRetainedContext(t *testing.T) {
 	t.Run("spawn: a lane reuse of an idle worker with no prior dispatch warns the retained context", func(t *testing.T) {
 		f := newSpawnFixture(t, []fakecli.Rule{idleHerdrRule("review-2")})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.roster(t, reuseLaneRow("review-2", f.cwd))
 		code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"reviewer"})
 		if code != 0 {
@@ -109,7 +109,7 @@ func TestSpawnIdleReuseWarningDescribesRetainedContext(t *testing.T) {
 			{Argv: []string{"agent", "get", "review-2"}, Stdout: `{"result":{"agent":{"name":"review-2","agent_status":"done"}}}`},
 		})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.roster(t, reuseLaneRow("review-2", f.cwd))
 		finishedReport(t, f.state, "review-2")
 		code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"reviewer"})

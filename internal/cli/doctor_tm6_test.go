@@ -46,8 +46,8 @@ func tm6CLIEnv(t *testing.T) (platform.Env, string) {
 	for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "HERDR_WORKSPACE_ID"} {
 		clean[key] = base.Get(key)
 	}
-	clean["SOHO_DIR"] = base.Get("HERDR_SOHO_DIR")
-	clean["SOHO_SKILL_DIR"] = base.Get("HERDR_SOHO_SKILL_DIR")
+	clean["SOHO_DIR"] = base.Get("SOHO_DIR")
+	clean["SOHO_SKILL_DIR"] = base.Get("SOHO_SKILL_DIR")
 	clean["USERPROFILE"] = base.Get("HOME")
 	clean["PATH"] = t.TempDir()
 	clean["TMPDIR"] = t.TempDir()
@@ -206,7 +206,7 @@ func TestDoctorTM6CLIAndParity(t *testing.T) {
 					"codex":  "ambient-codex-model",
 					"cursor": "ambient-cursor-model",
 				} {
-					if err := os.WriteFile(filepath.Join(ambientTmp, "herdr-soho-models-"+kind+".txt"), []byte(models+"\n"), 0o600); err != nil {
+					if err := os.WriteFile(filepath.Join(ambientTmp, "soho-models-"+kind+".txt"), []byte(models+"\n"), 0o600); err != nil {
 						t.Fatal(err)
 					}
 				}

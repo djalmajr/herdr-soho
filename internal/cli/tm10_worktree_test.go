@@ -46,7 +46,7 @@ func TestTM10WorktreeCommandsReadMainState(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		state := filepath.Join(realMain, ".herdr-soho", "ws")
+		state := filepath.Join(realMain, ".soho", "ws")
 		if err := os.MkdirAll(filepath.Join(state, "reports"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +82,7 @@ func TestTM10WorktreeCommandsReadMainState(t *testing.T) {
 			t.Fatal(err)
 		}
 		env = withFakeCLI(env, fakeDir)
-		env["HERDR_SOHO_DIR"] = ""
+		env["SOHO_DIR"] = ""
 		env["HERDR_WORKSPACE_ID"], env["HERDR_ENV"] = "ws", "1"
 		old, err := os.Getwd()
 		if err != nil {
@@ -113,7 +113,7 @@ func TestTM10WorktreeCommandsReadMainState(t *testing.T) {
 		if code != 0 || waitErr != "" || !strings.Contains(waitOut, `"agent":"build"`) {
 			t.Fatalf("wait code=%d out=%q err=%q", code, waitOut, waitErr)
 		}
-		if _, err := os.Stat(filepath.Join(worker, ".herdr-soho")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(worker, ".soho")); !os.IsNotExist(err) {
 			t.Fatalf("worker has separate state: %v", err)
 		}
 		if got := core.StateRoot(&core.Config{Entries: map[string]core.ConfigEntry{}}, env, worker); got != filepath.Dir(state) {
@@ -174,7 +174,7 @@ func TestTM10RosterGitProcessBound(t *testing.T) {
 		env["PATH"] = fakeDir
 		env["SOHO_FAKECLI_CONFIG"] = fakeDir
 		env["HERDR_SOCKET_PATH"] = filepath.Join(t.TempDir(), "missing.sock")
-		env["HERDR_ENV"], env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = "1", filepath.Join(t.TempDir(), "state"), "ws"
+		env["HERDR_ENV"], env["SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = "1", filepath.Join(t.TempDir(), "state"), "ws"
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var out, stderr bytes.Buffer
 		platform.Stdout, platform.Stderr = &out, &stderr

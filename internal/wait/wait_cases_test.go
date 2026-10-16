@@ -149,7 +149,7 @@ func TestWaitJavaScriptStateProbeCases(t *testing.T) {
 	t.Run("wait: quota wins over a provider stop on the same screen", func(t *testing.T) { // JS: "wait: quota wins over a provider stop on the same screen"
 		// Mutation captured: prioritizing the Connection error on this screen returns provider-error (14), not quota (11).
 		f := newQueuedProbeFixture(t, "idle", "5", "Individual quota reached\nError: Connection error.\n", nil)
-		f.env["HERDR_SOHO_DIR"] = filepath.Dir(f.sd)
+		f.env["SOHO_DIR"] = filepath.Dir(f.sd)
 		f.env["HERDR_WORKSPACE_ID"] = filepath.Base(f.sd)
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var out, errOut bytes.Buffer
@@ -193,7 +193,7 @@ func TestWaitJavaScriptAutoApproveCases(t *testing.T) {
 	t.Run("tryAutoApprove: a counter that exists but is not a number fails closed", func(t *testing.T) { // JS: "tryAutoApprove: a counter that exists but is not a number fails closed"
 		f := newQueuedProbeFixture(t, "blocked", "5", "Allow command?\nPress enter to confirm\n", nil)
 		env := f.env.Clone()
-		env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+		env["SOHO_AUTO_APPROVE"] = "on"
 		for _, bad := range []string{"", "  \n", "x\n", "1.5\n"} {
 			if err := os.WriteFile(f.marker("approvals"), []byte(bad), 0o600); err != nil {
 				t.Fatal(err)
@@ -249,7 +249,7 @@ func TestWaitJavaScriptRetryCases(t *testing.T) {
 		// Adapted contract: the retry needs a recognized composer holding
 		// the stored path — the claude box, not a plain history line.
 		f := newQueuedProbeFixture(t, "idle", "5", claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{"not-received": "2000000000 5 " + prompt + "\n"})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 		if got := f.probe(""); got != "working" {
 			t.Fatalf("fresh marker = %q, want wait", got)
 		}
@@ -273,7 +273,7 @@ func TestWaitJavaScriptRetryCases(t *testing.T) {
 		f := newQueuedProbeFixture(t, "idle", "5", "Read the file "+prompt+" in full and execute it.\n", map[string]string{
 			"not-received": "1 5 " + prompt + "\n", "enter-retry": "3 1999999900\n",
 		})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 		if got := f.probe(""); got != "not-received" {
 			t.Fatalf("spent retries = %q", got)
 		}
@@ -306,7 +306,7 @@ func TestWaitTM4RemainingRetryAndApprovalCases(t *testing.T) {
 		// Adapted contract: the retry needs a recognized composer holding
 		// the stored path — the claude box, not a plain "> " marker line.
 		f := newQueuedProbeFixture(t, "idle", "5", "Welcome to the worker\n"+claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{"not-received": "1999998800 5 " + prompt + "\n"})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "600"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "600"
 		enterCount := func() int {
 			count := 0
 			for _, call := range f.calls() {
@@ -345,7 +345,7 @@ func TestWaitTM4RemainingRetryAndApprovalCases(t *testing.T) {
 	t.Run("tryAutoApprove: key per kind, counter and log, the cap, send failure", func(t *testing.T) { // JS: "tryAutoApprove: key per kind, counter and log, the cap, send failure"
 		f := newQueuedProbeFixture(t, "blocked", "5", "Allow command?\nPress enter to confirm\n", nil)
 		env := f.env.Clone()
-		env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+		env["SOHO_AUTO_APPROVE"] = "on"
 		if !TryAutoApprove(f.sd, "worker", f.ctx, env) {
 			t.Fatal("claude dialog was not auto-approved")
 		}
@@ -363,8 +363,8 @@ func TestWaitTM4RemainingRetryAndApprovalCases(t *testing.T) {
 
 		capFixture := newQueuedProbeFixture(t, "blocked", "5", "Allow command?\nPress enter to confirm\n", map[string]string{"approvals": "1\n"})
 		capEnv := capFixture.env.Clone()
-		capEnv["HERDR_SOHO_AUTO_APPROVE"] = "on"
-		capEnv["HERDR_SOHO_MAX_AUTO_APPROVALS"] = "1"
+		capEnv["SOHO_AUTO_APPROVE"] = "on"
+		capEnv["SOHO_MAX_AUTO_APPROVALS"] = "1"
 		if TryAutoApprove(capFixture.sd, "worker", capFixture.ctx, capEnv) || hasCall(capFixture.calls(), "agent send-keys worker enter") {
 			t.Fatal("approval cap allowed another Enter")
 		}
@@ -384,7 +384,7 @@ func TestWaitTM4RemainingRetryAndApprovalCases(t *testing.T) {
 		failedEnv := failed.env.Clone()
 		failedEnv["PATH"] = failedBin
 		failedEnv["SOHO_FAKECLI_CONFIG"] = failedBin
-		failedEnv["HERDR_SOHO_AUTO_APPROVE"] = "on"
+		failedEnv["SOHO_AUTO_APPROVE"] = "on"
 		if TryAutoApprove(failed.sd, "worker", failed.ctx, failedEnv) {
 			t.Fatal("failed key send was reported as approved")
 		}
@@ -409,7 +409,7 @@ func TestWaitTM4RetryThenDoneCase(t *testing.T) {
 		// Adapted contract: the retry needs a recognized composer holding
 		// the stored path — the claude box, not a plain "> " marker line.
 		f := newQueuedProbeFixture(t, "idle", "5", "Welcome to the worker\n"+claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{"not-received": "1999998800 5 " + prompt + "\n"})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "600"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "600"
 		if got := f.probe(""); got != "working" || !hasCall(f.calls(), "agent send-keys worker enter") {
 			t.Fatalf("retry did not keep the probe working with one Enter: state=%q calls=%#v", got, f.calls())
 		}
@@ -446,7 +446,7 @@ func TestWaitTM4ApprovalDialogHistoryCases(t *testing.T) {
 		env := f.env.Clone()
 		env["PATH"] = bin
 		env["SOHO_FAKECLI_CONFIG"] = bin
-		env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+		env["SOHO_AUTO_APPROVE"] = "on"
 		f.env = env
 		return f
 	}
@@ -523,7 +523,7 @@ func TestWaitTM4CheckpointRemainingCases(t *testing.T) {
 	})
 	t.Run("wait: with stuck_warn_minutes=0 the hash still follows the screen (no endless fresh change)", func(t *testing.T) { // JS: "wait: with stuck_warn_minutes=0 the hash still follows the screen (no endless fresh change)"
 		f := newQueuedProbeFixture(t, "working", "5", "Busy 30%\n", nil)
-		f.env["HERDR_SOHO_STUCK_WARN_MINUTES"] = "0"
+		f.env["SOHO_STUCK_WARN_MINUTES"] = "0"
 		if err := os.WriteFile(f.marker("stuck-hash"), []byte(strconv.FormatUint(uint64(CksumField(NormalizeScreen("Busy 10%\n"))), 10)+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}

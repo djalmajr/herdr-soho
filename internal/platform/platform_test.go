@@ -493,7 +493,7 @@ func capturePanic(run func()) (value any) {
 }
 
 // TestLauncherPath pins the deliberate binary-only contract: the
-// configured HERDR_SOHO_BIN override (validated and symlink-resolved) or
+// configured SOHO_BIN override (validated and symlink-resolved) or
 // the current executable; never a skill scripts launcher, never a
 // Node/Bun/Bash search, and every invalid override fails closed.
 func TestLauncherPath(t *testing.T) {
@@ -505,7 +505,7 @@ func TestLauncherPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolving the test binary: %v", err)
 	}
-	t.Run("the HERDR_SOHO_BIN override names the native binary through symlinks and hostile spacing", func(t *testing.T) {
+	t.Run("the SOHO_BIN override names the native binary through symlinks and hostile spacing", func(t *testing.T) {
 		// A symlinked binary inside a directory with a space and a quote:
 		// the hostile spacing must not defeat the resolution, and the
 		// skill directory must play no part.
@@ -517,11 +517,11 @@ func TestLauncherPath(t *testing.T) {
 		if err := os.MkdirAll(weird, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		link := filepath.Join(weird, "herdr-soho")
+		link := filepath.Join(weird, "soho")
 		if err := os.Symlink(exe, link); err != nil {
 			t.Fatal(err)
 		}
-		env := Env{"HERDR_SOHO_BIN": link, "PATH": "", "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+		env := Env{"SOHO_BIN": link, "PATH": ""}
 		if got := LauncherPath(env); got != want {
 			t.Fatalf("LauncherPath() = %q, want the resolved native binary %q", got, want)
 		}
@@ -532,12 +532,12 @@ func TestLauncherPath(t *testing.T) {
 		defer func() { currentExecutable = previous }()
 		// An empty or blank override means no override: the fallback holds.
 		for _, blank := range []string{"", "   "} {
-			env := Env{"HERDR_SOHO_BIN": blank, "PATH": "", "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+			env := Env{"SOHO_BIN": blank, "PATH": ""}
 			if got := LauncherPath(env); got != exe {
 				t.Fatalf("LauncherPath() with %q override = %q, want the current executable %q", blank, got, exe)
 			}
 		}
-		got := LauncherPath(Env{"PATH": "", "HERDR_SOHO_SKILL_DIR": t.TempDir()})
+		got := LauncherPath(Env{"PATH": ""})
 		if got != exe {
 			t.Fatalf("LauncherPath() = %q, want the current executable %q", got, exe)
 		}
@@ -554,7 +554,7 @@ func TestLauncherPath(t *testing.T) {
 			want    string
 			skipWin bool
 		}{
-			{name: "relative override", bin: "herdr-soho", want: "SOHO_BIN must be an absolute path"},
+			{name: "relative override", bin: "soho", want: "SOHO_BIN must be an absolute path"},
 			{name: "missing override", bin: filepath.Join(tmp, "missing"), want: "SOHO_BIN is missing or not a regular file"},
 			{name: "directory override", bin: tmp, want: "SOHO_BIN is missing or not a regular file"},
 			{
@@ -571,7 +571,7 @@ func TestLauncherPath(t *testing.T) {
 				name: ".cmd batch override", bin: filepath.Join(tmp, "run.cmd"), want: "SOHO_BIN is not a native binary",
 				setup: func(t *testing.T) string {
 					f := filepath.Join(tmp, "run.cmd")
-					if err := os.WriteFile(f, []byte("@echo off\nnode herdr-soho.mjs\n"), 0o755); err != nil {
+					if err := os.WriteFile(f, []byte("@echo off\nnode soho.mjs\n"), 0o755); err != nil {
 						t.Fatal(err)
 					}
 					return f
@@ -614,12 +614,71 @@ func TestLauncherPath(t *testing.T) {
 				if tc.setup != nil {
 					bin = tc.setup(t)
 				}
-				got := capturePanic(func() { LauncherPath(Env{"HERDR_SOHO_BIN": bin}) })
+				got := capturePanic(func() { LauncherPath(Env{"SOHO_BIN": bin}) })
 				exit, ok := got.(*ExitError)
 				if !ok || exit.Code != 2 || !strings.Contains(exit.Msg, tc.want) {
 					t.Fatalf("LauncherPath panic=%#v; want ExitError code 2 naming %q", got, tc.want)
 				}
 			})
+		}
+	})
+}
+
+// DJA-318: the herdr-soho generation's env names are no longer read at
+// the platform layer. Defined alone, each of them is ignored; the SOHO_ name
+// keeps deciding.
+func TestLegacyEnvNamesIgnored(t *testing.T) {
+	t.Run("HERDR_SOHO_NOWRITE=1 alone does not open the read-only gate", func(t *testing.T) {
+		if nowriteGate(Env{"HERDR_SOHO_NOWRITE": "1"}) {
+			t.Fatal("the legacy NOWRITE name opened the read-only gate")
+		}
+		if !nowriteGate(Env{"SOHO_NOWRITE": "1"}) {
+			t.Fatal("the SOHO_ name must still open the read-only gate")
+		}
+	})
+	t.Run("HERDR_SOHO_SKILL_DIR alone is not a skill source", func(t *testing.T) {
+		home := t.TempDir()
+		bin := t.TempDir()
+		previous := currentExecutable
+		currentExecutable = func() (string, error) { return filepath.Join(bin, "soho"), nil }
+		defer func() { currentExecutable = previous }()
+		configured := t.TempDir()
+		if dir, origin := SkillDirSourceOrEmpty(Env{"HERDR_SOHO_SKILL_DIR": configured, "HOME": home, "USERPROFILE": home}); dir != "" || origin != "" {
+			t.Fatalf("SkillDirSourceOrEmpty() = %q %q; the legacy configured name must be ignored (want empty)", dir, origin)
+		}
+		// The SOHO_ name keeps deciding (control).
+		if dir, origin := SkillDirSourceOrEmpty(Env{"SOHO_SKILL_DIR": configured, "HOME": home, "USERPROFILE": home}); dir != configured || origin != "SOHO_SKILL_DIR" {
+			t.Fatalf("SkillDirSourceOrEmpty() = %q %q; want %q SOHO_SKILL_DIR", dir, origin, configured)
+		}
+	})
+	t.Run("HERDR_SOHO_BIN alone is not a launcher override", func(t *testing.T) {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatalf("locating the test binary: %v", err)
+		}
+		previous := currentExecutable
+		currentExecutable = func() (string, error) { return exe, nil }
+		defer func() { currentExecutable = previous }()
+		// A valid native binary at another path: the legacy override must
+		// not pick it up, the fallback is the current executable.
+		override := filepath.Join(t.TempDir(), "soho-copy")
+		data, err := os.ReadFile(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(override, data, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if got := LauncherPath(Env{"HERDR_SOHO_BIN": override}); got != exe {
+			t.Fatalf("LauncherPath() = %q; the legacy override must be ignored (want the current executable %q)", got, exe)
+		}
+		// The SOHO_ override keeps deciding (control).
+		resolvedOverride, err := filepath.EvalSymlinks(override)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := LauncherPath(Env{"SOHO_BIN": override}); got != resolvedOverride {
+			t.Fatalf("LauncherPath() = %q; want the SOHO_ override %q", got, resolvedOverride)
 		}
 	})
 }
@@ -647,7 +706,7 @@ func TestIsNativeExecutableHeader(t *testing.T) {
 		{name: "ELF", header: []byte{0x7F, 'E', 'L', 'F', 2, 1, 1, 0}, want: true},
 		{name: "PE with the signature at e_lfanew", header: pe, want: true},
 		{name: "shebang script", header: []byte("#!/bin/sh\necho hi\n"), want: false},
-		{name: ".cmd batch", header: []byte("@echo off\nnode herdr-soho.mjs\n"), want: false},
+		{name: ".cmd batch", header: []byte("@echo off\nnode soho.mjs\n"), want: false},
 		{name: "JSON", header: []byte(`{"a":1}`), want: false},
 		{name: "MZ without the PE signature", header: append([]byte("MZ"), make([]byte, 0x40-2)...), want: false},
 		{name: "MZ with an out-of-window e_lfanew", header: func() []byte {

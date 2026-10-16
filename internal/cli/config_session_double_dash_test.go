@@ -30,14 +30,14 @@ func TestSetValuesWithDoubleDash(t *testing.T) {
 	t.Run("session set: a value that begins with -- is joined", func(t *testing.T) {
 		env, cwd := commandFixture(t)
 		code, _, errOut := runIn(t, []string{"session", "set", "lane.review.args", "--add-dir", "/x/shared"}, env, cwd)
-		if got := sessionFile(t, env.Get("HERDR_SOHO_DIR")); code != 0 || errOut != "" || got != "lane.review.args=--add-dir /x/shared\n" {
+		if got := sessionFile(t, env.Get("SOHO_DIR")); code != 0 || errOut != "" || got != "lane.review.args=--add-dir /x/shared\n" {
 			t.Fatalf("code=%d err=%q file=%q", code, errOut, got)
 		}
 	})
 	t.Run("session set: -- before the value", func(t *testing.T) {
 		env, cwd := commandFixture(t)
 		code, _, errOut := runIn(t, []string{"session", "set", "lane.review.args", "--", "--add-dir /x/shared"}, env, cwd)
-		if got := sessionFile(t, env.Get("HERDR_SOHO_DIR")); code != 0 || errOut != "" || got != "lane.review.args=--add-dir /x/shared\n" {
+		if got := sessionFile(t, env.Get("SOHO_DIR")); code != 0 || errOut != "" || got != "lane.review.args=--add-dir /x/shared\n" {
 			t.Fatalf("code=%d err=%q file=%q", code, errOut, got)
 		}
 	})

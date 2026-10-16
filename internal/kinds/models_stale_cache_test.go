@@ -13,7 +13,7 @@ import (
 // A fresh (less than 1 h old) copy of the 1 h copy file.
 func freshCopy(t *testing.T, tmp, kind, list string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(tmp, "herdr-soho-models-"+kind+".txt"), []byte(list), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, "soho-models-"+kind+".txt"), []byte(list), 0600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -44,7 +44,7 @@ func TestModelStaleCopy(t *testing.T) {
 		if len(warns) != 0 {
 			t.Fatalf("stale copy raised a no-match warning: %v", warns)
 		}
-		if copy, readErr := os.ReadFile(filepath.Join(tmp, "herdr-soho-models-codex.txt")); readErr != nil || string(copy) != "gpt-5-codex\n" {
+		if copy, readErr := os.ReadFile(filepath.Join(tmp, "soho-models-codex.txt")); readErr != nil || string(copy) != "gpt-5-codex\n" {
 			t.Fatalf("codex rewrote the 1 h copy it no longer uses: %q err=%v", copy, readErr)
 		}
 	})
@@ -68,7 +68,7 @@ func TestModelStaleCopy(t *testing.T) {
 		if readErr != nil || len(calls) != 1 {
 			t.Fatalf("source re-read was not exactly one CLI call: calls=%d err=%v", len(calls), readErr)
 		}
-		rewritten, readErr := os.ReadFile(filepath.Join(tmp, "herdr-soho-models-grok.txt"))
+		rewritten, readErr := os.ReadFile(filepath.Join(tmp, "soho-models-grok.txt"))
 		if readErr != nil || !strings.Contains(string(rewritten), "grok-2") {
 			t.Fatalf("the copy was not rewritten with the fresh list: %q err=%v", rewritten, readErr)
 		}

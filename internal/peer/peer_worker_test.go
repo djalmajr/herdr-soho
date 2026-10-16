@@ -16,7 +16,7 @@ import (
 // the given role (role "" writes no roster line at all).
 func rosterSender(t *testing.T, f *fixture, name, role string) {
 	t.Helper()
-	stateDir := filepath.Join(f.env["HERDR_SOHO_DIR"], "ws-test")
+	stateDir := filepath.Join(f.env["SOHO_DIR"], "ws-test")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestSendWorkerLookupFailureOrIncompleteRegistrationNeverBypassesGuard(t *te
 			f.env["HERDR_PANE_ID"] = "w0test:p0a"
 			rosterSender(t, f, "worker", "implementer")
 			if incomplete {
-				if err := os.WriteFile(filepath.Join(f.env["HERDR_SOHO_DIR"], "ws-test", "agents.tsv"), []byte("worker\tw0test:p0a\n"), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(f.env["SOHO_DIR"], "ws-test", "agents.tsv"), []byte("worker\tw0test:p0a\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}

@@ -30,8 +30,8 @@ func TestSpawnEntryCatchJavaScriptCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := commandSpawnEnv(t, root, state, bin)
-		env["HERDR_SOHO_LANES"] = "off"
-		env["HERDR_SOHO_MAX_WORKERS"] = "1"
+		env["SOHO_LANES"] = "off"
+		env["SOHO_MAX_WORKERS"] = "1"
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var out, errOut strings.Builder
 		platform.Stdout, platform.Stderr = &out, &errOut
@@ -56,7 +56,7 @@ func TestSpawnEntryCatchJavaScriptCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := commandSpawnEnv(t, root, state, bin)
-		env["HERDR_SOHO_LANES"] = "off"
+		env["SOHO_LANES"] = "off"
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var out, errOut strings.Builder
 		platform.Stdout, platform.Stderr = &out, &errOut
@@ -80,8 +80,8 @@ func commandSpawnEnv(t *testing.T, root, state, bin string) platform.Env {
 	env["HOME"] = root
 	env["HERDR_ENV"] = "1"
 	env["HERDR_WORKSPACE_ID"] = "ws"
-	env["HERDR_SOHO_DIR"] = state
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+	env["SOHO_DIR"] = state
+	env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	env["SOHO_WAIT_POLL_MS"] = "1"
 	return env
 }

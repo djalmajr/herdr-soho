@@ -41,11 +41,11 @@ func newSpawnFixture(t *testing.T, rules []fakecli.Rule) spawnFixture {
 	}
 	f.env["HOME"] = root
 	f.env["USERPROFILE"] = root
-	f.env["HERDR_SOHO_DIR"] = f.state
+	f.env["SOHO_DIR"] = f.state
 	f.env["HERDR_WORKSPACE_ID"] = "ws"
-	f.env["HERDR_SOHO_SKILL_DIR"] = filepath.Join(root, "skill")
-	f.env["HERDR_SOHO_ROLES"] = filepath.Join(root, "roles")
-	f.env["HERDR_SOHO_LANES"] = "off"
+	f.env["SOHO_SKILL_DIR"] = filepath.Join(root, "skill")
+	f.env["SOHO_ROLES"] = filepath.Join(root, "roles")
+	f.env["SOHO_LANES"] = "off"
 	f.ctx = &core.Config{Entries: map[string]core.ConfigEntry{}}
 	if err := os.MkdirAll(filepath.Join(f.state, "ws"), 0o700); err != nil {
 		t.Fatal(err)
@@ -138,10 +138,10 @@ func configureSpawnFixture(t *testing.T, f *spawnFixture) {
 			t.Fatal(err)
 		}
 	}
-	f.env["HERDR_SOHO_ROLES"] = filepath.Join(f.root, "roles")
-	f.env["HERDR_SOHO_LANES"] = "off"
-	f.env["HERDR_SOHO_LAYOUT"] = "split"
-	f.env["HERDR_SOHO_REGRID"] = "off"
+	f.env["SOHO_ROLES"] = filepath.Join(f.root, "roles")
+	f.env["SOHO_LANES"] = "off"
+	f.env["SOHO_LAYOUT"] = "split"
+	f.env["SOHO_REGRID"] = "off"
 	f.env["SOHO_WAIT_POLL_MS"] = "1"
 	f.env["HERDR_ENV"] = "1"
 }
@@ -204,7 +204,7 @@ func TestFindReusableJavaScriptCases(t *testing.T) {
 				}
 			}
 			if tc.js == "findReusable: edited workers never become a review role" {
-				f.env["HERDR_SOHO_ROLES"] = filepath.Join(f.root, "roles")
+				f.env["SOHO_ROLES"] = filepath.Join(f.root, "roles")
 				if err := os.WriteFile(filepath.Join(f.root, "roles", "implementer.md"), []byte("---\nmode: edit\nkind: grok\n---\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -521,7 +521,7 @@ func TestCmdSpawnJavaScriptCases(t *testing.T) {
 		if code != 3 {
 			t.Fatalf("unknown role exit=%d", code)
 		}
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		code, _, _, _ = runCmdSpawn(t, f, []string{"sub-orchestrator"})
 		if code != 3 {
 			t.Fatalf("lane-less role exit=%d", code)
@@ -569,7 +569,7 @@ func TestCmdSpawnJavaScriptCases(t *testing.T) {
 		// JS: "spawn: --tab-label forces the herd tab and pins the label (test-tab-labels.sh)"
 		f := newSpawnFixture(t, freshSpawnRules())
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LAYOUT"] = "split"
+		f.env["SOHO_LAYOUT"] = "split"
 		code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker", "--tab-label", "task tab"})
 		if code != 0 {
 			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -695,7 +695,7 @@ func TestCmdSpawnJavaScriptCases(t *testing.T) {
 		// JS: "spawn: a fresh worker (layout=tab → herd tab), roster row and start args"
 		f := newSpawnFixture(t, freshSpawnRules())
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LAYOUT"] = "tab"
+		f.env["SOHO_LAYOUT"] = "tab"
 		code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
 		if code != 0 {
 			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
@@ -798,7 +798,7 @@ func TestSpawnLaneJavaScriptCases(t *testing.T) {
 		// lane has no slot, so spawn exits 13 naming the idle and what it runs.
 		f := newSpawnFixture(t, []fakecli.Rule{{Argv: []string{"agent", "get", "build"}, Stdout: `{"result":{"agent":{"agent_status":"idle"}}}`}})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
 		f.ctx.Order = []string{"lane_build_roles"}
 		// The recorded session model differs from the requested default model.
@@ -814,7 +814,7 @@ func TestSpawnLaneJavaScriptCases(t *testing.T) {
 		// JS: "spawn: an explicit lane kind that matches the session is reused; a different CLI is 13"
 		f := newSpawnFixture(t, []fakecli.Rule{{Argv: []string{"agent", "get", "build"}, Stdout: `{"result":{"agent":{"agent_status":"idle"}}}`}})
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
+		f.env["SOHO_LANES"] = "on"
 		f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
 		f.ctx.Entries["lane_build_kind"] = core.ConfigEntry{Value: "grok", Source: "project"}
 		f.ctx.Order = []string{"lane_build_roles", "lane_build_kind"}

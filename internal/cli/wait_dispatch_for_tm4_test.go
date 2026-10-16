@@ -98,7 +98,7 @@ func TestDispatchForReleasedCommandCases(t *testing.T) {
 	})
 	t.Run("released agent names match exactly before the timestamp", func(t *testing.T) { // JS: "released agent names match exactly before the timestamp"
 		f := releasedForFixture(t, "openai")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		addReleasedForSidecar(t, f, "build-2", "20260927T101001", "claude", "", "accepted", false)
 		code, out, stderr := f.run(t, "worker", f.brief, "--for", "build", "--no-wait")
 		if code != 2 || out != "" || !strings.Contains(stderr, "not an agent in the roster") {
@@ -151,7 +151,7 @@ func readTaskDispatchResult(t *testing.T, out string) taskReportDispatchResult {
 func TestTaskReportCommandLifecycleCases(t *testing.T) {
 	t.Run("dispatch-amend-done-collect works when all symlink creation APIs fail with EPERM", func(t *testing.T) { // JS: "dispatch-amend-done-collect works when all symlink creation APIs fail with EPERM"
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		fixedNow := platform.Now
 		now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
 		platform.Now = func() time.Time { value := now; now = now.Add(2 * time.Second); return value }
@@ -190,7 +190,7 @@ func TestTaskReportCommandLifecycleCases(t *testing.T) {
 	t.Run("task report is stable across two amendments, wait and collect; clean and stats ignore the copy and pointer", func(t *testing.T) { // JS: "task report is stable across two amendments, wait and collect; clean and stats ignore the copy and pointer"
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
 		f.env["SOHO_WAIT_POLL_MS"] = "1"
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		fixedNow := platform.Now
 		now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
 		platform.Now = func() time.Time { value := now; now = now.Add(2 * time.Second); return value }
@@ -325,7 +325,7 @@ func TestTaskReportCommandLifecycleCases(t *testing.T) {
 	t.Run("--amend creates a task pointer for a legacy task without one", func(t *testing.T) { // JS: "--amend creates a task pointer for a legacy task without one"
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
 		f.env["SOHO_WAIT_POLL_MS"] = "1"
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		fixedNow := platform.Now
 		now := time.Date(2026, 9, 29, 1, 0, 0, 0, time.UTC)
 		platform.Now = func() time.Time { value := now; now = now.Add(2 * time.Second); return value }
@@ -378,7 +378,7 @@ func TestTaskReportNewTaskCommandCase(t *testing.T) {
 	t.Run("a new dispatch after a finished task gets its own stable copy and leaves the previous one", func(t *testing.T) { // JS: "a new dispatch after a finished task gets its own stable copy and leaves the previous one"
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
 		f.env["SOHO_WAIT_POLL_MS"] = "1"
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		fixedNow := platform.Now
 		now := time.Date(2026, 9, 29, 2, 0, 0, 0, time.UTC)
 		platform.Now = func() time.Time { value := now; now = now.Add(2 * time.Second); return value }

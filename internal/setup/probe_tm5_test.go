@@ -55,12 +55,12 @@ func probeGoldenContext(t *testing.T, kind, model string, rules []fakecli.Rule) 
 			env[key] = value
 		}
 	}
-	delete(env, "HERDR_SOHO_MODEL_"+strings.ToUpper(kind)+"_WORKER")
+	delete(env, "SOHO_MODEL_"+strings.ToUpper(kind)+"_WORKER")
 	env["PATH"] = bin
 	home := t.TempDir()
 	env["HOME"], env["USERPROFILE"] = home, home
 	env["XDG_CONFIG_HOME"], env["TMPDIR"] = filepath.Join(home, ".config"), t.TempDir()
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+	env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	env["HERDR_PANE_ID"], env["HERDR_WORKSPACE_ID"] = "w0test:p0a", "w0test"
 	env["HERDR_SOCKET_PATH"] = filepath.Join(t.TempDir(), "missing-socket")
 	if os.PathSeparator == '\\' {
@@ -85,7 +85,7 @@ func probeAllFakeEnv(t *testing.T, bin string) platform.Env {
 	home := t.TempDir()
 	env["HOME"], env["USERPROFILE"] = home, home
 	env["XDG_CONFIG_HOME"], env["TMPDIR"] = filepath.Join(home, ".config"), t.TempDir()
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+	env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	return env
 }
 
@@ -201,7 +201,7 @@ func TestSetupProbeTM5Continuation(t *testing.T) {
 		if err := os.WriteFile(exe, []byte("#!/definitely/missing/herdr-test-interpreter\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "HERDR_SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho")}
+		env := platform.Env{"PATH": bin, "HOME": t.TempDir(), "SOHO_SKILL_DIR": filepath.Join("..", "..", "skills", "soho")}
 		got := probeOne(nil, "claude", "", "configured", 2, env, t.TempDir())
 		if got.Status != "error" || got.Cause != "exit 127" {
 			t.Fatalf("probe=%+v", got)

@@ -111,7 +111,7 @@ func TestCodexSendScreenMarkers(t *testing.T) {
 		}
 	})
 	t.Run("the same screen with the marker typed in the composer is still on screen and in the composer", func(t *testing.T) {
-		typed := withCodexComposerLine(screen, "› [herdr-soho:peer] #"+id+" …")
+		typed := withCodexComposerLine(screen, "› [soho:peer] #"+id+" …")
 		if !messageStillInScreen("codex", typed, endLine, id) {
 			t.Fatal("the id in the composer must block the screen proof")
 		}
@@ -123,7 +123,7 @@ func TestCodexSendScreenMarkers(t *testing.T) {
 		}
 	})
 	t.Run("a follow-up queue line above the composer is queued, not on screen", func(t *testing.T) {
-		queued := withCodexComposerLine(screen, "↳ [herdr-soho:peer] #"+id+" Message from another agent\n› Ask Codex to do anything")
+		queued := withCodexComposerLine(screen, "↳ [soho:peer] #"+id+" Message from another agent\n› Ask Codex to do anything")
 		if !codexQueued(queued, id) {
 			t.Fatal("the '↳ #id' line above the composer must be the follow-up queue")
 		}
@@ -132,13 +132,13 @@ func TestCodexSendScreenMarkers(t *testing.T) {
 		}
 	})
 	t.Run("a queue line at or below the composer is not queued", func(t *testing.T) {
-		below := withCodexComposerLine(screen, "› x") + "\n↳ [herdr-soho:peer] #" + id + " Message from another agent"
+		below := withCodexComposerLine(screen, "› x") + "\n↳ [soho:peer] #" + id + " Message from another agent"
 		if codexQueued(below, id) {
 			t.Fatal("only lines above the composer count as the queue")
 		}
 	})
 	t.Run("a queue line with another id is not queued for this id", func(t *testing.T) {
-		other := withCodexComposerLine(screen, "↳ [herdr-soho:peer] #01020304 Message from another agent\n› Ask Codex to do anything")
+		other := withCodexComposerLine(screen, "↳ [soho:peer] #01020304 Message from another agent\n› Ask Codex to do anything")
 		if codexQueued(other, id) {
 			t.Fatal("a queue line of another message must not match")
 		}

@@ -52,7 +52,7 @@ func TestWaitEnterRetryNeedsRecognizedComposer(t *testing.T) {
 	f := newQueuedProbeFixture(t, "idle", "5", "Read the file "+prompt+" in full and execute it.\n", map[string]string{
 		"not-received": "1999999900 5 " + prompt + "\n",
 	})
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 	if got := f.probe(""); got != "not-received" {
 		t.Fatalf("probe=%q, want not-received without keys", got)
 	}
@@ -77,7 +77,7 @@ func TestWaitEnterRetryOnRecognizedComposerSendsEnter(t *testing.T) {
 	f := newQueuedProbeFixture(t, "idle", "5", claudeBoxScreen("Welcome to the worker\n", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{
 		"not-received": "1999999900 5 " + prompt + "\n",
 	})
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 	if got := f.probe(""); got != "working" {
 		t.Fatalf("probe=%q, want working after the retry Enter", got)
 	}
@@ -109,7 +109,7 @@ func TestWaitEnterRetryRefusesKnownDialogUI(t *testing.T) {
 		if kind != "claude" {
 			f.cursorRoster(t, kind)
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 		if got := f.probe(""); got != "not-received" {
 			t.Fatalf("probe=%q, want not-received after the dialog refusal", got)
 		}
@@ -139,7 +139,7 @@ func TestWaitEnterRetryHonorsFailedSendKey(t *testing.T) {
 	f := newQueuedProbeFixture(t, "idle", "5", claudeBoxScreen("Welcome to the worker\n", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{
 		"not-received": "1999999900 5 " + prompt + "\n",
 	}, fakecli.Rule{Argv: []string{"agent", "send-keys", "worker", "enter"}, Code: 1, Stderr: `{"error":{"code":"send_failed","message":"the fake send-keys failed"}}`})
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 	for probe := 1; probe <= 2; probe++ {
 		if got := f.probe(""); got != "working" {
 			t.Fatalf("probe %d=%q, want working (the failed key does not end the retry)", probe, got)
@@ -168,7 +168,7 @@ func TestWaitEnterRetryWithoutStoredPathGetsNoKey(t *testing.T) {
 	f := newQueuedProbeFixture(t, "idle", "5", "Read the file /tmp/worker-brief.md in full and execute it.\n", map[string]string{
 		"not-received": "1999999900 5\n",
 	})
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 	if got := f.probe(""); got != "not-received" {
 		t.Fatalf("probe=%q, want not-received without keys", got)
 	}
@@ -193,7 +193,7 @@ func TestWaitEnterRetryUnrecognizedKindGetsNoKey(t *testing.T) {
 		"not-received": "1999999900 5 " + prompt + "\n",
 	})
 	f.cursorRoster(t, "grok")
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 	if got := f.probe(""); got != "not-received" {
 		t.Fatalf("probe=%q, want not-received without keys", got)
 	}
@@ -216,7 +216,7 @@ func TestWaitQueuedRetryNeedsRecognizedComposer(t *testing.T) {
 		"queued":      "1 5 " + prompt + "\n",
 		"enter-retry": "1 1234567890\n",
 	})
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 	if got := f.probe(""); got != "not-received" {
 		t.Fatalf("probe=%q, want not-received without keys", got)
 	}
@@ -245,7 +245,7 @@ func TestWaitQueuedRetryOnRecognizedComposerSendsEnter(t *testing.T) {
 		"queued":      "1 5 " + prompt + "\n",
 		"enter-retry": "1 1234567890\n",
 	})
-	f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 	if got := f.probe(""); got != "working" {
 		t.Fatalf("probe=%q, want working after the retry Enter", got)
 	}

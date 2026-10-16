@@ -348,7 +348,7 @@ func CmdPlan(args []string, ctx *core.Config, env platform.Env, cwd string) {
 		file, source string
 		pairs        [][2]string
 		touched      bool
-	}{{file: projectFile, source: core.EffectiveConfigFile(projectFile, core.LegacyProjectConfigPath(root)), pairs: proj, touched: panes != "" || len(laneSpecs) > 0 || len(proj) > 0}, {file: userFile, source: core.EffectiveConfigFile(userFile, core.LegacyUserConfigPath(platform.Current(), env)), pairs: user, touched: len(user) > 0}, {file: sessionFile, source: sessionFile, pairs: sess, touched: len(sess) > 0}}
+	}{{file: projectFile, source: projectFile, pairs: proj, touched: panes != "" || len(laneSpecs) > 0 || len(proj) > 0}, {file: userFile, source: userFile, pairs: user, touched: len(user) > 0}, {file: sessionFile, source: sessionFile, pairs: sess, touched: len(sess) > 0}}
 	sectionAfter := make([]string, len(sections))
 	tempNames := []string{"proj.conf", "user.conf", "session.conf"}
 	for i, section := range sections {

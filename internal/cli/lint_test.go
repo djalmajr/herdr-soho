@@ -36,12 +36,12 @@ func TestLintCommandReadOnlyAndExitModes(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := platform.Env{
-			"PATH":                  os.Getenv("PATH"),
-			"HOME":                  filepath.Join(root, "home"),
-			"XDG_CONFIG_HOME":       filepath.Join(root, "config"),
-			"HERDR_SOHO_DIR":        filepath.Join(root, "state"),
-			"HERDR_SOHO_SKILL_DIR":  skillDir,
-			"HERDR_SOHO_BRIEF_LINT": "warn",
+			"PATH":            os.Getenv("PATH"),
+			"HOME":            filepath.Join(root, "home"),
+			"XDG_CONFIG_HOME": filepath.Join(root, "config"),
+			"SOHO_DIR":        filepath.Join(root, "state"),
+			"SOHO_SKILL_DIR":  skillDir,
+			"SOHO_BRIEF_LINT": "warn",
 		}
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var stdout, stderr bytes.Buffer
@@ -74,14 +74,14 @@ func TestLintCommandReadOnlyAndExitModes(t *testing.T) {
 		stdout.Reset()
 		stderr.Reset()
 		strict := env.Clone()
-		strict["HERDR_SOHO_BRIEF_LINT"] = "strict"
+		strict["SOHO_BRIEF_LINT"] = "strict"
 		if code := Run([]string{"lint", brief}, strict); code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), " (brief_lint=strict)\n") {
 			t.Fatalf("strict mode: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		stdout.Reset()
 		stderr.Reset()
 		off := env.Clone()
-		off["HERDR_SOHO_BRIEF_LINT"] = "off"
+		off["SOHO_BRIEF_LINT"] = "off"
 		if code := Run([]string{"lint", brief}, off); code != 0 || stdout.String() != "brief "+brief+": lint off (brief_lint=off)\n" || stderr.Len() != 0 {
 			t.Fatalf("off mode: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
@@ -116,7 +116,7 @@ func TestLintCommandUsageAndErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		env := platform.Env{"PATH": os.Getenv("PATH"), "HOME": filepath.Join(root, "home"), "XDG_CONFIG_HOME": filepath.Join(root, "config"), "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": skillDir}
+		env := platform.Env{"PATH": os.Getenv("PATH"), "HOME": filepath.Join(root, "home"), "XDG_CONFIG_HOME": filepath.Join(root, "config"), "SOHO_DIR": filepath.Join(root, "state"), "SOHO_SKILL_DIR": skillDir}
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var stdout, stderr bytes.Buffer
 		platform.Stdout, platform.Stderr = &stdout, &stderr

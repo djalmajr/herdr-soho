@@ -15,7 +15,7 @@ import (
 // skill directory resolvable. A throwaway tree stands in for the skill.
 func composeEnv(t *testing.T) platform.Env {
 	t.Helper()
-	return platform.Env{"HERDR_SOHO_SKILL_DIR": t.TempDir()}
+	return platform.Env{"SOHO_SKILL_DIR": t.TempDir()}
 }
 
 func TestDispatchHelpers(t *testing.T) {
@@ -199,7 +199,7 @@ func TestDispatchJavaScriptHelperCases(t *testing.T) {
 		if warn.Mode != "warn" || !strings.Contains(warn.MissingMessage, "[Expected result]") {
 			t.Fatalf("warn=%#v", warn)
 		}
-		off := BriefLintFindings(file, ctx, platform.Env{"HERDR_SOHO_BRIEF_LINT": "off"}, BriefLintOptions{})
+		off := BriefLintFindings(file, ctx, platform.Env{"SOHO_BRIEF_LINT": "off"}, BriefLintOptions{})
 		if off.Mode != "off" || off.MissingMessage != "" || len(off.Warnings) != 0 {
 			t.Fatalf("off=%#v", off)
 		}
@@ -222,7 +222,7 @@ func TestDispatchJavaScriptHelperCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/soho"}
+		env := platform.Env{"SOHO_SKILL_DIR": "../../skills/soho"}
 		roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\nex\tp1\tgrok\tscouter\txai\t1\t/tmp/work\tnow\tgrok-4.7\ttask\timplementer,scouter\nother\tp2\tcodex\timplementer\topenai\t1\t/tmp/work\tnow\tgpt-5\ttask\timplementer\nplain\tp3\tgrok\tscouter\txai\t1\t/tmp/work\tnow\tgrok-4.7\ttask\tscouter\n"
 		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
@@ -254,7 +254,7 @@ func TestDispatchJavaScriptHelperCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := FamilyConflicts(sd, "xai", platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/soho"}, cwd); len(got) != 1 || got[0] != "ex (grok)" {
+		if got := FamilyConflicts(sd, "xai", platform.Env{"SOHO_SKILL_DIR": "../../skills/soho"}, cwd); len(got) != 1 || got[0] != "ex (grok)" {
 			t.Fatalf("conflicts=%v", got)
 		}
 	})
@@ -264,7 +264,7 @@ func TestDispatchJavaScriptHelperCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": "../../skills/soho"}
+		env := platform.Env{"SOHO_SKILL_DIR": "../../skills/soho"}
 		roster := "doc\tp1\tcodex\tdocumenter\topenai\t1\t/tmp/work\tnow\tgpt-5\ttask\timplementer,documenter\n"
 		if err := os.WriteFile(filepath.Join(sd, "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
@@ -298,7 +298,7 @@ func TestDispatchJavaScriptHelperCases(t *testing.T) {
 		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRole text.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_REPORT_LANGUAGE": "pt-BR", "HERDR_SOHO_WORKER_CONTEXT": "lean", "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+		env := platform.Env{"SOHO_REPORT_LANGUAGE": "pt-BR", "SOHO_WORKER_CONTEXT": "lean", "SOHO_SKILL_DIR": t.TempDir()}
 		prompt := ComposePrompt(role, "implementer", "worker", full, "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, env, "codex", "", false)
 		if !strings.Contains(prompt, "- Write the report in pt-BR.\n") || !strings.Contains(prompt, "- This brief is self-contained.") {
 			t.Fatalf("prompt missed language/context: %s", prompt)
@@ -324,7 +324,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": "../../skills/soho"}
+		env := platform.Env{"SOHO_ROLES": roles, "SOHO_SKILL_DIR": "../../skills/soho"}
 		got := FamilyConflicts(dir, "openai", env, cwd)
 		if len(got) != 1 || got[0] != "doc (codex)" {
 			t.Fatalf("project edit-role history conflicts=%v", got)
@@ -430,7 +430,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 		}
 		// The configured override is the native test binary; the skill
 		// directory in the env must play no part in the path.
-		p := ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"HERDR_SOHO_BIN": exe, "HERDR_SOHO_SKILL_DIR": t.TempDir()}, "codex", "", false)
+		p := ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"SOHO_BIN": exe, "SOHO_SKILL_DIR": t.TempDir()}, "codex", "", false)
 		want := "- Run every `soho` command this prompt names through the launcher at `" + resolved + "`, not through PATH.\n"
 		if !strings.Contains(p, want) {
 			t.Fatalf("composed prompt missed the launcher line:\n%s", p)
@@ -446,7 +446,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 			t.Fatalf("composed prompt names a skill scripts launcher:\n%s", p)
 		}
 	})
-	t.Run("compose: an invalid HERDR_SOHO_BIN fails closed before the prompt exists", func(t *testing.T) {
+	t.Run("compose: an invalid SOHO_BIN fails closed before the prompt exists", func(t *testing.T) {
 		role := filepath.Join(t.TempDir(), "implementer.md")
 		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n\nRole.\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -472,7 +472,7 @@ func TestDispatchRemainingHelperCases(t *testing.T) {
 							t.Fatalf("composition panicked %#v; want ExitError code 2 naming %q", r, tc.want)
 						}
 					}()
-					prompt = ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"HERDR_SOHO_BIN": tc.bin}, "codex", "", false)
+					prompt = ComposePrompt(role, "implementer", "worker", "# Goal\nrun", "/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"SOHO_BIN": tc.bin}, "codex", "", false)
 				}()
 				_ = prompt
 			})

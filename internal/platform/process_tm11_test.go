@@ -27,11 +27,11 @@ func TestTM11WindowsTreeKillCases(t *testing.T) {
 		t.Run(`JS: "`+tc.title+`"`, func(t *testing.T) {
 			dir, wrapper, env := tm11WindowsFake(t, helper)
 			if tc.grandchild {
-				env["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "parent-exits"
+				env["SOHO_TREEKILL_FAKE_MODE"] = "parent-exits"
 				// The helper records its PIDs here; the grandchild outlives the
 				// call by design, so the cleanup stops it.
 				pidFile := filepath.Join(dir, "grandchild-pids.txt")
-				env["HERDR_SOHO_TREEKILL_PID_FILE"] = pidFile
+				env["SOHO_TREEKILL_PID_FILE"] = pidFile
 				t.Cleanup(func() { cleanupRecordedProcesses(pidFile) })
 				treeKillChainReady(t, env, dir)
 				started := time.Now()
@@ -41,14 +41,14 @@ func TestTM11WindowsTreeKillCases(t *testing.T) {
 				}
 				return
 			}
-			env["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "complete"
+			env["SOHO_TREEKILL_FAKE_MODE"] = "complete"
 			ok := RunCli(wrapper, nil, RunOptions{Env: env, Platform: "win32", Cwd: dir, Input: tc.input, MergeOutput: tc.merge, OutputFiles: tc.files, TimeoutMs: 15000})
 			if ok.Status == nil || *ok.Status != 0 || ok.TimedOut || ok.Error != "" || !strings.Contains(ok.Stdout, "tree-output") || !strings.Contains(ok.Stdout, tc.input) {
 				t.Fatalf("completion result=%#v", ok)
 			}
-			env["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "parent"
+			env["SOHO_TREEKILL_FAKE_MODE"] = "parent"
 			pidFile := filepath.Join(dir, "pids.txt")
-			env["HERDR_SOHO_TREEKILL_PID_FILE"] = pidFile
+			env["SOHO_TREEKILL_PID_FILE"] = pidFile
 			t.Cleanup(func() { cleanupRecordedProcesses(pidFile) })
 			treeKillChainReady(t, env, dir)
 			got := RunCli(wrapper, nil, RunOptions{Env: env, Platform: "win32", Cwd: dir, Input: tc.input, MergeOutput: tc.merge, OutputFiles: tc.files, TimeoutMs: 1000})
@@ -64,8 +64,8 @@ func TestTM11WindowsTreeKillCases(t *testing.T) {
 	t.Run(`JS: "runCli (Windows only): a .cmd that hangs past the timeout returns the timeout shape and no process of the tree survives"`, func(t *testing.T) {
 		dir, wrapper, env := tm11WindowsFake(t, helper)
 		pidFile := filepath.Join(dir, "windows-only-pids.txt")
-		env["HERDR_SOHO_TREEKILL_FAKE_MODE"] = "parent"
-		env["HERDR_SOHO_TREEKILL_PID_FILE"] = pidFile
+		env["SOHO_TREEKILL_FAKE_MODE"] = "parent"
+		env["SOHO_TREEKILL_PID_FILE"] = pidFile
 		t.Cleanup(func() { cleanupRecordedProcesses(pidFile) })
 		treeKillChainReady(t, env, dir)
 		got := RunCli(wrapper, []string{"a"}, RunOptions{Env: env, Platform: "win32", Cwd: dir, TimeoutMs: 1000})

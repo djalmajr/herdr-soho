@@ -96,7 +96,7 @@ func TestDispatchMetricsForSidecar(t *testing.T) { // mutation: the sidecar drop
 		// The reviewer is anthropic and the author family is anthropic too:
 		// the family check is off because the case is the sidecar field, not
 		// the check.
-		h.env["HERDR_SOHO_FAMILY_CHECK"] = "off"
+		h.env["SOHO_FAMILY_CHECK"] = "off"
 		raw, obj := dispatchForSidecar(t, h, "--for", "anthropic")
 		forValue, ok := obj.Get("for")
 		if !ok {

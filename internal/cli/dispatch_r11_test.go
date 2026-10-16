@@ -447,14 +447,14 @@ func newR11Fixture(t *testing.T, tc r11Case) *r11Fixture {
 			env[k] = v
 		}
 	}
-	env["HERDR_ENV"], env["HERDR_SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = "1", state, "ws"
-	env["HERDR_SOHO_ROLES"], env["HERDR_SOHO_SKILL_DIR"] = roles, "../../skills/soho"
+	env["HERDR_ENV"], env["SOHO_DIR"], env["HERDR_WORKSPACE_ID"] = "1", state, "ws"
+	env["SOHO_ROLES"], env["SOHO_SKILL_DIR"] = roles, "../../skills/soho"
 	check := tc.check
 	if check == "" {
 		check = "1"
 	}
-	env["HERDR_SOHO_PROMPT_CHECK_SECONDS"], env["HERDR_SOHO_PROMPT_SETTLE_SECONDS"] = check, "0"
-	env["HERDR_SOHO_BRIEF_LINT"], env["TMPDIR"] = "off", root
+	env["SOHO_PROMPT_CHECK_SECONDS"], env["SOHO_PROMPT_SETTLE_SECONDS"] = check, "0"
+	env["SOHO_BRIEF_LINT"], env["TMPDIR"] = "off", root
 	env["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing.sock")
 	return &r11Fixture{root: root, state: state, bin: bin, brief: brief, env: env, tc: tc}
 }

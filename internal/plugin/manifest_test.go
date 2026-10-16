@@ -13,7 +13,6 @@ import (
 
 const (
 	sohoManifestPath = "plugin/herdr-plugin.toml"
-	shimManifestPath = "plugin-legacy/herdr-plugin.toml"
 )
 
 type manifestAction struct {
@@ -181,10 +180,10 @@ func allCommands(m parsedManifest) [][]string {
 	return cmds
 }
 
-// TestManifestCommandsUseTheGoCLI checks every `command` line of both
-// plugin/herdr-plugin.toml and plugin-legacy/herdr-plugin.toml with a
-// plain line parser (no external TOML dependency). Herdr runs the argv
-// without a shell, so the commands must call the Go CLI by name:
+// TestManifestCommandsUseTheGoCLI checks every `command` line of
+// plugin/herdr-plugin.toml with a plain line parser (no external TOML
+// dependency). Herdr runs the argv without a shell, so the commands must
+// call the Go CLI by name:
 //   - every command starts with "soho", "plugin";
 //   - the next subcommand is one PluginCommand dispatches
 //     (internal/plugin/clipboard.go): board, bridge, clipboard or picker;
@@ -196,7 +195,7 @@ func allCommands(m parsedManifest) [][]string {
 func TestManifestCommandsUseTheGoCLI(t *testing.T) {
 	pluginSubcommands := map[string]bool{"board": true, "bridge": true, "clipboard": true, "picker": true, "team": true}
 	bridgeActions := map[string]bool{"board": true, "doctor": true, "roster": true, "team": true, "pick": true}
-	for _, rel := range []string{sohoManifestPath, shimManifestPath} {
+	for _, rel := range []string{sohoManifestPath} {
 		t.Run(rel, func(t *testing.T) {
 			m := parseManifest(t, rel)
 			commands := 0
@@ -224,36 +223,21 @@ func TestManifestCommandsUseTheGoCLI(t *testing.T) {
 	}
 }
 
-// TestBothManifestsShareTheSameActionsAndPanes: the legacy shim
-// (plugin-legacy/herdr-plugin.toml) is a compatibility copy of the soho
-// manifest (plugin/herdr-plugin.toml). Both must expose the same actions
-// and panes — ids, contexts and commands — run the same soho binary,
-// carry the same version, and use the decided ids and names.
-func TestBothManifestsShareTheSameActionsAndPanes(t *testing.T) {
+// TestSohoManifestActionsAndPanes: the soho manifest
+// (plugin/herdr-plugin.toml) exposes the decided actions and panes — ids,
+// contexts and commands — runs the soho binary, and uses the decided id
+// and name.
+func TestSohoManifestActionsAndPanes(t *testing.T) {
 	soho := parseManifest(t, sohoManifestPath)
-	shim := parseManifest(t, shimManifestPath)
 
 	if soho.ID != plugin.SohoPluginID || soho.Name != "soho" {
 		t.Fatalf("soho manifest identity: id=%q name=%q, want %q / %q", soho.ID, soho.Name, plugin.SohoPluginID, "soho")
 	}
-	if shim.ID != plugin.LegacyShimPluginID || shim.Name != "herdr-soho (legacy shim)" {
-		t.Fatalf("shim manifest identity: id=%q name=%q, want %q / %q", shim.ID, shim.Name, plugin.LegacyShimPluginID, "herdr-soho (legacy shim)")
-	}
-	if soho.Version == "" || soho.Version != shim.Version {
-		t.Fatalf("manifest versions differ: soho=%q shim=%q", soho.Version, shim.Version)
+	if soho.Version == "" {
+		t.Fatalf("soho manifest version is empty")
 	}
 
 	sort.Slice(soho.Actions, func(i, j int) bool { return soho.Actions[i].ID < soho.Actions[j].ID })
-	sort.Slice(shim.Actions, func(i, j int) bool { return shim.Actions[i].ID < shim.Actions[j].ID })
-	if !reflect.DeepEqual(soho.Actions, shim.Actions) {
-		t.Fatalf("actions differ:\nsoho=%#v\nshim=%#v", soho.Actions, shim.Actions)
-	}
-	sort.Slice(soho.Panes, func(i, j int) bool { return soho.Panes[i].ID < soho.Panes[j].ID })
-	sort.Slice(shim.Panes, func(i, j int) bool { return shim.Panes[i].ID < shim.Panes[j].ID })
-	if !reflect.DeepEqual(soho.Panes, shim.Panes) {
-		t.Fatalf("panes differ:\nsoho=%#v\nshim=%#v", soho.Panes, shim.Panes)
-	}
-
 	wantActions := []string{"pick", "doctor", "roster", "team"}
 	sort.Strings(wantActions)
 	gotActions := make([]string, len(soho.Actions))
@@ -276,11 +260,9 @@ func TestBothManifestsShareTheSameActionsAndPanes(t *testing.T) {
 	}
 
 	// Every command runs the soho binary (command[0] == "soho").
-	for _, m := range []parsedManifest{soho, shim} {
-		for _, cmd := range allCommands(m) {
-			if cmd[0] != "soho" {
-				t.Fatalf("command[0]=%q, want \"soho\": %q", cmd[0], cmd)
-			}
+	for _, cmd := range allCommands(soho) {
+		if cmd[0] != "soho" {
+			t.Fatalf("command[0]=%q, want \"soho\": %q", cmd[0], cmd)
 		}
 	}
 }

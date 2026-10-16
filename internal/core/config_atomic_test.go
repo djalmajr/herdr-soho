@@ -20,7 +20,7 @@ func TestConfigAtomicWriteFailure(t *testing.T) {
 	t.Run(`JS: "a failed rename leaves the config and the session file untouched"`, func(t *testing.T) {
 		// Mutation captured: swallowing the atomic-write error returns success instead of exit 4.
 		root := t.TempDir()
-		env := platform.Env{"HERDR_SOHO_DIR": filepath.Join(root, ".herdr-soho")}
+		env := platform.Env{"SOHO_DIR": filepath.Join(root, ".soho")}
 		project := filepath.Join(root, ".agents", "soho.conf")
 		if err := os.MkdirAll(filepath.Dir(project), 0o700); err != nil {
 			t.Fatal(err)

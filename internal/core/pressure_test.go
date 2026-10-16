@@ -32,7 +32,7 @@ func pressureFixture(t *testing.T) (ctx *core.Config, env platform.Env, stateDir
 	}
 	env["HOME"] = root
 	env["USERPROFILE"] = root
-	env["HERDR_SOHO_DIR"] = state
+	env["SOHO_DIR"] = state
 	env["HERDR_WORKSPACE_ID"] = "ws"
 	// Explicit limits: CleanEnv ships the machine-state warning disabled
 	// (0/0), so the tests that expect a warning set their limits themselves.
@@ -270,7 +270,7 @@ func TestConfigSetRejectsNonIntegerPressureValues(t *testing.T) {
 
 func TestPressureNowriteWritesNothingAndWarnsNothing(t *testing.T) {
 	ctx, env, stateDir := pressureFixture(t)
-	env["HERDR_SOHO_NOWRITE"] = "1"
+	env["SOHO_NOWRITE"] = "1"
 	dfree, dtotal := diskPressure()
 	sused, stotal := swapPressure()
 	fakeMachine(t, dfree, dtotal, true, sused, stotal, true)
@@ -331,11 +331,11 @@ func TestPressureSpawnWarnsAndKeepsTheStdoutJSON(t *testing.T) {
 		}
 		env["HOME"] = root
 		env["USERPROFILE"] = root
-		env["HERDR_SOHO_DIR"] = state
+		env["SOHO_DIR"] = state
 		env["HERDR_WORKSPACE_ID"] = "ws"
-		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join(root, "skill")
-		env["HERDR_SOHO_ROLES"] = roles
-		env["HERDR_SOHO_LANES"] = "off"
+		env["SOHO_SKILL_DIR"] = filepath.Join(root, "skill")
+		env["SOHO_ROLES"] = roles
+		env["SOHO_LANES"] = "off"
 		env["HERDR_ENV"] = "1"
 		env["HERDR_PANE_ID"] = "p1"
 		env["SOHO_WAIT_POLL_MS"] = "1"

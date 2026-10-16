@@ -31,11 +31,11 @@ func layoutFake(t *testing.T, rules []fakecli.Rule) (platform.Env, *core.Config,
 			env[key] = value
 		}
 	}
-	env["HERDR_ENV"], env["HERDR_WORKSPACE_ID"], env["HERDR_SOHO_DIR"] = "1", "ws", filepath.Join(root, "state")
-	env["HERDR_SOHO_SKILL_DIR"], env["TMPDIR"] = "../../skills/soho", filepath.Join(root, "tmp")
+	env["HERDR_ENV"], env["HERDR_WORKSPACE_ID"], env["SOHO_DIR"] = "1", "ws", filepath.Join(root, "state")
+	env["SOHO_SKILL_DIR"], env["TMPDIR"] = "../../skills/soho", filepath.Join(root, "tmp")
 	cwd := root
 	ctx := core.LoadConfig(env, cwd)
-	dir := filepath.Join(env["HERDR_SOHO_DIR"], "ws")
+	dir := filepath.Join(env["SOHO_DIR"], "ws")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestCmdRegridSplitPullsAndRebuilds(t *testing.T) {
 			{Argv: []string{"pane", "list", "--workspace", "ws"}, Call: 3, Stdout: after},
 		}
 		env, ctx, cwd, dir := layoutFake(t, rules)
-		env["HERDR_TAB_ID"], env["HERDR_PANE_ID"], env["HERDR_SOHO_SPLIT_MAX_PANES"] = "t0", "C", "4"
+		env["HERDR_TAB_ID"], env["HERDR_PANE_ID"], env["SOHO_SPLIT_MAX_PANES"] = "t0", "C", "4"
 		roster := "caller-worker\tp1\tcursor\timplementer\nremote-worker\tp2\tcursor\tscouter\n"
 		if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
@@ -229,7 +229,7 @@ func TestCmdRegridTabLayoutKeepsAndRebuilds(t *testing.T) {
 			{Argv: []string{"pane", "close"}, ArgvPrefix: true},
 		}
 		env, ctx, cwd, dir := layoutFake(t, rules)
-		env["HERDR_SOHO_LAYOUT"] = "tab"
+		env["SOHO_LAYOUT"] = "tab"
 		if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte("solo\tq1\tcursor\timplementer\nb1\tq2\tcursor\timplementer\nb2\tq3\tcursor\treviewer\nb3\tq4\tcursor\timplementer\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -487,7 +487,7 @@ func TestAutomaticRegridSpawnSuccessIsSilent(t *testing.T) {
 			{Argv: []string{"pane", "close"}, ArgvPrefix: true},
 		}
 		env, ctx, cwd, dir := layoutFake(t, rules)
-		env["HERDR_SOHO_LAYOUT"] = "tab"
+		env["SOHO_LAYOUT"] = "tab"
 		if err := os.WriteFile(filepath.Join(dir, "agents.tsv"), []byte("b1\tq1\tcursor\tscouter\nb2\tq2\tcursor\timplementer\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}

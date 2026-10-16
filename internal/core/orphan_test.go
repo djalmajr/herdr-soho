@@ -28,9 +28,9 @@ func orphanFixture(t *testing.T, rosterRows, releasedRows []string, agentsJSON, 
 			env[key] = value
 		}
 	}
-	env["HERDR_SOHO_SKILL_DIR"] = testSkillDir(t)
+	env["SOHO_SKILL_DIR"] = testSkillDir(t)
 	env["HERDR_WORKSPACE_ID"] = "ws"
-	env["HERDR_SOHO_DIR"] = filepath.Join(root, "state")
+	env["SOHO_DIR"] = filepath.Join(root, "state")
 	env["HOME"] = filepath.Join(root, "home")
 	env["USERPROFILE"] = env.Get("HOME")
 	env["XDG_CONFIG_HOME"] = filepath.Join(root, "config")
@@ -151,9 +151,9 @@ func TestOrphansOfFailedPaneListClassifiesNothing(t *testing.T) {
 			env[key] = value
 		}
 	}
-	env["HERDR_SOHO_SKILL_DIR"] = testSkillDir(t)
+	env["SOHO_SKILL_DIR"] = testSkillDir(t)
 	env["HERDR_WORKSPACE_ID"] = "ws"
-	env["HERDR_SOHO_DIR"] = filepath.Join(root, "state")
+	env["SOHO_DIR"] = filepath.Join(root, "state")
 	env["HOME"] = filepath.Join(root, "home")
 	bin := t.TempDir()
 	if _, err := fakecli.Install(t, bin, "herdr", []fakecli.Rule{{Argv: []string{"agent", "list"}, Stdout: `{"result":{"agents":[{"name":"review","pane_id":"ws:p1","agent_status":"idle"}]}}`}}); err != nil {
@@ -187,9 +187,9 @@ func releasedPanesWriteFixture(t *testing.T, okPanes, gonePanes []string) (platf
 			env[key] = value
 		}
 	}
-	env["HERDR_SOHO_SKILL_DIR"] = testSkillDir(t)
+	env["SOHO_SKILL_DIR"] = testSkillDir(t)
 	env["HERDR_WORKSPACE_ID"] = "ws"
-	env["HERDR_SOHO_DIR"] = filepath.Join(root, "state")
+	env["SOHO_DIR"] = filepath.Join(root, "state")
 	env["HOME"] = filepath.Join(root, "home")
 	env["USERPROFILE"] = env.Get("HOME")
 	env["XDG_CONFIG_HOME"] = filepath.Join(root, "config")
@@ -297,7 +297,7 @@ func TestReleasedPanesRefusedInsideSkill(t *testing.T) {
 	// Like the other state files, the registry refuses to be written inside
 	// the skill dir; the refusal dies before anything is written.
 	env, ctx, cwd, _ := releasedPanesWriteFixture(t, nil, nil)
-	env["HERDR_SOHO_DIR"] = env.Get("HERDR_SOHO_SKILL_DIR")
+	env["SOHO_DIR"] = env.Get("SOHO_SKILL_DIR")
 	_, ok := func() (_ []string, ok bool) {
 		defer func() {
 			if value := recover(); value != nil {
@@ -314,7 +314,7 @@ func TestReleasedPanesRefusedInsideSkill(t *testing.T) {
 	if !ok {
 		t.Fatal("the record did not die with the skill-dir refusal")
 	}
-	skillState := filepath.Join(env.Get("HERDR_SOHO_SKILL_DIR"), "ws")
+	skillState := filepath.Join(env.Get("SOHO_SKILL_DIR"), "ws")
 	if _, err := os.Stat(filepath.Join(skillState, "released-panes.tsv")); !os.IsNotExist(err) {
 		t.Fatalf("the refusal wrote a registry file: %v", err)
 	}

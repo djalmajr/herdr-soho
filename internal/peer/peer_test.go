@@ -110,7 +110,7 @@ func TestBuildPromptArgsCompleteScrubbedPrompt(t *testing.T) {
 	}
 	f := newFixture(t, rules)
 	f.env["HERDR_PANE_ID"] = "w0test:p0a"
-	stateDir := filepath.Join(f.env["HERDR_SOHO_DIR"], "ws-test")
+	stateDir := filepath.Join(f.env["SOHO_DIR"], "ws-test")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func newFixtureAt(t *testing.T, dir string, rules []fakecli.Rule) *fixture {
 	}
 	base := []string{
 		"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(dir, "home"), "XDG_CONFIG_HOME=" + filepath.Join(dir, "config"),
-		"TMPDIR=" + filepath.Join(dir, "tmp"), "HERDR_SOHO_DIR=" + filepath.Join(dir, "state"), "HERDR_WORKSPACE_ID=ws-test",
+		"TMPDIR=" + filepath.Join(dir, "tmp"), "SOHO_DIR=" + filepath.Join(dir, "state"), "HERDR_WORKSPACE_ID=ws-test",
 		// With -race the fake re-executes the instrumented test binary and
 		// the race runtime sleeps ~1s at exit (GORACE atexit_sleep_ms).
 		// The fixture's own env removes only that wait, so the deadline
@@ -232,7 +232,7 @@ func newFixtureAt(t *testing.T, dir string, rules []fakecli.Rule) *fixture {
 			env[key] = value
 		}
 	}
-	env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+	env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 	return &fixture{t: t, dir: dir, env: env, bin: bin}
 }
 
@@ -324,7 +324,7 @@ func TestSend(t *testing.T) {
 		if (err != nil && !os.IsNotExist(err)) || len(calls) != 0 {
 			t.Fatalf("fake herdr calls=%+v err=%v", calls, err)
 		}
-		log, err := os.ReadFile(filepath.Join(f.env["HERDR_SOHO_DIR"], "ws-test", peer.PeerLogFile))
+		log, err := os.ReadFile(filepath.Join(f.env["SOHO_DIR"], "ws-test", peer.PeerLogFile))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -703,9 +703,9 @@ func TestSend(t *testing.T) {
 			}
 		}
 	})
-	t.Run("NOWRITE rejects send and leaves the peer attempt log untouched", func(t *testing.T) { // JS: "HERDR_SOHO_NOWRITE=1: the attempt log is not written (and the entry refuses send)"
+	t.Run("NOWRITE rejects send and leaves the peer attempt log untouched", func(t *testing.T) { // JS: "HERDR_SOHO_NOWRITE=1: the attempt log is not written (and the entry refuses send)" (DJA-318: the gate is asserted on the SOHO_ name)
 		f := newFixture(t, nil)
-		f.env["HERDR_SOHO_NOWRITE"] = "1"
+		f.env["SOHO_NOWRITE"] = "1"
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hello"})
 		if code != 2 || !strings.Contains(stderr, "read-only") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
@@ -979,9 +979,8 @@ func TestSendAmendmentCases(t *testing.T) {
 			name, envKey, envValue, policy string
 			wantCode                       int
 		}{
-			{"sender-off-does-not-refuse", "HERDR_SOHO_INBOUND", "off", "", 0},
-			{"legacy-sender-off-does-not-refuse", "HERDR_SOHO_INBOUND", "off", "", 0},
-			{"target-project-off-wins", "HERDR_SOHO_INBOUND", "auto", "inbound=off\n", 18},
+			{"sender-off-does-not-refuse", "SOHO_INBOUND", "off", "", 0},
+			{"target-project-off-wins", "SOHO_INBOUND", "auto", "inbound=off\n", 18},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				dir := t.TempDir()
@@ -1060,17 +1059,17 @@ func TestSendAmendmentCases(t *testing.T) {
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: "after prompt\n"},
 		}
 		f := newFixtureAt(t, dir, rules)
-		if err := os.MkdirAll(filepath.Join(dir, "config", "herdr-soho"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(dir, "config", "soho"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "config", "herdr-soho", "config"), []byte("inbound=off\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "config", "soho", "config"), []byte("inbound=off\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		code, _, stderr := f.run([]string{"send", "w0test:p0a", "hi"})
 		if code != 18 || !strings.Contains(stderr, "inbound=off") {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
-		if err := os.Remove(filepath.Join(dir, "config", "herdr-soho", "config")); err != nil {
+		if err := os.Remove(filepath.Join(dir, "config", "soho", "config")); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.MkdirAll(filepath.Join(dir, ".agents"), 0o755); err != nil {
@@ -1394,7 +1393,7 @@ func TestSendAmendmentCases(t *testing.T) {
 				enters++
 			}
 		}
-		logPath := filepath.Join(f.env.Get("HERDR_SOHO_DIR"), f.env.Get("HERDR_WORKSPACE_ID"), peer.PeerLogFile)
+		logPath := filepath.Join(f.env.Get("SOHO_DIR"), f.env.Get("HERDR_WORKSPACE_ID"), peer.PeerLogFile)
 		log, err := os.ReadFile(logPath)
 		if err != nil {
 			t.Fatal(err)

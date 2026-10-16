@@ -67,37 +67,18 @@ func TestTeam(t *testing.T) {
 		f.wantCode(t, nil, 2)
 	})
 
-	t.Run("a team file only in the former herdr-soho directory is read", func(t *testing.T) {
+	t.Run("a repository team file only in the former herdr-soho directory is not read", func(t *testing.T) {
 		f := newTeamFix(t)
 		legacy := filepath.Join(filepath.Dir(core.LegacyUserConfigPath("linux", f.env)), "teams", teamOrg, teamRepo+".conf")
 		writeTeamFile(t, legacy, "panes=3\nlane.build.roles=implementer\n")
-		team, err := f.resolve(nil)
-		if err != nil {
-			t.Fatalf("ResolveTeam: %v", err)
-		}
-		if team.Source != "teams/"+teamOrg+"/"+teamRepo+".conf" || team.File != legacy {
-			t.Fatalf("team = %s %s, want the legacy repository file", team.Source, team.File)
+		_, err := f.resolve(nil)
+		if teamCode(err) != 2 || !strings.Contains(err.Error(), "no team configuration") {
+			t.Fatalf("err = %v, want the no team configuration failure", err)
 		}
 	})
 
-	t.Run("the soho team file wins over the former one", func(t *testing.T) {
+	t.Run("a soho team path that is not a file is refused", func(t *testing.T) {
 		f := newTeamFix(t)
-		legacy := filepath.Join(filepath.Dir(core.LegacyUserConfigPath("linux", f.env)), "teams", teamOrg, teamRepo+".conf")
-		writeTeamFile(t, legacy, "panes=3\nlane.build.roles=implementer\n")
-		f.writeTeam(t, "repo", "panes=4\nlane.build.roles=implementer\n")
-		team, err := f.resolve(nil)
-		if err != nil {
-			t.Fatalf("ResolveTeam: %v", err)
-		}
-		if team.File != f.repoFile() {
-			t.Fatalf("team file = %s, want the soho one %s", team.File, f.repoFile())
-		}
-	})
-
-	t.Run("a soho team path that is not a file is refused even with a former file", func(t *testing.T) {
-		f := newTeamFix(t)
-		legacy := filepath.Join(filepath.Dir(core.LegacyUserConfigPath("linux", f.env)), "teams", teamOrg, teamRepo+".conf")
-		writeTeamFile(t, legacy, "panes=3\nlane.build.roles=implementer\n")
 		if err := os.MkdirAll(f.repoFile(), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -107,6 +88,16 @@ func TestTeam(t *testing.T) {
 	t.Run("no configuration exits 2", func(t *testing.T) {
 		f := newTeamFix(t)
 		f.wantCode(t, nil, 2)
+	})
+
+	t.Run("a team file only in the former herdr-soho directory is not read", func(t *testing.T) {
+		f := newTeamFix(t)
+		legacy := filepath.Join(filepath.Dir(core.LegacyUserConfigPath("linux", f.env)), "teams", "default.conf")
+		writeTeamFile(t, legacy, "panes=3\nlane.build.roles=implementer\n")
+		_, err := f.resolve(nil)
+		if teamCode(err) != 2 || !strings.Contains(err.Error(), "no team configuration") {
+			t.Fatalf("err = %v, want the no team configuration failure", err)
+		}
 	})
 
 	t.Run("present repo file without lane roles does not fall through", func(t *testing.T) {
@@ -220,7 +211,7 @@ func TestTeam(t *testing.T) {
 		}
 		env := platform.Env{
 			"APPDATA": appdata, "USERPROFILE": home, "HOME": home,
-			"HERDR_SOHO_SKILL_DIR": skillDir(t), "PATH": filepath.Join(root, "bin"),
+			"SOHO_SKILL_DIR": skillDir(t), "PATH": filepath.Join(root, "bin"),
 		}
 		file := filepath.Join(appdata, "soho", "teams", teamOrg, teamRepo+".conf")
 		writeTeamFile(t, file, "panes=3\nlane.build.roles=implementer\n")
@@ -305,7 +296,7 @@ func newTeamFix(t *testing.T) teamFix {
 		repo: repo,
 		env: platform.Env{
 			"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": conf,
-			"HERDR_SOHO_SKILL_DIR": skillDir(t), "PATH": filepath.Join(root, "bin"),
+			"SOHO_SKILL_DIR": skillDir(t), "PATH": filepath.Join(root, "bin"),
 		},
 	}
 }

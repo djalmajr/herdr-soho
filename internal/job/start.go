@@ -395,7 +395,7 @@ func runMode(mode string) string {
 
 // autoCloseSettings resolves the job's automatic close settings from the
 // layered configuration of the job's checkout (core.LoadConfig over the
-// checkout: defaults, user, project) plus the HERDR_SOHO_* environment
+// checkout: defaults, user, project) plus the SOHO_* environment
 // through core.Cfg. The project file of the job's repository wins over
 // the user file, which wins over the defaults. An invalid value is exit
 // 2 naming the key, the same failure job_finishing_timeout uses.

@@ -33,8 +33,8 @@ func newReleaseFixture(t *testing.T, agentStatus string, agentError string) *rel
 	t.Helper()
 	env, cwd := commandFixture(t)
 	env["HERDR_ENV"] = "1"
-	env["HERDR_SOHO_REGRID"] = "off"
-	state := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws")
+	env["SOHO_REGRID"] = "off"
+	state := filepath.Join(env.Get("SOHO_DIR"), "ws")
 	if err := os.MkdirAll(filepath.Join(state, "wait"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestReleaseLayoutAndLabelsFollowClose(t *testing.T) { // JS: "release close
 	// Mutation captured: running pane layout or herd tab label changes before the close leaves the grid stale.
 	t.Run("regrid", func(t *testing.T) {
 		f := newReleaseFixture(t, "", "")
-		f.env["HERDR_SOHO_REGRID"] = "on"
+		f.env["SOHO_REGRID"] = "on"
 		addReleaseReport(t, f.state, "worker", false)
 		r := f.run(t, "worker", "--close")
 		closed := callsTo(r.calls, "pane", "close", "p-worker")

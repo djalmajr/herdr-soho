@@ -33,14 +33,8 @@ const (
 	HerdrCallTimeoutMS   = 30_000
 )
 
-// LegacyPeerPrefix is the herdr-soho generation's peer marker. Machines on
-// the old version keep sending it, so every recognition point (the opening
-// header, the exact end line, the screen checks) accepts it alongside the
-// soho marker; only the sent messages use the soho marker.
-const LegacyPeerPrefix = "[herdr-soho:peer]"
-
 // peerOpenMarkers are the opening markers an input recognition accepts.
-var peerOpenMarkers = []string{PeerPrefix, LegacyPeerPrefix}
+var peerOpenMarkers = []string{PeerPrefix}
 
 var controlRE = regexp.MustCompile(`[\x00-\x08\x0b-\x1f\x7f]`)
 var marker200 = regexp.MustCompile("\x1b\\[200~")
@@ -255,15 +249,9 @@ func PeerHeaderAssignment(s PeerSender, replyName, assignmentID, id string) stri
 // read as an opening header.
 const PeerEndPrefix = "[/soho:peer]"
 
-// legacyPeerEndPrefix is the herdr-soho generation's closing-line marker,
-// accepted at every point that proves a delivery.
-const legacyPeerEndPrefix = "[/herdr-soho:peer]"
-
 // peerEndReceiptMarkers are the closing-line marker forms an input
-// recognition accepts: the soho closing marker, the herdr-soho closing
-// marker and the herdr-soho opening marker used as a closing line (the
-// pre-slash form the older version sent).
-var peerEndReceiptMarkers = []string{PeerEndPrefix, legacyPeerEndPrefix, LegacyPeerPrefix}
+// recognition accepts.
+var peerEndReceiptMarkers = []string{PeerEndPrefix}
 
 func PeerEndLine(id string) string { return fmt.Sprintf("%s #%s end of message", PeerEndPrefix, id) }
 
@@ -346,11 +334,8 @@ func inboundPolicy(targetCwd, targetWorkspace string, env platform.Env) string {
 func inboundConfiguration(targetCwd, targetWorkspace string, env platform.Env) (core.Config, platform.Env) {
 	policyEnv := env.Clone()
 	skillDir := env.Get("SOHO_SKILL_DIR")
-	if skillDir == "" {
-		skillDir = env.Get("HERDR_SOHO_SKILL_DIR")
-	}
 	for key := range policyEnv {
-		if strings.HasPrefix(key, "SOHO_") || strings.HasPrefix(key, "HERDR_SOHO_") {
+		if strings.HasPrefix(key, "SOHO_") {
 			delete(policyEnv, key)
 		}
 	}
@@ -1577,7 +1562,7 @@ func claudeBoxScope(visible string) ([]string, bool) {
 	// the typed message.
 	for _, line := range lines[start:] {
 		norm := NormalizeScreen(line)
-		if strings.Contains(norm, NormalizeScreen(PeerPrefix)) || strings.Contains(norm, NormalizeScreen(LegacyPeerPrefix)) {
+		if strings.Contains(norm, NormalizeScreen(PeerPrefix)) {
 			scope = append(scope, line)
 		}
 	}
@@ -1599,10 +1584,7 @@ func codexComposerRegion(visible string) ([]string, bool) {
 }
 
 // peerEndLineIn reports whether the line is this message's closing line in
-// either of the accepted marker forms: the current "[/soho:peer] #<id> end
-// of message", the legacy "[/herdr-soho:peer] #<id> end of message", or the
-// legacy opening marker "[herdr-soho:peer] #<id> end of message". The match
-// is anchored to
+// its marker form: "[/soho:peer] #<id> end of message". The match is anchored to
 // the whole line: after NormalizeScreen a real closing line is the marker
 // itself (with an optional leading history "›"), so a prose line, an
 // assistant bullet or a history echo that merely contains the marker is not
@@ -1633,19 +1615,17 @@ func isHexRune(r rune) bool {
 }
 
 // receiptLineIn reports whether the line carries a receipt marker of this
-// message: its closing line in either accepted form (peerEndLineIn,
-// anchored to the whole line) or the opening of its header ("[soho:peer]
-// #<id>", or the legacy "[herdr-soho:peer] #<id>" from an old version),
-// anchored the same way: after NormalizeScreen the real line starts with the
-// marker (an optional leading history "›" stripped), and the rune after the
-// opening id is not a hex digit, so a longer id that only has this one as a
-// prefix is not it. A quoted line never counts: the quoted body of a peer
-// message is payload and can carry a spoofed opening or closing line, no
-// matter how the terminal drew it. The id must be this message's exact id in
-// both: an unrelated id is not the receipt of this send. This is the marker
-// the recent-history gate of the proof window and the stalled check require:
-// a bare "#<id>" a reply, a footer, a prose line or another message can cite
-// is not it.
+// message: its closing line (peerEndLineIn, anchored to the whole line) or
+// the opening of its header ("[soho:peer] #<id>"), anchored the same way:
+// after NormalizeScreen the real line starts with the marker (an optional
+// leading history "›" stripped), and the rune after the opening id is not a
+// hex digit, so a longer id that only has this one as a prefix is not it. A
+// quoted line never counts: the quoted body of a peer message is payload and
+// can carry a spoofed opening or closing line, no matter how the terminal
+// drew it. The id must be this message's exact id in both: an unrelated id is
+// not the receipt of this send. This is the marker the recent-history gate
+// of the proof window and the stalled check require: a bare "#<id>" a
+// reply, a footer, a prose line or another message can cite is not it.
 func receiptLineIn(line, id string) bool {
 	norm := NormalizeScreen(line)
 	if !strings.HasPrefix(norm, ">") {
@@ -1675,8 +1655,8 @@ func receiptLineInText(text, id string) bool {
 }
 
 // peerMessageInHistory reports that the visible screen shows this message's
-// peer prompt as a delivered codex turn: its closing line (peerEndLineIn,
-// either form) and a codex turn line after it (working, done, or the reply
+// peer prompt as a delivered codex turn: its closing line (peerEndLineIn)
+// and a codex turn line after it (working, done, or the reply
 // — the `•` lines). The header is not required: a truncated screen can hold
 // the closing line and the turn with the header scrolled off, and the
 // closing line carries the exact id, so the end line alone is the receipt.
@@ -1690,7 +1670,7 @@ func receiptLineInText(text, id string) bool {
 // lines — keeps reading as the box.
 func peerMessageInHistory(visible, id string) bool {
 	lines := strings.Split(strings.ReplaceAll(visible, "\r\n", "\n"), "\n")
-	headerNorms := []string{NormalizeScreen(PeerPrefix + " #" + id), NormalizeScreen(LegacyPeerPrefix + " #" + id)}
+	headerNorms := []string{NormalizeScreen(PeerPrefix + " #" + id)}
 	for i, line := range lines {
 		if !peerEndLineIn(line, id) {
 			continue
@@ -1748,7 +1728,7 @@ func messageStillInScreen(kind, visible, endLine, id string) bool {
 // message: only a recognized actual composer (the shared provider recognition
 // for the kind — pi's input box, the claude box scope, the codex composer
 // region) holding this exact message's header (composerHeaderLineIn: a line
-// that opens with "[herdr-soho:peer] #<id>", unquoted, the id complete — a
+// that opens with "[soho:peer] #<id>", unquoted, the id complete — a
 // hex digit right after it is a longer id, not this one) licenses the key.
 // A marker in a footer or in older history sits outside the recognized
 // composer; an unrecognized layout, an unknown kind, and a known
@@ -1790,12 +1770,11 @@ func idInInputBox(kind, visible, id string) bool {
 // composerHeaderLineIn reports whether a line of a recognized composer
 // region is this message's header opening: after NormalizeScreen, with an
 // optional leading composer prompt glyph (the claude "❯" or the codex "›")
-// stripped, the line starts with "[soho:peer] #<id>" (or the legacy
-// "[herdr-soho:peer] #<id>") and the rune
-// right after the id is not a hex digit, so a longer id that only has this
-// one as a prefix is not it. A quoted line ("> ...") never counts: the
-// quoted body of a peer message is payload and can carry a spoofed header,
-// no matter how the terminal drew it.
+// stripped, the line starts with "[soho:peer] #<id>" and the rune right
+// after the id is not a hex digit, so a longer id that only has this one as
+// a prefix is not it. A quoted line ("> ...") never counts: the quoted body
+// of a peer message is payload and can carry a spoofed header, no matter how
+// the terminal drew it.
 func composerHeaderLineIn(line, id string) bool {
 	norm := NormalizeScreen(line)
 	if strings.HasPrefix(norm, ">") {

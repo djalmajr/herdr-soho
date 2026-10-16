@@ -27,7 +27,7 @@ func tm5LocalFixture(t *testing.T) (string, platform.Env, *core.Config) {
 func TestSetupLocalTM5Cases(t *testing.T) {
 	t.Run("// JS: \"setup --local adds the state dir entry when it is not ignored yet\"", func(t *testing.T) { // Mutation captured: omitting the state path from the exclude makes local state visible to git.
 		root, env, ctx := tm5LocalFixture(t)
-		env["HERDR_SOHO_DIR"] = "inside-cache"
+		env["SOHO_DIR"] = "inside-cache"
 		code, _, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, root)
 		data, err := os.ReadFile(excludePath(root, env))
 		if code != 0 || err != nil || !strings.Contains(string(data), "/inside-cache\n") {
@@ -84,7 +84,7 @@ func TestSetupLocalTM5Cases(t *testing.T) {
 	})
 	t.Run("// JS: \"setup --local accepts a trailing-slash state dir; exact entry, unrelated files stay visible\"", func(t *testing.T) { // Mutation captured: retaining a trailing slash changes the git exclude pattern and can miss the directory.
 		root, env, ctx := tm5LocalFixture(t)
-		env["HERDR_SOHO_DIR"] = "cache/"
+		env["SOHO_DIR"] = "cache/"
 		code, _, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, root)
 		data, err := os.ReadFile(excludePath(root, env))
 		if code != 0 || err != nil || !strings.Contains(string(data), "/cache\n") || strings.Contains(string(data), "/cache/\n") {
@@ -93,7 +93,7 @@ func TestSetupLocalTM5Cases(t *testing.T) {
 	})
 	t.Run("// JS: \"setup --plan --local accepts a trailing-slash state dir; the diff shows the exact entry, nothing is written\"", func(t *testing.T) { // Mutation captured: planning must normalize the exclude entry but must not write it.
 		root, env, ctx := tm5LocalFixture(t)
-		env["HERDR_SOHO_DIR"] = "cache/"
+		env["SOHO_DIR"] = "cache/"
 		before, _ := os.ReadFile(excludePath(root, env))
 		code, out, _, msg := runPlanStreams([]string{"--local"}, ctx, env, root)
 		after, _ := os.ReadFile(excludePath(root, env))
@@ -103,7 +103,7 @@ func TestSetupLocalTM5Cases(t *testing.T) {
 	})
 	t.Run("// JS: \"setup --local refuses a state dir with a trailing-whitespace segment (rc 4) before any mutation\"", func(t *testing.T) { // Mutation captured: Git strips trailing whitespace from excludes, so setup must refuse before writing.
 		root, env, ctx := tm5LocalFixture(t)
-		env["HERDR_SOHO_DIR"] = "cache "
+		env["SOHO_DIR"] = "cache "
 		before := setupFilesystemSnapshot(t, root)
 		code, out, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, root)
 		if code != 4 || out != "" || !strings.Contains(msg, "ends in whitespace") || !reflect.DeepEqual(before, setupFilesystemSnapshot(t, root)) {
@@ -112,7 +112,7 @@ func TestSetupLocalTM5Cases(t *testing.T) {
 	})
 	t.Run("// JS: \"setup --plan --local refuses a trailing-whitespace state dir (rc 4) with no plan output\"", func(t *testing.T) { // Mutation captured: unsafe paths must fail before any preview is printed.
 		root, env, ctx := tm5LocalFixture(t)
-		env["HERDR_SOHO_DIR"] = "cache "
+		env["SOHO_DIR"] = "cache "
 		code, out, _, msg := runPlanStreams([]string{"--local"}, ctx, env, root)
 		if code != 4 || out != "" || !strings.Contains(msg, "ends in whitespace") {
 			t.Fatalf("code=%d out=%q msg=%q", code, out, msg)
@@ -120,8 +120,8 @@ func TestSetupLocalTM5Cases(t *testing.T) {
 	})
 	t.Run("// JS: \"setup --local accepts an interior-space state dir; real git ignores it and unrelated files stay visible\"", func(t *testing.T) { // Mutation captured: git must ignore the exact path with internal spaces, not a broader pattern.
 		root, env, ctx := tm5LocalFixture(t)
-		env["HERDR_SOHO_DIR"] = "cache with space"
-		if err := os.Mkdir(filepath.Join(root, env.Get("HERDR_SOHO_DIR")), 0o700); err != nil {
+		env["SOHO_DIR"] = "cache with space"
+		if err := os.Mkdir(filepath.Join(root, env.Get("SOHO_DIR")), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(root, "unrelated.txt"), []byte("visible"), 0o600); err != nil {
@@ -142,7 +142,7 @@ func TestSetupLocalTM5Cases(t *testing.T) {
 		for _, value := range []string{"./cache", "a/./b"} {
 			t.Run(value, func(t *testing.T) {
 				root, env, ctx := tm5LocalFixture(t)
-				env["HERDR_SOHO_DIR"] = value
+				env["SOHO_DIR"] = value
 				code, _, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, root)
 				if code != 0 {
 					t.Fatalf("code=%d msg=%q", code, msg)
@@ -157,7 +157,7 @@ func TestSetupLocalTM5Cases(t *testing.T) {
 	})
 	t.Run("// JS: \"setup --local with a relative external state dir adds no state entry and reports it outside the repository\"", func(t *testing.T) { // Mutation captured: an external relative state path must not create a misleading repository exclude.
 		root, env, ctx := tm5LocalFixture(t)
-		env["HERDR_SOHO_DIR"] = "../outside-state"
+		env["SOHO_DIR"] = "../outside-state"
 		code, out, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, root)
 		data, err := os.ReadFile(excludePath(root, env))
 		if code != 0 || err != nil || strings.Contains(string(data), "outside-state") || !strings.Contains(strings.ToLower(out), "outside") {
@@ -166,7 +166,7 @@ func TestSetupLocalTM5Cases(t *testing.T) {
 	})
 	t.Run("// JS: \"setup --plan --local and --dry-run accept the ./cache spelling without writing anything\"", func(t *testing.T) { // Mutation captured: dry-run and plan must normalize ./cache without touching disk.
 		root, env, ctx := tm5LocalFixture(t)
-		env["HERDR_SOHO_DIR"] = "./cache"
+		env["SOHO_DIR"] = "./cache"
 		before := setupFilesystemSnapshot(t, root)
 		code, out, msg := runSetupWrite([]string{"--local", "--dry-run", "--no-hooks"}, ctx, env, root)
 		if code != 0 || !strings.Contains(out, "/cache") || !reflect.DeepEqual(before, setupFilesystemSnapshot(t, root)) {
@@ -261,11 +261,11 @@ func TestSetupLocalTM5Cases(t *testing.T) {
 			t.Fatalf("linked common dir=%q", got)
 		}
 	})
-	t.Run("// JS: \"setup --local refuses unsafe HERDR_SOHO_DIR values (rc 4) before any mutation\"", func(t *testing.T) { // Mutation captured: unsafe git-ignore syntax can broaden exclusions or escape the repository.
+	t.Run("// JS: \"setup --local refuses unsafe SOHO_DIR values (rc 4) before any mutation\"", func(t *testing.T) { // Mutation captured: unsafe git-ignore syntax can broaden exclusions or escape the repository.
 		for _, value := range []string{"*", "?", "[ab]", "cache "} {
 			t.Run(value, func(t *testing.T) {
 				root, env, ctx := tm5LocalFixture(t)
-				env["HERDR_SOHO_DIR"] = value
+				env["SOHO_DIR"] = value
 				before := setupFilesystemSnapshot(t, root)
 				code, out, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, root)
 				if code != 4 || out != "" || msg == "" || !reflect.DeepEqual(before, setupFilesystemSnapshot(t, root)) {
@@ -278,7 +278,7 @@ func TestSetupLocalTM5Cases(t *testing.T) {
 		for _, value := range []string{"cache", "!cache", "#cache"} {
 			t.Run(value, func(t *testing.T) {
 				root, env, ctx := tm5LocalFixture(t)
-				env["HERDR_SOHO_DIR"] = value
+				env["SOHO_DIR"] = value
 				if err := os.Mkdir(filepath.Join(root, value), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -365,7 +365,7 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, tc := range []struct{ input, shown string }{{"./cache", "cache/"}, {"deep/./cache", "deep/cache/"}, {"../outside", filepath.Join(external, "outside")}} {
-			env["HERDR_SOHO_DIR"] = tc.input
+			env["SOHO_DIR"] = tc.input
 			got := classifyLocalState(root, ctx, env, root).shown
 			if got != tc.shown {
 				t.Errorf("state path %q shown as %q, want %q", tc.input, got, tc.shown)
@@ -384,16 +384,16 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 	t.Run(`// JS: "stateDirShown: relative and trailing-slash overrides, external absolute, default preserved"`, func(t *testing.T) {
 		root, env, ctx := tm5LocalFixture(t)
 		for _, tc := range []struct{ value, want string }{{"cache", "cache/"}, {"cache/", "cache/"}, {"deep/my cache", "deep/my cache/"}, {filepath.Join(t.TempDir(), "external"), filepath.Join(t.TempDir(), "unused")}} {
-			env["HERDR_SOHO_DIR"] = tc.value
+			env["SOHO_DIR"] = tc.value
 			want := tc.want
 			if filepath.IsAbs(tc.value) {
 				want = tc.value
 			}
 			if got := classifyLocalState(root, ctx, env, root).shown; got != want {
-				t.Errorf("HERDR_SOHO_DIR=%q shown=%q want=%q", tc.value, got, want)
+				t.Errorf("SOHO_DIR=%q shown=%q want=%q", tc.value, got, want)
 			}
 		}
-		env["HERDR_SOHO_DIR"] = ""
+		env["SOHO_DIR"] = ""
 		if got := classifyLocalState(root, ctx, env, root).shown; got != ".soho/" {
 			t.Fatalf("default shown=%q", got)
 		}
@@ -401,7 +401,7 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 	t.Run(`// JS: "setup --local: the final message names the effective state dir, not the default (relative and external)"`, func(t *testing.T) {
 		for _, tc := range []struct{ value, want string }{{"cache", "state dir ignored: cache/"}, {filepath.Join(t.TempDir(), "outside"), ""}} {
 			root, env, ctx := tm5LocalFixture(t)
-			env["HERDR_SOHO_DIR"] = tc.value
+			env["SOHO_DIR"] = tc.value
 			code, out, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, root)
 			if code != 0 {
 				t.Fatalf("code=%d msg=%q", code, msg)
@@ -555,7 +555,7 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 	})
 	t.Run(`// JS: "setup --plan --local refuses a trailing-whitespace state dir (rc 4) with no output or mutation"`, func(t *testing.T) {
 		root, env, ctx := tm5LocalFixture(t)
-		env["HERDR_SOHO_DIR"] = "cache "
+		env["SOHO_DIR"] = "cache "
 		before := setupFilesystemSnapshot(t, root)
 		code, out, _, msg := runPlanStreams([]string{"--local"}, ctx, env, root)
 		if code != 4 || out != "" || !strings.Contains(msg, "ends in whitespace") || !reflect.DeepEqual(before, setupFilesystemSnapshot(t, root)) {
@@ -604,7 +604,7 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 			root = physicalRoot
 			seed(t, root, env)
 			link := linkTo(t, root)
-			env["HERDR_SOHO_DIR"] = filepath.Join(link, stateValue)
+			env["SOHO_DIR"] = filepath.Join(link, stateValue)
 			if makeState {
 				state := filepath.Join(root, stateValue)
 				if err := os.MkdirAll(state, 0o700); err != nil {
@@ -657,7 +657,7 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 				if err := os.Symlink(target, filepath.Join(root, "state-link")); err != nil {
 					t.Skipf("symlink unavailable: %v", err)
 				}
-				env["HERDR_SOHO_DIR"] = filepath.Join(root, "state-link")
+				env["SOHO_DIR"] = filepath.Join(root, "state-link")
 				before := setupFilesystemSnapshot(t, root)
 				code, out, msg := 0, "", ""
 				if mode == "plan" {
@@ -693,7 +693,7 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 		if out, err := exec.Command(git, "-C", root, "worktree", "add", "--detach", linked).CombinedOutput(); err != nil {
 			t.Fatalf("worktree: %v %s", err, out)
 		}
-		env["HERDR_SOHO_DIR"] = filepath.Join(linked, "state")
+		env["SOHO_DIR"] = filepath.Join(linked, "state")
 		got := classifyLocalState(root, ctx, env, root)
 		gotWorktree, _ := filepath.EvalSymlinks(got.worktree)
 		wantWorktree, _ := filepath.EvalSymlinks(linked)
@@ -709,7 +709,7 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 		if out, err := exec.Command(git, "-C", root, "worktree", "add", "--detach", linked).CombinedOutput(); err != nil {
 			t.Fatalf("worktree: %v %s", err, out)
 		}
-		env["HERDR_SOHO_DIR"] = filepath.Join(root, "state")
+		env["SOHO_DIR"] = filepath.Join(root, "state")
 		code, out, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, linked)
 		if code != 0 || !strings.Contains(out, "info"+string(filepath.Separator)+"exclude") {
 			t.Fatalf("code=%d out=%q msg=%q", code, out, msg)
@@ -727,7 +727,7 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 		if out, err := exec.Command(git, "init", "-q", other).CombinedOutput(); err != nil {
 			t.Fatalf("git init: %v %s", err, out)
 		}
-		env["HERDR_SOHO_DIR"] = filepath.Join(other, "state")
+		env["SOHO_DIR"] = filepath.Join(other, "state")
 		code, out, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, linked)
 		data, err := os.ReadFile(excludePath(linked, env))
 		if code != 0 || err != nil || strings.Contains(string(data), "state") || !strings.Contains(strings.ToLower(out), "outside") {
@@ -737,7 +737,7 @@ func TestSetupLocalTM5BoundaryCases(t *testing.T) {
 	t.Run(`// JS: "setup --local and --plan refuse a worktree-root state dir (rc 4) before any mutation"`, func(t *testing.T) {
 		for _, plan := range []bool{false, true} {
 			root, env, ctx := tm5LocalFixture(t)
-			env["HERDR_SOHO_DIR"] = "."
+			env["SOHO_DIR"] = "."
 			before := setupFilesystemSnapshot(t, root)
 			var code int
 			var out, msg string
@@ -931,7 +931,7 @@ func localAliasedSymlinkRefusal(t *testing.T, interior bool) {
 			t.Skipf("symlink unavailable: %v", err)
 		}
 	}
-	env["HERDR_SOHO_DIR"] = filepath.Join(alias, "link", "child")
+	env["SOHO_DIR"] = filepath.Join(alias, "link", "child")
 	code, out, msg := runSetupWrite([]string{"--local", "--no-hooks"}, ctx, env, root)
 	if code != 4 || out != "" || !strings.Contains(msg, "symlink") {
 		t.Fatalf("code=%d out=%q msg=%q", code, out, msg)

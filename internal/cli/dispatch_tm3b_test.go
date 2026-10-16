@@ -388,7 +388,7 @@ func TestDispatchTM3bSandboxAndSharedTreeCases(t *testing.T) {
 		if err := os.WriteFile(role, []byte("---\nname: Implementer\n---\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		got := dispatch.ComposePrompt(role, "implementer", "build", "brief", "/tmp/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"HERDR_SOHO_SKILL_DIR": t.TempDir()}, "codex", "", false)
+		got := dispatch.ComposePrompt(role, "implementer", "build", "brief", "/tmp/report.md", &core.Config{Entries: map[string]core.ConfigEntry{}}, platform.Env{"SOHO_SKILL_DIR": t.TempDir()}, "codex", "", false)
 		if !strings.Contains(got, "tests that start a local server fail") {
 			t.Fatalf("composed prompt omitted sandbox note: %s", got)
 		}
@@ -482,12 +482,12 @@ func newTM3bHarnessAt(t *testing.T, root, briefText string) tm3bHarness {
 	env["USERPROFILE"] = filepath.Join(root, "home")
 	env["XDG_CONFIG_HOME"] = filepath.Join(root, "xdg")
 	env["SOHO_FAKECLI_CONFIG"] = filepath.Join(bin, "herdr.json")
-	env["HERDR_SOHO_DIR"] = state
+	env["SOHO_DIR"] = state
 	env["HERDR_WORKSPACE_ID"] = "ws"
-	env["HERDR_SOHO_SKILL_DIR"] = "../../skills/soho"
-	env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
-	env["HERDR_SOHO_PROMPT_SETTLE_SECONDS"] = "0"
-	env["HERDR_SOHO_BRIEF_LINT"] = "off"
+	env["SOHO_SKILL_DIR"] = "../../skills/soho"
+	env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
+	env["SOHO_PROMPT_SETTLE_SECONDS"] = "0"
+	env["SOHO_BRIEF_LINT"] = "off"
 	env["HERDR_SOCKET_PATH"] = filepath.Join(root, "missing", "herdr.sock")
 	// A race-instrumented fake child otherwise pauses for one second on
 	// exit; the harness sets only GORACE and leaves the rest of the env as built.
@@ -600,7 +600,7 @@ func TestDispatchTM3bStrictLintOverlapAndMarkerCases(t *testing.T) {
 	t.Run("dispatch: a strict lint dies 2 without creating the state dirs", func(t *testing.T) {
 		briefText := strings.Replace(tm3bFullBrief(), "# Owned files\ninternal/a.go\n\n", "", 1)
 		h := newTM3bHarness(t, briefText)
-		h.env["HERDR_SOHO_BRIEF_LINT"] = "strict"
+		h.env["SOHO_BRIEF_LINT"] = "strict"
 		var recovered any
 		func() { defer func() { recovered = recover() }(); h.run(t, "build", h.brief, "--no-wait") }()
 		exit, ok := recovered.(*platform.ExitError)

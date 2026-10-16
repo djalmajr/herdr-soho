@@ -125,7 +125,7 @@ func newNowriteReads(t *testing.T, withState bool) *nowriteReads {
 	if err := os.WriteFile(filepath.Join(nr.sd, "task-report-worker.json"), []byte(pointer), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	nr.mutation = filepath.Join(nr.f.tmp, "herdr-soho-mutation-zz")
+	nr.mutation = filepath.Join(nr.f.tmp, "soho-mutation-zz")
 	if err := os.MkdirAll(nr.mutation, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func TestGcShowsThePressureLine(t *testing.T) {
 		},
 		{
 			name: "the configured limit applies", diskFreeGB: 60, diskOK: true, swapUsedGB: 30, swapOK: true,
-			env:  platform.Env{"HERDR_SOHO_PRESSURE_DISK_FREE_PERCENT": "70"},
+			env:  platform.Env{"SOHO_PRESSURE_DISK_FREE_PERCENT": "70"},
 			want: "resource pressure: disk " + sd + " has 60% free (60 GB of 100 GB); run 'soho gc' and close idle panes before opening more",
 		},
 	}

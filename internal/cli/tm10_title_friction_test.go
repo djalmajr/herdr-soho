@@ -33,8 +33,8 @@ func runTM10(t *testing.T, args []string, rules []fakecli.Rule, env platform.Env
 	clean["HOME"] = root
 	clean["USERPROFILE"] = root
 	clean["XDG_CONFIG_HOME"] = filepath.Join(root, "config")
-	clean["HERDR_SOHO_DIR"] = filepath.Join(root, "state")
-	clean["HERDR_SOHO_SKILL_DIR"] = testSkillDir(t)
+	clean["SOHO_DIR"] = filepath.Join(root, "state")
+	clean["SOHO_SKILL_DIR"] = testSkillDir(t)
 	clean["HERDR_WORKSPACE_ID"] = "ws"
 	oldOut, oldErr := platform.Stdout, platform.Stderr
 	var out, stderr bytes.Buffer
@@ -116,7 +116,7 @@ func TestTM10FrictionCases(t *testing.T) {
 			if code != tc.code || !strings.Contains(out.String(), tc.out) {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 			}
-			logPath := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "friction.log")
+			logPath := filepath.Join(env.Get("SOHO_DIR"), "ws", "friction.log")
 			data, err := os.ReadFile(logPath)
 			if tc.line != "" && (err != nil || !strings.Contains(string(data), tc.line)) {
 				t.Fatalf("friction log=%q err=%v", data, err)

@@ -43,12 +43,12 @@ func ownEnv(t *testing.T) platform.Env {
 		}
 	}
 	return platform.Env{
-		"PATH":                 prepareGitOnlyDir(t),
-		"HOME":                 home,
-		"XDG_CONFIG_HOME":      conf,
-		"GIT_CONFIG_GLOBAL":    global,
-		"GIT_CONFIG_SYSTEM":    system,
-		"HERDR_SOHO_SKILL_DIR": "../../skills/soho",
+		"PATH":              prepareGitOnlyDir(t),
+		"HOME":              home,
+		"XDG_CONFIG_HOME":   conf,
+		"GIT_CONFIG_GLOBAL": global,
+		"GIT_CONFIG_SYSTEM": system,
+		"SOHO_SKILL_DIR":    "../../skills/soho",
 	}
 }
 
@@ -563,21 +563,21 @@ func TestOwnCheckout(t *testing.T) {
 			f.expectStore(t, f.env, f.top, filepath.Clean(custom))
 		})
 
-		t.Run("HERDR_SOHO_DIR names the store root", func(t *testing.T) {
+		t.Run("SOHO_DIR names the store root", func(t *testing.T) {
 			f := newOwnWorktreeFixture(t, "j1")
 			custom := filepath.Join(f.tmp, "env-state")
 			f.installStore(t, custom)
 			env := f.env.Clone()
-			env["HERDR_SOHO_DIR"] = custom
-			// StateRootPath: HERDR_SOHO_DIR wins over every config layer.
+			env["SOHO_DIR"] = custom
+			// StateRootPath: SOHO_DIR wins over every config layer.
 			f.expectStore(t, env, f.top, filepath.Clean(custom))
 		})
 
-		t.Run("HERDR_SOHO_DIR without the state", func(t *testing.T) {
+		t.Run("SOHO_DIR without the state", func(t *testing.T) {
 			f := newOwnWorktreeFixture(t, "j1")
 			f.installStore(t, f.storeRoot())
 			env := f.env.Clone()
-			env["HERDR_SOHO_DIR"] = filepath.Join(f.tmp, "absent-state")
+			env["SOHO_DIR"] = filepath.Join(f.tmp, "absent-state")
 			// StateRootPath: a pinned root is used as is; the valid default
 			// store at <checkout>/.soho is not a fallback.
 			f.expectNil(t, env, f.top)

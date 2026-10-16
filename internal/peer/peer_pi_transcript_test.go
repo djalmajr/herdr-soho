@@ -245,7 +245,7 @@ func TestSendPiTranscriptProof(t *testing.T) {
 		// The message sits in the Steering queue above the input box: the
 		// session already holds the taken line, but the message is not read
 		// yet, so the count growth is not arrival.
-		screen := piSendScreen("old turn output\nSteering: [herdr-soho:peer] #01020304 Message from another agent", "")
+		screen := piSendScreen("old turn output\nSteering: [soho:peer] #01020304 Message from another agent", "")
 		rules := []fakecli.Rule{
 			{Argv: []string{"agent", "get", "w0test:p0a"}, ArgvPrefix: true, Stdout: piSessionAgentJSON("working", "1", sessionPath)},
 			{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, ArgvPrefix: true, Stdout: screen},

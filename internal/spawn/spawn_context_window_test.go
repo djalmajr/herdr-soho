@@ -168,7 +168,7 @@ func TestSpawnGrokContextWindowFromEnvironment(t *testing.T) {
 	rules = append(rules, freshSpawnRules()...)
 	f := newSpawnFixture(t, rules)
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_CONTEXT_WINDOW_GROK"] = "500k"
+	f.env["SOHO_CONTEXT_WINDOW_GROK"] = "500k"
 	code, stdout, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
 	if code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)

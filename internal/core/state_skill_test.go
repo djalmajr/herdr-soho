@@ -86,7 +86,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 
 	t.Run("cwd = the skill: StateDir exits 2 with the phrase and creates nothing inside the skill", func(t *testing.T) {
 		_, skill, home := skillFixture(t)
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
+		env := platform.Env{"SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
 		code, msg := stateDirExit(t, ctx, env, skill)
 		wantDir := filepath.Join(skill, ".soho")
 		want := "the state dir '" + wantDir + "' would be inside the soho skill ('" + skill + "'); run soho from the project's directory (nothing was written)"
@@ -110,7 +110,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		if err := os.MkdirAll(sub, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
+		env := platform.Env{"SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
 		code, msg := stateDirExit(t, ctx, env, sub)
 		if code != 2 {
 			t.Fatalf("exit=%d msg=%q", code, msg)
@@ -137,7 +137,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		// The skill is known by the symlink, but the cwd is the resolved
 		// target (a different spelling): only EvalSymlinks makes the state
 		// root compare as inside the skill.
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": link, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
+		env := platform.Env{"SOHO_SKILL_DIR": link, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
 		if got := StateInSkill(ctx, env, real); got != link {
 			t.Fatalf("StateInSkill()=%q want %q", got, link)
 		}
@@ -172,7 +172,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		}
 		bin, log := herdrLogger(t, root)
 		env := platform.Env{
-			"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home,
+			"SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home,
 		}
 		for key, value := range herdrLoggerEnv(t, bin) {
 			env[key] = value
@@ -192,7 +192,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		root, skill, home := skillFixture(t)
 		bin, log := herdrLogger(t, root)
 		env := platform.Env{
-			"HERDR_SOHO_SKILL_DIR": skill, "HOME": home, "USERPROFILE": home,
+			"SOHO_SKILL_DIR": skill, "HOME": home, "USERPROFILE": home,
 		}
 		for key, value := range herdrLoggerEnv(t, bin) {
 			env[key] = value
@@ -213,7 +213,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 		if err := os.MkdirAll(proj, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
+		env := platform.Env{"SOHO_SKILL_DIR": skill, "SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
 		if got := StateInSkill(ctx, env, proj); got != "" {
 			t.Fatalf("StateInSkill()=%q want empty", got)
 		}
@@ -230,9 +230,9 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 			t.Fatalf("state created inside the skill: %v", err)
 		}
 	})
-	t.Run("an absolute HERDR_SOHO_DIR outside the skill wins from a cwd inside it", func(t *testing.T) {
+	t.Run("an absolute SOHO_DIR outside the skill wins from a cwd inside it", func(t *testing.T) {
 		root, skill, home := skillFixture(t)
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
+		env := platform.Env{"SOHO_SKILL_DIR": skill, "SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home}
 		if got := StateInSkill(ctx, env, skill); got != "" {
 			t.Fatalf("StateInSkill()=%q want empty", got)
 		}
@@ -267,7 +267,7 @@ func TestStateDirRefusesTheSkillDir(t *testing.T) {
 	})
 	t.Run("nowrite mode keeps the read path untouched inside the skill", func(t *testing.T) {
 		_, skill, home := skillFixture(t)
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_NOWRITE": "1", "HOME": home, "USERPROFILE": home}
+		env := platform.Env{"SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "SOHO_NOWRITE": "1", "HOME": home, "USERPROFILE": home}
 		dir := StateDir(ctx, env, skill)
 		if dir != filepath.Join(skill, ".soho", "ws") {
 			t.Fatalf("dir=%q", dir)
@@ -299,7 +299,7 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 
 	t.Run("StateRoot from a cwd inside a skill that is a git checkout: no .gitignore is created", func(t *testing.T) {
 		_, skill, home := gitSkill(t)
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
+		env := platform.Env{"SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		dir := StateRoot(ctx, env, skill)
 		if dir != filepath.Join(skill, ".soho") {
 			t.Fatalf("dir=%q want %q", dir, filepath.Join(skill, ".soho"))
@@ -313,7 +313,7 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(skill, ".gitignore"), []byte("# pre-existing\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
+		env := platform.Env{"SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		StateRoot(ctx, env, skill)
 		got, err := os.ReadFile(filepath.Join(skill, ".gitignore"))
 		if err != nil || string(got) != "# pre-existing\n" {
@@ -325,7 +325,7 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(skill, ".gitignore"), []byte("# pre-existing\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
+		env := platform.Env{"SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		dir := StateDirPath(ctx, env, skill)
 		if dir != filepath.Join(skill, ".soho", "ws") {
 			t.Fatalf("dir=%q want %q", dir, filepath.Join(skill, ".soho", "ws"))
@@ -347,7 +347,7 @@ func TestStateRootAndStateDirPathKeepTheSkillGitignoreUntouched(t *testing.T) {
 		if out, gitErr := exec.Command("git", "init", "-q", proj).CombinedOutput(); gitErr != nil {
 			t.Fatalf("git init: %s %v", out, gitErr)
 		}
-		env := platform.Env{"HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
+		env := platform.Env{"SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws", "HOME": home, "USERPROFILE": home, "PATH": gitOnlyDir(t)}
 		dir := StateRoot(ctx, env, proj)
 		if dir != filepath.Join(proj, ".soho") {
 			t.Fatalf("dir=%q want %q", dir, filepath.Join(proj, ".soho"))

@@ -50,7 +50,7 @@ func burstFixture(t *testing.T, live []burstLive) spawnFixture {
 	}
 	f := newSpawnFixture(t, append(rules, freshSpawnRules()...))
 	configureSpawnFixture(t, &f)
-	f.env["HERDR_SOHO_LANES"] = "on"
+	f.env["SOHO_LANES"] = "on"
 	return f
 }
 

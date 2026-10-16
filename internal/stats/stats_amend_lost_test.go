@@ -44,7 +44,7 @@ func newAmendLostFixture(t *testing.T) *amendLostFixture {
 func (f *amendLostFixture) env() platform.Env {
 	return platform.Env{
 		"HERDR_ENV":          "1",
-		"HERDR_SOHO_DIR":     filepath.Dir(f.sd),
+		"SOHO_DIR":           filepath.Dir(f.sd),
 		"HERDR_WORKSPACE_ID": "ws",
 		"HOME":               f.root,
 		"TMPDIR":             filepath.Join(f.root, "tmp"),

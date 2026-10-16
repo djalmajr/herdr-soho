@@ -56,7 +56,7 @@ func TestTM11KindsCommandParity(t *testing.T) {
 			bin := t.TempDir()
 			installKindFakes(t, bin)
 			clean := envFrom(testutil.CleanEnv(t))
-			for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "HERDR_SOHO_SKILL_DIR", "HERDR_WORKSPACE_ID"} {
+			for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "SOHO_SKILL_DIR", "HERDR_WORKSPACE_ID"} {
 				clean[key] = env.Get(key)
 			}
 			clean["PATH"] = bin

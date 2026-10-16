@@ -131,7 +131,7 @@ func TestCollaborateCLIRejectsStaleVersionAndClosesExplicitly(t *testing.T) {
 	if code, _, errOut := f.run(t, f.env, "collaborate", "finalize", a.ID, "--verdict", "accept"); code != 2 || !strings.Contains(errOut, "stale") {
 		t.Fatalf("stale accepted: code=%d err=%s", code, errOut)
 	}
-	f.env["HERDR_SOHO_WORKER_MESSAGES"] = "off"
+	f.env["SOHO_WORKER_MESSAGES"] = "off"
 	if code, _, stderr := f.run(t, f.env, "collaborate", "stop", a.ID); code != 0 {
 		t.Fatalf("stop disabled policy: %d %s", code, stderr)
 	}
@@ -185,8 +185,8 @@ func TestCollaborateCLIStatusNowriteAndWorkerStartRefusal(t *testing.T) {
 	}
 	a := startCollaboration(t, f, brief)
 	env := f.env.Clone()
-	env["HERDR_SOHO_NOWRITE"] = "1"
-	env["HERDR_SOHO_WORKER_MESSAGES"] = "off"
+	env["SOHO_NOWRITE"] = "1"
+	env["SOHO_WORKER_MESSAGES"] = "off"
 	before := nowriteTreeSnapshot(t, f.root)
 	code, out, stderr := f.run(t, env, "collaborate", "status", a.ID, "--json")
 	if code != 0 || !strings.Contains(out, "current_revision") || !strings.Contains(out, "worker_messages=off") || stderr != "" {
@@ -198,7 +198,7 @@ func TestCollaborateCLIStatusNowriteAndWorkerStartRefusal(t *testing.T) {
 	if code, _, _ := f.run(t, env, "collaborate", "stop", a.ID); code != 2 {
 		t.Fatal("NOWRITE stopped assignment")
 	}
-	if code, out, stderr := f.run(t, platform.Env{"HERDR_SOHO_NOWRITE": "1"}, "capabilities", "--json"); code != 0 || !strings.Contains(out, `"worker_collaboration":1`) || stderr != "" {
+	if code, out, stderr := f.run(t, platform.Env{"SOHO_NOWRITE": "1"}, "capabilities", "--json"); code != 0 || !strings.Contains(out, `"worker_collaboration":1`) || stderr != "" {
 		t.Fatalf("capabilities: %d %s %s", code, out, stderr)
 	}
 }

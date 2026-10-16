@@ -51,7 +51,7 @@ func TestProbeCodexTimeout(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := fakeEnv(t, bin)
-		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+		env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
 		old := platform.Stdout
 		var out bytes.Buffer
@@ -76,7 +76,7 @@ func TestProbeCodexTimeout(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := fakeEnv(t, bin)
-		env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+		env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 		env["SOHO_PROBE_TIMEOUT"] = "1"
 		ctx := &core.Config{Entries: map[string]core.ConfigEntry{}, Order: []string{}}
 		old := platform.Stdout

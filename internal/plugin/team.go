@@ -218,10 +218,9 @@ func teamCall(ctx contextpkg.Context, exe string, env platform.Env, platformName
 	if nowrite {
 		childEnv["SOHO_NOWRITE"] = "1"
 	} else {
-		// A write must run ungated: strip the current gate name and the
-		// legacy HERDR_SOHO_NOWRITE inherited from the environment.
+		// A write must run ungated: strip the gate name the current read
+		// calls inject.
 		delete(childEnv, "SOHO_NOWRITE")
-		delete(childEnv, "HERDR_SOHO_NOWRITE")
 	}
 	if bin := env.Get("HERDR_BIN_PATH"); bin != "" {
 		childEnv = withPath(childEnv, filepath.Dir(bin), platformName)

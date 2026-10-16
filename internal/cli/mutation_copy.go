@@ -405,7 +405,7 @@ func mutationCopyPrepareDest(raw, cwd string, env platform.Env, home, source str
 		if tmpDir == "" {
 			tmpDir = os.TempDir()
 		}
-		made, err := os.MkdirTemp(tmpDir, "herdr-soho-mutation-")
+		made, err := os.MkdirTemp(tmpDir, "soho-mutation-")
 		if err != nil {
 			return "", raw, false, "cannot be created: " + err.Error()
 		}

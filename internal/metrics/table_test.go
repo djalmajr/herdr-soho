@@ -261,9 +261,9 @@ const tableWriteBefore = "# Profiles\n\ntext before the block\n\n"
 const tableWriteAfter = "\ntext after the block\n\nlast line without newline"
 
 func tableMarkerBlock() string {
-	return "<!-- herdr-soho:metrics-table:start -->\n" +
+	return "<!-- soho:metrics-table:start -->\n" +
 		"_No field summaries yet._\n" +
-		"<!-- herdr-soho:metrics-table:end -->"
+		"<!-- soho:metrics-table:end -->"
 }
 
 // TestTable_WriteBlockOnly writes one row into a file with text around the
@@ -298,10 +298,10 @@ func TestTable_WriteBlockOnly(t *testing.T) {
 		t.Fatalf("bytes from the end marker on changed:\n%q\nvs\n%q", string(got)[len(got)-len(after):], after)
 	}
 	want := tableWriteBefore +
-		"<!-- herdr-soho:metrics-table:start -->\n\n" +
+		"<!-- soho:metrics-table:start -->\n\n" +
 		tableHeader +
 		"| implementer | build | fix | beta | low | 1 | - | - | - | - | low |\n\n" +
-		"<!-- herdr-soho:metrics-table:end -->" + tableWriteAfter
+		"<!-- soho:metrics-table:end -->" + tableWriteAfter
 	if string(got) != want {
 		t.Fatalf("file =\n%s\nwant:\n%s", string(got), want)
 	}
@@ -319,9 +319,9 @@ func TestTable_WriteInvalidMarkers(t *testing.T) {
 	}{
 		{"no markers", "just text\nno markers here\n"},
 		{"two pairs", tableMarkerBlock() + "\n\n" + tableMarkerBlock() + "\n"},
-		{"end before start", "<!-- herdr-soho:metrics-table:end -->\n" +
+		{"end before start", "<!-- soho:metrics-table:end -->\n" +
 			"_No field summaries yet._\n" +
-			"<!-- herdr-soho:metrics-table:start -->\n"},
+			"<!-- soho:metrics-table:start -->\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -438,7 +438,7 @@ func TestTable_ZeroLines(t *testing.T) {
 	if rerr != nil {
 		t.Fatalf("reading target: %v", rerr)
 	}
-	want := "lead\n<!-- herdr-soho:metrics-table:start -->\n\n_No field summaries yet._\n\n<!-- herdr-soho:metrics-table:end -->\ntail\n"
+	want := "lead\n<!-- soho:metrics-table:start -->\n\n_No field summaries yet._\n\n<!-- soho:metrics-table:end -->\ntail\n"
 	if string(got) != want {
 		t.Fatalf("file =\n%s\nwant:\n%s", string(got), want)
 	}
@@ -482,8 +482,8 @@ func TestTable_WriteRealProfiles(t *testing.T) {
 		t.Fatalf("table row %q missing from:\n%s", row, gotS)
 	}
 	// Byte for byte outside the markers.
-	startIdx := strings.Index(orig, "<!-- herdr-soho:metrics-table:start -->")
-	endIdx := strings.Index(orig[startIdx+1:], "<!-- herdr-soho:metrics-table:end -->") + startIdx + 1
+	startIdx := strings.Index(orig, "<!-- soho:metrics-table:start -->")
+	endIdx := strings.Index(orig[startIdx+1:], "<!-- soho:metrics-table:end -->") + startIdx + 1
 	before, after := orig[:startIdx], orig[endIdx:]
 	if !strings.HasPrefix(gotS, before) {
 		t.Fatalf("bytes before the markers changed")
@@ -491,14 +491,14 @@ func TestTable_WriteRealProfiles(t *testing.T) {
 	if !strings.HasSuffix(gotS, after) {
 		t.Fatalf("bytes from the end marker on changed")
 	}
-	if !strings.Contains(gotS, "<!-- herdr-soho:metrics-table:start -->\n\n"+tableHeader+row+"\n<!-- herdr-soho:metrics-table:end -->") {
-		t.Fatalf("the block is not the blank-line-wrapped table:\n%s", gotS[startIdx:endIdx+len("<!-- herdr-soho:metrics-table:end -->")+1])
+	if !strings.Contains(gotS, "<!-- soho:metrics-table:start -->\n\n"+tableHeader+row+"\n<!-- soho:metrics-table:end -->") {
+		t.Fatalf("the block is not the blank-line-wrapped table:\n%s", gotS[startIdx:endIdx+len("<!-- soho:metrics-table:end -->")+1])
 	}
 }
 
 // tableEndMarkerIndex locates the end marker in the write fixture.
 func tableEndMarkerIndex(s string) int {
-	return strings.Index(s, "<!-- herdr-soho:metrics-table:end -->")
+	return strings.Index(s, "<!-- soho:metrics-table:end -->")
 }
 
 // TestTable_EndToEndExportAndTable is the point-to-point check: it builds a

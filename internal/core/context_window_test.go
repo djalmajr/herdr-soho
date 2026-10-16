@@ -32,7 +32,7 @@ func TestContextWindowKeyAndEnv(t *testing.T) {
 	if got := Cfg(&ctx, ContextWindowKey("grok"), "", env); got != "256000" {
 		t.Fatalf("cfg=%q, want 256000 (file layer)", got)
 	}
-	env["HERDR_SOHO_CONTEXT_WINDOW_GROK"] = "500k"
+	env["SOHO_CONTEXT_WINDOW_GROK"] = "500k"
 	if got := Cfg(&ctx, ContextWindowKey("grok"), "", env); got != "500k" {
 		t.Fatalf("cfg=%q, want 500k (env wins)", got)
 	}
@@ -43,12 +43,14 @@ func TestContextWindowKeyAndEnv(t *testing.T) {
 	if len(entries) != 1 || entries["grok"].Value != "500k" || entries["grok"].Source != "env" {
 		t.Fatalf("entries=%#v", entries)
 	}
-	// Legacy env spelling lands on the same key, like the other keys.
-	legacy := platform.Env{}
-	legacy["HERDR_SOHO_CONTEXT_WINDOW_GROK"] = "500k"
-	ApplyLegacyEnv(legacy)
-	if got := legacy.Get("SOHO_CONTEXT_WINDOW_GROK"); got != "500k" {
-		t.Fatalf("legacy env=%q", got)
+	// The former env spelling no longer lands on the key.
+	legacy := platform.Env{"HERDR_SOHO_CONTEXT_WINDOW_GROK": "500k"}
+	emptyCtx := &Config{Entries: make(map[string]ConfigEntry)}
+	if got := Cfg(emptyCtx, ContextWindowKey("grok"), "", legacy); got != "" {
+		t.Fatalf("former env spelling still read: %q", got)
+	}
+	if got := ContextWindowEntries(emptyCtx, legacy); len(got) != 0 {
+		t.Fatalf("former env spelling in entries: %#v", got)
 	}
 }
 
@@ -110,7 +112,7 @@ func TestConfigListsContextWindowLikeTheOtherDottedKeys(t *testing.T) {
 	}
 	// A key that only exists in the environment is listed under its rebuilt
 	// dotted name, as effort.* does.
-	env["HERDR_SOHO_CONTEXT_WINDOW_CODEX"] = "256000"
+	env["SOHO_CONTEXT_WINDOW_CODEX"] = "256000"
 	out, _ = capture(t, func() { CmdConfig(&ctx, env, cwd) })
 	found := false
 	for _, line := range strings.Split(out, "\n") {

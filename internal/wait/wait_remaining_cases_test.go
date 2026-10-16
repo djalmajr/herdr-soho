@@ -89,7 +89,7 @@ func TestWaitRemainingQueuedAndRetryCases(t *testing.T) {
 		f := newQueuedProbeFixture(t, "idle", "5", claudeBoxScreen("", "❯ Read the file "+prompt+" in full and execute it.", "  [Opus 5.5] 67% [main*]\n"), map[string]string{
 			"not-received": "1999999900\n", "enter-retry": "1 1999999900\n",
 		})
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "15"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "15"
 		if got := f.probe(""); got != "not-received" {
 			t.Fatalf("pathless marker probe=%q, want not-received without keys", got)
 		}
@@ -269,8 +269,8 @@ func TestWaitRemainingCapacityCases(t *testing.T) {
 		f.bin = bin
 		f.env["PATH"] = bin
 		f.env["SOHO_FAKECLI_CONFIG"] = bin
-		f.env["HERDR_SOHO_PROVIDER_RETRIES"] = "1"
-		f.env["HERDR_SOHO_PROVIDER_RETRY_DELAY"] = "0"
+		f.env["SOHO_PROVIDER_RETRIES"] = "1"
+		f.env["SOHO_PROVIDER_RETRY_DELAY"] = "0"
 		return f, bin
 	}
 	t.Run("wait: capacity sends the continue prompt and the report settles done", func(t *testing.T) { // JS: "wait: capacity sends the continue prompt and the report settles done"
@@ -372,7 +372,7 @@ func TestWaitStuckScreenWarningOnceCase(t *testing.T) {
 		t.Cleanup(func() { platform.Now = oldNow })
 		screen := "Running tests 42% ◐ 3.1s\n"
 		f := newQueuedProbeFixture(t, "working", "5", screen, nil)
-		f.env["HERDR_SOHO_STUCK_WARN_MINUTES"] = "1"
+		f.env["SOHO_STUCK_WARN_MINUTES"] = "1"
 		if err := os.WriteFile(f.marker("stuck-hash"), []byte(stringInt(CksumField(NormalizeScreen(screen)))+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}

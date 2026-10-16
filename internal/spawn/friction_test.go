@@ -34,8 +34,8 @@ func TestSpawnBadAgentListRecordsFriction(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := platform.Env{
-		"HERDR_ENV": "1", "HERDR_SOHO_DIR": state, "SOHO_FAKECLI_CONFIG": bin,
-		"HERDR_SOHO_LANES": "off", "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws",
+		"HERDR_ENV": "1", "SOHO_DIR": state, "SOHO_FAKECLI_CONFIG": bin,
+		"SOHO_LANES": "off", "SOHO_ROLES": roles, "SOHO_SKILL_DIR": skill, "HERDR_WORKSPACE_ID": "ws",
 		"HOME": root, "PATH": bin, "TMPDIR": root,
 	}
 	oldOut, oldErr := platform.Stdout, platform.Stderr

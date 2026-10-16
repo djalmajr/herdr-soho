@@ -35,9 +35,9 @@ func TestDoctorReportsUsedKindsInUTF16Order(t *testing.T) {
 	}
 	env := platform.Env{
 		"HOME": root, "USERPROFILE": root, "PATH": bin,
-		"HERDR_ENV": "1", "HERDR_SOHO_DIR": filepath.Join(root, "state"),
-		"HERDR_SOHO_LANES": "off", "HERDR_SOHO_ROLES": roles,
-		"HERDR_SOHO_SKILL_DIR": root,
+		"HERDR_ENV": "1", "SOHO_DIR": filepath.Join(root, "state"),
+		"SOHO_LANES": "off", "SOHO_ROLES": roles,
+		"SOHO_SKILL_DIR": root,
 	}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	var out strings.Builder
@@ -49,9 +49,9 @@ func TestDoctorReportsUsedKindsInUTF16Order(t *testing.T) {
 
 func TestProjectIsFirstRunRequiresTeamChoiceOrRoster(t *testing.T) { // JS: "projectIsFirstRun: the team-choice and roster tests"
 	root := t.TempDir()
-	env := platform.Env{"HOME": root, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"HOME": root, "SOHO_DIR": filepath.Join(root, "state"), "SOHO_SKILL_DIR": root}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
-	conf := filepath.Join(root, ".agents", "herdr-soho.conf")
+	conf := filepath.Join(root, ".agents", "soho.conf")
 	if err := os.MkdirAll(filepath.Dir(conf), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestDoctorFixRejectsInvalidPanesBeforeWriting(t *testing.T) { // JS: "docto
 	root := t.TempDir()
 	// The skill must stay outside the project root: inside it, doctor --fix
 	// now refuses before the panes validation this test checks.
-	env := platform.Env{"HOME": root, "HERDR_SOHO_SKILL_DIR": filepath.Join(root, "skill")}
+	env := platform.Env{"HOME": root, "SOHO_SKILL_DIR": filepath.Join(root, "skill")}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	oldOut, oldErr := platform.Stdout, platform.Stderr
 	var out, stderr strings.Builder
@@ -120,9 +120,9 @@ func TestDoctorFixUsesLastNonCommentPanesValue(t *testing.T) {
 			root := t.TempDir()
 			// The skill must stay outside the project root: inside it, doctor
 			// --fix now refuses before the panes parsing this test checks.
-			env := platform.Env{"HOME": root, "USERPROFILE": root, "HERDR_SOHO_SKILL_DIR": filepath.Join(root, "skill")}
+			env := platform.Env{"HOME": root, "USERPROFILE": root, "SOHO_SKILL_DIR": filepath.Join(root, "skill")}
 			ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
-			conf := filepath.Join(root, ".agents", "herdr-soho.conf")
+			conf := filepath.Join(root, ".agents", "soho.conf")
 			if err := os.MkdirAll(filepath.Dir(conf), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -171,7 +171,7 @@ func TestDoctorDiscardedLaneModelIsSilentWhenLanesAreOff(t *testing.T) {
 		"lane_build_model": {Value: "claude-opus", Source: "user"},
 	}}
 	var out strings.Builder
-	doctorDiscardedModels(&ctx, platform.Env{"HERDR_SOHO_SKILL_DIR": root}, root, &Say{Out: &out})
+	doctorDiscardedModels(&ctx, platform.Env{"SOHO_SKILL_DIR": root}, root, &Say{Out: &out})
 	if strings.Contains(out.String(), "lane.build.model=") {
 		t.Fatalf("unused lane model was reported while lanes=off: %s", out.String())
 	}
@@ -188,7 +188,7 @@ func TestDoctorLaneRolesSplitOnlyOnCommas(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	env := platform.Env{"HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"SOHO_ROLES": roles, "SOHO_SKILL_DIR": root}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{
 		"lanes":                          {Value: "on", Source: "project"},
 		"panes":                          {Value: "4", Source: "project"},
@@ -255,7 +255,7 @@ func TestDoctorPlannerWarningsUseSortedKeys(t *testing.T) {
 		Order: []string{"role_planner_model", "role_planner_kind"},
 	}
 	var out strings.Builder
-	doctorLaneWarnings(&ctx, platform.Env{"HERDR_SOHO_SKILL_DIR": root}, root, &Say{Out: &out})
+	doctorLaneWarnings(&ctx, platform.Env{"SOHO_SKILL_DIR": root}, root, &Say{Out: &out})
 	got := out.String()
 	kind := strings.Index(got, "config: role_planner_kind is set")
 	model := strings.Index(got, "config: role_planner_model is set")
@@ -276,7 +276,7 @@ func TestDoctorWarnsWhenOfficialSkillDiffersFromHerdr(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HOME": home, "USERPROFILE": home, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": root, "PATH": bin, "HERDR_ENV": "1"}
+	env := platform.Env{"HOME": home, "USERPROFILE": home, "SOHO_DIR": filepath.Join(root, "state"), "SOHO_FAKECLI_CONFIG": bin, "SOHO_SKILL_DIR": root, "PATH": bin, "HERDR_ENV": "1"}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	var out strings.Builder
 	DoctorCheck(&ctx, env, root, &out)
@@ -335,7 +335,7 @@ func TestDoctorReadsHerdrVersionAndLargeSkillFromPath(t *testing.T) { // Mutatio
 	if _, err := fakecli.Install(t, bin, "herdr", rules); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HOME": home, "USERPROFILE": home, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "SOHO_FAKECLI_CONFIG": bin, "HERDR_SOHO_SKILL_DIR": root, "PATH": bin, "HERDR_ENV": "1"}
+	env := platform.Env{"HOME": home, "USERPROFILE": home, "SOHO_DIR": filepath.Join(root, "state"), "SOHO_FAKECLI_CONFIG": bin, "SOHO_SKILL_DIR": root, "PATH": bin, "HERDR_ENV": "1"}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	var out strings.Builder
 	DoctorCheck(&ctx, env, root, &out)
@@ -368,7 +368,7 @@ func TestDoctorRecognizesNativeAndOldSessionStartHooks(t *testing.T) { // JS: "d
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			env := platform.Env{"HOME": root, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
+			env := platform.Env{"HOME": root, "SOHO_DIR": filepath.Join(root, "state"), "SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
 			ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 			settings := filepath.Join(root, ".claude", "settings.json")
 			if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
@@ -403,7 +403,7 @@ func TestDoctorWarnsWhenNativeAndPreviousHooksCoexist(t *testing.T) {
 		for _, nativeFirst := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/native-first=%v", obsolete.name, nativeFirst), func(t *testing.T) {
 				root := t.TempDir()
-				env := platform.Env{"HOME": root, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
+				env := platform.Env{"HOME": root, "SOHO_DIR": filepath.Join(root, "state"), "SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
 				ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 				commands := []string{setuptext.SetupHookDoctor(), obsolete.command}
 				if !nativeFirst {
@@ -441,10 +441,10 @@ func quoteCommand(command string) string {
 
 // TestDoctorSetupGuidanceUsesTheNativeLauncher proves the setup guidance
 // lines carry the platform.LauncherPath binary (the actual native executable
-// when no HERDR_SOHO_BIN override exists), never the obsolete scripts path.
+// when no SOHO_BIN override exists), never the obsolete scripts path.
 func TestDoctorSetupGuidanceUsesTheNativeLauncher(t *testing.T) {
 	root := t.TempDir()
-	env := platform.Env{"HOME": root, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
+	env := platform.Env{"HOME": root, "SOHO_DIR": filepath.Join(root, "state"), "SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	var out strings.Builder
 	DoctorCheck(&ctx, env, root, &out)
@@ -458,9 +458,9 @@ func TestDoctorSetupGuidanceUsesTheNativeLauncher(t *testing.T) {
 	if strings.Contains(got, "scripts/soho") {
 		t.Fatalf("obsolete scripts path leaked into the setup guidance:\n%s", got)
 	}
-	// A hostile HERDR_SOHO_BIN override is refused by LauncherPath (code 2)
+	// A hostile SOHO_BIN override is refused by LauncherPath (code 2)
 	// before any guidance is emitted: the doctor never runs it.
-	hostile := platform.Env{"HOME": root, "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_SOHO_BIN": "relative-bin"}
+	hostile := platform.Env{"HOME": root, "SOHO_SKILL_DIR": root, "PATH": "", "SOHO_BIN": "relative-bin"}
 	var recovered any
 	func() {
 		defer func() { recovered = recover() }()
@@ -469,7 +469,7 @@ func TestDoctorSetupGuidanceUsesTheNativeLauncher(t *testing.T) {
 	}()
 	exit, ok := recovered.(*platform.ExitError)
 	if !ok || exit.Code != 2 {
-		t.Fatalf("hostile HERDR_SOHO_BIN: recovered %#v; want ExitError code 2 (fail closed, no guidance)", recovered)
+		t.Fatalf("hostile SOHO_BIN: recovered %#v; want ExitError code 2 (fail closed, no guidance)", recovered)
 	}
 }
 
@@ -484,7 +484,7 @@ func TestDoctorCodexUIWarningsFollowNetworkToken(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	env := platform.Env{"HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"SOHO_ROLES": roles, "SOHO_SKILL_DIR": root}
 	t.Run(`doctorCodexNetworkWarnings: codex UI roles without a network token warn, lifted by the spawn tokens`, func(t *testing.T) { // JS: "doctorCodexNetworkWarnings: codex UI roles without a network token warn, lifted by the spawn tokens"
 		// Mutation captured: Contains instead of HasSuffix accepts a suffixed network token and hides both warnings.
 		exact := func(role, key string) string {
@@ -518,9 +518,9 @@ func TestDoctorCodexUIWarningsFollowNetworkToken(t *testing.T) {
 	})
 }
 
-func TestDoctorWarnsAboutLegacyProjectConfig(t *testing.T) { // JS: "doctor: the legacy config warns about the missing panes and the cap"
+func TestDoctorWarnsAboutFormerProjectConfig(t *testing.T) {
 	root := t.TempDir()
-	env := platform.Env{"HOME": root, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
+	env := platform.Env{"HOME": root, "SOHO_DIR": filepath.Join(root, "state"), "SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
 	legacy := filepath.Join(root, ".agents", "herdr-soho.conf")
 	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
 		t.Fatal(err)
@@ -531,14 +531,16 @@ func TestDoctorWarnsAboutLegacyProjectConfig(t *testing.T) { // JS: "doctor: the
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	var out strings.Builder
 	DoctorCheck(&ctx, env, root, &out)
-	if !strings.Contains(out.String(), "legacy project config in use: ") {
-		t.Fatalf("legacy config warning missing: %s", out.String())
+	got := out.String()
+	want := "former project config " + legacy + " is no longer read: run 'soho setup' to move it to " + filepath.Join(root, ".agents", "soho.conf")
+	if !strings.Contains(got, want) {
+		t.Fatalf("leftover warning missing (want %q): %s", want, got)
 	}
 }
 
 func TestDoctorWarnsWhenSplitCapExceedsTheTeam(t *testing.T) { // A9: the reference is 1 + the effective max_workers, not panes (the frozen JS text was panes-based)
 	root := t.TempDir()
-	env := platform.Env{"HOME": root, "HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"HOME": root, "SOHO_SKILL_DIR": root}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{"panes": {Value: "3", Source: "project"}, "split_max_panes": {Value: "8", Source: "project"}}, Order: []string{"panes", "split_max_panes"}}
 	var out strings.Builder
 	s := &Say{Out: &out}
@@ -550,7 +552,7 @@ func TestDoctorWarnsWhenSplitCapExceedsTheTeam(t *testing.T) { // A9: the refere
 
 func TestDoctorSplitCapChecksTheWholeTeam(t *testing.T) { // A9: an explicit split_max_panes is checked against 1 + the effective max_workers
 	root := t.TempDir()
-	env := platform.Env{"HOME": root, "HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"HOME": root, "SOHO_SKILL_DIR": root}
 	for _, tc := range []struct {
 		name   string
 		values map[string]string
@@ -589,7 +591,7 @@ func TestDoctorSplitCapChecksTheWholeTeam(t *testing.T) { // A9: an explicit spl
 
 func TestDoctorReportsRawPaneMode(t *testing.T) { // Mutation captured: normalizing an invalid pane_mode to strict hides the raw configuration error.
 	root := t.TempDir()
-	env := platform.Env{"HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"SOHO_SKILL_DIR": root}
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{
 		"panes":     {Value: "4", Source: "project"},
 		"pane_mode": {Value: "weird", Source: "project"},
@@ -606,7 +608,7 @@ func TestDoctorReportsRawPaneMode(t *testing.T) { // Mutation captured: normaliz
 
 func TestDoctorReportsDiscardedLaneEffort(t *testing.T) { // Mutation captured: omitting the ignored-effort message hides a layer-precedence decision.
 	root := t.TempDir()
-	env := platform.Env{"HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"SOHO_SKILL_DIR": root}
 	ctx := core.Config{
 		Entries: map[string]core.ConfigEntry{
 			"panes":              {Value: "4", Source: "project"},
@@ -626,7 +628,7 @@ func TestDoctorReportsDiscardedLaneEffort(t *testing.T) { // Mutation captured: 
 
 func TestDoctorNamesAllLegacyPresetLanes(t *testing.T) { // Mutation captured: reporting only the first legacy lane loses the preset's full identity.
 	root := t.TempDir()
-	env := platform.Env{"HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"SOHO_SKILL_DIR": root}
 	ctx := core.Config{
 		Entries: map[string]core.ConfigEntry{
 			"panes":            {Value: "3", Source: "project"},
@@ -644,7 +646,7 @@ func TestDoctorNamesAllLegacyPresetLanes(t *testing.T) { // Mutation captured: r
 
 func TestDoctorSortsOrphanLaneWarnings(t *testing.T) { // Mutation captured: using config insertion order instead of key order reverses orphan diagnostics.
 	root := t.TempDir()
-	env := platform.Env{"HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"SOHO_SKILL_DIR": root}
 	ctx := core.Config{
 		Entries: map[string]core.ConfigEntry{
 			"panes":           {Value: "4", Source: "project"},
@@ -677,7 +679,7 @@ func TestDoctorNamesSeparateClaudeMdWithLegacyBlock(t *testing.T) { // JS: "setu
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			env := platform.Env{"HOME": root, "HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
+			env := platform.Env{"HOME": root, "SOHO_DIR": filepath.Join(root, "state"), "SOHO_SKILL_DIR": root, "PATH": "", "HERDR_ENV": "1"}
 			ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 			if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(tc.agents), 0o600); err != nil {
 				t.Fatal(err)
@@ -709,7 +711,7 @@ func TestDoctorDiscardedModelsNameTheHigherConfigLayer(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(roles, "implementer.md"), []byte("---\nmode: edit\n---\nImplement.\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			env := platform.Env{"HERDR_SOHO_SKILL_DIR": root, "HERDR_SOHO_ROLES": roles}
+			env := platform.Env{"SOHO_SKILL_DIR": root, "SOHO_ROLES": roles}
 			ctx := core.Config{Entries: map[string]core.ConfigEntry{
 				"lanes": {Value: tc.lanes, Source: "project"}, "panes": {Value: "4", Source: "project"}, "lane_build_roles": {Value: "implementer", Source: "project"},
 				tc.kindKey: {Value: "codex", Source: "project"}, tc.modelKey: {Value: "grok-4.7", Source: "user"},

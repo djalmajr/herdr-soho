@@ -29,8 +29,8 @@ func newProviderTextsFixture(t *testing.T, capacityText string) *queuedProbeFixt
 	f.bin = bin
 	f.env["PATH"] = bin
 	f.env["SOHO_FAKECLI_CONFIG"] = bin
-	f.env["HERDR_SOHO_PROVIDER_RETRIES"] = "1"
-	f.env["HERDR_SOHO_PROVIDER_RETRY_DELAY"] = "0"
+	f.env["SOHO_PROVIDER_RETRIES"] = "1"
+	f.env["SOHO_PROVIDER_RETRY_DELAY"] = "0"
 	if capacityText != "" {
 		f.ctx = &core.Config{Entries: map[string]core.ConfigEntry{"provider_capacity_texts": {Value: capacityText}}}
 	}

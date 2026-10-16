@@ -29,7 +29,7 @@ func frictionFilterFixture(t *testing.T, log string) (platform.Env, string) {
 	}
 	env = withFakeCLI(env, fakeDir)
 	env["HERDR_ENV"] = "1"
-	logPath := filepath.Join(env.Get("HERDR_SOHO_DIR"), "ws", "friction.log")
+	logPath := filepath.Join(env.Get("SOHO_DIR"), "ws", "friction.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		t.Fatal(err)
 	}

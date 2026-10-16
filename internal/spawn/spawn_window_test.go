@@ -410,8 +410,8 @@ func TestSpawnRemainingIntegrationJavaScriptCases(t *testing.T) {
 		// JS: "spawn: panes=2 — the review roles have no lane (exit 3, the orchestrator reviews)"
 		f := newSpawnFixture(t, nil)
 		configureSpawnFixture(t, &f)
-		f.env["HERDR_SOHO_LANES"] = "on"
-		f.env["HERDR_SOHO_PANES"] = "2"
+		f.env["SOHO_LANES"] = "on"
+		f.env["SOHO_PANES"] = "2"
 		code, _, _, _ := runCmdSpawn(t, f, []string{"reviewer"})
 		if code != 3 {
 			t.Fatalf("reviewer exit=%d", code)
@@ -450,7 +450,7 @@ func TestSpawnSessionAfterSpawnJavaScriptCases(t *testing.T) {
 			// JS: "lane"
 			f := newSpawnFixture(t, []fakecli.Rule{{Argv: []string{"agent", "get", "build"}, Stdout: `{"result":{"agent":{"agent_status":"idle"}}}`}})
 			configureSpawnFixture(t, &f)
-			f.env["HERDR_SOHO_LANES"] = "on"
+			f.env["SOHO_LANES"] = "on"
 			f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
 			f.ctx.Entries["lane_build_kind"] = core.ConfigEntry{Value: "grok", Source: "project"}
 			f.ctx.Entries["lane_build_model"] = core.ConfigEntry{Value: "grok-4.7", Source: "project"}

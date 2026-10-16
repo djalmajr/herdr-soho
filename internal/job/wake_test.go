@@ -178,16 +178,14 @@ func TestWakeEmptyCmd(t *testing.T) {
 	}
 }
 
-// TestWakeInput: stdin carries the exact events.jsonl line and the eight
-// wake vars hold the exact values: the four SOHO_JOB_* vars and the legacy
-// HERDR_SOHO_JOB_* set with identical values.
+// TestWakeInput: stdin carries the exact events.jsonl line and the four
+// wake vars hold the exact values: the four SOHO_JOB_* vars.
 func TestWakeInput(t *testing.T) {
 	fakeDir := t.TempDir()
 	if _, err := fakecli.InstallWithOptions(t, fakeDir, "wakehook", []fakecli.Rule{{AnyArgs: true}}, fakecli.InstallOptions{
 		CaptureStdin: true,
 		CaptureEnv: []string{
 			"SOHO_JOB_ID", "SOHO_JOB_SEQ", "SOHO_JOB_EVENT", "SOHO_JOB_IDEMPOTENCY_KEY",
-			"HERDR_SOHO_JOB_ID", "HERDR_SOHO_JOB_SEQ", "HERDR_SOHO_JOB_EVENT", "HERDR_SOHO_JOB_IDEMPOTENCY_KEY",
 		},
 	}); err != nil {
 		t.Fatalf("install the capturing fake wake hook: %v", err)
@@ -248,14 +246,10 @@ func TestWakeInput(t *testing.T) {
 		t.Fatalf("stdin = %q, want %q", calls[0].Stdin, string(marshaled)+"\n")
 	}
 	wantEnv := map[string]string{
-		"SOHO_JOB_ID":                    "job-1",
-		"SOHO_JOB_SEQ":                   "2",
-		"SOHO_JOB_EVENT":                 "question",
-		"SOHO_JOB_IDEMPOTENCY_KEY":       "job-1:2",
-		"HERDR_SOHO_JOB_ID":              "job-1",
-		"HERDR_SOHO_JOB_SEQ":             "2",
-		"HERDR_SOHO_JOB_EVENT":           "question",
-		"HERDR_SOHO_JOB_IDEMPOTENCY_KEY": "job-1:2",
+		"SOHO_JOB_ID":              "job-1",
+		"SOHO_JOB_SEQ":             "2",
+		"SOHO_JOB_EVENT":           "question",
+		"SOHO_JOB_IDEMPOTENCY_KEY": "job-1:2",
 	}
 	if len(calls[0].Env) != len(wantEnv) {
 		t.Fatalf("captured env = %v, want %v", calls[0].Env, wantEnv)
@@ -263,6 +257,51 @@ func TestWakeInput(t *testing.T) {
 	for key, value := range wantEnv {
 		if calls[0].Env[key] != value {
 			t.Fatalf("env %s = %q, want %q", key, calls[0].Env[key], value)
+		}
+	}
+}
+
+// TestWakeEnvCarriesNoLegacyPrefix (DJA-318 N2, negative): the wake
+// environment has no key with the legacy prefix (the old generation of
+// these var names) — only the four SOHO_JOB_* vars. The fake hook captures
+// both generations' names, so a resurrected legacy key is visible in the
+// call log. The prefix is built from two parts so this test itself stays
+// out of the repo-wide legacy-name grep.
+func TestWakeEnvCarriesNoLegacyPrefix(t *testing.T) {
+	fakeDir := t.TempDir()
+	legacyPrefix := "HERDR_" + "SOHO_JOB_"
+	capture := []string{
+		"SOHO_JOB_ID", "SOHO_JOB_SEQ", "SOHO_JOB_EVENT", "SOHO_JOB_IDEMPOTENCY_KEY",
+		legacyPrefix + "ID", legacyPrefix + "SEQ", legacyPrefix + "EVENT", legacyPrefix + "IDEMPOTENCY_KEY",
+	}
+	if _, err := fakecli.InstallWithOptions(t, fakeDir, "wakehook", []fakecli.Rule{{AnyArgs: true}}, fakecli.InstallOptions{CaptureEnv: capture}); err != nil {
+		t.Fatalf("install the capturing fake wake hook: %v", err)
+	}
+	env := platform.Env{}
+	for _, item := range fakecli.Env(nil, fakeDir) {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && key != "" {
+			env[key] = value
+		}
+	}
+	env["HOME"] = t.TempDir()
+	env["XDG_CONFIG_HOME"] = t.TempDir()
+	hook := WakeHook{Cmd: "wakehook", JobID: "job-1", Env: env, Delays: []time.Duration{}}
+	if attempts := hook.Run(wakeEvent("question", nil)); attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	calls := wakeHookCalls(t, fakeDir)
+	if len(calls) != 1 {
+		t.Fatalf("hook calls = %d, want 1", len(calls))
+	}
+	for key, value := range calls[0].Env {
+		if strings.HasPrefix(key, legacyPrefix) {
+			t.Fatalf("wake env carries the legacy key %s=%q (captured=%v)", key, value, calls[0].Env)
+		}
+	}
+	for _, key := range []string{"SOHO_JOB_ID", "SOHO_JOB_SEQ", "SOHO_JOB_EVENT", "SOHO_JOB_IDEMPOTENCY_KEY"} {
+		if _, ok := calls[0].Env[key]; !ok {
+			t.Fatalf("wake env missing %s (captured=%v)", key, calls[0].Env)
 		}
 	}
 }

@@ -17,7 +17,7 @@ func TestResolvedRoleKindConfigThenFrontmatter(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(roles, "implementer.md"), []byte("---\nkind: claude\n---\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": filepath.Join(root, "skill")}
+	env := platform.Env{"SOHO_ROLES": roles, "SOHO_SKILL_DIR": filepath.Join(root, "skill")}
 	ctx := &Config{Entries: map[string]ConfigEntry{}, Order: []string{}}
 	t.Run("frontmatter is the fallback", func(t *testing.T) {
 		if got := ResolvedRoleKind("implementer", ctx, env, root); got != "claude" {

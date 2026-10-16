@@ -18,7 +18,7 @@ func TestConfigNativeArgsCombinesKindAndRoleArgs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(roles, "designer.md"), []byte("---\nkind: codex\n---\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"HERDR_SOHO_ROLES": roles, "HOME": root, "HERDR_SOHO_SKILL_DIR": root}
+	env := platform.Env{"SOHO_ROLES": roles, "HOME": root, "SOHO_SKILL_DIR": root}
 	if err := os.WriteFile(filepath.Join(root, "config.defaults"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}

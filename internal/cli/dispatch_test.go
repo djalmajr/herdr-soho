@@ -47,7 +47,7 @@ func TestDispatchNoWaitWritesPromptAndTaskState(t *testing.T) {
 	if _, err := fakecli.Install(t, bin, "herdr", calls); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_ENV": "1", "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": "../../skills/soho", "HERDR_SOHO_PROMPT_CHECK_SECONDS": "0", "HERDR_SOHO_PROMPT_SETTLE_SECONDS": "0", "HERDR_SOHO_BRIEF_LINT": "off", "TMPDIR": root}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_ENV": "1", "SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "SOHO_ROLES": roles, "SOHO_SKILL_DIR": "../../skills/soho", "SOHO_PROMPT_CHECK_SECONDS": "0", "SOHO_PROMPT_SETTLE_SECONDS": "0", "SOHO_BRIEF_LINT": "off", "TMPDIR": root}
 	// A race-instrumented fake child otherwise pauses for one second on
 	// exit; the harness sets only GORACE and leaves the rest of the env as built.
 	env["GORACE"] = fakecli.RaceOptions(env.List())
@@ -109,7 +109,7 @@ func TestDispatchNoWaitWritesPromptAndTaskState(t *testing.T) {
 func TestDispatchSidecarSession(t *testing.T) {
 	t.Run("the sidecar records the roster started value as the session", func(t *testing.T) {
 		f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 {
 			t.Fatalf("code=%d out=%s", code, out)
@@ -129,7 +129,7 @@ func TestDispatchSidecarSession(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "ws", "agents.tsv"), []byte(roster), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_PROMPT_CHECK_SECONDS"] = "0"
+		f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
 		code, out, _ := f.run(t, "worker", f.brief, "--no-wait")
 		if code != 0 {
 			t.Fatalf("code=%d out=%s", code, out)

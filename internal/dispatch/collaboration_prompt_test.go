@@ -13,9 +13,9 @@ import (
 
 func TestPromptExplainsActiveAssignmentWithoutNormalCompletion(t *testing.T) {
 	root := t.TempDir()
-	env := platform.Env{"HERDR_SOHO_DIR": t.TempDir(), "HERDR_WORKSPACE_ID": "ws"}
+	env := platform.Env{"SOHO_DIR": t.TempDir(), "HERDR_WORKSPACE_ID": "ws"}
 	skill, _ := filepath.Abs(filepath.Join("..", "..", "skills", "soho"))
-	env["HERDR_SOHO_SKILL_DIR"] = skill
+	env["SOHO_SKILL_DIR"] = skill
 	ctx := core.Config{Entries: map[string]core.ConfigEntry{}}
 	sd := core.StateDir(&ctx, env, root)
 	core.RosterAppend(sd, []string{"author", "ws:p1", "codex", "implementer", "openai", "0", root, "one", "gpt-5.4", "ask", "implementer", "build"})

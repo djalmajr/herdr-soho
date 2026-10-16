@@ -95,7 +95,7 @@ func autoCloseStartFix(t *testing.T, defaultsBody, projectBody, userBody string)
 	f := newPrepareFixture(t, []fakecli.Rule{{Argv: []string{"auth", "status"}}})
 	skill := t.TempDir()
 	writeTeamFile(t, filepath.Join(skill, "config.defaults"), defaultsBody)
-	f.env["HERDR_SOHO_SKILL_DIR"] = skill
+	f.env["SOHO_SKILL_DIR"] = skill
 	f.cloneCheckout()
 	if projectBody != "" {
 		writeTeamFile(t, filepath.Join(f.checkout(), ".agents", "soho.conf"), projectBody)

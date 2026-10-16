@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	metricsTableStartMarker = "<!-- herdr-soho:metrics-table:start -->"
-	metricsTableEndMarker   = "<!-- herdr-soho:metrics-table:end -->"
+	metricsTableStartMarker = "<!-- soho:metrics-table:start -->"
+	metricsTableEndMarker   = "<!-- soho:metrics-table:end -->"
 	metricsTableEmpty       = "_No field summaries yet._"
 	metricsTableHeader      = "| Role | Type | Kind | Model | Effort | n | Median min | Partial | Precision | Missed | Confidence |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
 )

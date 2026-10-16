@@ -17,7 +17,7 @@ func TestSetupReadFlagRouting(t *testing.T) {
 	var out, errOut bytes.Buffer
 	platform.Stdout, platform.Stderr = &out, &errOut
 	t.Cleanup(func() { platform.Stdout, platform.Stderr = oldOut, oldErr })
-	env := platform.Env{"PATH": t.TempDir(), "HOME": t.TempDir(), "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+	env := platform.Env{"PATH": t.TempDir(), "HOME": t.TempDir(), "SOHO_SKILL_DIR": t.TempDir()}
 	code := Run([]string{"setup", "--probe", "--invalid"}, env)
 	if code != 2 || out.Len() != 0 || errOut.String() != "soho: setup --probe: unknown option '--invalid'\n" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
@@ -37,7 +37,7 @@ func TestSetupDetectValidatesFullArgv(t *testing.T) {
 			platform.Stdout, platform.Stderr = &out, &errOut
 			t.Cleanup(func() { platform.Stdout, platform.Stderr = oldOut, oldErr })
 			home := t.TempDir()
-			env := platform.Env{"PATH": t.TempDir(), "HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+			env := platform.Env{"PATH": t.TempDir(), "HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "SOHO_SKILL_DIR": t.TempDir()}
 			code := Run([]string{"setup", "--detect", tc.arg}, env)
 			if code != 2 || out.Len() != 0 || errOut.String() != tc.want {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
@@ -50,7 +50,7 @@ func TestSetupDetectValidatesFullArgv(t *testing.T) {
 		platform.Stdout, platform.Stderr = &out, &errOut
 		t.Cleanup(func() { platform.Stdout, platform.Stderr = oldOut, oldErr })
 		home := t.TempDir()
-		env := platform.Env{"PATH": t.TempDir(), "HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "HERDR_SOHO_SKILL_DIR": t.TempDir()}
+		env := platform.Env{"PATH": t.TempDir(), "HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "SOHO_SKILL_DIR": t.TempDir()}
 		code := Run([]string{"setup", "--detect"}, env)
 		if code != 0 || errOut.Len() != 0 || !strings.HasPrefix(out.String(), "{\n  \"kinds\"") {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
@@ -82,7 +82,7 @@ func TestSetupWriteRejectsSetBeforeAnyWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
-	env := platform.Env{"PATH": filepath.Dir(git), "HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "HERDR_SOHO_SKILL_DIR": skill, "HERDR_SOHO_DIR": ".herdr-soho"}
+	env := platform.Env{"PATH": filepath.Dir(git), "HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "SOHO_SKILL_DIR": skill, "SOHO_DIR": ".herdr-soho"}
 	oldOut, oldErr := platform.Stdout, platform.Stderr
 	var out, errOut bytes.Buffer
 	platform.Stdout, platform.Stderr = &out, &errOut

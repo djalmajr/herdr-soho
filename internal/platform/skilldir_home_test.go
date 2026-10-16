@@ -32,8 +32,8 @@ func writeSkillTree(t *testing.T, dir string) {
 func TestSkillDirFindsTheInstalledSkillInHome(t *testing.T) {
 	t.Run("the .agents skill wins when both home layouts are valid", func(t *testing.T) {
 		home := t.TempDir()
-		agents := filepath.Join(home, ".agents", "skills", "herdr-soho")
-		claude := filepath.Join(home, ".claude", "skills", "herdr-soho")
+		agents := filepath.Join(home, ".agents", "skills", "soho")
+		claude := filepath.Join(home, ".claude", "skills", "soho")
 		writeSkillTree(t, agents)
 		writeSkillTree(t, claude)
 		dir, origin := SkillDirSource(homeSkillFixture(t, home))
@@ -43,7 +43,7 @@ func TestSkillDirFindsTheInstalledSkillInHome(t *testing.T) {
 	})
 	t.Run("the .claude skill is found when .agents is absent", func(t *testing.T) {
 		home := t.TempDir()
-		claude := filepath.Join(home, ".claude", "skills", "herdr-soho")
+		claude := filepath.Join(home, ".claude", "skills", "soho")
 		writeSkillTree(t, claude)
 		dir, origin := SkillDirSource(homeSkillFixture(t, home))
 		if dir != claude || origin != "home" {
@@ -53,10 +53,10 @@ func TestSkillDirFindsTheInstalledSkillInHome(t *testing.T) {
 	t.Run("a home directory without the skill mark falls through to the bundled skill", func(t *testing.T) {
 		home := t.TempDir()
 		// The directory exists but carries no SKILL.md + roles mark.
-		if err := os.MkdirAll(filepath.Join(home, ".agents", "skills", "herdr-soho"), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(home, ".agents", "skills", "soho"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(home, ".agents", "skills", "herdr-soho", "README.md"), []byte("no skill here\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(home, ".agents", "skills", "soho", "README.md"), []byte("no skill here\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		dir, origin := SkillDirSource(homeSkillFixture(t, home))
@@ -70,7 +70,7 @@ func TestSkillDirFindsTheInstalledSkillInHome(t *testing.T) {
 	})
 	t.Run("the installed home skill wins over the bundled skill without materializing", func(t *testing.T) {
 		home := t.TempDir()
-		agents := filepath.Join(home, ".agents", "skills", "herdr-soho")
+		agents := filepath.Join(home, ".agents", "skills", "soho")
 		writeSkillTree(t, agents)
 		dir, origin := SkillDirSource(homeSkillFixture(t, home))
 		if dir != agents || origin != "home" {
@@ -98,19 +98,35 @@ func TestSkillDirFindsTheInstalledSkillInHome(t *testing.T) {
 		}
 		probeBundledSkill(t, dir)
 	})
-	t.Run("HERDR_SOHO_SKILL_DIR wins over both home layouts", func(t *testing.T) {
+	t.Run("the configured SOHO_SKILL_DIR wins over both home layouts", func(t *testing.T) {
 		home := t.TempDir()
-		writeSkillTree(t, filepath.Join(home, ".agents", "skills", "herdr-soho"))
-		writeSkillTree(t, filepath.Join(home, ".claude", "skills", "herdr-soho"))
+		writeSkillTree(t, filepath.Join(home, ".agents", "skills", "soho"))
+		writeSkillTree(t, filepath.Join(home, ".claude", "skills", "soho"))
 		configured := t.TempDir()
 		env := homeSkillFixture(t, home)
-		env["HERDR_SOHO_SKILL_DIR"] = configured
+		env["SOHO_SKILL_DIR"] = configured
 		dir, origin := SkillDirSource(env)
-		if dir != configured || origin != "HERDR_SOHO_SKILL_DIR" {
-			t.Fatalf("SkillDirSource() = %q %q; want %q HERDR_SOHO_SKILL_DIR", dir, origin, configured)
+		if dir != configured || origin != "SOHO_SKILL_DIR" {
+			t.Fatalf("SkillDirSource() = %q %q; want %q SOHO_SKILL_DIR", dir, origin, configured)
 		}
 		if _, err := os.Stat(testBundleCacheBase(home)); !os.IsNotExist(err) {
 			t.Fatalf("the configured skill dir must not materialize the bundled cache: %v", err)
+		}
+	})
+	// DJA-318: a tree at the former name is not a skill source: the
+	// home lookup falls through to the bundled skill, and a HERDR_SOHO_
+	// configured value is ignored.
+	t.Run("a home tree at the former name is not found (negative)", func(t *testing.T) {
+		home := t.TempDir()
+		agents := filepath.Join(home, ".agents", "skills", "herdr-soho")
+		claude := filepath.Join(home, ".claude", "skills", "herdr-soho")
+		writeSkillTree(t, agents)
+		writeSkillTree(t, claude)
+		env := homeSkillFixture(t, home)
+		env["HERDR_SOHO_SKILL_DIR"] = agents
+		dir, origin := SkillDirSourceOrEmpty(env)
+		if dir != "" || origin == "home" || origin == "HERDR_SOHO_SKILL_DIR" {
+			t.Fatalf("SkillDirSourceOrEmpty() = %q %q; the former names must be ignored (want the bundled fallback or empty)", dir, origin)
 		}
 	})
 }

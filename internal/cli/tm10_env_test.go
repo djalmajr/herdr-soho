@@ -43,7 +43,7 @@ func runTM10Env(t *testing.T, omitted string, extra platform.Env) (string, strin
 	clean["HOME"], clean["USERPROFILE"] = t.TempDir(), t.TempDir()
 	clean["XDG_CONFIG_HOME"] = filepath.Join(t.TempDir(), "config")
 	clean["TMPDIR"] = t.TempDir()
-	clean["HERDR_SOHO_SKILL_DIR"] = testSkillDir(t)
+	clean["SOHO_SKILL_DIR"] = testSkillDir(t)
 	for k, v := range extra {
 		clean[k] = v
 	}
@@ -82,7 +82,7 @@ func TestTM10EnvMirrors(t *testing.T) {
 		}
 	})
 	t.Run(`JS: "env: the config line reflects the effective config (env overrides)"`, func(t *testing.T) {
-		out, stderr, code := runTM10Env(t, "", platform.Env{"HERDR_SOHO_LAYOUT": "tab", "HERDR_SOHO_APPROVALS": "full"})
+		out, stderr, code := runTM10Env(t, "", platform.Env{"SOHO_LAYOUT": "tab", "SOHO_APPROVALS": "full"})
 		if code != 0 || stderr != "" || !strings.Contains(out, "config: layout=tab reuse_workers=on approvals=full") {
 			t.Fatalf("code=%d out=%q err=%q", code, out, stderr)
 		}
@@ -91,9 +91,9 @@ func TestTM10EnvMirrors(t *testing.T) {
 
 func TestEnvPrintsTheSkillDirAndItsOrigin(t *testing.T) {
 	fixtureEnv, _ := commandFixture(t)
-	dir := fixtureEnv.Get("HERDR_SOHO_SKILL_DIR")
+	dir := fixtureEnv.Get("SOHO_SKILL_DIR")
 	if dir == "" {
-		t.Fatal("the command fixture sets no HERDR_SOHO_SKILL_DIR")
+		t.Fatal("the command fixture sets no SOHO_SKILL_DIR")
 	}
 	// The fixture sets the legacy name; ApplyLegacyEnv copies it to
 	// SOHO_SKILL_DIR before Run, so the env line names the current variable.

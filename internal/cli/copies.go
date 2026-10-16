@@ -395,7 +395,7 @@ type gcCandidate struct {
 	missing bool
 }
 
-// gcUnregisteredCopy is a herdr-soho-mutation-* directory below TMPDIR that
+// gcUnregisteredCopy is a soho-mutation-* directory below TMPDIR that
 // the registry does not know.
 type gcUnregisteredCopy struct {
 	path string
@@ -723,7 +723,7 @@ func gcPrintUnregistered(entries []gcUnregisteredCopy, _ bool) {
 	}
 }
 
-// gcUnregistered lists the herdr-soho-mutation-* directories directly below
+// gcUnregistered lists the soho-mutation-* directories directly below
 // TMPDIR (or os.TempDir() without TMPDIR) that are not in the registry and
 // whose mtime is older than the threshold, sorted by path.
 func gcUnregistered(env platform.Env, rows []core.CopyRow, now time.Time, threshold time.Duration) []gcUnregisteredCopy {
@@ -745,7 +745,7 @@ func gcUnregistered(env platform.Env, rows []core.CopyRow, now time.Time, thresh
 	out := []gcUnregisteredCopy{}
 	for _, entry := range entries {
 		path := filepath.Join(tmpDir, entry.Name())
-		if !strings.HasPrefix(entry.Name(), "herdr-soho-mutation-") {
+		if !strings.HasPrefix(entry.Name(), "soho-mutation-") {
 			continue
 		}
 		info, statErr := os.Stat(path)

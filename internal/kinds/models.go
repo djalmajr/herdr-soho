@@ -60,7 +60,7 @@ func ModelsCacheFile(kind string, env platform.Env) string {
 	if dir == "" {
 		dir = os.TempDir()
 	}
-	return filepath.Join(dir, "herdr-soho-models-"+kind+".txt")
+	return filepath.Join(dir, "soho-models-"+kind+".txt")
 }
 
 // ModelIDs reads the model list of the kind, honoring the 1-hour copy in

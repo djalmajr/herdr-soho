@@ -53,7 +53,7 @@ func TestSpawnWarnsAboutIdleReleasedOrphanBeforeOpeningThePane(t *testing.T) {
 	f := newSpawnFixture(t, laneOrphanRules())
 	configureSpawnFixture(t, &f)
 	f.env["HERDR_PANE_ID"] = "p1"
-	f.env["HERDR_SOHO_LANES"] = "on"
+	f.env["SOHO_LANES"] = "on"
 	f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
 	f.ctx.Entries["lane_build_kind"] = core.ConfigEntry{Value: "grok", Source: "project"}
 	f.ctx.Order = []string{"lane_build_roles", "lane_build_kind"}
@@ -103,7 +103,7 @@ func TestSpawnHasNoOrphanWarningWithoutReleasedRows(t *testing.T) {
 	f := newSpawnFixture(t, laneOrphanRules())
 	configureSpawnFixture(t, &f)
 	f.env["HERDR_PANE_ID"] = "p1"
-	f.env["HERDR_SOHO_LANES"] = "on"
+	f.env["SOHO_LANES"] = "on"
 	f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
 	f.ctx.Entries["lane_build_kind"] = core.ConfigEntry{Value: "grok", Source: "project"}
 	f.ctx.Order = []string{"lane_build_roles", "lane_build_kind"}

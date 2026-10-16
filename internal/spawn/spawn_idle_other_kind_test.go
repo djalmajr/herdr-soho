@@ -39,7 +39,7 @@ func m1Fixture(t *testing.T, oldKind, oldState string, extraOld ...string) spawn
 	f := newSpawnFixture(t, m1Rules(t, oldKind, oldState, olds...))
 	configureSpawnFixture(t, &f)
 	f.env["HERDR_PANE_ID"] = "p1"
-	f.env["HERDR_SOHO_LANES"] = "on"
+	f.env["SOHO_LANES"] = "on"
 	f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
 	f.ctx.Entries["lane_build_kind"] = core.ConfigEntry{Value: "codex", Source: "project"}
 	f.ctx.Entries["lane_build_panes"] = core.ConfigEntry{Value: "2", Source: "project"}

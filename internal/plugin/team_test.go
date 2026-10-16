@@ -51,7 +51,7 @@ func teamPanelFixture(t *testing.T) (platform.Env, string, string) {
 		{Argv: []string{"collect", "worker-2", "--lines", "60"}, Stdout: "report two line\n"},
 		{Argv: []string{"release", "worker-1", "--close"}, Stdout: "released one\n"},
 		{Argv: []string{"release", "worker-2", "--close"}, Stdout: "released two\n"},
-	}, fakecli.InstallOptions{CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_PANE_ID", "HERDR_TAB_ID", "SOHO_NOWRITE", "HERDR_SOHO_NOWRITE", "PATH"}})
+	}, fakecli.InstallOptions{CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_PANE_ID", "HERDR_TAB_ID", "SOHO_NOWRITE", "PATH"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,13 +422,13 @@ func TestTeamPanelXCancelNeverCallsRelease(t *testing.T) {
 }
 
 // TestTeamPanelXConfirmsReleaseWithoutNowriteAndReloads: y runs
-// `release <agent> --close` WITHOUT the NOWRITE gate — neither the
-// current SOHO_NOWRITE nor the legacy HERDR_SOHO_NOWRITE inherited from
-// the environment — the view shows the output and reloads (explain and
-// roster run again after the release).
+// `release <agent> --close` WITHOUT the NOWRITE gate — the SOHO_NOWRITE
+// inherited from the environment is stripped from the write call — the view
+// shows the output and reloads (explain and roster run again after the
+// release).
 func TestTeamPanelXConfirmsReleaseWithoutNowriteAndReloads(t *testing.T) {
 	env, cli, cwd := teamPanelFixture(t)
-	env["HERDR_SOHO_NOWRITE"] = "1" // the legacy gate must not survive into a write
+	env["SOHO_NOWRITE"] = "1" // the gate must not survive into a write
 	writer, output, finished := teamStartWithPipes(t, env, cli, nil)
 	teamWaitForOutput(t, output, "worker-1")
 	_, _ = writer.Write([]byte("\x1b[B")) // down: select worker-2
@@ -445,9 +445,6 @@ func TestTeamPanelXConfirmsReleaseWithoutNowriteAndReloads(t *testing.T) {
 	}
 	if got := calls[release].Env["SOHO_NOWRITE"]; got != "" {
 		t.Fatalf("release env NOWRITE=%q want absent (a write)", calls[release].Env)
-	}
-	if got := calls[release].Env["HERDR_SOHO_NOWRITE"]; got != "" {
-		t.Fatalf("release env legacy NOWRITE=%q want stripped (a write)", calls[release].Env)
 	}
 	for _, want := range [][]string{{"explain"}, {"roster"}} {
 		if i := teamCallIndexAfter(calls, release, want); i < 0 {

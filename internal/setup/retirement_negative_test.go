@@ -45,7 +45,7 @@ func TestRetirementNegativeContracts(t *testing.T) {
 				t.Fatal(err)
 			}
 			env := fakeEnv(t, bin)
-			env["HERDR_SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
+			env["SOHO_SKILL_DIR"] = filepath.Join("..", "..", "skills", "soho")
 			root := t.TempDir()
 			ctx := core.LoadConfig(env, root)
 			code, out, msg := runSetupWrite(tc.args, &ctx, env, root)

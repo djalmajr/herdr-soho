@@ -71,7 +71,7 @@ func TestWaitCursorWindowsTrustDialogBlockedNoInput(t *testing.T) {
 	setWaitPlatform(t, "win32")
 	f := newQueuedProbeFixture(t, "blocked", "5", waitTrustScreen(t), map[string]string{"not-received": "1700000000 5"})
 	f.cursorRoster(t, "cursor")
-	f.env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+	f.env["SOHO_AUTO_APPROVE"] = "on"
 	if got := f.probe(""); got != "blocked" {
 		t.Fatalf("probe=%q", got)
 	}
@@ -86,7 +86,7 @@ func TestWaitCursorWindowsIdleTrustDialogBlocked(t *testing.T) {
 	setWaitPlatform(t, "win32")
 	f := newQueuedProbeFixture(t, "idle", "", waitTrustScreen(t), map[string]string{"not-received": "1700000000 -"})
 	f.cursorRoster(t, "cursor")
-	f.env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+	f.env["SOHO_AUTO_APPROVE"] = "on"
 	if got := f.probe(""); got != "blocked" {
 		t.Fatalf("probe=%q", got)
 	}
@@ -126,7 +126,7 @@ func TestWaitCursorNonWindowsDialogBlocksNoInput(t *testing.T) {
 	setWaitPlatform(t, "linux")
 	f := newQueuedProbeFixture(t, "blocked", "5", waitTrustScreen(t), nil)
 	f.cursorRoster(t, "cursor")
-	f.env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+	f.env["SOHO_AUTO_APPROVE"] = "on"
 	if got := f.probe(""); got != "blocked" {
 		t.Fatalf("probe=%q", got)
 	}
@@ -157,7 +157,7 @@ func TestWaitCursorWindowsClippedTrustNoInput(t *testing.T) {
 			setWaitPlatform(t, "win32")
 			f := newQueuedProbeFixture(t, state, "5", string(b), map[string]string{"not-received": "1700000000 5"})
 			f.cursorRoster(t, "cursor")
-			f.env["HERDR_SOHO_AUTO_APPROVE"] = "on"
+			f.env["SOHO_AUTO_APPROVE"] = "on"
 			if got := f.probe(""); got != "blocked" {
 				t.Fatalf("probe=%q", got)
 			}

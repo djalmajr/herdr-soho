@@ -27,7 +27,7 @@ func TestSetupGitPathParity(t *testing.T) {
 		}
 		root, env, ctx := localPlanFixture(t)
 		parts := strings.Split(`a\b`, `\`)
-		env["HERDR_SOHO_DIR"] = filepath.Join(append([]string{root}, parts...)...)
+		env["SOHO_DIR"] = filepath.Join(append([]string{root}, parts...)...)
 		state := classifyLocalState(root, ctx, env, root)
 		if state.kind != "inside" || state.rel != "a/b" || state.shown != "a/b/" {
 			t.Fatalf("state classification=%+v, want inside a/b/", state)

@@ -195,16 +195,16 @@ func asrBase(t *testing.T, root string) (env platform.Env, conf string) {
 		t.Fatal(err)
 	}
 	env = platform.Env{
-		"PATH":                 prepareGitOnlyDir(t),
-		"HOME":                 home,
-		"XDG_CONFIG_HOME":      conf,
-		"GIT_CONFIG_GLOBAL":    global,
-		"GIT_CONFIG_NOSYSTEM":  "1",
-		"GIT_AUTHOR_NAME":      "fixture",
-		"GIT_AUTHOR_EMAIL":     "fixture@example.org",
-		"GIT_COMMITTER_NAME":   "fixture",
-		"GIT_COMMITTER_EMAIL":  "fixture@example.org",
-		"HERDR_SOHO_SKILL_DIR": skill,
+		"PATH":                prepareGitOnlyDir(t),
+		"HOME":                home,
+		"XDG_CONFIG_HOME":     conf,
+		"GIT_CONFIG_GLOBAL":   global,
+		"GIT_CONFIG_NOSYSTEM": "1",
+		"GIT_AUTHOR_NAME":     "fixture",
+		"GIT_AUTHOR_EMAIL":    "fixture@example.org",
+		"GIT_COMMITTER_NAME":  "fixture",
+		"GIT_COMMITTER_EMAIL": "fixture@example.org",
+		"SOHO_SKILL_DIR":      skill,
 	}
 	return env, conf
 }

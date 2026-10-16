@@ -622,15 +622,15 @@ func TestSuperviseAutoClose(t *testing.T) {
 		}
 		var woke []fakecli.Call
 		for _, call := range wakeHookCalls(t, fakeDir) {
-			if call.Env["HERDR_SOHO_JOB_EVENT"] == "needs_attention" {
+			if call.Env["SOHO_JOB_EVENT"] == "needs_attention" {
 				woke = append(woke, call)
 			}
 		}
 		if len(woke) != 1 {
 			t.Fatalf("needs_attention hook runs = %d, want exactly one", len(woke))
 		}
-		if woke[0].Env["HERDR_SOHO_JOB_SEQ"] != strconv.Itoa(events[na].Seq) {
-			t.Fatalf("hook seq = %q, want %d", woke[0].Env["HERDR_SOHO_JOB_SEQ"], events[na].Seq)
+		if woke[0].Env["SOHO_JOB_SEQ"] != strconv.Itoa(events[na].Seq) {
+			t.Fatalf("hook seq = %q, want %d", woke[0].Env["SOHO_JOB_SEQ"], events[na].Seq)
 		}
 		if !strings.Contains(woke[0].Stdin, `"motivo":"dirty"`) {
 			t.Fatalf("hook stdin = %q, want the dirty motivo", woke[0].Stdin)

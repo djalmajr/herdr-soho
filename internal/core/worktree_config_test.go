@@ -119,19 +119,19 @@ func TestA13LinkedWorktreeProjectConfig(t *testing.T) {
 			t.Fatalf("main checkout config set target = %q, want %q", got, mainConf)
 		}
 	})
-	t.Run("linked worktree falls back to the main checkout's legacy file", func(t *testing.T) {
+	t.Run("linked worktree without a soho config does not fall back to the main checkout's former file", func(t *testing.T) {
 		env, _, wt, mainConf := linkedWorktreeRepo(t)
 		mainLegacy := strings.TrimSuffix(mainConf, "soho.conf") + "herdr-soho.conf"
 		write(t, mainLegacy, "max_workers=11\n")
-		if got := ProjectConfigFileUsed(env, wt); got != mainLegacy {
-			t.Fatalf("project file used from the worktree = %q, want %q", got, mainLegacy)
+		if got := ProjectConfigFileUsed(env, wt); got != "" {
+			t.Fatalf("project file used from the worktree = %q, want none", got)
 		}
 		ctx := LoadConfig(env, wt)
-		if got := Cfg(&ctx, "max_workers", "", env); got != "11" || CfgSource(&ctx, "max_workers", env) != "project" {
-			t.Fatalf("max_workers = %q (%s), want 11 (project)", got, CfgSource(&ctx, "max_workers", env))
+		if got := Cfg(&ctx, "max_workers", "", env); got != "3" || CfgSource(&ctx, "max_workers", env) == "project" {
+			t.Fatalf("max_workers = %q (%s), want the default 3 with no project layer", got, CfgSource(&ctx, "max_workers", env))
 		}
-		if got := ConfigFileFor("project", env, wt); got != mainLegacy {
-			t.Fatalf("config set target = %q, want %q", got, mainLegacy)
+		if got := ConfigFileFor("project", env, wt); got != mainConf {
+			t.Fatalf("config set target = %q, want the soho path %q", got, mainConf)
 		}
 	})
 }

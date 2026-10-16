@@ -6,35 +6,36 @@ import (
 )
 
 func TestSkillDirSohoName(t *testing.T) {
-	t.Run("the soho home skill wins over the herdr-soho legacy home skill", func(t *testing.T) {
+	t.Run("the soho home skill wins over a tree at the former name (negative control)", func(t *testing.T) {
 		home := t.TempDir()
 		soho := filepath.Join(home, ".agents", "skills", "soho")
-		legacy := filepath.Join(home, ".agents", "skills", "herdr-soho")
+		former := filepath.Join(home, ".agents", "skills", "herdr-soho")
 		writeSkillTree(t, soho)
-		writeSkillTree(t, legacy)
+		writeSkillTree(t, former)
 		dir, origin := SkillDirSource(homeSkillFixture(t, home))
 		if dir != soho || origin != "home" {
 			t.Fatalf("SkillDirSource() = %q %q; want %q home (the soho tree wins)", dir, origin, soho)
 		}
 	})
-	t.Run("the herdr-soho legacy home skill is still found when only it exists", func(t *testing.T) {
+	// DJA-318: a tree at the former name is no longer a skill source.
+	t.Run("a tree at the former name only is not found (negative)", func(t *testing.T) {
 		home := t.TempDir()
-		legacy := filepath.Join(home, ".claude", "skills", "herdr-soho")
-		writeSkillTree(t, legacy)
-		dir, origin := SkillDirSource(homeSkillFixture(t, home))
-		if dir != legacy || origin != "home" {
-			t.Fatalf("SkillDirSource() = %q %q; want %q home", dir, origin, legacy)
+		former := filepath.Join(home, ".claude", "skills", "herdr-soho")
+		writeSkillTree(t, former)
+		dir, origin := SkillDirSourceOrEmpty(homeSkillFixture(t, home))
+		if dir == former || origin == "home" {
+			t.Fatalf("SkillDirSourceOrEmpty() = %q %q; the former name must not be a home source", dir, origin)
 		}
 	})
 	t.Run("the soho .claude layout is found when the soho .agents layout is absent", func(t *testing.T) {
 		home := t.TempDir()
 		claude := filepath.Join(home, ".claude", "skills", "soho")
-		legacyAgents := filepath.Join(home, ".agents", "skills", "herdr-soho")
+		formerAgents := filepath.Join(home, ".agents", "skills", "herdr-soho")
 		writeSkillTree(t, claude)
-		writeSkillTree(t, legacyAgents)
+		writeSkillTree(t, formerAgents) // interference: the former tree must not hide the soho .claude tree
 		dir, origin := SkillDirSource(homeSkillFixture(t, home))
 		if dir != claude || origin != "home" {
-			t.Fatalf("SkillDirSource() = %q %q; want %q home (the soho .claude tree wins over the legacy .agents tree)", dir, origin, claude)
+			t.Fatalf("SkillDirSource() = %q %q; want %q home (the soho .claude tree wins)", dir, origin, claude)
 		}
 	})
 }

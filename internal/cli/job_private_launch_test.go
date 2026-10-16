@@ -140,7 +140,7 @@ func TestJobSupervisePrivateLaunchContext(t *testing.T) {
 		if err := os.WriteFile(other, data, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		code, _, errOut := f.runEnv(t, withEnv(herdr, testLaunchBaseVar, base, "HERDR_SOHO_BIN", other), "supervise", "--id", "job-1")
+		code, _, errOut := f.runEnv(t, withEnv(herdr, testLaunchBaseVar, base, "SOHO_BIN", other), "supervise", "--id", "job-1")
 		if code != 4 || errOut != "soho: warning: job: the supervisor is not bound to its launch: the team command executable is not this supervisor's\n" {
 			t.Fatalf("code=%d err=%q", code, errOut)
 		}
@@ -225,7 +225,7 @@ func TestManagedCommandRefusedBeforeSideEffects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		run := withEnv(env, "HERDR_ENV", "1", "HERDR_PANE_ID", "ws:p1", "HERDR_SOHO_DIR", state, managedCLIVar, "parent", managedCLIArgsVar, c.args)
+		run := withEnv(env, "HERDR_ENV", "1", "HERDR_PANE_ID", "ws:p1", "SOHO_DIR", state, managedCLIVar, "parent", managedCLIArgsVar, c.args)
 		for i := 0; i+1 < len(c.names); i += 2 {
 			run[c.names[i]] = c.names[i+1]
 		}

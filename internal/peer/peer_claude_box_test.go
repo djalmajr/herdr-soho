@@ -309,7 +309,10 @@ func TestSendClaudeComposerBorders(t *testing.T) {
 // the arrival over the window: sent, exit 0, no key.
 func TestSendClaudeStalledRealScreen(t *testing.T) {
 	id, prompt := stalledID(t)
-	screen := strings.ReplaceAll(rc14ClaudeScreen, "debf6313", id)
+	// DJA-318: the frozen rc.14 capture holds the former generation's
+	// markers; the stalled check proves the arrival over the current ones,
+	// so the capture's marker lines are mapped to the soho forms.
+	screen := strings.ReplaceAll(strings.ReplaceAll(rc14ClaudeScreen, "[herdr-soho:peer]", "[/soho:peer]"), "debf6313", id)
 	pre := claudeBoxSep + "\n❯\n" + claudeBoxSep + "\n  [Opus 5.5] ██████░░░░ 67% [5h:8% 2h56m] [7d:54% 3d10h] [main*]\n"
 	rules := []fakecli.Rule{
 		{Argv: []string{"agent", "get", "w0test:p0a"}, Call: 1, Stdout: agentJSONKind("claude", "done", "1")},
@@ -511,15 +514,15 @@ func TestClaudeAlternatePromptBelowHistoryPair(t *testing.T) {
 		border,
 		"❯ old row",
 		border,
-		"› [herdr-soho:peer] #" + id + " Message from another agent",
+		"› [soho:peer] #" + id + " Message from another agent",
 		"  > hello",
-		"  [herdr-soho:peer] #" + id + " end of message",
+		"  [/soho:peer] #" + id + " end of message",
 		"  status footer",
 	}, "\n") + "\n"
 	if !idInInputBox("claude", screen, id) {
 		t.Fatalf("a typed marker under a history '─' pair must stay in the box:\n%s", screen)
 	}
-	if !messageStillInScreen("claude", screen, "[herdr-soho:peer] #"+id+" end of message", id) {
+	if !messageStillInScreen("claude", screen, "[/soho:peer] #"+id+" end of message", id) {
 		t.Fatalf("messageStillInScreen must keep the typed message:\n%s", screen)
 	}
 	if idInInputBox("claude", rc14ClaudeScreen, "debf6313") {
@@ -534,9 +537,9 @@ func TestClaudeFooterBareIDIsNotTyped(t *testing.T) {
 	const id = "01020304"
 	border := strings.Repeat("─", 40)
 	screen := strings.Join([]string{
-		"❯ [herdr-soho:peer] #" + id + " Message from another agent",
+		"❯ [soho:peer] #" + id + " Message from another agent",
 		"  > hello",
-		"  [herdr-soho:peer] #" + id + " end of message",
+		"  [/soho:peer] #" + id + " end of message",
 		"✻ Working… (3s)",
 		border,
 		"❯",

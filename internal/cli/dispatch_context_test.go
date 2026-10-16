@@ -90,7 +90,7 @@ func runContextWarnDispatch(t *testing.T, kind, screen string, amend bool, envEx
 	if _, err := fakecli.Install(t, bin, "herdr", calls); err != nil {
 		t.Fatal(err)
 	}
-	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_ENV": "1", "HERDR_SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_ROLES": roles, "HERDR_SOHO_SKILL_DIR": "../../skills/soho", "HERDR_SOHO_PROMPT_CHECK_SECONDS": "0", "HERDR_SOHO_PROMPT_SETTLE_SECONDS": "0", "HERDR_SOHO_BRIEF_LINT": "off", "TMPDIR": root}
+	env := platform.Env{"PATH": bin, "SOHO_FAKECLI_CONFIG": bin, "HERDR_ENV": "1", "SOHO_DIR": state, "HERDR_WORKSPACE_ID": "ws", "SOHO_ROLES": roles, "SOHO_SKILL_DIR": "../../skills/soho", "SOHO_PROMPT_CHECK_SECONDS": "0", "SOHO_PROMPT_SETTLE_SECONDS": "0", "SOHO_BRIEF_LINT": "off", "TMPDIR": root}
 	for k, v := range envExtra {
 		env[k] = v
 	}
@@ -157,7 +157,7 @@ func TestDispatchContextWarn(t *testing.T) {
 	})
 
 	t.Run("context_warn_percent=0 turns the warning off", func(t *testing.T) {
-		code, out, stderr := runContextWarnDispatch(t, "opencode", footer62, false, platform.Env{"HERDR_SOHO_CONTEXT_WARN_PERCENT": "0"}, []string{"--no-wait"})
+		code, out, stderr := runContextWarnDispatch(t, "opencode", footer62, false, platform.Env{"SOHO_CONTEXT_WARN_PERCENT": "0"}, []string{"--no-wait"})
 		if code != 0 {
 			t.Fatalf("code=%d stdout=%s stderr=%s", code, out, stderr)
 		}

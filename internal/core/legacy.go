@@ -1,45 +1,17 @@
 package core
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
-	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/djalmajr/soho/internal/platform"
-	textutil "github.com/djalmajr/soho/internal/text"
 )
 
-var legacyCopied []string
-
-func LegacyEnvCopied() []string { return append([]string(nil), legacyCopied...) }
-
-func ApplyLegacyEnv(env platform.Env) []string {
-	copied := make([]string, 0)
-	for name, old := range env.Clone() {
-		if !strings.HasPrefix(name, "HERDR_SOHO_") || old == "" {
-			continue
-		}
-		fresh := "SOHO_" + strings.TrimPrefix(name, "HERDR_SOHO_")
-		// An empty new value is replaced, as in the former bridge, except
-		// SOHO_NOWRITE: set at all, even to the empty string, it decides
-		// alone, so the former value is copied only while it is absent.
-		value, present := env.Lookup(fresh)
-		if fresh == "SOHO_NOWRITE" && present {
-			continue
-		}
-		if value == "" {
-			env[fresh] = old
-			copied = append(copied, name)
-		}
-	}
-	textutil.SortUTF16(copied)
-	legacyCopied = copied
-	return append([]string(nil), copied...)
-}
-
+// LegacyUserConfigPath is the former user configuration file, kept so the
+// doctor and the setup migration can detect a leftover old installation.
+// Nothing reads the file itself: the binary only reads the soho names.
 func LegacyUserConfigPath(platformName string, env platform.Env) string {
 	if xdg := env.Get("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, "herdr-soho", "config")
@@ -59,109 +31,32 @@ func LegacyProjectConfigPath(root string) string {
 
 func LegacyStatePath(root string) string { return filepath.Join(root, ".herdr-soho") }
 
-func EffectiveConfigFile(newPath, legacyPath string) string {
-	if isFile(newPath) {
-		return newPath
-	}
-	if isFile(legacyPath) {
-		return legacyPath
-	}
-	return newPath
-}
-
-func MigrateLegacyConfigFile(dest string, env platform.Env, cwd string) bool {
-	root := platform.ProjectRoot(env, cwd)
-	legacy := ""
-	if dest == platform.UserConfigPath(platform.Current(), env) {
-		legacy = LegacyUserConfigPath(platform.Current(), env)
-	} else if dest == filepath.Join(root, ".agents", "soho.conf") {
-		legacy = LegacyProjectConfigPath(root)
-	}
-	if legacy == "" {
-		return false
-	}
-	if _, err := os.Lstat(dest); err == nil {
-		return false
-	}
-	info, err := os.Stat(legacy)
-	if err != nil || !info.Mode().IsRegular() {
-		return false
-	}
-	data, err := os.ReadFile(legacy)
-	if err != nil {
-		platform.Die(fmt.Sprintf("config set: could not read legacy config %s (file left untouched)", legacy), 4)
-	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o777); err != nil {
-		platform.Die(fmt.Sprintf("config set: could not rewrite %s (file left untouched)", dest), 4)
-	}
-	var suffix [4]byte
-	if _, err := rand.Read(suffix[:]); err != nil {
-		platform.Die(fmt.Sprintf("config set: could not rewrite %s (file left untouched)", dest), 4)
-	}
-	tmp := filepath.Join(filepath.Dir(dest), fmt.Sprintf(".%s.%d.%s.tmp", filepath.Base(dest), os.Getpid(), hex.EncodeToString(suffix[:])))
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
-	if err != nil {
-		platform.Die(fmt.Sprintf("config set: could not rewrite %s (file left untouched)", dest), 4)
-	}
-	cleanup := func() { _ = os.Remove(tmp) }
-	if _, err = f.Write(data); err == nil {
-		err = f.Chmod(info.Mode().Perm())
-	}
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = os.Rename(tmp, dest)
-	}
-	if err != nil {
-		cleanup()
-		platform.Die(fmt.Sprintf("config set: could not rewrite %s (file left untouched)", dest), 4)
-	}
-	fmt.Fprintf(platform.Stderr, "soho: warning: copied legacy config %s to %s; the legacy file is no longer read\n", legacy, dest)
-	return true
-}
-
-func DefaultStateDirName(root string) string {
-	newDir := filepath.Join(root, ".soho")
-	oldDir := LegacyStatePath(root)
-	if _, err := os.Stat(newDir); os.IsNotExist(err) && isDir(oldDir) {
-		return ".herdr-soho"
-	}
-	return ".soho"
-}
-
-func LegacyDoctorWarnings(env platform.Env, cwd, platformName string) []string {
+// LegacyLeftovers names the former herdr-soho artifacts an old
+// installation left behind, for the doctor's leftover warnings: the
+// former HERDR_SOHO_ environment variables (non-empty, alphabetical),
+// then the former user config, project config and state dir, each when
+// present. Nothing it names is read: they are detection-only paths.
+func LegacyLeftovers(env platform.Env, cwd, platformName string) []string {
 	out := make([]string, 0)
-	for _, name := range LegacyEnvCopied() {
-		out = append(out, fmt.Sprintf("legacy environment variable %s is read as SOHO_%s; rename it", name, strings.TrimPrefix(name, "HERDR_SOHO_")))
+	names := make([]string, 0)
+	for name, value := range env {
+		if strings.HasPrefix(name, "HERDR_SOHO_") && value != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		out = append(out, fmt.Sprintf("environment variable %s is no longer read; rename it to SOHO_%s", name, strings.TrimPrefix(name, "HERDR_SOHO_")))
 	}
 	root := platform.ProjectRoot(env, cwd)
-	newUser := platform.UserConfigPath(platformName, env)
-	oldUser := LegacyUserConfigPath(platformName, env)
-	newProject := filepath.Join(root, ".agents", "soho.conf")
-	oldProject := LegacyProjectConfigPath(root)
-	if isFile(oldUser) {
-		if isFile(newUser) {
-			out = append(out, fmt.Sprintf("legacy user config %s is no longer read (%s exists); remove it once you no longer need it", oldUser, newUser))
-		} else {
-			out = append(out, fmt.Sprintf("legacy user config in use: %s (the next 'config set --user' copies it to %s)", oldUser, newUser))
-		}
+	if isFile(LegacyUserConfigPath(platformName, env)) {
+		out = append(out, fmt.Sprintf("former user config %s is no longer read: run 'soho setup' to move it to %s", LegacyUserConfigPath(platformName, env), platform.UserConfigPath(platformName, env)))
 	}
-	if isFile(oldProject) {
-		if isFile(newProject) {
-			out = append(out, fmt.Sprintf("legacy project config %s is no longer read (%s exists); remove it once you no longer need it", oldProject, newProject))
-		} else {
-			out = append(out, fmt.Sprintf("legacy project config in use: %s (the next 'config set' copies it to %s)", oldProject, newProject))
-		}
+	if isFile(LegacyProjectConfigPath(root)) {
+		out = append(out, fmt.Sprintf("former project config %s is no longer read: run 'soho setup' to move it to %s", LegacyProjectConfigPath(root), filepath.Join(root, ".agents", "soho.conf")))
 	}
-	ctx := LoadConfig(env, cwd)
-	entry, found := ctx.Entries["state_dir"]
-	statePinned := env.Get("SOHO_DIR") != "" || env.Get("HERDR_SOHO_DIR") != "" || env.Get("SOHO_STATE_DIR") != "" || env.Get("HERDR_SOHO_STATE_DIR") != "" || (found && entry.Source != "defaults" && entry.Value != "")
-	if !statePinned && DefaultStateDirName(root) == ".herdr-soho" {
-		out = append(out, fmt.Sprintf("legacy state dir in use: %s (once no worker is live, rename it to .soho and ignore .soho/ in git)", LegacyStatePath(root)))
-	}
-	if isDir(LegacyStatePath(root)) && isDir(filepath.Join(root, ".soho")) {
-		out = append(out, fmt.Sprintf("legacy state dir %s is no longer used (%s exists); clean it once its reports are no longer needed", LegacyStatePath(root), filepath.Join(root, ".soho")))
+	if isDir(LegacyStatePath(root)) {
+		out = append(out, fmt.Sprintf("former state dir %s is no longer used: run 'soho setup' to move it to %s once no worker is live", LegacyStatePath(root), filepath.Join(root, ".soho")))
 	}
 	return out
 }

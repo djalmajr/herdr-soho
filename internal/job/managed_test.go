@@ -107,7 +107,7 @@ func (f managedFixture) run(t *testing.T, r managedRun) string {
 	env["HERDR_ENV"] = "1"
 	env["HERDR_WORKSPACE_ID"] = launchTestWorkspace
 	env["HERDR_PANE_ID"] = launchTestPane
-	env["HERDR_SOHO_DIR"] = f.root
+	env["SOHO_DIR"] = f.root
 	env[managedHelperVar] = "parent"
 	env[managedRootVar] = f.root
 	env[managedArgsVar] = childArgs
@@ -234,7 +234,7 @@ func TestManagedSelectionRefused(t *testing.T) {
 		{bind: true, childEnv: "HERDR_WORKSPACE_ID=w-other"},
 		{bind: true, childEnv: "HERDR_PANE_ID=p-other"},
 		{bind: true, childEnv: "HERDR_ENV=<unset>"},
-		{bind: true, childEnv: "HERDR_SOHO_DIR=" + filepath.Join(os.TempDir(), "another-store")},
+		{bind: true, childEnv: "SOHO_DIR=" + filepath.Join(os.TempDir(), "another-store")},
 		{parentArgs: []string{"job", "supervise", "--id", "../job-1"}},
 		{parentArgs: []string{"job", "supervise", "--id", "job-1", "--extra"}},
 		{parentArgs: []string{"job", "supervise"}},

@@ -12,8 +12,8 @@ import (
 func TestNativeHookReminderAndOutsideHerdr(t *testing.T) {
 	env, cwd := commandFixture(t)
 	env["PATH"] = t.TempDir()
-	for _, nowrite := range []string{"", "HERDR_SOHO_NOWRITE", "SOHO_NOWRITE"} {
-		delete(env, "HERDR_SOHO_NOWRITE")
+	for _, nowrite := range []string{"", "SOHO_NOWRITE", "SOHO_NOWRITE"} {
+		delete(env, "SOHO_NOWRITE")
 		delete(env, "SOHO_NOWRITE")
 		if nowrite != "" {
 			env[nowrite] = "1"
@@ -37,7 +37,7 @@ func TestNativeHookReminderAndOutsideHerdr(t *testing.T) {
 			t.Fatalf("%s doctor: %d %q %q", nowrite, code, out, stderr)
 		}
 	}
-	delete(env, "HERDR_SOHO_NOWRITE")
+	delete(env, "SOHO_NOWRITE")
 	delete(env, "SOHO_NOWRITE")
 	env["HERDR_ENV"] = "1"
 	code, out, stderr := runIn(t, []string{"hook", "reminder"}, env, cwd)
@@ -105,7 +105,7 @@ func TestNativeDoctorHookReadOnlyWarnings(t *testing.T) {
 }
 
 func TestNativeDoctorHookMissingSkillIsAdvisory(t *testing.T) {
-	env := platform.Env{"HERDR_ENV": "1", "HERDR_SOHO_SKILL_DIR": filepath.Join(t.TempDir(), "missing"), "PATH": t.TempDir(), "HOME": t.TempDir(), "USERPROFILE": t.TempDir()}
+	env := platform.Env{"HERDR_ENV": "1", "SOHO_SKILL_DIR": filepath.Join(t.TempDir(), "missing"), "PATH": t.TempDir(), "HOME": t.TempDir(), "USERPROFILE": t.TempDir()}
 	code, out, stderr := runIn(t, []string{"hook", "doctor"}, env, t.TempDir())
 	if code != 0 || !strings.Contains(out, "soho doctor: ") || stderr != "" {
 		t.Fatalf("missing skill hook: %d %q %q", code, out, stderr)

@@ -43,9 +43,9 @@ func newCommandFixture(t *testing.T) *statsFixture {
 func (f *statsFixture) env() platform.Env {
 	env := envFrom(fakecli.Env(testutil.CleanEnv(f.t), f.fakebin))
 	env["HERDR_ENV"] = "1"
-	env["HERDR_SOHO_DIR"] = f.state
+	env["SOHO_DIR"] = f.state
 	env["HERDR_WORKSPACE_ID"] = f.workspace
-	env["HERDR_SOHO_SKILL_DIR"] = f.skill
+	env["SOHO_SKILL_DIR"] = f.skill
 	env["TMPDIR"] = f.tmp
 	return env
 }
@@ -1039,7 +1039,7 @@ func TestStatsAndCollectWithHerdrInPathDoNotPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := f.env()
-	delete(env, "HERDR_SOHO_DIR")
+	delete(env, "SOHO_DIR")
 	invoke := func(args ...string) (string, string, int) {
 		oldOut, oldErr := platform.Stdout, platform.Stderr
 		var out, errOut bytes.Buffer

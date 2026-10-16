@@ -23,7 +23,7 @@ func TestRolesNoDeleteRule(t *testing.T) {
 		"a directory you did not create in this slice",
 	}
 	skillDir := filepath.Join("..", "..", "skills", "soho")
-	env := platform.Env{"HERDR_SOHO_SKILL_DIR": skillDir}
+	env := platform.Env{"SOHO_SKILL_DIR": skillDir}
 	goos := "posix"
 	if runtime.GOOS == "windows" {
 		goos = "win32"

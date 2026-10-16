@@ -88,13 +88,13 @@ func newWaitStatusFixture(t *testing.T, rows string, rules []fakecli.Rule) *wait
 	}
 	clean := envFrom(testutil.CleanEnv(t))
 	for key, value := range env {
-		if key == "HOME" || key == "XDG_CONFIG_HOME" || key == "HERDR_SOHO_SKILL_DIR" || key == "HERDR_WORKSPACE_ID" {
+		if key == "HOME" || key == "XDG_CONFIG_HOME" || key == "SOHO_SKILL_DIR" || key == "HERDR_WORKSPACE_ID" {
 			clean[key] = value
 		}
 	}
 	clean["PATH"] = bin
 	clean["HERDR_ENV"] = "1"
-	clean["HERDR_SOHO_DIR"] = state
+	clean["SOHO_DIR"] = state
 	clean["HERDR_WORKSPACE_ID"] = "ws"
 	clean["HERDR_SOCKET_PATH"] = filepath.Join(base, "missing.sock")
 	clean["SOHO_WAIT_POLL_MS"] = "1"
@@ -609,7 +609,7 @@ func TestWaitJavaScriptTimeoutAndAnyCases(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(f.state, "last-report-ready"), []byte(writeReport+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f.env["HERDR_SOHO_NOTIFY"] = "on"
+		f.env["SOHO_NOTIFY"] = "on"
 		code, out, stderr := f.runWait(t, "ready", "working", "--timeout", "2000", "--any")
 		if code != 0 || stderr != "" || strings.Count(out, `"status":"done"`) != 1 {
 			t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
@@ -877,7 +877,7 @@ func TestWaitRemainingExitCases(t *testing.T) {
 	t.Run("wait: a state change since the marker ends settled-no-report, no Enter", func(t *testing.T) { // JS: "wait: a state change since the marker ends settled-no-report, no Enter"
 		f := newWaitStatusFixture(t, row, []fakecli.Rule{{Argv: []string{"agent", "get", "worker"}, Stdout: `{"result":{"agent":{"agent_status":"idle","state_change_seq":6}}}`}})
 		advancingWaitClock(t, 5*time.Second)
-		f.env["HERDR_SOHO_SETTLED_GRACE"] = "0"
+		f.env["SOHO_SETTLED_GRACE"] = "0"
 		if err := os.WriteFile(filepath.Join(f.state, "wait", "worker.not-received"), []byte("1 5 /tmp/worker-brief.md\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}

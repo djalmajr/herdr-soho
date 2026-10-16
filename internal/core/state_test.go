@@ -29,7 +29,7 @@ func TestRosterAppendProcess(t *testing.T) {
 func TestStateParity(t *testing.T) {
 	t.Run("creates briefs/reports/wait and the 12-column header, idempotent", func(t *testing.T) { // JS: "stateDir: creates briefs/reports/wait and the 12-column header, idempotent"
 		root := t.TempDir()
-		env := platform.Env{"HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws"}
+		env := platform.Env{"SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws"}
 		ctx := &Config{Entries: map[string]ConfigEntry{}}
 		dir := StateDir(ctx, env, root)
 		if dir != filepath.Join(root, "state", "ws") {
@@ -57,7 +57,7 @@ func TestStateParity(t *testing.T) {
 			t.Fatal(err)
 		}
 		dirMode, _ := os.Stat(controlDir)
-		env := platform.Env{"HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws"}
+		env := platform.Env{"SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws"}
 		dir := StateDir(&Config{Entries: map[string]ConfigEntry{}}, env, root)
 		childMode, _ := os.Stat(filepath.Join(dir, "wait"))
 		if childMode.Mode().Perm() != dirMode.Mode().Perm() {
@@ -332,7 +332,7 @@ func TestStateParity(t *testing.T) {
 					t.Fatal(err)
 				}
 				env := fakeEnvWithCLI(t, fakeDir)
-				env["HERDR_SOHO_DIR"] = filepath.Join(root, "state")
+				env["SOHO_DIR"] = filepath.Join(root, "state")
 				var recovered any
 				func() {
 					defer func() { recovered = recover() }()
@@ -342,7 +342,7 @@ func TestStateParity(t *testing.T) {
 				if !ok || exitErr.Code != 2 || exitErr.Msg == "" {
 					t.Fatalf("recovered=%#v", recovered)
 				}
-				if _, err := os.Stat(env.Get("HERDR_SOHO_DIR")); !os.IsNotExist(err) {
+				if _, err := os.Stat(env.Get("SOHO_DIR")); !os.IsNotExist(err) {
 					t.Fatalf("state root created after invalid response: %v", err)
 				}
 			})
@@ -350,7 +350,7 @@ func TestStateParity(t *testing.T) {
 	})
 	t.Run("state directory in nowrite mode creates no tree", func(t *testing.T) { // JS: "nowrite: stateDir creates nothing; normal mode still creates the state tree and the .gitignore entry"
 		root := t.TempDir()
-		env := platform.Env{"HERDR_SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "HERDR_SOHO_NOWRITE": "1"}
+		env := platform.Env{"SOHO_DIR": filepath.Join(root, "state"), "HERDR_WORKSPACE_ID": "ws", "SOHO_NOWRITE": "1"}
 		dir := StateDir(&Config{Entries: map[string]ConfigEntry{}}, env, root)
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
 			t.Fatalf("state created in nowrite: %v", err)

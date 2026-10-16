@@ -83,7 +83,6 @@ func cmdInstall(args []string, env platform.Env) int {
 		platform.Die(err.Error(), 1)
 	}
 	fmt.Fprintf(platform.Stdout, "installed %s\n", res.Destination)
-	fmt.Fprintf(platform.Stdout, "installed %s\n", res.LegacyCopy)
 	fmt.Fprintf(platform.Stdout, "sha256 %s\n", res.Digest)
 	fmt.Fprintf(platform.Stdout, "release %s\n", res.ReleaseURL)
 	if !pathContains(env.Get("PATH"), abs) {

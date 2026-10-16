@@ -38,7 +38,7 @@ func TestBoundSendKeepsTheTargetInboundPolicy(t *testing.T) {
 		{Argv: []string{"agent", "read", "w0test:p0a", "--source", "visible"}, Call: 2, Stdout: "after prompt\n"},
 	}
 	f := newFixtureAt(t, dir, rules)
-	serverUser := filepath.Join(dir, "config", "herdr-soho", "config")
+	serverUser := filepath.Join(dir, "config", "soho", "config")
 	if err := os.MkdirAll(filepath.Dir(serverUser), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -46,10 +46,10 @@ func TestBoundSendKeepsTheTargetInboundPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	starter := filepath.Join(dir, "starter")
-	if err := os.MkdirAll(filepath.Join(starter, "herdr-soho"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(starter, "soho"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(starter, "herdr-soho", "config"), []byte("inbound=auto\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(starter, "soho", "config"), []byte("inbound=auto\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cwd := filepath.Join(dir, "home")

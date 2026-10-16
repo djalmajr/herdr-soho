@@ -445,7 +445,7 @@ func TestJobNowriteWritingSubcommands(t *testing.T) {
 	for name, value := range f.env {
 		env[name] = value
 	}
-	env["HERDR_SOHO_NOWRITE"] = "1"
+	env["SOHO_NOWRITE"] = "1"
 
 	cases := [][]string{
 		{"start", "--id", "job-1", "--repo", "example-org/example-repo", "--brief", "-", "--dry-run"},
@@ -600,7 +600,7 @@ func TestJobCleanLeavesPendingJobAlone(t *testing.T) {
 	env = withFakeCLI(env, fakeDir)
 	env["HERDR_ENV"] = "1"
 	env["HERDR_WORKSPACE_ID"] = "ws"
-	env["HERDR_SOHO_DIR"] = state
+	env["SOHO_DIR"] = state
 	var cleanOut, cleanErr bytes.Buffer
 	oldOut, oldErr := platform.Stdout, platform.Stderr
 	platform.Stdout, platform.Stderr = &cleanOut, &cleanErr

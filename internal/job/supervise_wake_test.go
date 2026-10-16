@@ -23,10 +23,10 @@ import (
 	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
 
-// wakeEnvKeys are the four HERDR_SOHO_JOB_* vars the hook must see.
+// wakeEnvKeys are the four SOHO_JOB_* vars the hook must see.
 var wakeEnvKeys = []string{
-	"HERDR_SOHO_JOB_ID", "HERDR_SOHO_JOB_SEQ", "HERDR_SOHO_JOB_EVENT",
-	"HERDR_SOHO_JOB_IDEMPOTENCY_KEY",
+	"SOHO_JOB_ID", "SOHO_JOB_SEQ", "SOHO_JOB_EVENT",
+	"SOHO_JOB_IDEMPOTENCY_KEY",
 }
 
 // wakeSupFixture is supFixture plus the fake wake hook installed in its
@@ -62,13 +62,13 @@ func wakeSeqValue(t *testing.T, jobDir string) (string, bool) {
 	return string(raw), true
 }
 
-// hookSeqs returns the HERDR_SOHO_JOB_SEQ of every recorded hook call.
+// hookSeqs returns the SOHO_JOB_SEQ of every recorded hook call.
 func hookSeqs(t *testing.T, fakeDir string) []int {
 	t.Helper()
 	calls := wakeHookCalls(t, fakeDir)
 	out := make([]int, 0, len(calls))
 	for _, call := range calls {
-		seq, err := strconv.Atoi(call.Env["HERDR_SOHO_JOB_SEQ"])
+		seq, err := strconv.Atoi(call.Env["SOHO_JOB_SEQ"])
 		if err != nil {
 			t.Fatalf("hook call %d has no seq env: %v", len(out), call.Env)
 		}
@@ -120,10 +120,10 @@ func TestSuperviseWakeNoteRunsHookOnce(t *testing.T) {
 	}
 	// The four env vars carry the exact values.
 	want := map[string]string{
-		"HERDR_SOHO_JOB_ID":              "job-1",
-		"HERDR_SOHO_JOB_SEQ":             "2",
-		"HERDR_SOHO_JOB_EVENT":           "question",
-		"HERDR_SOHO_JOB_IDEMPOTENCY_KEY": "job-1:2",
+		"SOHO_JOB_ID":              "job-1",
+		"SOHO_JOB_SEQ":             "2",
+		"SOHO_JOB_EVENT":           "question",
+		"SOHO_JOB_IDEMPOTENCY_KEY": "job-1:2",
 	}
 	if len(calls[0].Env) != len(want) {
 		t.Fatalf("captured env = %v, want %v", calls[0].Env, want)
@@ -580,7 +580,7 @@ func waitHookEntered(t *testing.T, fakeDir string, seq int) {
 	for {
 		if calls, err := fakecli.ReadCalls(filepath.Join(fakeDir, "wakehook.calls.jsonl")); err == nil {
 			for _, call := range calls {
-				if call.Env["HERDR_SOHO_JOB_SEQ"] == want {
+				if call.Env["SOHO_JOB_SEQ"] == want {
 					return
 				}
 			}

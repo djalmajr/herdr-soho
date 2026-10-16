@@ -135,8 +135,8 @@ func TestWakeHookEnvironmentIsTheServers(t *testing.T) {
 			t.Fatalf("wake %s=%q, want the server's %q", name, got[name], server[name])
 		}
 	}
-	if got["HERDR_SOHO_JOB_ID"] != "job-1" {
-		t.Fatalf("the wake command is not the hook's: %v", got["HERDR_SOHO_JOB_ID"])
+	if got["SOHO_JOB_ID"] != "job-1" {
+		t.Fatalf("the wake command is not the hook's: %v", got["SOHO_JOB_ID"])
 	}
 	if ops := sup.Ops.(selfCLI); ops.Env[launchConfigBaseVar] != starterConfig {
 		t.Fatal("the team commands did not receive the selection")
