@@ -312,6 +312,72 @@ func TestMigrateNamesState(t *testing.T) {
 		}
 		mustExist(t, old)
 	})
+
+	t.Run("an empty .soho counts as absent: the dir moves over it", func(t *testing.T) {
+		env, cwd := migrateEnv(t)
+		old := filepath.Join(cwd, ".herdr-soho")
+		novo := filepath.Join(cwd, ".soho")
+		mustWriteFile(t, filepath.Join(old, "ws1", "agents.tsv"), "# roster\n\n")
+		if err := os.MkdirAll(novo, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		ctx := core.LoadConfig(env, cwd)
+		lines := migrateNames(&ctx, env, cwd, false)
+		want := []string{
+			"migrate: moved " + old + " to " + novo,
+		}
+		if !reflect.DeepEqual(lines, want) {
+			t.Fatalf("lines = %v, want %v", lines, want)
+		}
+		mustNotExist(t, old)
+		if got := mustReadFile(t, filepath.Join(novo, "ws1", "agents.tsv")); got != "# roster\n\n" {
+			t.Fatalf("moved roster = %q", got)
+		}
+	})
+
+	t.Run("a .soho with a file still blocks: kept line, nothing changes", func(t *testing.T) {
+		env, cwd := migrateEnv(t)
+		old := filepath.Join(cwd, ".herdr-soho")
+		novo := filepath.Join(cwd, ".soho")
+		mustWriteFile(t, filepath.Join(old, "ws1", "agents.tsv"), "# roster\n\n")
+		mustWriteFile(t, filepath.Join(novo, "note.txt"), "keep\n")
+		ctx := core.LoadConfig(env, cwd)
+		lines := migrateNames(&ctx, env, cwd, false)
+		want := []string{
+			"migrate: kept " + old + ": " + novo + " already exists; remove " + old + " once its reports are no longer needed",
+		}
+		if !reflect.DeepEqual(lines, want) {
+			t.Fatalf("lines = %v, want %v", lines, want)
+		}
+		mustExist(t, old)
+		if got := mustReadFile(t, filepath.Join(novo, "note.txt")); got != "keep\n" {
+			t.Fatalf(".soho note changed to %q", got)
+		}
+	})
+
+	t.Run("a symlink .soho to an empty dir still blocks", func(t *testing.T) {
+		env, cwd := migrateEnv(t)
+		old := filepath.Join(cwd, ".herdr-soho")
+		novo := filepath.Join(cwd, ".soho")
+		target := filepath.Join(cwd, "soho-target")
+		mustWriteFile(t, filepath.Join(old, "ws1", "agents.tsv"), "# roster\n\n")
+		if err := os.MkdirAll(target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, novo); err != nil {
+			t.Skip("cannot create a symlink on this platform")
+		}
+		ctx := core.LoadConfig(env, cwd)
+		lines := migrateNames(&ctx, env, cwd, false)
+		want := []string{
+			"migrate: kept " + old + ": " + novo + " already exists; remove " + old + " once its reports are no longer needed",
+		}
+		if !reflect.DeepEqual(lines, want) {
+			t.Fatalf("lines = %v, want %v", lines, want)
+		}
+		mustExist(t, old)
+		mustExist(t, novo)
+	})
 }
 
 // TestMigrateNamesDryRun: with dry=true the same fixtures report the
@@ -431,6 +497,23 @@ func TestMigrateNamesDryRun(t *testing.T) {
 			t.Fatalf("lines = %v, want %v", fx.lines, want)
 		}
 		mustExist(t, filepath.Join(fx.cwd, ".herdr-soho"))
+	})
+
+	t.Run("state with an empty .soho: would move, nothing removed", func(t *testing.T) {
+		fx := runDry(t, func(t *testing.T, env platform.Env, cwd string, old, novo string) {
+			mustWriteFile(t, filepath.Join(cwd, ".herdr-soho", "ws1", "agents.tsv"), "# roster\n\n")
+			if err := os.MkdirAll(filepath.Join(cwd, ".soho"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		})
+		want := []string{
+			"migrate: would move " + filepath.Join(fx.cwd, ".herdr-soho") + " to " + filepath.Join(fx.cwd, ".soho"),
+		}
+		if !reflect.DeepEqual(fx.lines, want) {
+			t.Fatalf("lines = %v, want %v", fx.lines, want)
+		}
+		mustExist(t, filepath.Join(fx.cwd, ".herdr-soho"))
+		mustExist(t, filepath.Join(fx.cwd, ".soho"))
 	})
 }
 
