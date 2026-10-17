@@ -867,7 +867,7 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 				if active {
 					suffix := ""
 					if !math.IsNaN(timeoutMs) && !math.IsInf(timeoutMs, 0) {
-						suffix = fmt.Sprintf(" --timeout %s", formatTimeout(timeoutMs))
+						suffix = fmt.Sprintf(" --timeout %s", core.FormatTimeoutMS(int64(timeoutMs)))
 					}
 					if ceiling != nil {
 						_, _ = fmt.Fprintf(platform.Stderr, "soho: checkpoint: '%s' is still working (screen changed within the last %ds); wait again: soho wait %s%s\n", agent, *ceiling, agent, suffix)
@@ -875,7 +875,7 @@ func WaitFor(agents []string, sd string, ctx *core.Config, env platform.Env, tim
 						_, _ = fmt.Fprintf(platform.Stderr, "soho: checkpoint: '%s' is still working (screen changed %ds ago); wait again: soho wait %s%s\n", agent, *age, agent, suffix)
 					}
 				} else if !math.IsNaN(timeoutMs) && !math.IsInf(timeoutMs, 0) {
-					sendWarning(fmt.Sprintf("timeout waiting for '%s'; it may still be working (state: %s). Run: soho wait %s --timeout %s", agent, tag, agent, formatTimeout(timeoutMs*2)))
+					sendWarning(fmt.Sprintf("timeout waiting for '%s'; it may still be working (state: %s). Run: soho wait %s --timeout %s", agent, tag, agent, core.FormatTimeoutMS(int64(timeoutMs*2))))
 				} else {
 					sendWarning(fmt.Sprintf("timeout waiting for '%s'; it may still be working (state: %s)", agent, tag))
 				}
@@ -904,7 +904,6 @@ func renewalSuffix(value string) string {
 	}
 	return ""
 }
-func formatTimeout(value float64) string { return strconv.FormatInt(int64(value), 10) }
 
 func numberString(value float64) string { return strconv.FormatFloat(value, 'f', -1, 64) }
 func lastNonEmpty(screen string, n int) string {
@@ -974,11 +973,15 @@ func CmdWait(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 				core.DieFriction("wait: --timeout expects a value", 2, "", "wait")
 			}
 			raw := argv[i+1]
-			if !uintPattern.MatchString(raw) {
-				core.DieFriction("wait: --timeout expects milliseconds, got '"+raw+"'", 2, "", "wait")
+			ms, ok := core.ParseTimeoutMS(raw)
+			if !ok {
+				core.DieFriction("wait: --timeout expects milliseconds or a duration such as 90s, 30m or 2h, got '"+raw+"'", 2, "", "wait")
 			}
-			timeout, _ = strconv.ParseFloat(raw, 64)
-			core.WarnShortTimeout("wait", frictionLogFile, int64(timeout))
+			timeout = float64(ms)
+			// A unit names the intent: only a unitless integer warns.
+			if core.IsPlainTimeoutMS(raw) {
+				core.WarnShortTimeout("wait", frictionLogFile, ms)
+			}
 			i++
 		case "--any":
 			any = true

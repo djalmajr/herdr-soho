@@ -198,11 +198,11 @@ func jobMSValue(sub, flag string, vals map[string]string, fallback int) int {
 	if !ok {
 		return fallback
 	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 || n > jobWaitBoundMS {
-		platform.Die("job "+sub+": "+flag+" must be an integer from 0 to 600000", 2)
+	n, ok := core.ParseTimeoutMS(raw)
+	if !ok || n > jobWaitBoundMS {
+		platform.Die("job "+sub+": "+flag+" expects milliseconds or a duration such as 90s, 30m or 2h, from 0 to 600000", 2)
 	}
-	return n
+	return int(n)
 }
 
 // jobSinceValue returns the events --since flag (integer >= 0).

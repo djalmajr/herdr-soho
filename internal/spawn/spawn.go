@@ -545,9 +545,16 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	}
 	if o.timeout == "" {
 		o.timeout = core.Cfg(ctx, "spawn_timeout", "60000", env)
-	} else if n, ok := text.ParseJSNumber(o.timeout); ok && !math.IsNaN(n) && !math.IsInf(n, 0) && math.Trunc(n) == n {
-		// The value goes to `herdr agent start --timeout`, also in milliseconds.
-		core.WarnShortTimeout("spawn", filepath.Join(core.StateDirPath(ctx, env, cwd), "friction.log"), int64(n))
+	} else if ms, ok := core.ParseTimeoutMS(o.timeout); !ok {
+		core.DieFriction(fmt.Sprintf("spawn: --timeout expects milliseconds or a duration such as 90s, 30m or 2h, got '%s'", o.timeout), 2, "", "spawn")
+	} else {
+		// The value goes to `herdr agent start --timeout`, also in
+		// milliseconds: a unit is converted here, so herdr never sees one.
+		// A unit names the intent, so only a unitless integer warns.
+		if core.IsPlainTimeoutMS(o.timeout) {
+			core.WarnShortTimeout("spawn", filepath.Join(core.StateDirPath(ctx, env, cwd), "friction.log"), ms)
+		}
+		o.timeout = strconv.FormatInt(ms, 10)
 	}
 	if o.effort != "" {
 		if !text.HasWord(strings.Join(core.EffortLadder, " "), o.effort) {

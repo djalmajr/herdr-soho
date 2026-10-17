@@ -57,8 +57,14 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 				role = v
 			case "--timeout":
 				timeoutRaw = v
-				// run forwards its --timeout here, so this is the single warning site.
-				core.WarnShortTimeout("dispatch", frictionLogPath, int64(parseTimeout(v)))
+				if _, ok := core.ParseTimeoutMS(v); !ok {
+					core.DieFriction(fmt.Sprintf("dispatch: --timeout expects milliseconds or a duration such as 90s, 30m or 2h, got '%s'", v), 2, frictionLogPath, "dispatch")
+				}
+				// run forwards its --timeout here, so this is the single warning
+				// site: a unit names the intent, so only a unitless integer warns.
+				if core.IsPlainTimeoutMS(v) {
+					core.WarnShortTimeout("dispatch", frictionLogPath, int64(parseTimeout(v)))
+				}
 			case "--for":
 				forValue = &v
 			}
@@ -942,7 +948,14 @@ func seqString(value any) string {
 	}
 	return ""
 }
+
+// parseTimeout reads the --timeout flag in milliseconds: a plain integer or
+// a duration with ms, s, m or h (core.ParseTimeoutMS); it still returns 0 for
+// a value it cannot read, as before the unit syntax.
 func parseTimeout(raw string) float64 {
+	if ms, ok := core.ParseTimeoutMS(raw); ok {
+		return float64(ms)
+	}
 	v, e := strconv.ParseFloat(raw, 64)
 	if e != nil {
 		return 0
@@ -2079,6 +2092,11 @@ func splitRunArgs(argv []string) ([]string, []string, bool) {
 		case "--timeout":
 			if i+1 >= len(argv) {
 				core.DieFriction("run: --timeout expects a value", 2, frictionLogPath, "run")
+			}
+			// Refused before the spawn: run opens the pane before dispatch, so
+			// an invalid duration must not cost a pane.
+			if _, ok := core.ParseTimeoutMS(argv[i+1]); !ok {
+				core.DieFriction(fmt.Sprintf("dispatch: --timeout expects milliseconds or a duration such as 90s, 30m or 2h, got '%s'", argv[i+1]), 2, frictionLogPath, "dispatch")
 			}
 			dispatchArgs = append(dispatchArgs, a, argv[i+1])
 			i++

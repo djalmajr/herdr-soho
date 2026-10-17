@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -129,12 +128,16 @@ func cmdCompact(argv []string, ctx *core.Config, env platform.Env, cwd string) i
 				core.DieFriction("compact: --timeout expects a value", 2, frictionLogPath, "compact")
 			}
 			i++
-			value, err := strconv.ParseInt(argv[i], 10, 64)
-			if err != nil || value <= 0 {
-				core.DieFriction("compact: --timeout expects milliseconds", 2, frictionLogPath, "compact")
+			raw := argv[i]
+			value, ok := core.ParseTimeoutMS(raw)
+			if !ok || value <= 0 {
+				core.DieFriction(fmt.Sprintf("compact: --timeout expects milliseconds or a duration such as 90s, 30m or 2h, got '%s'", raw), 2, frictionLogPath, "compact")
 			}
 			timeoutMS = value
-			core.WarnShortTimeout("compact", frictionLogPath, value)
+			// A unit names the intent: only a unitless integer warns.
+			if core.IsPlainTimeoutMS(raw) {
+				core.WarnShortTimeout("compact", frictionLogPath, value)
+			}
 		default:
 			if agent != "" {
 				core.DieFriction(fmt.Sprintf("compact: unexpected argument '%s'", argv[i]), 2, frictionLogPath, "compact")
