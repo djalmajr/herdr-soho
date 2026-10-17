@@ -120,16 +120,19 @@ func setupTM7GoldenPath(t *testing.T, name string) string {
 }
 
 // readSetupTM7Golden loads a frozen oracle golden and applies the testutil
-// hook oracle adapter, the DJA-330 peer-block oracle adapter and the
-// DJA-318 soho-rename oracle adapter: the frozen expected hook outputs
-// embed the exact pre-native herdr-soho shell commands (raw and
-// JSON-quoted, in the expected Files/Out values), the frozen expected
-// block texts and plan diffs keep the pre-DJA-330 "Peer messages" bullet,
-// and the frozen expected setup block, hook literals and doctor lines keep
-// the pre-rename herdr-soho setup text. The adapters rewrite only those
-// exact strings to the approved native literals, the DJA-330 replacement
-// and the soho setup-text contract. Seeds and every other frozen
-// expectation pass through untouched.
+// hook oracle adapter, the DJA-330 peer-block oracle adapter, the DJA-318
+// soho-rename oracle adapter and the DJA-374 plan-hunk adapter: the frozen
+// expected hook outputs embed the exact pre-native herdr-soho shell
+// commands (raw and JSON-quoted, in the expected Files/Out values), the
+// frozen expected block texts and plan diffs keep the pre-DJA-330 "Peer
+// messages" bullet, the frozen expected setup block, hook literals and
+// doctor lines keep the pre-rename herdr-soho setup text, and the frozen
+// plan hunk header of the AGENTS.md block diff counts the 43-line
+// pre-DJA-374 block. The adapters rewrite only those exact strings to the
+// approved native literals, the DJA-330 replacement, the soho setup-text
+// contract (the rename oracle's soho block constants carry the DJA-374
+// peer-bullet extension) and the post-DJA-374 hunk count. Seeds and every
+// other frozen expectation pass through untouched.
 func readSetupTM7Golden[T any](t *testing.T, name string) T {
 	t.Helper()
 	data, err := os.ReadFile(setupTM7GoldenPath(t, name))
@@ -140,7 +143,7 @@ func readSetupTM7Golden[T any](t *testing.T, name string) T {
 	if err := json.Unmarshal(data, &tree); err != nil {
 		t.Fatal(err)
 	}
-	adapted, err := json.Marshal(testutil.ApplySohoRenameOracle(testutil.ApplyPeerBlockOracle(testutil.ApplyHookOracle(testutil.ApplySohoNameOracle(tree)))))
+	adapted, err := json.Marshal(testutil.ApplyPeerBlockDJA374PlanHunk(testutil.ApplySohoRenameOracle(testutil.ApplyPeerBlockOracle(testutil.ApplyHookOracle(testutil.ApplySohoNameOracle(tree))))))
 	if err != nil {
 		t.Fatal(err)
 	}
