@@ -594,11 +594,21 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		o.reuse = core.Cfg(ctx, "reuse_workers", "on", env)
 	}
 	sd := core.StateDir(ctx, env, cwd)
+	// DJA-392: the pressure refusal is measured once, here, so the lane
+	// cleanup below and the refusal further down see the same answer.
+	var refuseParts []string
+	if o.pane == "" && !o.force {
+		refuseParts = core.PressureRefuseParts(ctx, env, cwd)
+	}
 	burst := false
 	if lane != "" && o.pane == "" {
 		d := core.LaneDecide(ctx, lane, o.role, env, cwd, o.reuse == "on")
 		for _, gone := range d.Gone {
 			core.RosterRemove(sd, gone)
+			if len(refuseParts) > 0 {
+				// No pane opens under the refusal: no friction line saying so.
+				continue
+			}
 			Warn(fmt.Sprintf("lane '%s' worker '%s' is gone; opening a new pane", lane, gone), ctx, env, "spawn")
 		}
 		burst = core.PaneMode(ctx, env) == "flex" && has(core.SplitRoles(core.Cfg(ctx, "flex_roles", "reviewer,documenter", env)), o.role) && (d.Decision == "busy" || d.Capacity == 0 && d.Decision == "absent") && len(core.LiveBurstWorkers(sd, env)) < core.FlexExtra(ctx, env)
@@ -742,10 +752,8 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	// never refused. --force skips only this refusal (the pressure warning
 	// line at the top still went out); a measurement failure never
 	// refuses, and nothing is written (no friction line, no roster line).
-	if o.pane == "" && !o.force {
-		if parts := core.PressureRefuseParts(ctx, env, cwd); len(parts) > 0 {
-			platform.Die(fmt.Sprintf("spawn: refusing to open a new pane under resource pressure: %s; close idle panes or run 'soho gc', or pass --force", strings.Join(parts, "; ")), 25)
-		}
+	if o.pane == "" && len(refuseParts) > 0 {
+		platform.Die(fmt.Sprintf("spawn: refusing to open a new pane under resource pressure: %s; close idle panes or run 'soho gc', or pass --force", strings.Join(refuseParts, "; ")), 25)
 	}
 	core.EnforceWorkerCap(ctx, env, cwd)
 	var orphanLive []any

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/djalmajr/soho/internal/core"
 	"github.com/djalmajr/soho/internal/platform"
 	"github.com/djalmajr/soho/internal/testutil/fakecli"
 )
@@ -290,5 +291,35 @@ func TestSpawnRefusalDoesNotTouchIdleReuse(t *testing.T) {
 	after, err := os.ReadFile(filepath.Join(f.state, "ws", "agents.tsv"))
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatalf("reuse under pressure changed the roster: before=%q after=%q err=%v", before, after, err)
+	}
+}
+
+// DJA-392 review: on a lane with a gone worker, a refused spawn still drops
+// the gone row (housekeeping every spawn does) but writes no friction line:
+// the "opening a new pane" note would be false under the refusal.
+func TestLanePressureRefusalWritesNoFriction(t *testing.T) {
+	rules := []fakecli.Rule{{Argv: []string{"agent", "get", "gone-worker"}, Code: 1, Stderr: `{"error":{"code":"agent_not_found","message":"gone"}}`}}
+	rules = append(rules, freshSpawnRules()...)
+	f := newSpawnFixture(t, rules)
+	configureSpawnFixture(t, &f)
+	f.env["SOHO_LANES"] = "on"
+	f.ctx.Entries["lane_build_roles"] = core.ConfigEntry{Value: "worker", Source: "project"}
+	f.ctx.Entries["lane_build_kind"] = core.ConfigEntry{Value: "grok", Source: "project"}
+	f.ctx.Entries["lane_build_panes"] = core.ConfigEntry{Value: "2", Source: "project"}
+	f.ctx.Order = append(f.ctx.Order, "lane_build_roles", "lane_build_kind", "lane_build_panes")
+	row := strings.Join([]string{"gone-worker", "p-old", "grok", "worker", "xai", "1", f.cwd, "now", "grok-4.7", "ask", "worker", "build", "", "", "high"}, "\t")
+	f.roster(t, row)
+	fakePressureMachine(t, 3*pressureGB, 100*pressureGB, true, 24*pressureGB, 25*pressureGB, true)
+	code, _, stderr, calls := runCmdSpawn(t, f, []string{"worker"})
+	if code != 25 {
+		t.Fatalf("exit=%d stderr=%q, want the refusal", code, stderr)
+	}
+	assertNoPaneOrAgentCreation(t, calls)
+	if friction, err := os.ReadFile(filepath.Join(f.state, "ws", "friction.log")); err == nil && len(friction) > 0 {
+		t.Fatalf("the refusal appended friction: %s", friction)
+	}
+	roster, err := os.ReadFile(filepath.Join(f.state, "ws", "agents.tsv"))
+	if err != nil || strings.Contains(string(roster), "gone-worker") {
+		t.Fatalf("the gone row should still be dropped: %q err=%v", roster, err)
 	}
 }
