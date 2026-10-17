@@ -85,8 +85,9 @@ func loadTeamViewForm(path string) string {
 
 // rememberTeamViewForm persists the team view's form preference (the
 // tree or the table plus a newline, in the team-view file beside the
-// session-view one): a write failure records it and interrupts nothing,
-// like the session view's.
+// session-view one): a write failure is recorded in the view's own
+// flag (nothing displays it - the list's message is the list's own
+// preference's) and interrupts nothing, like the session view's.
 func (s *BoardState) rememberTeamViewForm() {
 	if s.teamViewPreferencePath == "" {
 		return
@@ -95,5 +96,5 @@ func (s *BoardState) rememberTeamViewForm() {
 	if err == nil {
 		err = platform.AtomicWrite(s.teamViewPreferencePath, s.teamViewForm+"\n")
 	}
-	s.viewPreferenceFailed = err != nil
+	s.teamViewPreferenceFailed = err != nil
 }

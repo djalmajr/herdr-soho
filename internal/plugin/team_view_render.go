@@ -524,12 +524,28 @@ func teamViewOutsideSection(roles []teamViewRole, avail int) []string {
 // label: the first line continues the label line and the continuations
 // start at the first role's column; the break happens only between
 // roles (a role wider than the whole line is hard-cut, one piece per
-// line, so the wrap always advances).
+// line, so the wrap always advances). When the prefix alone fills the
+// line (avail columns or more), the mode is one line: the prefix
+// followed by the roles separated by ", ", cut with the teamCut -
+// never a break, and never past the width.
 func teamViewRoleListLines(prefix string, roles []string, avail int) []string {
 	if avail <= 0 {
 		return []string{""}
 	}
 	prefix = teamCut(prefix, avail)
+	if displayWidth(prefix) >= avail {
+		// The prefix fills the line: one line, the prefix followed by
+		// the roles separated by ", ", cut (no break), so the line
+		// never goes past the width.
+		joined := prefix
+		for i, role := range roles {
+			if i > 0 {
+				joined += ", "
+			}
+			joined += role
+		}
+		return []string{teamCut(joined, avail)}
+	}
 	prefixW := displayWidth(prefix)
 	var lines []string
 	line := prefix

@@ -7,6 +7,7 @@ package plugin
 // (width 80 tree, width 100 table) and the width-40 cuts and wraps.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -718,13 +719,188 @@ func TestTeamViewBoardFormSaveFailureKeepsTheSwitch(t *testing.T) {
 	if action := s.ApplyKey("v"); action != "" {
 		t.Fatalf("v action=%q", action)
 	}
-	if !s.viewPreferenceFailed {
+	if !s.teamViewPreferenceFailed {
 		t.Fatal("the failed form save was not recorded")
+	}
+	if s.viewPreferenceFailed {
+		t.Fatal("the team-view's failed save took the list's preference flag")
 	}
 	if frame := renderSessionModal(s, 80, 24, ""); !strings.Contains(frame, "Team · Table") {
 		t.Fatalf("the save failure blocked the switch:\n%s", frame)
 	}
 	if s.ApplyKey("esc") != "" || s.TeamView != nil {
 		t.Fatalf("esc exit=%q view=%v want the list back", s.Exit, s.TeamView)
+	}
+}
+
+// DJA-375 R2: the review's two findings - the team-view's save failure
+// must not leak the list's "could not be saved" message, and every line
+// the tree and the table produce fits the width for any avail >= 1
+// (the review's width-1 case included), with the frame exactly as tall
+// as asked and no line past the width.
+
+// teamViewHostileFixture is the review's hostile cells: an agent whose
+// name carries an SGR sequence and whose role/task carry control
+// characters, plus the review's wide role (界😀abc, mode read-only, in a
+// lane) on top of the brief's fixtures.
+func teamViewHostileFixture() (*pickerTeamView, *pickerTeamView) {
+	roles := make([]teamViewRole, 0, len(teamViewRoleFixture)+1)
+	for _, r := range teamViewRoleFixture {
+		roles = append(roles, teamViewRole{
+			Role: r[0], Kind: r[1], Model: r[2], Effort: r[3], Mode: r[4],
+			Lane: r[5], KindFrom: r[6], ModelFrom: r[7], EffortFrom: r[8],
+			File: "/x/nau/" + r[0] + ".md",
+		})
+	}
+	roles = append(roles, teamViewRole{Role: "界😀abc", Lane: "wide", Mode: "read-only"})
+	roster := &teamViewRoster{
+		Workspace: "w6Y",
+		Settings:  teamViewRosterSettings{Layout: "split", ReuseWorkers: "on", MultiRole: "on", AutoApprove: "off"},
+		Agents: []teamViewRosterAgent{
+			{Name: "build", Role: "implementer", Kind: "pi", Pane: "w6Y:p2", State: "working", Report: "pending", Task: "Brief — wake hook"},
+			{Name: "界😀\x1b[31mX", Role: "r\n", Kind: "pi", Pane: "w6Y:p3", State: "working", Report: "pending", Task: "task\t"},
+		},
+		Others: []teamViewRosterOther{{Name: "orchestrator-4", Kind: "claude", Pane: "w6Y:p1", State: "idle", Workspace: "w6Y"}},
+	}
+	view := func(form string) *pickerTeamView {
+		return &pickerTeamView{
+			loaded:         true,
+			roster:         roster,
+			roles:          &teamViewRoles{Roles: roles},
+			machine:        "local",
+			workspaceLabel: "nau",
+			form:           form,
+		}
+	}
+	return view(teamFormTree), view(teamFormTable)
+}
+
+// TestTeamViewEveryLineFitsTheWidthFromOneTo120 is the review's width
+// finding: for every avail from 1 to 120, in both forms, every line of
+// pickerTeamContent has at most avail display columns (styles excluded)
+// and nothing panics. It includes the review's case (width 1, mode
+// read-only, role 界😀abc).
+func TestTeamViewEveryLineFitsTheWidthFromOneTo120(t *testing.T) {
+	for _, form := range []string{teamFormTree, teamFormTable} {
+		v, _ := teamViewHostileFixture()
+		v.form = form
+		for w := 1; w <= 120; w++ {
+			for _, line := range pickerTeamContent(v, w) {
+				if got := displayWidth(StripPickerControls(line)); got > w {
+					t.Fatalf("form=%s width=%d line has %d columns: %q", form, w, got, line)
+				}
+			}
+		}
+	}
+}
+
+// TestTeamViewReviewWidthOneCase pins the review's exact example: the
+// mode read-only with the role 界😀abc at width 1 gives one line of at
+// most 1 column (the prefix cut to the width, the roles after it, cut -
+// never the 2-column overflow of the old hard-cut floor).
+func TestTeamViewReviewWidthOneCase(t *testing.T) {
+	v, _ := teamViewHostileFixture()
+	lines := pickerTeamContent(v, 1)
+	for i, line := range lines {
+		if got := displayWidth(StripPickerControls(line)); got > 1 {
+			t.Fatalf("width=1 line %d has %d columns: %q", i, got, line)
+		}
+	}
+}
+
+// TestTeamViewFrameFitsItsWidthAtTinyWidths is the review's frame
+// finding: a renderPickerTeamFrame with width between 6 and 20 is
+// exactly the asked height, and no line goes past the width.
+func TestTeamViewFrameFitsItsWidthAtTinyWidths(t *testing.T) {
+	tree, table := teamViewHostileFixture()
+	for _, v := range []*pickerTeamView{tree, table} {
+		s := NewPickerState()
+		s.ViewState.Enabled = true
+		s.TeamView = v
+		o := pickerTeamViewOptions(s, "")
+		for w := 6; w <= 20; w++ {
+			for _, h := range []int{8, 18, 24} {
+				frame := renderPickerTeamFrame(&o, w, h)
+				lines := strings.Split(strings.TrimSuffix(frame, "\n"), "\n")
+				if len(lines) != h {
+					t.Fatalf("form=%s width=%d height=%d: the frame has %d lines:\n%s", v.form, w, h, len(lines), frame)
+				}
+				for i, line := range lines {
+					if got := displayWidth(StripPickerControls(line)); got > w {
+						t.Fatalf("form=%s width=%d height=%d: line %d has %d columns: %q", v.form, w, h, i, got, line)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestTeamViewFormSaveFailureIsSilentInTheList is the review's
+// silent-failure finding: with the config directory blocked, v in the
+// team view and Esc leave the list without the "could not be saved"
+// message (that message is the list's own preference's), the switch
+// happened, and the list's preference failure still shows its message.
+func TestTeamViewFormSaveFailureIsSilentInTheList(t *testing.T) {
+	cfg := t.TempDir()
+	// A regular file where the config directory would be: the write
+	// cannot create the directory (the list's save-failure rule).
+	if err := os.WriteFile(filepath.Join(cfg, "soho"), []byte("owned blocker"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	envCLI, cli, _ := pickerTeamFixture(t, teamViewJSONRules(t, teamViewRosterFixture, false, teamViewRolesFixture, false))
+	s := newSessionState(platform.Env{"XDG_CONFIG_HOME": cfg}, "darwin", true)
+	s.Entries = []PickerEntry{teamViewNauEntry(t, cwd)}
+	if action := s.ApplyKey("i"); action != "team" {
+		t.Fatalf("i action=%q want team", action)
+	}
+	boardTeamLoadAndApply(t, s, envCLI, cli)
+	if action := s.ApplyKey("v"); action != "" {
+		t.Fatalf("v action=%q", action)
+	}
+	if got := s.TeamView.form; got != teamFormTable {
+		t.Fatalf("v form=%q want table (the switch happened)", got)
+	}
+	if !s.teamViewPreferenceFailed {
+		t.Fatal("the failed form save was not recorded in the view's own flag")
+	}
+	if s.viewPreferenceFailed {
+		t.Fatal("the team-view's failed save took the list's preference flag")
+	}
+	if s.ApplyKey("esc") != "" || s.TeamView != nil {
+		t.Fatalf("esc exit=%q view=%v want the list back", s.Exit, s.TeamView)
+	}
+	var b bytes.Buffer
+	redrawSession(&b, s, 100)
+	if strings.Contains(b.String(), "could not be saved") {
+		t.Fatalf("the list shows the save message after the team toggle and Esc:\n%s", b.String())
+	}
+	// The list's own preference failure still shows its message.
+	s.ViewState.View = sessionViewTree
+	s.rememberSessionView()
+	if !s.viewPreferenceFailed {
+		t.Fatal("the list's failed save was not recorded")
+	}
+	b.Reset()
+	redrawSession(&b, s, 100)
+	if !strings.Contains(b.String(), "could not be saved") {
+		t.Fatalf("the list's preference failure lost its message:\n%s", b.String())
+	}
+}
+
+// TestTeamViewToggleBeforeLoadKeepsTheForm is the review's guard: v
+// before the load applies still takes the finished result, and the form
+// the switch chose is kept.
+func TestTeamViewToggleBeforeLoadKeepsTheForm(t *testing.T) {
+	s := NewPickerState()
+	s.TeamView = &pickerTeamView{loadSeq: 1, entryRef: "x", form: teamFormTree}
+	if action := s.ApplyKey("v"); action != "" {
+		t.Fatalf("v action=%q want empty", action)
+	}
+	if !s.applyPickerTeamView(pickerTeamViewResult{seq: 1, entryRef: "x", roster: &teamViewRoster{}, roles: &teamViewRoles{}}) {
+		t.Fatal("the finished load was not applied after the pre-load switch")
+	}
+	if got := s.TeamView.form; got != teamFormTable {
+		t.Fatalf("form=%q want table kept after the load", got)
 	}
 }

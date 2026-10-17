@@ -88,6 +88,10 @@ type BoardState struct {
 	// preference at the state's construction (missing, unreadable or
 	// invalid values read as the tree) and persisted by the v switch.
 	teamViewForm string
+	// teamViewPreferenceFailed records the team-view form's save
+	// failure: nothing displays it (the list's message is the list's
+	// own preference's), the switch and the atomic write go on as usual.
+	teamViewPreferenceFailed bool
 	// lastFrameSeq, lastFrameW and lastFrameH record the exact frame bytes
 	// this runtime last painted and the viewport they were painted
 	// against. An identical frame for the same viewport is not written
