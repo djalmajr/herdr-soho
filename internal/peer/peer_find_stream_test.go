@@ -24,7 +24,12 @@ import (
 func init() {
 	if file := os.Getenv("SOHO_FIND_REMOTE_PID"); file != "" &&
 		strings.Join(os.Args[1:], " ") == "--machine slow api snapshot" {
-		if err := os.WriteFile(file, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		// Write then rename, so the test never reads a created but still empty file.
+		tmp := file + ".tmp"
+		if err := os.WriteFile(tmp, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+			os.Exit(91)
+		}
+		if err := os.Rename(tmp, file); err != nil {
 			os.Exit(91)
 		}
 	}
