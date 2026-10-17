@@ -960,10 +960,139 @@ func compareComposed(t *testing.T, key, got string, sc retireDispatchCase, stepO
 	t.Fatalf("composed %s misses the report contract line for any step report path", key)
 }
 
+// TestDJA379DispatchOracle exercises the DJA-379 adaptation itself:
+// applied to a fragment of the frozen golden it replaces exactly the three
+// documented pairs and nothing else; applied to a text without a pair it
+// fails.
+func TestDJA379DispatchOracle(t *testing.T) {
+	// A controlled fragment carrying all three pairs, plus the distractors
+	// the exact-string contract must leave alone: the .current.md report
+	// pointer, another agent's path and the state-dir files the pairs do
+	// not cover.
+	frag := `{"files":{"state/ws/briefs/build-<TS>.md":"<ROOT>/state/ws/reports/build-<TS>.md","state/ws/reports/build-<TS>.current.md":"old","state/ws/briefs/build-<TS>.dispatch.json":"{}","state/ws/last-report-build":"state/ws/reports/build-<TS>.md","herdr.log":"agent prompt build <ROOT>/state/ws/briefs/build-<TS>.md <ROOT>/state/ws/reports/build-<TS>.md","tmp/soho/ws/reports/rev-<TS>.md":"rev"}}`
+	want := `{"files":{"tmp/soho/ws/reports/build-<TS>.brief.md":"<ROOT>/tmp/soho/ws/reports/build-<TS>.md","state/ws/reports/build-<TS>.current.md":"old","tmp/soho/ws/reports/build-<TS>.dispatch.json":"{}","state/ws/last-report-build":"tmp/soho/ws/reports/build-<TS>.md","herdr.log":"agent prompt build <ROOT>/tmp/soho/ws/reports/build-<TS>.brief.md <ROOT>/tmp/soho/ws/reports/build-<TS>.md","tmp/soho/ws/reports/rev-<TS>.md":"rev"}}`
+	adapted, err := testutil.ApplyDispatchReportDirOracle(frag)
+	if err != nil {
+		t.Fatalf("adapt the fragment: %v", err)
+	}
+	if adapted != want {
+		t.Fatalf("fragment adaptation:\n got  %s\n want %s", adapted, want)
+	}
+
+	// A real fragment of the frozen golden: the dispatch-quota scenario
+	// document. The adaptation must produce exactly the three pair swaps,
+	// computed here independently of the implementation.
+	pairs := [][2]string{
+		{testutil.DispatchBriefOraclePrevious, testutil.DispatchBriefOracleNative},
+		{testutil.DispatchReportOraclePrevious, testutil.DispatchReportOracleNative},
+		{testutil.DispatchSidecarOraclePrevious, testutil.DispatchSidecarOracleNative},
+	}
+	raw := string(loadRetirementGolden(t, "dispatch")["dispatch-quota"])
+	independent := raw
+	for _, pair := range pairs {
+		independent = strings.ReplaceAll(independent, pair[0], pair[1])
+	}
+	adapted, err = testutil.ApplyDispatchReportDirOracle(raw)
+	if err != nil {
+		t.Fatalf("adapt the dispatch-quota fragment: %v", err)
+	}
+	if adapted != independent {
+		t.Fatalf("the golden fragment adaptation differs from the exact pair swaps: %s",
+			firstGoldenLineDifference(adapted, independent))
+	}
+
+	// Without a pair the adaptation fails, per missing pair: it is never
+	// applied silently over a changed golden.
+	if _, err := testutil.ApplyDispatchReportDirOracle(`{"files":{"herdr.log":"agent list"}}`); err == nil {
+		t.Fatal("a text without any pair must fail")
+	}
+	for i, missing := range pairs {
+		text := ""
+		for j, pair := range pairs {
+			if j != i {
+				text += pair[0] + " "
+			}
+		}
+		if _, err := testutil.ApplyDispatchReportDirOracle(text); err == nil {
+			t.Fatalf("missing %s: expected an error", missing[0])
+		} else if !strings.Contains(err.Error(), missing[0]) {
+			t.Fatalf("missing %s: the error does not name it: %v", missing[0], err)
+		}
+	}
+	// A second application over the adapted text fails: no pair remains, so
+	// re-adapting a document is always loud.
+	if _, err := testutil.ApplyDispatchReportDirOracle(adapted); err == nil {
+		t.Fatal("a second application over the adapted text must fail")
+	}
+
+	// The run-wait-only mirror step: applied to the pair-adapted run-wait
+	// document, the state entries exist and carry the same content as the
+	// adapted tmp/soho entries (mirrorReport copies them); applied to a
+	// document without the tmp entries it fails.
+	runWaitRaw := string(loadRetirementGolden(t, "dispatch")["run-wait"])
+	adaptedRunWait, err := testutil.ApplyDispatchReportDirOracle(runWaitRaw)
+	if err != nil {
+		t.Fatalf("adapt the run-wait fragment: %v", err)
+	}
+	mirrored, err := testutil.ApplyDispatchMirrorEntries(adaptedRunWait)
+	if err != nil {
+		t.Fatalf("mirror the run-wait fragment: %v", err)
+	}
+	var mirroredDoc struct {
+		Files map[string]string `json:"files"`
+	}
+	if err := json.Unmarshal([]byte(mirrored), &mirroredDoc); err != nil {
+		t.Fatalf("parse the mirrored run-wait scenario: %v", err)
+	}
+	for stateKey, tmpKey := range map[string]string{
+		"state/ws/reports/build-<TS>.md":           "tmp/soho/ws/reports/build-<TS>.md",
+		"state/ws/briefs/build-<TS>.md":            "tmp/soho/ws/reports/build-<TS>.brief.md",
+		"state/ws/briefs/build-<TS>.dispatch.json": "tmp/soho/ws/reports/build-<TS>.dispatch.json",
+	} {
+		stateContent, okState := mirroredDoc.Files[stateKey]
+		tmpContent, okTmp := mirroredDoc.Files[tmpKey]
+		if !okState {
+			t.Fatalf("the mirrored inventory lost the state entry %s", stateKey)
+		}
+		if !okTmp {
+			t.Fatalf("the mirrored inventory lost the tmp entry %s", tmpKey)
+		}
+		if stateContent != tmpContent {
+			t.Fatalf("the mirror entry %s differs from its tmp copy %s:\n got  %q\n want %q", stateKey, tmpKey, stateContent, tmpContent)
+		}
+	}
+	// Without the adapted tmp entries the mirror step fails: it is never
+	// applied silently over a document the pair adaptation did not produce.
+	if _, err := testutil.ApplyDispatchMirrorEntries(runWaitRaw); err == nil {
+		t.Fatal("the mirror step over the unadapted document must fail")
+	} else if !strings.Contains(err.Error(), "tmp/soho/ws/reports/build-<TS>.md") {
+		t.Fatalf("the mirror error does not name the missing tmp entry: %v", err)
+	}
+}
+
 func TestRetirementDispatchGolden(t *testing.T) {
 	// JS: parity-dispatch.test.mjs (test-quota.sh, test-status.sh:199,
 	// test-multi-role.sh, and run with/without the wait).
 	goldens := loadRetirementGolden(t, "dispatch")
+
+	// DJA-379 intentional contract adaptation: with the state dir outside the worker's cwd, the composed prompt and the report go to $TMPDIR/soho/<ws>/reports; the frozen bytes are unchanged. run-wait also keeps the state-dir entries: wait's mirrorReport copies the settled report, the composed brief and the sidecar back to the state dir.
+	for _, name := range []string{"dispatch-quota", "dispatch-titled", "run-no-wait", "run-wait"} {
+		adapted, err := testutil.ApplyDispatchReportDirOracle(string(goldens[name]))
+		if err != nil {
+			t.Fatalf("golden %s: %v", name, err)
+		}
+		goldens[name] = json.RawMessage(adapted)
+	}
+	// The run-wait-only step of the adaptation: the wait settles done, so
+	// mirrorReport copied the settled report, the composed brief and the
+	// sidecar back to the state dir; the expected final inventory keeps the
+	// three state entries, each with the content of its adapted tmp/soho
+	// copy.
+	if mirrored, err := testutil.ApplyDispatchMirrorEntries(string(goldens["run-wait"])); err != nil {
+		t.Fatalf("golden run-wait: %v", err)
+	} else {
+		goldens["run-wait"] = json.RawMessage(mirrored)
+	}
 
 	// seedRoster appends a trailing newline to each row (parity-dispatch.
 	// test.mjs); build12 does the same so the on-disk roster matches.

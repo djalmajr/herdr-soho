@@ -245,7 +245,14 @@ func cmdDispatch(argv []string, ctx *core.Config, env platform.Env, cwd string) 
 	stamp := core.NowStamp(now)
 	reportsDir := filepath.Join(sd, "briefs")
 	reportDir := filepath.Join(sd, "reports")
-	if workerCwd != "" && !dispatch.SamePath(workerCwd, platform.ProjectRoot(env, cwd), platform.Current()) {
+	// The report and the composed prompt follow the state dir only when the
+	// worker can reach it: a sandboxed worker writes inside its own cwd, so
+	// with a non-empty worker cwd the files go to the soho scratch dir
+	// whenever sd is not inside that cwd — the caller's project root no
+	// longer decides. Comparing the worker's cwd with the caller's root
+	// routed a worktree caller's report into the main checkout's sd, which
+	// the worker there cannot write (DJA-379).
+	if workerCwd != "" && !dispatch.PathWithin(sd, workerCwd, platform.Current()) {
 		tmp := env.Get("TMPDIR")
 		if tmp == "" {
 			tmp = os.TempDir()
