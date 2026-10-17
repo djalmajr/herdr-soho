@@ -532,11 +532,12 @@ func teamViewRoleListLines(prefix string, roles []string, avail int) []string {
 	if avail <= 0 {
 		return []string{""}
 	}
-	prefix = teamCut(prefix, avail)
 	if displayWidth(prefix) >= avail {
 		// The prefix fills the line: one line, the prefix followed by
 		// the roles separated by ", ", cut (no break), so the line
-		// never goes past the width.
+		// never goes past the width. The prefix is measured before any
+		// cut: a cut that stops before a wide character leaves it
+		// narrower than the width and would send the roles to the wrap.
 		joined := prefix
 		for i, role := range roles {
 			if i > 0 {

@@ -904,3 +904,16 @@ func TestTeamViewToggleBeforeLoadKeepsTheForm(t *testing.T) {
 		t.Fatalf("form=%q want table kept after the load", got)
 	}
 }
+
+// A mode prefix wider than the line only because of a wide character
+// still makes one cut line: the prefix is measured before any cut (a
+// cut that stops before the wide character leaves it narrower than the
+// width, which used to send the roles to the wrap, one piece per line).
+func TestTeamViewWideModePrefixStaysOneLine(t *testing.T) {
+	v := &pickerTeamView{loaded: true, roster: &teamViewRoster{}, roles: &teamViewRoles{Roles: []teamViewRole{{Role: "abc", Lane: "wide", Mode: "界"}}}}
+	got := teamViewRolesBlock(v, 3)
+	want := teamCut("  界  abc", 3)
+	if len(got) != 2 || got[1] != want {
+		t.Fatalf("want the lane header and one cut mode line %q; got %q", want, got)
+	}
+}
