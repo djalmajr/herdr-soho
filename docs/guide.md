@@ -59,7 +59,7 @@ The **documenter** edits documentation only (README, guides, references, ADRs, C
 ```text
 soho init                              # you become `orchestrator`; an untitled pane gets one
 soho title "slice 2"                   # this pane: `orchestrator: slice 2`
-soho roles
+soho roles [--json]
 soho spawn implementer                 # the agent is named after its lane (`build`)
 soho dispatch build brief.md           # waits for the report file
 soho collect build [--verify]          # active collaboration: metadata and last evidence path; otherwise prints the report; an agent still working or blocked with no report: stderr and exit 4 (`--lines` forces the terminal); --verify checks the evidence hash and its sha256 lines (exit 16 on changed/missing or no hash lines, 4 if unreadable)
@@ -67,7 +67,7 @@ soho stats [--since <date>] [--by role|kind|model|agent|effort] [--json] # tasks
 soho friction add "<text>" [--brief P] # record one friction note (level note, command friction)
 soho run scouter brief.md               # spawn + dispatch + collect
 soho wait build review                 # block until every report exists
-soho roster [--scope workspace|server]   # live agents with role/kind/pane/state/report and the current task (TASK); default workspace; --scope server adds the other local workspaces, grouped and identified
+soho roster [--scope workspace|server] [--json]   # live agents with role/kind/pane/state/report and the current task (TASK); default workspace; --scope server adds the other local workspaces, grouped and identified
 soho send build "check the report"     # peer message: a ref (local/w12:p1, windows/w3:p1) or a name on the local server; --file <path>; --now; --timeout MS (default 600000)
 soho collaborate start <author> <reviewer> --brief <path> [--max-rounds N]   # orchestrator only: open a review cycle (distinct model families; see "Worker collaboration")
 soho release build --close             # closes only panes the skill created; never a participant of an active collaboration

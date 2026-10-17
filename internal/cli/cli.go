@@ -177,7 +177,7 @@ func Run(args []string, env platform.Env) (code int) {
 			}
 			extra = fmt.Sprintf(" (%d extra %s not allowed)", count, noun)
 		}
-		platform.Die("soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server]', 'explain', 'config', 'roles', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset SOHO_NOWRITE to write", 2)
+		platform.Die("soho: SOHO_NOWRITE=1 is read-only: only these invocations run (the plugin's reads): the exact 'doctor', 'roster [--scope workspace|server] [--json]', 'explain', 'config', 'roles [--json]', 'friction' with the read options --since, --level, --command, --agent, --summary, 'collect <agent> [--lines N] [--verify]', 'copies', 'procs', 'status [agents...]', 'gc' without --yes, 'collaborate status <assignment> [--json]', 'capabilities --json'; rejected: "+shown+extra+" — unset SOHO_NOWRITE to write", 2)
 	}
 	if command == "help" || command == "-h" || command == "--help" || command == "" {
 		_, _ = io.WriteString(platform.Stdout, usage)
@@ -329,7 +329,7 @@ func Run(args []string, env platform.Env) (code int) {
 	case "run":
 		return cmdRun(args[1:], ctx, decisionEnv, commandCwd)
 	case "roles":
-		cmdRoles(decisionEnv, commandCwd)
+		cmdRoles(args[1:], decisionEnv, commandCwd)
 		return 0
 	case "role":
 		cmdRole(args[1:], decisionEnv, commandCwd)
@@ -373,9 +373,10 @@ func Run(args []string, env platform.Env) (code int) {
 }
 
 // nowriteReadInvocation decides, from the shape of the invocation alone, what
-// runs under SOHO_NOWRITE=1: the exact doctor/roster (the plugin's
-// actions, unchanged), the exact explain, config, roles and copies, friction
-// with only the read options, collect <agent> with its options, status with
+// runs under SOHO_NOWRITE=1: the doctor/roster reads (the plugin's
+// actions, roster with its --scope and --json shapes), the exact explain,
+// config, copies and procs, roles with the optional --json, friction with
+// only the read options, collect <agent> with its options, status with
 // agent names, and gc without --yes.
 // Every other shape is rejected before any command runs, so a rejected
 // invocation writes nothing (not even a friction line).
@@ -393,10 +394,12 @@ func nowriteReadInvocation(args []string) bool {
 	case "job":
 		return nowriteJobRead(args[1:])
 	case "roster":
-		_, ok := rosterScope(args[1:])
+		_, _, ok := rosterArgs(args[1:])
 		return ok
-	case "doctor", "explain", "config", "roles", "copies", "procs":
+	case "doctor", "explain", "config", "copies", "procs":
 		return len(args) == 1
+	case "roles":
+		return len(args) == 1 || (len(args) == 2 && args[1] == "--json")
 	case "status":
 		for _, agent := range args[1:] {
 			if agent == "" || strings.HasPrefix(agent, "-") {

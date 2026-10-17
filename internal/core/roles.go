@@ -163,9 +163,20 @@ func stringsToAny(values []string) []any {
 	return out
 }
 
-func CmdRoles(env platform.Env, cwd string) {
+// roleTableRow is one row of the roles table: the role's file and the
+// settings the text table and the JSON output both show. The rows keep the
+// text order: the role dirs in priority order, the names sorted UTF16 per
+// dir, one entry per role name (the first dir wins).
+type roleTableRow struct {
+	Role string
+	File string
+	Res  RoleSettings
+	Mode string
+}
+
+func collectRoles(env platform.Env, cwd string) []roleTableRow {
 	ctx := LoadConfig(env, cwd)
-	lines := []string{padUTF16("ROLE", 18) + " " + padUTF16("KIND", 8) + " " + padUTF16("MODEL", 24) + " " + padUTF16("EFFORT", 8) + " " + padUTF16("MODE", 10) + " FROM"}
+	rows := []roleTableRow{}
 	seen := map[string]bool{}
 	for _, dir := range RoleDirs(env, cwd) {
 		entries, err := os.ReadDir(dir)
@@ -189,16 +200,48 @@ func CmdRoles(env platform.Env, cwd string) {
 				continue
 			}
 			seen[role] = true
-			res := ResolveRoleSettings(role, &ctx, env, cwd, RoleFlags{})
-			cell := func(value string) string {
-				if value == "" {
-					return "-"
-				}
-				return value
-			}
-			from := fmt.Sprintf("kind: %s; model: %s; effort: %s; file: %s", res.KindFrom, res.ModelFrom, res.EffortFrom, file)
-			lines = append(lines, padUTF16(role, 18)+" "+padUTF16(cell(res.Kind), 8)+" "+padUTF16(cell(res.ModelSpec), 24)+" "+padUTF16(cell(res.Effort), 8)+" "+padUTF16(cell(FmGet(file, "mode")), 10)+" "+from)
+			rows = append(rows, roleTableRow{Role: role, File: file, Res: ResolveRoleSettings(role, &ctx, env, cwd, RoleFlags{}), Mode: FmGet(file, "mode")})
 		}
 	}
+	return rows
+}
+
+func CmdRoles(env platform.Env, cwd string) {
+	lines := []string{padUTF16("ROLE", 18) + " " + padUTF16("KIND", 8) + " " + padUTF16("MODEL", 24) + " " + padUTF16("EFFORT", 8) + " " + padUTF16("MODE", 10) + " FROM"}
+	cell := func(value string) string {
+		if value == "" {
+			return "-"
+		}
+		return value
+	}
+	for _, row := range collectRoles(env, cwd) {
+		res := row.Res
+		from := fmt.Sprintf("kind: %s; model: %s; effort: %s; file: %s", res.KindFrom, res.ModelFrom, res.EffortFrom, row.File)
+		lines = append(lines, padUTF16(row.Role, 18)+" "+padUTF16(cell(res.Kind), 8)+" "+padUTF16(cell(res.ModelSpec), 24)+" "+padUTF16(cell(res.Effort), 8)+" "+padUTF16(cell(row.Mode), 10)+" "+from)
+	}
 	_, _ = fmt.Fprintln(platform.Stdout, strings.Join(lines, "\n"))
+}
+
+// CmdRolesJSON prints the roles table as one compact JSON object on one
+// line (the plugin's read): the same roles, order and values as the text
+// table, with the empty values as "" (the "-" cells are text-only).
+func CmdRolesJSON(env platform.Env, cwd string) {
+	rows := collectRoles(env, cwd)
+	roles := make([]any, 0, len(rows))
+	for _, row := range rows {
+		res := row.Res
+		roles = append(roles, jsonjs.O(
+			"role", row.Role,
+			"kind", res.Kind,
+			"model", res.ModelSpec,
+			"effort", res.Effort,
+			"mode", row.Mode,
+			"lane", res.Lane,
+			"kind_from", res.KindFrom,
+			"model_from", res.ModelFrom,
+			"effort_from", res.EffortFrom,
+			"file", row.File,
+		))
+	}
+	_, _ = fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O("roles", roles)))
 }
