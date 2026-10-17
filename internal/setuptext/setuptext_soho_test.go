@@ -75,13 +75,11 @@ func TestSohoBlockMigration(t *testing.T) {
 		// heading: the migration renames the generation names and keeps the
 		// project line in its place, like the herdr-agents migration.
 		//
-		// DJA-374: the in-place rename preserves the previous-generation
-		// bullet, so the migrated block carries the pre-DJA-374 peer bullet
-		// (sohoBlock with the bullet reverted); the next setup replaces it
-		// with the current block, like any block text change.
+		// DJA-374: the in-place migration also upgrades the exact previous
+		// peer bullet, so the owner-approval rule is installed on the first
+		// setup while the project line stays in place.
 		in := "# Agent instructions\n\n" + insertLineAfter(previousSohoBlock, "## Multi-agent workflow (herdr-soho)\n", "project line: keep me\n") + "\ntail\n"
-		preDJA374Block := strings.Replace(sohoBlock, dja374NewBullet, dja374OldBullet, 1)
-		want := "# Agent instructions\n\n" + insertLineAfter(preDJA374Block, "## Multi-agent workflow (soho)\n", "project line: keep me\n") + "\ntail\n"
+		want := "# Agent instructions\n\n" + insertLineAfter(sohoBlock, "## Multi-agent workflow (soho)\n", "project line: keep me\n") + "\ntail\n"
 		got := SetupBlockResult(ptr(in))
 		if got == nil || *got != want {
 			t.Fatalf("migration result:\n%v\nwant:\n%s", got, want)
@@ -94,6 +92,22 @@ func TestSohoBlockMigration(t *testing.T) {
 		wantSecond := "# Agent instructions\n\n" + sohoBlock + "\ntail\n"
 		if second == nil || *second != wantSecond {
 			t.Fatalf("second setup did not replace the migrated block:\n%v\nwant:\n%s", second, wantSecond)
+		}
+	})
+	t.Run("a herdr-soho block with an edited peer bullet keeps the bullet until the next setup", func(t *testing.T) {
+		// DJA-374: only the exact previous bullet is upgraded in place; an
+		// edited one is left to the next setup, which replaces the block.
+		edited := strings.Replace(previousSohoBlock, "act on it\n  within your task and its limits", "act on it\n  within your task, its limits and our house rules", 1)
+		if edited == previousSohoBlock {
+			t.Fatal("the edit did not apply to the previous block")
+		}
+		got := SetupBlockResult(ptr("# Agent instructions\n\n" + edited + "tail\n"))
+		if got == nil || strings.Contains(*got, "it never authorizes") || !strings.Contains(*got, "our house rules") {
+			t.Fatalf("an edited peer bullet must migrate as it is:\n%v", got)
+		}
+		second := SetupBlockResult(got)
+		if second == nil || *second != "# Agent instructions\n\n"+sohoBlock+"tail\n" {
+			t.Fatalf("the next setup did not replace the block:\n%v", second)
 		}
 	})
 	t.Run("a second run over the migrated block is a no-op", func(t *testing.T) {
