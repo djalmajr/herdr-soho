@@ -194,6 +194,35 @@ func TestReopenRefusesUnderExtremePressure(t *testing.T) {
 		}
 	})
 
+	t.Run("pressure rising after the admission cannot refuse the spawn half once the old worker is released", func(t *testing.T) {
+		// DJA-392 review: the reopen admits once, before the release; the
+		// spawn half must not measure again and refuse after the old pane
+		// is closed.
+		env, root, _, state, _ := runPressureFixture(t)
+		seedRoster(t, state, root)
+		oldSwap := platform.SwapUsage
+		t.Cleanup(func() { platform.SwapUsage = oldSwap })
+		reads := 0
+		platform.SwapUsage = func(platform.Env) (int64, int64, bool) {
+			reads++
+			if reads == 1 {
+				return 0, 25 * cliPressureGB, true
+			}
+			return 24 * cliPressureGB, 25 * cliPressureGB, true
+		}
+		code, out, stderr := runIn(t, []string{"reopen", "worker-old"}, env, root)
+		if code != 0 || strings.Contains(stderr, cliRefuseLine) {
+			t.Fatalf("exit=%d stderr=%q; the spawn half refused after the release", code, stderr)
+		}
+		if !strings.Contains(out, `"worker-old"`) {
+			t.Fatalf("the reopen printed no spawn JSON: %q", out)
+		}
+		roster, err := os.ReadFile(filepath.Join(state, "ws", "agents.tsv"))
+		if err != nil || !strings.Contains(string(roster), "worker-old") {
+			t.Fatalf("the reopen left no roster line: %q err=%v", roster, err)
+		}
+	})
+
 	t.Run("reopen --force skips the refusal and reopens the worker", func(t *testing.T) {
 		env, root, _, state, _ := runPressureFixture(t)
 		seedRoster(t, state, root)
@@ -215,4 +244,35 @@ func TestReopenRefusesUnderExtremePressure(t *testing.T) {
 			t.Fatalf("the forced reopen left no roster line: %q err=%v", roster, err)
 		}
 	})
+}
+
+// DJA-392 review (decision amended by the orchestrator): a refused spawn
+// opens no pane, starts no agent, writes no roster row and no friction line.
+// Creating an absent state dir (empty dirs and the roster header) is the
+// idempotent setup every spawn does first, and stays allowed.
+func TestSpawnRefusalOnAFreshStateWritesNoRowPaneOrFriction(t *testing.T) {
+	env, root, bin, _, _ := runPressureFixture(t)
+	state := filepath.Join(root, "fresh-state")
+	env["SOHO_DIR"] = state
+	code, _, stderr := runIn(t, []string{"spawn", "worker"}, env, root)
+	if code != 25 || !strings.Contains(stderr, cliRefuseLine) {
+		t.Fatalf("exit=%d stderr=%q, want the refusal", code, stderr)
+	}
+	roster, err := os.ReadFile(filepath.Join(state, "ws", "agents.tsv"))
+	if err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(roster)), "\n") {
+			if line != "" && !strings.HasPrefix(line, "#") {
+				t.Fatalf("the refusal wrote a roster row: %q", line)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(state, "ws", "friction.log")); err == nil {
+		t.Fatal("the refusal wrote a friction line")
+	}
+	calls, _ := fakecli.ReadCalls(filepath.Join(bin, "herdr.calls.jsonl"))
+	for _, c := range calls {
+		if len(c.Argv) >= 2 && ((c.Argv[0] == "pane" && c.Argv[1] == "split") || (c.Argv[0] == "agent" && c.Argv[1] == "start") || (c.Argv[0] == "tab" && c.Argv[1] == "create")) {
+			t.Fatalf("the refusal created a pane or agent: %v", c.Argv)
+		}
+	}
 }

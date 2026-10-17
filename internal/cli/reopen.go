@@ -69,10 +69,10 @@ func cmdReopen(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 		return code
 	}
 
-	spawnArgs := []string{role, "--fresh", "--kind", wkind, "--name", agent, "--cwd", wdir}
-	if force {
-		spawnArgs = append(spawnArgs, "--force")
-	}
+	// The pressure admission ran once, above, before the release: the spawn
+	// half never measures again, so a pressure rise after the release cannot
+	// refuse the new pane once the old worker is gone.
+	spawnArgs := []string{role, "--fresh", "--kind", wkind, "--name", agent, "--cwd", wdir, "--force"}
 	if model != "" {
 		spawnArgs = append(spawnArgs, "--model", model)
 	}
