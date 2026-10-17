@@ -823,7 +823,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	target, file := "", ""
 	assignment, messageType := "", ""
 	now, timeoutMS := false, DefaultSendTimeoutMS
-	timeoutGiven := false
+	timeoutGiven, timeoutPlain := false, false
 	words := []string{}
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
@@ -842,12 +842,23 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			} else if a == "--type" {
 				messageType = argv[i]
 			} else {
-				n, ok := parsePositiveInt(argv[i])
-				if !ok {
-					platform.Die("send: --timeout expects the wait in milliseconds (a positive integer)", 2)
+				raw := argv[i]
+				ms, ok := core.ParseTimeoutMS(raw)
+				if ok && (ms <= 0 || ms > int64(math.MaxInt)) {
+					ok = false // send keeps its positive minimum, and a plain number its int range
 				}
-				timeoutMS = n
+				if !ok {
+					// The JS Number() spellings (1e3, 12.0, 0x10) stay accepted
+					// as plain milliseconds; a unit needs ParseTimeoutMS.
+					if n, ok2 := parsePositiveInt(raw); ok2 {
+						ms = int64(n)
+					} else {
+						platform.Die("send: --timeout expects the wait in milliseconds or a duration such as 90s, 30m or 2h", 2)
+					}
+				}
+				timeoutMS = int(ms)
 				timeoutGiven = true
+				timeoutPlain = core.IsPlainTimeoutMS(raw)
 			}
 		default:
 			if strings.HasPrefix(a, "--") {
@@ -951,7 +962,7 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	// The short-timeout warning logs under the state dir, so it comes after the
 	// skill refusal above, which must leave no side effect. An empty log file
 	// keeps the warning on screen only (core.Warn writes nothing for it).
-	if timeoutGiven {
+	if timeoutGiven && timeoutPlain {
 		frictionLog := ""
 		if stateDir != "" {
 			frictionLog = filepath.Join(stateDir, "friction.log")
@@ -1909,14 +1920,27 @@ func CmdFind(argv []string, env platform.Env) int {
 			// Rejected before any herdr invocation: an invalid deadline must
 			// not cost a single subprocess.
 			if i+1 >= len(argv) || argv[i+1] == "" || strings.HasPrefix(argv[i+1], "--") {
-				platform.DieFriction("find: --timeout expects the deadline in milliseconds (a positive integer)", 2)
+				platform.DieFriction("find: --timeout expects the deadline in milliseconds or a duration such as 90s, 30m or 2h", 2)
 			}
 			i++
-			if n, ok := parsePositiveInt(argv[i]); !ok {
-				platform.DieFriction("find: --timeout expects the deadline in milliseconds (a positive integer)", 2)
-			} else {
-				timeoutMS = n
+			raw := argv[i]
+			ms, ok := core.ParseTimeoutMS(raw)
+			if ok && ms > int64(math.MaxInt) {
+				ok = false // beyond the int range, as a plain number would be
 			}
+			if !ok {
+				// The JS Number() spellings (1e3, 12.0, 0x10) stay accepted as
+				// plain milliseconds; a unit needs ParseTimeoutMS.
+				if n, ok2 := parsePositiveInt(raw); !ok2 {
+					platform.DieFriction("find: --timeout expects the deadline in milliseconds or a duration such as 90s, 30m or 2h", 2)
+				} else {
+					ms = int64(n)
+				}
+			}
+			if ms <= 0 {
+				platform.DieFriction("find: --timeout expects the deadline in milliseconds or a duration such as 90s, 30m or 2h", 2)
+			}
+			timeoutMS = int(ms)
 		default:
 			if strings.HasPrefix(a, "--") {
 				platform.DieFriction("usage: find [search words] [--machine <label>]... [--all] [--json] [--timeout MS]", 2)
