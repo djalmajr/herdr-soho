@@ -241,3 +241,54 @@ func TestSendAgentNotReady(t *testing.T) {
 		}
 	})
 }
+
+// DJA-377 review: every agent_not_ready retry gets only what is left of the
+// send's --timeout. A retry whose agent get hangs is cut at the deadline and
+// the send exits 4 as still not ready, instead of waiting out the get's own
+// 30 s timeout.
+func TestSendAgentNotReadySlowRetryKeepsTheDeadline(t *testing.T) {
+	f := newFixture(t, []fakecli.Rule{
+		{Argv: []string{"agent", "get", "worker"}, Call: 1, Stderr: notReadyErr, Code: 1},
+		{Argv: []string{"agent", "get", "worker"}, Call: 2, Delay: 3000, Stderr: notReadyErr, Code: 1},
+	})
+	f.env["SOHO_SEND_POLL_MS"] = "10"
+	start := time.Now()
+	code, _, stderr := f.run([]string{"send", "worker", "--now", "--timeout", "200ms", "hello"})
+	elapsed := time.Since(start)
+	calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 4 || !strings.Contains(stderr, "(still not ready after 0.2s)") || countCalls(calls, "agent", "prompt") != 0 {
+		t.Fatalf("code=%d stderr=%q calls=%v; want exit 4 still not ready, no prompt", code, stderr, calls)
+	}
+	if elapsed >= 1500*time.Millisecond {
+		t.Fatalf("the slow retry held the send for %v, far past its 200ms --timeout", elapsed)
+	}
+}
+
+// DJA-377 review: the busy wait after an agent_not_ready wait gets only the
+// real time left before the shared deadline, never a floor that revives an
+// exhausted budget; nothing left means no new wait.
+func TestSendBusyBudgetAfterNotReady(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	cases := []struct {
+		name     string
+		notReady bool
+		left     time.Duration
+		wantMS   int
+		wantWait bool
+	}{
+		{"no not-ready wait: the full --timeout", false, 0, 5000, true},
+		{"30 ms left stays 30 ms", true, 30 * time.Millisecond, 30, true},
+		{"1 ms left stays 1 ms", true, time.Millisecond, 1, true},
+		{"nothing left: no new wait", true, 0, 0, false},
+		{"past the deadline: no new wait", true, -50 * time.Millisecond, -50, false},
+	}
+	for _, tc := range cases {
+		gotMS, gotWait := peer.SendBusyBudgetMS(5000, tc.notReady, now.Add(tc.left), now)
+		if gotWait != tc.wantWait || (tc.wantWait && gotMS != tc.wantMS) {
+			t.Fatalf("%s: got (%d, %v), want (%d, %v)", tc.name, gotMS, gotWait, tc.wantMS, tc.wantWait)
+		}
+	}
+}
