@@ -85,7 +85,7 @@ func TestCmdRolesJSONMatchesTheTextTable(t *testing.T) {
 		t.Fatalf("roles JSON has %d roles, text table has %d rows:\n%s", len(arr), len(textRows), jsonOut)
 	}
 
-	wantFirst := `{"role":"custom","kind":"","model":"","effort":"","mode":"edit","lane":"","kind_from":"default","model_from":"default","effort_from":"default","file":"` + customFile + `"}`
+	wantFirst := `{"role":"custom","kind":"","model":"","effort":"","mode":"edit","lane":"","kind_from":"default","model_from":"default","effort_from":"default","file":` + jsonjs.Stringify(customFile) + `}`
 	if !strings.Contains(jsonOut, wantFirst) {
 		t.Fatalf("first JSON role does not pin the key order and the empty values as \"\":\ngot  %s\nwant it to contain %s", jsonOut, wantFirst)
 	}
