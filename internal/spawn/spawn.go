@@ -176,8 +176,25 @@ func ResumeArg(kind string, args []string) string {
 	return ""
 }
 
-// FindReusable selects an idle compatible worker from the roster.
+// FindReusable selects an idle compatible worker from the roster, whatever
+// MCP choice it was opened with.
 func FindReusable(role, kind, workerCwd, name, wantModel, wantApprovals string, ctx *core.Config, env platform.Env, cwd string) (string, string, bool) {
+	return FindReusableMcp(role, kind, workerCwd, name, wantModel, wantApprovals, "", ctx, env, cwd)
+}
+
+// mcpMatches reports whether a roster row's MCP choice (column 15,
+// DJA-392) fits the request. A row written before that column carries no
+// choice and matches any request, as reopen treats it; an empty request
+// matches any row.
+func mcpMatches(f []string, want string) bool {
+	got := fieldAt(f, 15)
+	return got == "" || want == "" || got == want
+}
+
+// FindReusableMcp is FindReusable that also requires the worker's MCP
+// choice to match wantMcp (DJA-392): a session opened without the user's
+// MCP servers cannot serve a role that needs them, nor the reverse.
+func FindReusableMcp(role, kind, workerCwd, name, wantModel, wantApprovals, wantMcp string, ctx *core.Config, env platform.Env, cwd string) (string, string, bool) {
 	multi := core.Cfg(ctx, "multi_role", "on", env)
 	sd := core.StateDirPath(ctx, env, cwd)
 	blockedName, blockedCause, crossHit := "", "", ""
@@ -226,6 +243,9 @@ func FindReusable(role, kind, workerCwd, name, wantModel, wantApprovals string, 
 		if args != ConfigNativeArgs(kind, "", role, ctx, env, cwd, nil) {
 			continue
 		}
+		if !mcpMatches(f, wantMcp) {
+			continue
+		}
 		report := core.LastReport(sd, nm)
 		if report != "" {
 			st, err := os.Stat(report)
@@ -260,7 +280,7 @@ func FindReusable(role, kind, workerCwd, name, wantModel, wantApprovals string, 
 // pending report, not locked for a review role, and kind, resolved model
 // (roster column 8) and cwd (roster column 6, canonical via
 // dispatch.SamePath) all matching the request.
-func laneReuseCandidate(f []string, state, role, kind, model, workerCwd, sd string, env platform.Env, cwd string) bool {
+func laneReuseCandidate(f []string, state, role, kind, model, mcp, workerCwd, sd string, env platform.Env, cwd string) bool {
 	if state != "idle" && state != "done" {
 		return false
 	}
@@ -275,13 +295,13 @@ func laneReuseCandidate(f []string, state, role, kind, model, workerCwd, sd stri
 	if core.IsReviewRole(role) && (core.RoleIsEdit(fieldAt(f, 3), env, cwd) || core.HistoryHasEdit(fieldAt(f, 10), env, cwd)) {
 		return false
 	}
-	return fieldAt(f, 2) == kind && fieldAt(f, 8) == model && dispatch.SamePath(fieldAt(f, 6), workerCwd, platform.Current())
+	return fieldAt(f, 2) == kind && fieldAt(f, 8) == model && mcpMatches(f, mcp) && dispatch.SamePath(fieldAt(f, 6), workerCwd, platform.Current())
 }
 
 // laneReusePick scans the lane's live workers in roster order and returns the
 // first idle worker that is a reuse candidate for the request, or "" when no
 // idle worker matches (each mismatched idle then counts as occupied).
-func laneReusePick(sd, lane, role, kind, model, workerCwd string, env platform.Env, cwd string) string {
+func laneReusePick(sd, lane, role, kind, model, mcp, workerCwd string, env platform.Env, cwd string) string {
 	for _, row := range core.LaneWorkers(sd, lane) {
 		f := strings.Split(row, "\t")
 		nm := fieldAt(f, 0)
@@ -289,7 +309,7 @@ func laneReusePick(sd, lane, role, kind, model, workerCwd string, env platform.E
 			continue
 		}
 		st := herdr.AgentState(nm, env, herdr.Timeout, nil)
-		if laneReuseCandidate(f, st.State, role, kind, model, workerCwd, sd, env, cwd) {
+		if laneReuseCandidate(f, st.State, role, kind, model, mcp, workerCwd, sd, env, cwd) {
 			return nm
 		}
 	}
@@ -680,7 +700,7 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 					}
 					named = true
 					st := herdr.AgentState(o.name, env, herdr.Timeout, nil)
-					if laneReuseCandidate(rf, st.State, o.role, kind, o.model, o.cwd, sd, env, cwd) {
+					if laneReuseCandidate(rf, st.State, o.role, kind, o.model, o.mcp, o.cwd, sd, env, cwd) {
 						selected = o.name
 					}
 					break
@@ -707,13 +727,19 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 				// match the request too; a mismatched idle is not reused and
 				// the lane decision proceeds as if it were busy — a new pane
 				// when the lane has a slot, exit 13 when it does not.
-				if fieldAt(f, 8) != o.model || !dispatch.SamePath(fieldAt(f, 6), o.cwd, platform.Current()) {
-					selected = laneReusePick(sd, lane, o.role, kind, o.model, o.cwd, env, cwd)
+				// DJA-392: the MCP choice the worker was opened with (roster
+				// column 15) must match too, under the same rule.
+				modelCwdOk := fieldAt(f, 8) == o.model && dispatch.SamePath(fieldAt(f, 6), o.cwd, platform.Current())
+				if !modelCwdOk || !mcpMatches(f, o.mcp) {
+					selected = laneReusePick(sd, lane, o.role, kind, o.model, o.mcp, o.cwd, env, cwd)
 					if selected == "" {
 						if d.N < d.Capacity {
 							break // the lane has a slot: open a new pane
 						}
-						core.DieFriction(fmt.Sprintf("spawn: lane '%s' has no idle worker matching kind '%s', model '%s' and cwd '%s' (idle: '%s' runs %s %s in %s); release it or raise the lane's panes", lane, kind, o.model, o.cwd, d.Name, actual, fieldAt(f, 8), fieldAt(f, 6)), 13, "", "")
+						if !modelCwdOk {
+							core.DieFriction(fmt.Sprintf("spawn: lane '%s' has no idle worker matching kind '%s', model '%s' and cwd '%s' (idle: '%s' runs %s %s in %s); release it or raise the lane's panes", lane, kind, o.model, o.cwd, d.Name, actual, fieldAt(f, 8), fieldAt(f, 6)), 13, "", "")
+						}
+						core.DieFriction(fmt.Sprintf("spawn: lane '%s' has no idle worker matching MCP '%s' (idle: '%s' was opened with MCP '%s'); release it or raise the lane's panes", lane, o.mcp, d.Name, fieldAt(f, 15)), 13, "", "")
 					}
 				} else {
 					selected = d.Name
@@ -778,7 +804,7 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		}
 	}
 	if lane == "" && o.reuse == "on" && o.pane == "" {
-		reused, unavailable, _ := FindReusable(o.role, kind, o.cwd, o.name, o.model, o.approvals, ctx, env, cwd)
+		reused, unavailable, _ := FindReusableMcp(o.role, kind, o.cwd, o.name, o.model, o.approvals, o.mcp, ctx, env, cwd)
 		if reused != "" {
 			previous := fieldAt(strings.Split(core.RosterLine(sd, reused), "\t"), 3)
 			gateReuse(reused, o.role, kind, ctx, env, cwd)
