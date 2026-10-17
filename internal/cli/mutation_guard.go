@@ -111,6 +111,10 @@ func runMutationGuardAt(args []string, env platform.Env, cwd string) int {
 	if err != nil {
 		return mutationGuardUsageError()
 	}
+	if parsed.source == "" && inside(copyPath, sourcePath) {
+		_, _ = fmt.Fprintf(platform.Stderr, "mutation-guard: without --source the source is the project of the current directory, which is the copy itself (%s); run it from the source worktree or pass --source <dir>\n", copyPath)
+		return 2
+	}
 
 	report := mutationGuardChecks(copyPath, sourcePath, env, parsed.envNames)
 	failed := printMutationCheck("copy-outside-source", "", report.Overlap)
