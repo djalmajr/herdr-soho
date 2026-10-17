@@ -303,3 +303,39 @@ func SamePath(left, right, goos string) bool {
 	}
 	return filepath.Clean(left) == filepath.Clean(right)
 }
+
+// PathWithin reports whether child is the same path as parent or located
+// beneath it, after resolving symlinks on both sides when possible (an
+// unresolvable side keeps its cleaned form) and applying the normalization
+// SamePath applies: on Windows the paths fold to lower-case slash form, the
+// drive letter included; on the other platforms they are only cleaned.
+func PathWithin(child, parent, goos string) bool {
+	child = pathWithinClean(child, goos)
+	parent = pathWithinClean(parent, goos)
+	if child == parent {
+		return true
+	}
+	if goos == "win32" {
+		return strings.HasPrefix(child, parent+"/")
+	}
+	return strings.HasPrefix(child, parent+string(os.PathSeparator))
+}
+
+// pathWithinClean normalizes one side of a PathWithin comparison exactly the
+// way SamePath normalizes its inputs; the symlink resolution the dispatch
+// rule needs (a state dir or a worker cwd can sit behind a symlinked
+// prefix) is done here, before the normalization.
+func pathWithinClean(p, goos string) string {
+	resolved := p
+	if eval, err := filepath.EvalSymlinks(p); err == nil {
+		resolved = eval
+	}
+	if goos == "win32" {
+		v := strings.ToLower(path.Clean(strings.ReplaceAll(resolved, `\`, "/")))
+		if len(v) >= 3 && v[1] == ':' && v[2] == '/' {
+			v = strings.ToLower(v[:2]) + v[2:]
+		}
+		return v
+	}
+	return filepath.Clean(resolved)
+}
