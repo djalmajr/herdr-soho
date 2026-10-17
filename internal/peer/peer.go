@@ -844,8 +844,8 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 			} else {
 				raw := argv[i]
 				ms, ok := core.ParseTimeoutMS(raw)
-				if ok && ms > int64(math.MaxInt) {
-					ok = false // beyond the int range, as a plain number would be
+				if ok && (ms <= 0 || ms > int64(math.MaxInt)) {
+					ok = false // send keeps its positive minimum, and a plain number its int range
 				}
 				if !ok {
 					// The JS Number() spellings (1e3, 12.0, 0x10) stay accepted

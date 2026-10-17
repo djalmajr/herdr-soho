@@ -66,6 +66,19 @@ func TestSendTimeoutDurationUnits(t *testing.T) {
 			t.Fatalf("herdr calls=%+v err=%v; the refusal must cost no subprocess", calls, err)
 		}
 	})
+	t.Run("a zero wait, with or without a unit, still exits 2 before any herdr call", func(t *testing.T) {
+		for _, raw := range []string{"0", "0ms", "0s", "0h"} {
+			f := newFixture(t, nil)
+			code, out, stderr := f.run([]string{"send", "w0test:p0a", "hello", "--timeout", raw})
+			if code != 2 || out != "" || stderr != "soho: send: --timeout expects the wait in milliseconds or a duration such as 90s, 30m or 2h\n" {
+				t.Fatalf("--timeout %s: code=%d out=%q stderr=%q; want exit 2", raw, code, out, stderr)
+			}
+			calls, err := fakecli.ReadCallsForConfig(filepath.Join(filepath.Dir(f.bin), "herdr.json"))
+			if (err != nil && !os.IsNotExist(err)) || (err == nil && len(calls) != 0) {
+				t.Fatalf("--timeout %s: herdr calls=%+v err=%v; the refusal must cost no subprocess", raw, calls, err)
+			}
+		}
+	})
 }
 
 func TestFindTimeoutDurationUnits(t *testing.T) {
