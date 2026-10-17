@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +58,12 @@ func TestGuardSuiteRunRefusesAConfiglessFake(t *testing.T) {
 	if exitErr.ExitCode() != 126 {
 		t.Fatalf("exit = %d, want 126 (stdout=%q stderr=%q)", exitErr.ExitCode(), stdout.String(), stderr.String())
 	}
-	want := "fakecli: probe ran without SOHO_FAKECLI_CONFIG; refusing to run the test suite as a fake command\n"
+	// The message names the fake as it was invoked: probe.exe on Windows.
+	name := "probe"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	want := "fakecli: " + name + " ran without SOHO_FAKECLI_CONFIG; refusing to run the test suite as a fake command\n"
 	if stderr.String() != want {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
