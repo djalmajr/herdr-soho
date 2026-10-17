@@ -2,17 +2,19 @@
 
 `herdr agent start --kind <kind>` launches the agent CLI with that name. Run `herdr agent` to list the kinds your installed Herdr supports. The family column is what the reviewer-vs-implementer rule compares.
 
-| Kind | Executable | Family | Effort ceiling | Effort flag | Model flag | `approvals: full` |
-|---|---|---|---|---|---|---|
-| `claude` | `claude` | anthropic | max | `--effort <low…max>` | `--model` | `--permission-mode bypassPermissions --settings '{"enableAllProjectMcpServers":true}'` |
-| `codex` | `codex` | openai | max, then the model's own levels (`xhigh` when `~/.codex/models_cache.json` does not list the model) | `-c model_reasoning_effort="<level>"` | `-m` | `-s workspace-write -a never` |
-| `grok` | `grok` | xai | xhigh | `--reasoning-effort <xhigh|high|medium|low>` (alias `--effort`) | `--model` | `--permission-mode bypassPermissions --always-approve` |
-| `agy` | `agy` | google | high | `--effort <low|medium|high>` | `--model` | `--dangerously-skip-permissions` |
-| `gemini` | `gemini` | google | high | `--effort` (assumed like agy) | `--model` | not mapped |
-| `cursor` | `cursor-agent` | by model (a family segment `anthropic|openai|xai|google|alibaba` in the id; else the LAST segment's `grok-*` → xai, `gpt-*`/`*codex*` → openai, `claude-*` → anthropic, `gemini-*` → google, `qwen*` → alibaba) | xhigh | none: suffix of the model id (`grok-4.7-xhigh`) | `--model` | `--trust --force --approve-mcps` |
-| `pi` | `pi` | by model | max | `--thinking <off…max>` | `--model <provider/id[:thinking]>` | nothing (pi has no approval prompts) |
-| `opencode` | `opencode` | by model | — | not mapped on the TUI (`--variant` is only in `opencode run`) | `-m <provider/model>` | `--auto` (edits: not mapped) |
-| `copilot` | `copilot` | mixed | — | not mapped | not mapped | not mapped |
+| Kind | Executable | Family | Effort ceiling | Effort flag | Model flag | `approvals: full` | MCP off flag |
+|---|---|---|---|---|---|---|---|
+| `claude` | `claude` | anthropic | max | `--effort <low…max>` | `--model` | `--permission-mode bypassPermissions --settings '{"enableAllProjectMcpServers":true}'` | `--strict-mcp-config` |
+| `codex` | `codex` | openai | max, then the model's own levels (`xhigh` when `~/.codex/models_cache.json` does not list the model) | `-c model_reasoning_effort="<level>"` | `-m` | `-s workspace-write -a never` | `-c mcp_servers={}` |
+| `grok` | `grok` | xai | xhigh | `--reasoning-effort <xhigh|high|medium|low>` (alias `--effort`) | `--model` | `--permission-mode bypassPermissions --always-approve` | — |
+| `agy` | `agy` | google | high | `--effort <low|medium|high>` | `--model` | `--dangerously-skip-permissions` | — |
+| `gemini` | `gemini` | google | high | `--effort` (assumed like agy) | `--model` | not mapped | — |
+| `cursor` | `cursor-agent` | by model (a family segment `anthropic|openai|xai|google|alibaba` in the id; else the LAST segment's `grok-*` → xai, `gpt-*`/`*codex*` → openai, `claude-*` → anthropic, `gemini-*` → google, `qwen*` → alibaba) | xhigh | none: suffix of the model id (`grok-4.7-xhigh`) | `--model` | `--trust --force --approve-mcps` | — |
+| `pi` | `pi` | by model | max | `--thinking <off…max>` | `--model <provider/id[:thinking]>` | nothing (pi has no approval prompts) | `--no-mcp` |
+| `opencode` | `opencode` | by model | — | not mapped on the TUI (`--variant` is only in `opencode run`) | `-m <provider/model>` | `--auto` (edits: not mapped) | — |
+| `copilot` | `copilot` | mixed | — | not mapped | not mapped | not mapped | — |
+
+`mcp` (`inherit` or `none`, default `inherit`) decides whether the worker keeps the user's MCP servers. The sources follow the other knobs, strongest first: the `--mcp inherit|none` flag, `lane.<name>.mcp`, `role.<role>.mcp`, the role frontmatter `mcp:`, then `inherit`. `none` translates to the `MCP off flag` column, inserted right after the effort args and before the configured (`args.<kind>`, `role.<role>.args`, `lane.<name>.args`) and user args (after `--`); a kind without a flag (`—`) prints the one-line warning `spawn: <kind> cannot turn MCP servers off per process; '<agent>' keeps the user's MCP servers` and inherits. The skill's `reviewer`, `implementer`, `tasker`, `scouter`, `researcher`, `documenter` and `security-reviewer` roles ship with `mcp: none`.
 
 `approvals: edits` maps to claude `--permission-mode acceptEdits`, codex `-s workspace-write -a on-request`, grok `--permission-mode acceptEdits`, agy `--mode accept-edits`, cursor `--trust --auto-review`. `pi` and `opencode` have no edits mode: spawn warns, the mode is a no-op (pi) or refused in the mapping (opencode).
 

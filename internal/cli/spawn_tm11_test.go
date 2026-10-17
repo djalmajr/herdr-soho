@@ -342,8 +342,25 @@ func (f *tm11SpawnFixture) runStepsPrepared(t *testing.T, golden tm11SpawnGolden
 			t.Fatal(err)
 		}
 		actualLog := strings.ReplaceAll(callLog, filepath.Dir(f.cwd), "<ROOT>")
-		if code != want.RC || actualOut != want.Out || actualErr != want.Err || (want.Log != nil && actualLog != *want.Log) {
-			t.Fatalf("step %d args=%v\ncode=%d want=%d\nstdout=%q want=%q\nstderr=%q want=%q\nlog=%q want=%v", i, want.Args, code, want.RC, actualOut, want.Out, actualErr, want.Err, actualLog, want.Log)
+		// DJA-392 intentional contract adaptation: roles with mcp=none add
+		// the kind's MCP-off flag after the effort args; the frozen bytes
+		// are unchanged.
+		wantOut, adErr := testutil.RewriteMcpSpawnJSON(want.Out)
+		if adErr != nil {
+			t.Fatalf("DJA-392 spawn JSON adaptation: %s", adErr)
+		}
+		wantErr, adErr := testutil.RewriteMcpErr(want.Err, wantOut)
+		if adErr != nil {
+			t.Fatalf("DJA-392 spawn stderr adaptation: %s", adErr)
+		}
+		wantLog := ""
+		if want.Log != nil {
+			if wantLog, adErr = testutil.RewriteMcpAgentStartLog(*want.Log); adErr != nil {
+				t.Fatalf("DJA-392 spawn log adaptation: %s", adErr)
+			}
+		}
+		if code != want.RC || actualOut != wantOut || actualErr != wantErr || (want.Log != nil && actualLog != wantLog) {
+			t.Fatalf("step %d args=%v\ncode=%d want=%d\nstdout=%q want=%q\nstderr=%q want=%q\nlog=%q want=%q", i, want.Args, code, want.RC, actualOut, wantOut, actualErr, wantErr, actualLog, wantLog)
 		}
 	}
 	for name, rel := range map[string]string{"herdTab": "herd-tab", "roster": "agents.tsv"} {

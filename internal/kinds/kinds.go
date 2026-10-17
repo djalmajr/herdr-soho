@@ -148,6 +148,34 @@ func KindEffortArgs(kind, effort, model string, env platform.Env, warn WarnFunc)
 	return nil
 }
 
+// KindMcpArgs translates the per-spawn MCP choice into the kind's
+// per-process flag (DJA-392): mcp=none turns the user's MCP servers off for
+// this process, inherit (or anything else) changes nothing. The ok result
+// reports whether the kind has a per-process flag at all: when it does not,
+// the caller warns once and the agent keeps the user's MCP servers.
+func KindMcpArgs(kind, mcp string) (args []string, ok bool) {
+	if mcp != "none" {
+		return nil, true
+	}
+	switch kind {
+	case "claude":
+		return []string{"--strict-mcp-config"}, true
+	case "codex":
+		return []string{"-c", "mcp_servers={}"}, true
+	case "pi":
+		return []string{"--no-mcp"}, true
+	default:
+		return nil, false
+	}
+}
+
+// KindMcpOff reports whether the kind can turn the user's MCP servers off
+// per process (the `soho kinds` table column).
+func KindMcpOff(kind string) bool {
+	_, ok := KindMcpArgs(kind, "none")
+	return ok
+}
+
 func KindModelArgs(kind, model, effort string, warn WarnFunc) []string {
 	if model == "" {
 		return nil
@@ -243,14 +271,20 @@ func KindSummary(kind string) string {
 }
 
 func CmdKinds(env platform.Env, platformName string) {
-	row := func(a, b, c, d, e string) string { return fmt.Sprintf("%-8s %-13s %-10s %-8s %s", a, b, c, d, e) }
-	lines := []string{row("KIND", "EXECUTABLE", "FAMILY", "EFFORT", "INSTALLED")}
+	row := func(a, b, c, d, e, f string) string {
+		return fmt.Sprintf("%-8s %-13s %-10s %-8s %-9s %s", a, b, c, d, e, f)
+	}
+	lines := []string{row("KIND", "EXECUTABLE", "FAMILY", "EFFORT", "INSTALLED", "MCP")}
 	for _, k := range KnownKinds {
 		installed := "no"
 		if _, ok := platform.FindExecutable(KindExe(k), env, platformName); ok {
 			installed = "yes"
 		}
-		lines = append(lines, row(k, KindExe(k), KindFamilyDisplay(k), KindEffortCeiling(k), installed))
+		mcp := "no"
+		if KindMcpOff(k) {
+			mcp = "yes"
+		}
+		lines = append(lines, row(k, KindExe(k), KindFamilyDisplay(k), KindEffortCeiling(k), installed, mcp))
 	}
 	_, _ = fmt.Fprintln(platform.Stdout, strings.Join(lines, "\n"))
 }

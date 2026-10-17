@@ -437,10 +437,10 @@ func defaultValue(value, fallback string) string {
 }
 
 type spawnOptions struct {
-	role, name, kind, direction, ratio, cwd, pane, timeout, effort, model, approvals, reuse, tabLabel string
-	kindSet                                                                                           bool
-	force                                                                                             bool
-	native                                                                                            []string
+	role, name, kind, direction, ratio, cwd, pane, timeout, effort, model, approvals, reuse, tabLabel, mcp string
+	kindSet                                                                                                bool
+	force                                                                                                  bool
+	native                                                                                                 []string
 }
 
 func parseArgs(argv []string, cwd string) spawnOptions {
@@ -466,7 +466,7 @@ func parseArgs(argv []string, cwd string) spawnOptions {
 			// line still goes out); never skips any other refusal.
 			o.force = true
 			continue
-		case "--tab-label", "--effort", "--model", "--approvals", "--name", "--kind", "--direction", "--ratio", "--cwd", "--pane", "--timeout":
+		case "--tab-label", "--effort", "--model", "--approvals", "--name", "--kind", "--direction", "--ratio", "--cwd", "--pane", "--timeout", "--mcp":
 		default:
 			core.DieFriction("spawn: unknown option "+a, 2, "", "")
 		}
@@ -478,6 +478,11 @@ func parseArgs(argv []string, cwd string) spawnOptions {
 		switch a {
 		case "--tab-label":
 			o.tabLabel = v
+		case "--mcp":
+			if v != "inherit" && v != "none" {
+				core.DieFriction("spawn: invalid --mcp '"+v+"' (inherit|none)", 2, "", "")
+			}
+			o.mcp = v
 		case "--effort":
 			o.effort = v
 		case "--model":
@@ -549,6 +554,9 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	if o.approvals != "ask" && o.approvals != "edits" && o.approvals != "full" {
 		core.DieFriction(fmt.Sprintf("invalid approvals '%s' (ask|edits|full)", o.approvals), 2, "", "")
 	}
+	// DJA-392: the per-role MCP server choice — flag > lane.<n>.mcp >
+	// role.<r>.mcp > the role file's mcp: > inherit.
+	o.mcp = ResolveMcp(o.mcp, lane, o.role, ctx, env, cwd)
 	if o.timeout == "" {
 		o.timeout = core.Cfg(ctx, "spawn_timeout", "60000", env)
 	} else if ms, ok := core.ParseTimeoutMS(o.timeout); !ok {
@@ -784,6 +792,15 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		}
 	}
 	args := buildArgs(kind, o.approvals, o.model, o.effort, ctx, env)
+	// DJA-392: mcp=none translates to the kind's per-process flag, right
+	// after the effort args (buildArgs ends with them) and before the
+	// config and user args; a kind without a per-process flag warns once
+	// and the agent keeps the user's MCP servers.
+	if mcpArgs, ok := kinds.KindMcpArgs(kind, o.mcp); !ok {
+		Warn(fmt.Sprintf("spawn: %s cannot turn MCP servers off per process; '%s' keeps the user's MCP servers", kind, o.name), ctx, env, "spawn")
+	} else {
+		args = append(args, mcpArgs...)
+	}
 	native := ConfigNativeArgs(kind, lane, o.role, ctx, env, cwd, func(key, own string) {
 		if own == "" {
 			own = "?"
@@ -1101,6 +1118,28 @@ func buildArgs(kind, approvals, model, effort string, ctx *core.Config, env plat
 	out = append(out, kinds.KindModelArgs(kind, model, effort, func(msg string) { Warn(msg, ctx, env, "spawn") })...)
 	out = append(out, kinds.KindEffortArgs(kind, effort, model, env, func(msg string) { Warn(msg, ctx, env, "spawn") })...)
 	return out
+}
+
+// ResolveMcp applies the per-role MCP server precedence (DJA-392): flag >
+// lane.<n>.mcp > role.<r>.mcp > the role file's mcp: > inherit.
+func ResolveMcp(flag, lane, role string, ctx *core.Config, env platform.Env, cwd string) string {
+	if flag != "" {
+		return flag
+	}
+	if lane != "" {
+		if v := core.LaneAttr(ctx, lane, "mcp", nil, env); v != "" {
+			return v
+		}
+	}
+	if v := core.Cfg(ctx, "role_"+strings.ReplaceAll(role, "-", "_")+"_mcp", "", env); v != "" {
+		return v
+	}
+	if file := core.RoleFile(role, env, cwd); file != "" {
+		if v := core.FmGet(file, "mcp"); v != "" {
+			return v
+		}
+	}
+	return "inherit"
 }
 
 func busyLane(lane, name, hint, role string, ctx *core.Config, env platform.Env, cwd string) {
