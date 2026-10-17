@@ -787,6 +787,67 @@ func TestMutationGuard(t *testing.T) {
 			}
 		}
 	})
+	t.Run("default source inside the copy refuses with exit 2 and no check lines", func(t *testing.T) {
+		s := newGuardFixture(t)
+		sub := filepath.Join(s.copy, "sub")
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		want := func(copyArg string) string {
+			return "mutation-guard: without --source the source is the project of the current directory, which is the copy itself (" + copyArg + "); run it from the source worktree or pass --source <dir>\n"
+		}
+		// From the copy root, as `soho mutation-guard .`.
+		code, out, stderr := runMutationGuardFixture(t, s, []string{"."}, nil, s.copy)
+		if code != 2 || out != "" || stderr != want(s.copy) {
+			t.Fatalf("copy root: code=%d stdout=%q stderr=%q", code, out, stderr)
+		}
+		// From a subdirectory, with the copy root as the copy argument.
+		code, out, stderr = runMutationGuardFixture(t, s, []string{s.copy}, nil, sub)
+		if code != 2 || out != "" || stderr != want(s.copy) {
+			t.Fatalf("subdirectory: code=%d stdout=%q stderr=%q", code, out, stderr)
+		}
+	})
+	t.Run("default source from a git-repo copy refuses the same way", func(t *testing.T) {
+		s := newGuardFixture(t)
+		if err := exec.Command("git", "-C", s.copy, "init", "-q").Run(); err != nil {
+			t.Skip("git is not available to create the project-root fixture")
+		}
+		sub := filepath.Join(s.copy, "sub")
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		want := "mutation-guard: without --source the source is the project of the current directory, which is the copy itself (" + s.copy + "); run it from the source worktree or pass --source <dir>\n"
+		code, out, stderr := runMutationGuardFixture(t, s, []string{"."}, nil, s.copy)
+		if code != 2 || out != "" || stderr != want {
+			t.Fatalf("copy root: code=%d stdout=%q stderr=%q", code, out, stderr)
+		}
+		code, out, stderr = runMutationGuardFixture(t, s, []string{s.copy}, nil, sub)
+		if code != 2 || out != "" || stderr != want {
+			t.Fatalf("subdirectory: code=%d stdout=%q stderr=%q", code, out, stderr)
+		}
+	})
+	t.Run("explicit source from inside the copy keeps the current behavior", func(t *testing.T) {
+		s := newGuardFixture(t)
+		// The correct source: exit 0, as today.
+		code, out, stderr := runMutationGuardFixture(t, s, []string{s.copy, "--source", s.source}, nil, s.copy)
+		want := "ok copy-outside-source\nok no-symlink-into-source\nok build-env\nok cargo-config\n"
+		if code != 0 || out != want || stderr != "" {
+			t.Fatalf("correct source: code=%d stdout=%q stderr=%q", code, out, stderr)
+		}
+		// A source pointing at the copy itself: still exit 1 by overlap.
+		code, out, stderr = runMutationGuardFixture(t, s, []string{s.copy, "--source", s.copy}, nil, s.copy)
+		if code != 1 || !strings.Contains(out, "fail copy-outside-source: copy and source directories overlap") || !strings.Contains(out, "ok no-symlink-into-source") || stderr != "" {
+			t.Fatalf("source is the copy: code=%d stdout=%q stderr=%q", code, out, stderr)
+		}
+	})
+	t.Run("default source from the project root still passes", func(t *testing.T) {
+		s := newGuardFixture(t)
+		code, out, stderr := runMutationGuardFixture(t, s, []string{s.copy}, nil, s.source)
+		want := "ok copy-outside-source\nok no-symlink-into-source\nok build-env\nok cargo-config\n"
+		if code != 0 || out != want || stderr != "" {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out, stderr)
+		}
+	})
 }
 
 func treeHash(root string) [32]byte {
