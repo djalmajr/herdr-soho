@@ -976,6 +976,29 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		appendPeerLog(stateDir, from, to, result, utf16Length(body), id, env)
 	}
 	t := resolveTarget(target, env)
+	// agent_not_ready is transient by definition: the pane's `agent start`
+	// is still finishing, and the agent idles about 2 s before the start
+	// returns. Poll the resolution on the send's own arrival poll until the
+	// target resolves or the send's --timeout wins. Every other failure of
+	// the resolution keeps today's immediate exit (agent_not_found with its
+	// hint, herdr down, a timed-out get, a silent remote machine).
+	notReadyWaitMS := 0
+	if !t.OK && t.Code == "agent_not_ready" {
+		waitStart := time.Now()
+		deadline := waitStart.Add(time.Duration(timeoutMS) * time.Millisecond)
+		for !t.OK && t.Code == "agent_not_ready" && time.Now().Before(deadline) {
+			sleepMS(min(arrivalPollMS(env), int(time.Until(deadline).Milliseconds())))
+			t = resolveTarget(target, env)
+		}
+		if !t.OK && t.Code == "agent_not_ready" {
+			// The deadline passed with the agent still starting: today's
+			// exit 4 and today's cause, with the waited time appended as the
+			// send's --timeout in numberSeconds form.
+			log(SenderRefOf(env), t.RefShown, "error")
+			platform.Die(fmt.Sprintf("send: %s unavailable: %s (still not ready after %ss)", t.RefShown, t.Cause, numberSeconds(timeoutMS)), 4)
+		}
+		notReadyWaitMS = int(time.Since(waitStart).Milliseconds())
+	}
 	if !t.OK {
 		result := "error"
 		if t.Code == "agent_not_found" {
@@ -1013,7 +1036,20 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	}
 	currentStatus := t.Status
 	if !now && (t.Status == "working" || t.Status == "blocked") {
-		w := waitUntilIdle(t.Machine, t.TargetArg, timeoutMS, env)
+		// The agent_not_ready wait above already spent part of the send's
+		// --timeout: the busy wait gets what is left, so the waits are
+		// charged to the same deadline and never add up. With no not-ready
+		// wait the budget is the full --timeout, exactly as today; a slow
+		// last poll can overshoot the deadline, so an exhausted budget is
+		// floored at 100 ms to keep the herdr call's --timeout positive.
+		busyMS := timeoutMS
+		if notReadyWaitMS > 0 {
+			busyMS = timeoutMS - notReadyWaitMS
+			if busyMS < 100 {
+				busyMS = 100
+			}
+		}
+		w := waitUntilIdle(t.Machine, t.TargetArg, busyMS, env)
 		if w.Code == "settled" {
 			currentStatus = "idle"
 		} else if w.Code == "timeout" {
