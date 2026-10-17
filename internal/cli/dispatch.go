@@ -2096,6 +2096,10 @@ func splitRunArgs(argv []string) ([]string, []string, bool) {
 		switch a {
 		case "--reuse", "--fresh":
 			spawnArgs = append(spawnArgs, a)
+		case "--force":
+			// DJA-392: the spawn's pressure-refusal skip (the warning line
+			// still goes out); run never applies it to anything else.
+			spawnArgs = append(spawnArgs, a)
 		case "--timeout":
 			if i+1 >= len(argv) {
 				core.DieFriction("run: --timeout expects a value", 2, frictionLogPath, "run")

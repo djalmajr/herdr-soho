@@ -34,6 +34,18 @@ func cmdReopen(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 	if line == "" {
 		core.DieFriction(fmt.Sprintf("agent '%s' is not in the roster", agent), 3, frictionLogPath, "reopen")
 	}
+	// DJA-392: the spawn half of a reopen always opens a new pane (--fresh,
+	// never reuse), so the pressure refusal runs here, before the release
+	// half changes any state (roster line, pane, copies): a refused reopen
+	// leaves the worker exactly as it was, and the spawn's warning line of
+	// today still goes out. --force is the skip and is forwarded to the
+	// spawn half, which would otherwise refuse there.
+	if !force {
+		if parts := core.PressureRefuseParts(ctx, env, cwd); len(parts) > 0 {
+			core.PressureWarn(ctx, env, cwd)
+			platform.Die(fmt.Sprintf("spawn: refusing to open a new pane under resource pressure: %s; close idle panes or run 'soho gc', or pass --force", strings.Join(parts, "; ")), 25)
+		}
+	}
 	fields := strings.Split(line, "\t")
 	field := func(index int) string {
 		if index < len(fields) {
@@ -57,7 +69,10 @@ func cmdReopen(argv []string, ctx *core.Config, env platform.Env, cwd string) in
 		return code
 	}
 
-	spawnArgs := []string{role, "--fresh", "--kind", wkind, "--name", agent, "--cwd", wdir}
+	// The pressure admission ran once, above, before the release: the spawn
+	// half never measures again, so a pressure rise after the release cannot
+	// refuse the new pane once the old worker is gone.
+	spawnArgs := []string{role, "--fresh", "--kind", wkind, "--name", agent, "--cwd", wdir, "--force"}
 	if model != "" {
 		spawnArgs = append(spawnArgs, "--model", model)
 	}

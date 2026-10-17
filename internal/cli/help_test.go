@@ -12,7 +12,7 @@ func TestCommandHelpFirstPositionOnly(t *testing.T) {
 		"                      [--ratio F] [--cwd DIR] [--pane ID] [--timeout MS]\n" +
 		"                      [--effort low|medium|high|xhigh|max] [--model M]\n" +
 		"                      [--approvals ask|edits|full] [--reuse|--fresh]\n" +
-		"                      [--tab-label TEXT] [-- <native agent args>]\n"
+		"                      [--tab-label TEXT] [--force] [-- <native agent args>]\n"
 	for _, flag := range []string{"--help", "-h"} {
 		t.Run("spawn "+flag, func(t *testing.T) {
 			code, out, errOut := runIn(t, []string{"spawn", flag}, env, cwd)
