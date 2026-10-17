@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/djalmajr/soho/internal/core"
 	"github.com/djalmajr/soho/internal/platform"
 )
 
@@ -97,10 +98,41 @@ func (c selfCLI) interruptible(ctx context.Context) teamOps {
 	return c
 }
 
+// spawnTimeout bounds the spawn step. The spawn itself waits up to
+// spawn_timeout for the agent to start, so the default adapter allows that
+// wait on top of its own bound for the rest of the spawn; a slow machine
+// raises spawn_timeout, not a fixed job constant. An explicit Timeout (a
+// bounded adapter, a test) stays the bound, and a configuration that cannot
+// be read keeps the team-ops bound: the supervisor must not die over it.
+func (c selfCLI) spawnTimeout() (bound time.Duration) {
+	if c.Timeout > 0 {
+		return c.Timeout
+	}
+	defer func() {
+		if value := recover(); value != nil {
+			if _, ok := value.(*platform.ExitError); !ok {
+				panic(value)
+			}
+			bound = defaultTeamOpsTimeout
+		}
+	}()
+	cfg := core.LoadConfig(c.Env, c.Dir)
+	ms, ok := core.ParseTimeoutMS(core.Cfg(&cfg, "spawn_timeout", "60000", c.Env))
+	if !ok || ms <= 0 {
+		return defaultTeamOpsTimeout
+	}
+	return defaultTeamOpsTimeout + time.Duration(ms)*time.Millisecond
+}
+
 // step runs one self subprocess and maps any failure to the fixed error of
 // the operation.
 func (c selfCLI) step(op string, args ...string) (string, error) {
-	out, detail, err := runStepDetailInCtx(c.Dir, c.Exe, args, c.timeout(), c.Env, c.Ctx)
+	return c.stepWithin(op, c.timeout(), args...)
+}
+
+// stepWithin is step with its own bound.
+func (c selfCLI) stepWithin(op string, timeout time.Duration, args ...string) (string, error) {
+	out, detail, err := runStepDetailInCtx(c.Dir, c.Exe, args, timeout, c.Env, c.Ctx)
 	if err != nil {
 		e := teamOpsError(op).(*ExitError)
 		e.Detail = detail
@@ -222,7 +254,7 @@ func parseMaxWorkers(output string) (value int, explicit bool, err error) {
 // prints. The real spawn indents the object over several lines, so the
 // candidate is the last line that opens an object, joined to the end.
 func (c selfCLI) SpawnOrchestrator() (string, error) {
-	out, err := c.step("spawn the job orchestrator", "spawn", "job-orchestrator", "--cwd", c.Dir, "--approvals", "full", "--fresh")
+	out, err := c.stepWithin("spawn the job orchestrator", c.spawnTimeout(), "spawn", "job-orchestrator", "--cwd", c.Dir, "--approvals", "full", "--fresh")
 	if err != nil {
 		return "", err
 	}
