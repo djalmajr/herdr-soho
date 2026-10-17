@@ -31,15 +31,18 @@ var McpOffRoles = map[string]bool{
 	"security-reviewer": true,
 }
 
-// McpOffArgs is the kind's per-process MCP-off flag as it appears in a
-// joined argv ("" when the kind has no per-process flag), mirroring
+// McpOffArgs is the kind's static per-process MCP-off flag as it appears in
+// a joined argv ("" when the kind has no static flag), mirroring
 // kinds.KindMcpArgs so the oracle never imports the production package.
+// Codex carries no static flag: its off args are dynamic (one
+// -c mcp_servers.<name>.enabled=false pair per enabled server, built by the
+// spawn from `codex mcp list --json`), so the frozen goldens — which pin
+// the argv before the DJA-392 field and cannot carry a live listing — adapt
+// as listing-free (no args) for codex.
 func McpOffArgs(kind string) string {
 	switch kind {
 	case "claude":
 		return "--strict-mcp-config"
-	case "codex":
-		return `-c mcp_servers={}`
 	case "pi":
 		return "--no-mcp"
 	default:
@@ -47,10 +50,33 @@ func McpOffArgs(kind string) string {
 	}
 }
 
+// McpOffKind reports whether the kind can turn the user's MCP servers off
+// per process at all (the `soho kinds` MCP column): claude and pi through a
+// static flag, codex through its per-server override. It mirrors
+// kinds.KindMcpOff.
+func McpOffKind(kind string) bool {
+	switch kind {
+	case "claude", "codex", "pi":
+		return true
+	default:
+		return false
+	}
+}
+
 // McpWarnLine is the exact line a fresh spawn of an unsupported kind prints
 // when mcp resolves to none, in the frozen-golden spelling (PROG: prefix).
 func McpWarnLine(kind, agent string) string {
 	return "PROG: warning: spawn: " + kind + " cannot turn MCP servers off per process; '" + agent + "' keeps the user's MCP servers\n"
+}
+
+// McpCodexListWarnLine is the exact line a fresh codex spawn prints when its
+// `mcp list --json` run fails in the frozen fixtures: the fixtures' fake
+// codex answers every call with an empty stdout, so the reason is always
+// "non-JSON output" there. The production warning carries the real reason
+// (codex not found in PATH, timed out after 10 s, exit <n>, non-JSON
+// output).
+func McpCodexListWarnLine(agent string) string {
+	return "PROG: warning: spawn: codex could not list its MCP servers (non-JSON output); '" + agent + "' keeps the user's MCP servers\n"
 }
 
 // effortAnchor returns the two-field anchor after which the MCP-off flag is
@@ -196,10 +222,13 @@ func RewriteMcpAgentStartLog(log string) (string, error) {
 }
 
 // RewriteMcpErr adapts the frozen stderr of a fresh spawn: a McpOffRoles
-// role whose kind has no per-process flag gains the one-line warning. The
-// warning is emitted when the spawn builds its agent args — after every
-// decision line (lane gone, …), before the startup-blocked line and the
-// --tab-label line of the same spawn, and at the end otherwise.
+// role whose kind has no per-process flag gains the one-line
+// "cannot turn MCP servers off per process" warning; a fresh codex spawn
+// gains the "could not list its MCP servers" warning (the fixtures' fake
+// codex answers the listing with an empty stdout). The warning is emitted
+// when the spawn builds its agent args — after every decision line (lane
+// gone, …), before the startup-blocked line and the --tab-label line of the
+// same spawn, and at the end otherwise.
 func RewriteMcpErr(err, out string) (string, error) {
 	doc, ok := firstSpawnDoc(out)
 	if !ok {
@@ -226,12 +255,24 @@ func RewriteMcpErr(err, out string) (string, error) {
 	}
 	kindValue, _ := obj.Get("kind")
 	kind, _ := kindValue.(string)
-	if McpOffArgs(kind) != "" {
-		return err, nil
+	switch kind {
+	case "claude", "pi":
+		return err, nil // static flag, no warning
+	case "codex":
+		break // the dynamic listing fails in the frozen fixtures
+	default:
+		if McpOffArgs(kind) != "" {
+			return err, nil
+		}
 	}
 	name, _ := obj.Get("name")
 	agent, _ := name.(string)
-	line := McpWarnLine(kind, agent)
+	var line string
+	if kind == "codex" {
+		line = McpCodexListWarnLine(agent)
+	} else {
+		line = McpWarnLine(kind, agent)
+	}
 	blocked := "PROG: warning: agent '" + agent + "' is blocked during startup"
 	tabLabel := "PROG: warning: --tab-label ignored"
 	lines := strings.Split(err, "\n")
@@ -264,9 +305,11 @@ func IsMcpFrictionLog(key, content string) bool {
 	if len(fields) != 4 || fields[1] != "warning" || (fields[2] != "run" && fields[2] != "spawn") {
 		return false
 	}
-	return strings.HasPrefix(fields[3], "spawn: ") &&
-		strings.Contains(fields[3], "cannot turn MCP servers off per process") &&
-		strings.HasSuffix(fields[3], "keeps the user's MCP servers")
+	if !strings.HasPrefix(fields[3], "spawn: ") || !strings.HasSuffix(fields[3], "keeps the user's MCP servers") {
+		return false
+	}
+	return strings.Contains(fields[3], "cannot turn MCP servers off per process") ||
+		strings.Contains(fields[3], "could not list its MCP servers")
 }
 
 // RewriteMcpKindsTable adapts the frozen `soho kinds` table: the MCP column
@@ -291,10 +334,85 @@ func RewriteMcpKindsTable(out string) (string, error) {
 			continue
 		}
 		value := "no"
-		if McpOffArgs(kind) != "" {
+		if McpOffKind(kind) {
 			value = "yes"
 		}
 		lines[i] = line + strings.Repeat(" ", 10-len(installed)) + value
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// McpSpawnedAgents returns the agent names of the spawn JSON documents the
+// step outputs carry (fresh or reuse; a `run` step's dispatch JSON and the
+// collected text never count). The names anchor RewriteMcpRoster: only the
+// rows those spawns wrote gain the roster's MCP field.
+func McpSpawnedAgents(outs ...string) []string {
+	names := []string{}
+	seen := map[string]bool{}
+	for _, out := range outs {
+		doc, ok := firstSpawnDoc(out)
+		if !ok {
+			continue
+		}
+		v, err := jsonjs.Parse([]byte(doc))
+		if err != nil {
+			continue
+		}
+		obj, ok := v.(*jsonjs.Object)
+		if !ok {
+			continue
+		}
+		nameValue, _ := obj.Get("name")
+		name, _ := nameValue.(string)
+		if name == "" {
+			continue
+		}
+		_, fresh := obj.Get("created_pane")
+		reusedValue, _ := obj.Get("reused")
+		if !fresh && reusedValue != true {
+			continue
+		}
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// RewriteMcpRoster adapts the frozen roster files: every row the scenario's
+// spawns wrote — exactly 15 fields (the rows predate the MCP field) and the
+// agent's name in spawned — gains the effective MCP choice as the 16th
+// field: none for a McpOffRoles role, inherit for the rest. Rows of any
+// other shape (seeded 11/12/8-field rows, rows of agents the scenario never
+// spawned) pass through byte-identical. A 15-field anchored row with an
+// empty role column fails instead of guessing, because no spawn writes such
+// a row.
+func RewriteMcpRoster(roster string, spawned []string) (string, error) {
+	if roster == "" {
+		return roster, nil
+	}
+	want := map[string]bool{}
+	for _, name := range spawned {
+		want[name] = true
+	}
+	lines := strings.Split(roster, "\n")
+	for i, line := range lines {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) != 15 || !want[fields[0]] {
+			continue
+		}
+		if fields[3] == "" {
+			return "", fmt.Errorf("DJA-392 R2 roster adaptation: row %d of agent %q has no role column; the 15-field anchor cannot resolve the MCP choice", i, fields[0])
+		}
+		value := "inherit"
+		if McpOffRoles[fields[3]] {
+			value = "none"
+		}
+		lines[i] = line + "\t" + value
 	}
 	return strings.Join(lines, "\n"), nil
 }

@@ -8,10 +8,12 @@ import (
 )
 
 func TestKindMcpArgsPerProcessTranslation(t *testing.T) {
-	t.Run("mcp=none maps to the kind's per-process flag", func(t *testing.T) {
+	t.Run("mcp=none maps to the kind's static per-process flag", func(t *testing.T) {
+		// codex is not here: its MCP-off args are dynamic (one -c pair per
+		// enabled server, built by spawn from `codex mcp list --json`), so
+		// the static translation carries nothing for it.
 		cases := []struct{ kind, want string }{
 			{"claude", "--strict-mcp-config"},
-			{"codex", `-c mcp_servers={}`},
 			{"pi", "--no-mcp"},
 		}
 		for _, tc := range cases {
@@ -25,10 +27,13 @@ func TestKindMcpArgsPerProcessTranslation(t *testing.T) {
 		}
 	})
 
-	t.Run("codex carries the flag as two argv elements", func(t *testing.T) {
+	t.Run("codex has no static flag: the per-server args are built from the live listing", func(t *testing.T) {
 		args, ok := KindMcpArgs("codex", "none")
-		if !ok || len(args) != 2 || args[0] != "-c" || args[1] != "mcp_servers={}" {
-			t.Fatalf("codex args=%#v ok=%v, want [-c mcp_servers={}]", args, ok)
+		if ok || len(args) > 0 {
+			t.Fatalf("codex static args=%v ok=%v, want nothing (the per-server flags come from the listing)", args, ok)
+		}
+		if !KindMcpOff("codex") {
+			t.Fatal("codex must stay yes in the MCP column: it has a mechanism, a dynamic one")
 		}
 	})
 

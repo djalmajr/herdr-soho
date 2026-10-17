@@ -2,6 +2,7 @@
 package spawn
 
 import (
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -30,6 +31,9 @@ var busyRetryDelay = time.Second
 const (
 	herdrStartTimeout = 30 * time.Second
 	startPollWindow   = 5 * time.Second
+	// mcpCodexListTimeoutMs caps the `codex mcp list --json` run the
+	// per-server MCP-off translation needs (DJA-392 fatia 2 R2).
+	mcpCodexListTimeoutMs = 10000
 	// contextWindowSettle is the pause between typing /context-window and its
 	// Enter, giving grok's menu time to appear before the selection.
 	contextWindowSettle = time.Second
@@ -45,6 +49,45 @@ func Warn(message string, ctx *core.Config, env platform.Env, command string) {
 }
 
 func mustGetwd() string { cwd, _ := os.Getwd(); return cwd }
+
+// mcpCodexOffArgs builds codex's per-server MCP-off args (DJA-392 fatia 2
+// R2): it runs `codex mcp list --json` in the spawn's own PATH and env and
+// returns, for every server the listing reports with enabled=true, the pair
+// -c mcp_servers.<name>.enabled=false — in list order. Only name and
+// enabled are read from the listing: the transport command lines may carry
+// credentials and never leave this function. ok is false (with a short
+// reason) when codex is not on the PATH, the listing times out, exits
+// nonzero, or prints non-JSON output; the spawn then warns once and the
+// agent keeps the user's MCP servers. Zero enabled servers are success with
+// no args and no reason.
+func mcpCodexOffArgs(env platform.Env) (args []string, ok bool, reason string) {
+	res := platform.RunCli("codex", []string{"mcp", "list", "--json"}, platform.RunOptions{Env: env, TimeoutMs: mcpCodexListTimeoutMs})
+	switch {
+	case res.NotFound:
+		return nil, false, "codex not found in PATH"
+	case res.TimedOut:
+		return nil, false, "timed out after 10 s"
+	case res.Status == nil || *res.Status != 0:
+		code := -1
+		if res.Status != nil {
+			code = *res.Status
+		}
+		return nil, false, fmt.Sprintf("exit %d", code)
+	}
+	var servers []struct {
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &servers); err != nil {
+		return nil, false, "non-JSON output"
+	}
+	for _, server := range servers {
+		if server.Enabled && server.Name != "" {
+			args = append(args, "-c", "mcp_servers."+server.Name+".enabled=false")
+		}
+	}
+	return args, true, ""
+}
 
 func approvalsRank(mode string) int {
 	switch mode {
@@ -795,8 +838,18 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 	// DJA-392: mcp=none translates to the kind's per-process flag, right
 	// after the effort args (buildArgs ends with them) and before the
 	// config and user args; a kind without a per-process flag warns once
-	// and the agent keeps the user's MCP servers.
-	if mcpArgs, ok := kinds.KindMcpArgs(kind, o.mcp); !ok {
+	// and the agent keeps the user's MCP servers. Codex builds its off args
+	// per server from its live listing (R2): -c mcp_servers=<name>.enabled
+	// =false for every enabled server, in list order; a failed listing warns
+	// once and the agent keeps the user's MCP servers.
+	if o.mcp == "none" && kind == "codex" {
+		mcpArgs, ok, reason := mcpCodexOffArgs(env)
+		if !ok {
+			Warn(fmt.Sprintf("spawn: codex could not list its MCP servers (%s); '%s' keeps the user's MCP servers", reason, o.name), ctx, env, "spawn")
+		} else {
+			args = append(args, mcpArgs...)
+		}
+	} else if mcpArgs, ok := kinds.KindMcpArgs(kind, o.mcp); !ok {
 		Warn(fmt.Sprintf("spawn: %s cannot turn MCP servers off per process; '%s' keeps the user's MCP servers", kind, o.name), ctx, env, "spawn")
 	} else {
 		args = append(args, mcpArgs...)
@@ -896,7 +949,10 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		core.RosterRemove(sd, stale[0])
 		Warn(fmt.Sprintf("replaced the stale roster line of '%s' (pane %s)", stale[0], stale[1]), ctx, env, "spawn")
 	}
-	core.RosterAppend(sd, []string{o.name, o.pane, kind, o.role, family, boolInt(created), o.cwd, core.NowStamp(platform.Now()), o.model, defaultValue(o.approvals, "ask"), o.role, lane, boolText(burst), native, o.effort})
+	// DJA-392 fatia 2 R2: the effective MCP choice (inherit|none) is the
+	// row's last field; reopen reads it and passes --mcp <value> to the
+	// respawn, so a worker keeps the MCP it was opened with.
+	core.RosterAppend(sd, []string{o.name, o.pane, kind, o.role, family, boolInt(created), o.cwd, core.NowStamp(platform.Now()), o.model, defaultValue(o.approvals, "ask"), o.role, lane, boolText(burst), native, o.effort, o.mcp})
 	// A spawn that re-rosters a released pane (spawn --pane on it) retires
 	// the pane's released-panes row.
 	if placement == "given" {

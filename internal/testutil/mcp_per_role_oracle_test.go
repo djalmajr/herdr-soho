@@ -103,13 +103,13 @@ func TestMcpPerRoleOracleSpawnJSON(t *testing.T) {
 		}
 	})
 
-	t.Run("the codex flag is two fields after the effort config", func(t *testing.T) {
+	t.Run("codex never changes the JSON: its off args are dynamic and per-server", func(t *testing.T) {
+		// The frozen codex spawn predates the per-server translation; the
+		// live spawn of the frozen fixture's fake codex (empty stdout for
+		// `mcp list --json`) adds no argv, so the document stays verbatim.
 		got, err := RewriteMcpSpawnJSON(frozenCodexJSON)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(got, `"agent_args": "-m sol|gpt-5 -c model_reasoning_effort=\"xhigh\" -c mcp_servers={}",`) {
-			t.Fatalf("out=%q", got)
+		if err != nil || got != frozenCodexJSON {
+			t.Fatalf("out=%q err=%v", got, err)
 		}
 	})
 
@@ -187,9 +187,12 @@ func TestMcpPerRoleOracleAgentStartLog(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// The pi line gains the static flag; the codex line stays verbatim
+		// (the per-server args come from a live listing the golden cannot
+		// carry); the grok line never changes.
 		want := "agent list\n" +
 			"agent start build --kind pi --pane p-new --timeout 60000 -- --thinking xhigh --no-mcp\n" +
-			"agent start build --kind codex --pane p-new --timeout 60000 -- -m sol|gpt-5 -c model_reasoning_effort=\"xhigh\" -c mcp_servers={}\n" +
+			"agent start build --kind codex --pane p-new --timeout 60000 -- -m sol|gpt-5 -c model_reasoning_effort=\"xhigh\"\n" +
 			"agent start build --kind grok --pane p-new --timeout 60000 -- --model grok-4.7 --reasoning-effort xhigh\n"
 		if got != want {
 			t.Fatalf("log:\n%swant:\n%s", got, want)
@@ -270,6 +273,24 @@ func TestMcpPerRoleOracleErr(t *testing.T) {
 		}
 	})
 
+	t.Run("a fresh codex spawn gains the list-failure warning (the fixtures' fake codex returns non-JSON)", func(t *testing.T) {
+		got, err := RewriteMcpErr("", frozenCodexJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "PROG: warning: spawn: codex could not list its MCP servers (non-JSON output); 'build' keeps the user's MCP servers\n"
+		if got != want {
+			t.Fatalf("err=%q, want %q", got, want)
+		}
+		got, err = RewriteMcpErr(notready, frozenCodexJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != strings.TrimSuffix(want, "\n")+"\n"+notready {
+			t.Fatalf("the warning must precede the startup-blocked line: err=%q", got)
+		}
+	})
+
 	t.Run("a reuse warns nothing", func(t *testing.T) {
 		got, err := RewriteMcpErr("", frozenReuseJSON)
 		if err != nil || got != "" {
@@ -329,6 +350,13 @@ func TestMcpPerRoleOracleFrictionLog(t *testing.T) {
 		}
 	})
 
+	t.Run("the codex list-failure line is accepted too", func(t *testing.T) {
+		line := "TS\twarning\tspawn\tspawn: codex could not list its MCP servers (non-JSON output); 'build' keeps the user's MCP servers\n"
+		if !IsMcpFrictionLog("state/ws/friction.log", line) {
+			t.Fatalf("the DJA-392 R2 friction line must be accepted: %q", line)
+		}
+	})
+
 	t.Run("a second line is refused", func(t *testing.T) {
 		line := "TS\twarning\trun\tspawn: grok cannot turn MCP servers off per process; 'build' keeps the user's MCP servers\nTS\tnote\tdispatch\twhatever\n"
 		if IsMcpFrictionLog("state/ws/friction.log", line) {
@@ -356,4 +384,65 @@ func TestMcpPerRoleOracleFrictionLog(t *testing.T) {
 			t.Fatalf("another file must fail")
 		}
 	})
+}
+
+func TestMcpPerRoleOracleRoster(t *testing.T) {
+	// The frozen spawn-written rows are 15 fields (the field predates the
+	// roster's MCP column); seeded rows are shorter and stay verbatim.
+	roster := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\n" +
+		"build\tp-new\tgrok\timplementer\txai\t1\t<ROOT>/repo\t<TS>\tgrok\task\timplementer\tbuild\t\t\txhigh\n" +
+		"w1\tp-w1\tgrok\tscouter\txai\t1\t<ROOT>/repo\t<TS>\tgrok\tfull\tscouter\texplore\n"
+
+	t.Run("spawned 15-field rows gain the effective choice as the 16th field", func(t *testing.T) {
+		got, err := RewriteMcpRoster(roster, []string{"build"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "# name\tpane\tkind\trole\tfamily\tcreated_pane\tcwd\tstarted\tmodel\tapprovals\troles\tlane\n" +
+			"build\tp-new\tgrok\timplementer\txai\t1\t<ROOT>/repo\t<TS>\tgrok\task\timplementer\tbuild\t\t\txhigh\tnone\n" +
+			"w1\tp-w1\tgrok\tscouter\txai\t1\t<ROOT>/repo\t<TS>\tgrok\tfull\tscouter\texplore\n"
+		if got != want {
+			t.Fatalf("got:\n%swant:\n%s", got, want)
+		}
+	})
+
+	t.Run("a spawned row of a non-McpOffRoles role records inherit", func(t *testing.T) {
+		row := "rev\tp-rev\tclaude\tplanner\tanthropic\t1\t<ROOT>/repo\t<TS>\tclaude-opus\task\tplanner\treview\t\t\txhigh\n"
+		got, err := RewriteMcpRoster("# h\n"+row, []string{"rev"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(got, "xhigh\tinherit\n") {
+			t.Fatalf("got:\n%s", got)
+		}
+	})
+
+	t.Run("a row of an agent the scenario never spawns stays verbatim", func(t *testing.T) {
+		got, err := RewriteMcpRoster(roster, []string{"other"})
+		if err != nil || got != roster {
+			t.Fatalf("got:\n%swant:\n%s err=%v", got, roster, err)
+		}
+	})
+
+	t.Run("a 15-field row without a role name fails instead of guessing", func(t *testing.T) {
+		row := "ghost\tp-x\tgrok\t\t\t1\t<ROOT>/repo\t<TS>\tgrok\task\t\tbuild\t\t\txhigh\n"
+		if _, err := RewriteMcpRoster("# h\n"+row, []string{"ghost"}); err == nil {
+			t.Fatal("the role-less row must fail")
+		}
+	})
+}
+
+func TestMcpSpawnedAgents(t *testing.T) {
+	// The spawn JSON is pretty-printed (two-space indent, closing brace in
+	// column 0) — the shape the spawn actually emits; the dispatch JSON is
+	// one compact line and never counts.
+	fresh := "{\n  \"name\": \"build\",\n  \"created_pane\": true,\n  \"kind\": \"grok\",\n  \"role\": \"implementer\"\n}\n"
+	reuse := "{\n  \"name\": \"build\",\n  \"reused\": true,\n  \"kind\": \"grok\",\n  \"role\": \"implementer\"\n}\n"
+	other := `{"wait_status":"submitted","agent":"build","role":"implementer"}\n`
+	if got := McpSpawnedAgents(fresh, other, reuse+"tail"); len(got) != 1 || got[0] != "build" {
+		t.Fatalf("got=%v, want [build] (fresh and reuse count, dispatch does not)", got)
+	}
+	if got := McpSpawnedAgents(other); len(got) != 0 {
+		t.Fatalf("got=%v, want nothing", got)
+	}
 }

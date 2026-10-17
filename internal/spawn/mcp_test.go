@@ -181,14 +181,15 @@ func TestCmdSpawnMcpArgvPosition(t *testing.T) {
 		}
 	})
 
-	t.Run("codex: the flag is two argv elements after the effort config", func(t *testing.T) {
+	t.Run("codex: the per-server flags follow the effort config", func(t *testing.T) {
 		f := mk(t)
+		installCodexMcpList(t, f, `[{"name":"alpha","enabled":true,"transport":{"command":"/opt/x --api-key SECRET-1"}}]`)
 		code, _, _, _ := runCmdSpawn(t, f, []string{"worker", "--kind", "codex", "--model", "gpt-5", "--effort", "high", "--mcp", "none"})
 		if code != 0 {
 			t.Fatalf("exit=%d", code)
 		}
 		tail := startTail(t, f)
-		want := `-m gpt-5 -c model_reasoning_effort="high" -c mcp_servers={}`
+		want := `-m gpt-5 -c model_reasoning_effort="high" -c mcp_servers.alpha.enabled=false`
 		if got := strings.Join(tail, " "); got != want {
 			t.Fatalf("argv=%q, want %q", got, want)
 		}

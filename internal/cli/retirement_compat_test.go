@@ -1438,6 +1438,16 @@ func checkDispatchFinalFiles(t *testing.T, f *retirementFixture, stored retireDi
 		if key == "herdr.log" {
 			continue
 		}
+		if key == "state/ws/agents.tsv" {
+			// DJA-392 fatia 2 R2: the spawn records the effective MCP
+			// choice as the roster's last field; adapt the frozen rows the
+			// scenario's run spawned (the frozen bytes stay unchanged).
+			adapted, adErr := testutil.RewriteMcpRoster(want, testutil.McpSpawnedAgents(stepOuts...))
+			if adErr != nil {
+				t.Fatalf("DJA-392 R2 roster adaptation for %s: %s", key, adErr)
+			}
+			want = adapted
+		}
 		got, ok := final[key]
 		if !ok {
 			t.Fatalf("missing state file %s (have %v)", key, sortedKeys(final))

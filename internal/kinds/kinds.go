@@ -148,11 +148,15 @@ func KindEffortArgs(kind, effort, model string, env platform.Env, warn WarnFunc)
 	return nil
 }
 
-// KindMcpArgs translates the per-spawn MCP choice into the kind's
+// KindMcpArgs translates the per-spawn MCP choice into the kind's static
 // per-process flag (DJA-392): mcp=none turns the user's MCP servers off for
 // this process, inherit (or anything else) changes nothing. The ok result
-// reports whether the kind has a per-process flag at all: when it does not,
-// the caller warns once and the agent keeps the user's MCP servers.
+// reports whether the kind has a static flag at all: when it does not, the
+// caller warns once and the agent keeps the user's MCP servers. Codex has
+// no static flag — its off args are dynamic (one
+// -c mcp_servers.<name>.enabled=false pair per enabled server, built by the
+// spawn from `codex mcp list --json`) — so it reports not-ok for mcp=none
+// and the spawn handles it.
 func KindMcpArgs(kind, mcp string) (args []string, ok bool) {
 	if mcp != "none" {
 		return nil, true
@@ -160,8 +164,6 @@ func KindMcpArgs(kind, mcp string) (args []string, ok bool) {
 	switch kind {
 	case "claude":
 		return []string{"--strict-mcp-config"}, true
-	case "codex":
-		return []string{"-c", "mcp_servers={}"}, true
 	case "pi":
 		return []string{"--no-mcp"}, true
 	default:
@@ -170,10 +172,16 @@ func KindMcpArgs(kind, mcp string) (args []string, ok bool) {
 }
 
 // KindMcpOff reports whether the kind can turn the user's MCP servers off
-// per process (the `soho kinds` table column).
+// per process (the `soho kinds` table column): claude and pi through a
+// static flag, codex through a per-server override built from its live
+// listing. Both count.
 func KindMcpOff(kind string) bool {
-	_, ok := KindMcpArgs(kind, "none")
-	return ok
+	switch kind {
+	case "claude", "codex", "pi":
+		return true
+	default:
+		return false
+	}
 }
 
 func KindModelArgs(kind, model, effort string, warn WarnFunc) []string {

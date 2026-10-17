@@ -378,10 +378,30 @@ func (f *tm11SpawnFixture) runStepsPrepared(t *testing.T, golden tm11SpawnGolden
 		}
 		value := strings.ReplaceAll(string(actual), filepath.Dir(f.cwd), "<ROOT>")
 		value = normTM11SpawnRoster(value)
+		// DJA-392 fatia 2 R2: the spawn records the effective MCP choice as
+		// the roster's last field; adapt the frozen rows the scenario's
+		// spawns wrote (the frozen bytes stay unchanged).
+		if name == "roster" {
+			adapted, adErr := testutil.RewriteMcpRoster(*want, testutil.McpSpawnedAgents(stepOutsOf(golden)...))
+			if adErr != nil {
+				t.Fatalf("DJA-392 R2 roster adaptation: %s", adErr)
+			}
+			*want = adapted
+		}
 		if value != *want {
 			t.Fatalf("%s=%q want=%q", name, value, *want)
 		}
 	}
+}
+
+// stepOutsOf returns each step's stdout, in order, for the oracle's
+// spawn-agent extraction (DJA-392 fatia 2 R2 roster adaptation).
+func stepOutsOf(golden tm11SpawnGolden) []string {
+	outs := make([]string, 0, len(golden.Steps))
+	for _, step := range golden.Steps {
+		outs = append(outs, step.Out)
+	}
+	return outs
 }
 
 // tm11SpawnReuseGoKeys: keys the Go spawn-reuse JSON gained after the JS
