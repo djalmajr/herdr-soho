@@ -13,13 +13,24 @@ import (
 
 // Resource pressure for `spawn`, `wait`, and `status`: one line on stderr
 // (never stdout, never the friction log) when the state dir's disk or the
-// swap passed the configured limits. Every measurement failure is
-// silent, the command's stdout and exit code never change, and under
-// SOHO_NOWRITE nothing is written and no warning goes out.
+// swap passed the configured limits, and — for the spawn only, above the
+// harder refusal limits — the refusal to open a new pane (exit 25, skipped
+// by --force). Every measurement failure is silent (the command's stdout
+// and exit code never change), and under SOHO_NOWRITE nothing is written,
+// no warning goes out and the spawn is never refused.
 
 const (
 	pressureDiskKey = "pressure_disk_free_percent"
 	pressureSwapKey = "pressure_swap_percent"
+
+	// The harder spawn-only limits: above them the spawn refuses to open a
+	// new pane (exit 25) unless it gets --force. They measure the same
+	// things as the warning keys (platform.DiskFree / platform.SwapUsage);
+	// on Windows the swap is not measured, so only the disk part applies.
+	pressureRefuseDiskKey     = "pressure_refuse_disk_free_percent"
+	pressureRefuseSwapKey     = "pressure_refuse_swap_percent"
+	pressureRefuseDiskDefault = 5
+	pressureRefuseSwapDefault = 95
 
 	pressureDiskDefault = 15
 	pressureSwapDefault = 80
@@ -64,6 +75,27 @@ func pressureCheck(ctx *Config, env platform.Env, cwd string, throttle bool) {
 	}
 }
 
+// PressureRefuseParts is the spawn refusal entry point (DJA-392): it holds
+// only the parts that passed the harder refusal limits
+// (pressure_refuse_disk_free_percent, pressure_refuse_swap_percent), with
+// the same text as the warning parts. It runs after the reuse decision and
+// before any herdr call that creates a pane or agent; the caller refuses
+// (exit 25) when it returns a part, unless --force was passed. A limit of 0
+// disables its part, a failed measurement yields no part (a failure never
+// refuses), and under SOHO_NOWRITE nothing refuses.
+func PressureRefuseParts(ctx *Config, env platform.Env, cwd string) []string {
+	if Nowrite(env) {
+		return nil
+	}
+	stateDir := pressureStateDir(ctx, env, cwd)
+	if stateDir == "" {
+		return nil
+	}
+	return pressureMeasure(ctx, env, stateDir,
+		pressureThreshold(ctx, pressureRefuseDiskKey, pressureRefuseDiskDefault, env),
+		pressureThreshold(ctx, pressureRefuseSwapKey, pressureRefuseSwapDefault, env))
+}
+
 // pressureStateDir resolves <state dir> without dying or spending a herdr
 // call: the workspace id comes from HERDR_WORKSPACE_ID; without it there is
 // no pressure check (a command that cannot resolve its state dir cannot be
@@ -76,13 +108,19 @@ func pressureStateDir(ctx *Config, env platform.Env, cwd string) string {
 	return filepath.Join(StateRootPath(ctx, env, cwd), workspace)
 }
 
-// pressureParts holds only the parts that passed their limit: the disk
-// part when the free percent is below pressure_disk_free_percent (0
-// disables), the swap part when the used percent is above
-// pressure_swap_percent (0 disables, and a zero swap total never warns).
+// pressureParts holds only the parts that passed the warning limits.
 func pressureParts(ctx *Config, env platform.Env, stateDir string) []string {
+	return pressureMeasure(ctx, env, stateDir,
+		pressureThreshold(ctx, pressureDiskKey, pressureDiskDefault, env),
+		pressureThreshold(ctx, pressureSwapKey, pressureSwapDefault, env))
+}
+
+// pressureMeasure holds only the parts that passed the given limits: the
+// disk part when the free percent is below diskLimit (0 disables), the
+// swap part when the used percent is above swapLimit (0 disables, and a
+// zero swap total never counts). Any measurement failure yields no part.
+func pressureMeasure(ctx *Config, env platform.Env, stateDir string, diskLimit, swapLimit int) []string {
 	var parts []string
-	diskLimit := pressureThreshold(ctx, pressureDiskKey, pressureDiskDefault, env)
 	if diskLimit > 0 {
 		if free, total, ok := platform.DiskFree(stateDir); ok && total > 0 {
 			pct := free * 100 / total
@@ -91,7 +129,6 @@ func pressureParts(ctx *Config, env platform.Env, stateDir string) []string {
 			}
 		}
 	}
-	swapLimit := pressureThreshold(ctx, pressureSwapKey, pressureSwapDefault, env)
 	if swapLimit > 0 {
 		if used, total, ok := platform.SwapUsage(env); ok && total > 0 {
 			pct := used * 100 / total

@@ -439,6 +439,7 @@ func defaultValue(value, fallback string) string {
 type spawnOptions struct {
 	role, name, kind, direction, ratio, cwd, pane, timeout, effort, model, approvals, reuse, tabLabel string
 	kindSet                                                                                           bool
+	force                                                                                             bool
 	native                                                                                            []string
 }
 
@@ -459,6 +460,11 @@ func parseArgs(argv []string, cwd string) spawnOptions {
 			continue
 		case "--fresh":
 			o.reuse = "off"
+			continue
+		case "--force":
+			// DJA-392: skips only the pressure refusal below (the warning
+			// line still goes out); never skips any other refusal.
+			o.force = true
 			continue
 		case "--tab-label", "--effort", "--model", "--approvals", "--name", "--kind", "--direction", "--ratio", "--cwd", "--pane", "--timeout":
 		default:
@@ -727,6 +733,18 @@ func CmdSpawn(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		if unavailable != "" {
 			parts := strings.SplitN(unavailable, "\x00", 2)
 			core.DieFriction(fmt.Sprintf("worker '%s' matches this role, kind and cwd but herdr agent get failed (%s). Not spawning a replacement; it may still be live.", parts[0], fieldAt(parts, 1)), 4, "", "")
+		}
+	}
+	// DJA-392: the harder pressure limits refuse to open a new pane (exit
+	// 25). Both reuse paths returned above, so anything that reaches here
+	// creates a new pane (o.pane == "") and no herdr call that creates a
+	// pane or agent has run yet; a given --pane creates no pane and is
+	// never refused. --force skips only this refusal (the pressure warning
+	// line at the top still went out); a measurement failure never
+	// refuses, and nothing is written (no friction line, no roster line).
+	if o.pane == "" && !o.force {
+		if parts := core.PressureRefuseParts(ctx, env, cwd); len(parts) > 0 {
+			platform.Die(fmt.Sprintf("spawn: refusing to open a new pane under resource pressure: %s; close idle panes or run 'soho gc', or pass --force", strings.Join(parts, "; ")), 25)
 		}
 	}
 	core.EnforceWorkerCap(ctx, env, cwd)

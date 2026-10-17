@@ -146,15 +146,20 @@ func runTM8ConfigGolden(t *testing.T, name string) {
 	}
 	// The frozen golden predates the soho name layer; the exact-substitution
 	// name oracle adapts the expected output, error, file names and contents.
+	// The DJA-392 oracle likewise adapts the frozen config listing that now
+	// ends with the two pressure refusal keys.
 	for i := range want.Files {
 		want.Files[i].Rel = testutil.RewriteSohoName(want.Files[i].Rel)
 		if want.Files[i].Content != nil {
 			*want.Files[i].Content = testutil.RewriteSohoName(*want.Files[i].Content)
+			*want.Files[i].Content = testutil.RewritePressureRefusal(*want.Files[i].Content)
 		}
 	}
 	for i := range want.Steps {
 		want.Steps[i].Out = testutil.RewriteSohoName(want.Steps[i].Out)
+		want.Steps[i].Out = testutil.RewritePressureRefusal(want.Steps[i].Out)
 		want.Steps[i].Err = testutil.RewriteSohoName(want.Steps[i].Err)
+		want.Steps[i].Err = testutil.RewritePressureRefusal(want.Steps[i].Err)
 	}
 	for i, step := range want.Steps {
 		stepEnv := env.Clone()
