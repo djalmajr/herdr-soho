@@ -80,6 +80,18 @@ type BoardState struct {
 	refreshOld           []PickerEntry
 	viewPreferencePath   string
 	viewPreferenceFailed bool
+	// teamViewPreferencePath is the team view's form preference file
+	// (the team-view file beside the session-view one): the same
+	// directory and the same way as the session-view preference.
+	teamViewPreferencePath string
+	// teamViewForm is the team view's open presentation, read from the
+	// preference at the state's construction (missing, unreadable or
+	// invalid values read as the tree) and persisted by the v switch.
+	teamViewForm string
+	// teamViewPreferenceFailed records the team-view form's save
+	// failure: nothing displays it (the list's message is the list's
+	// own preference's), the switch and the atomic write go on as usual.
+	teamViewPreferenceFailed bool
 	// lastFrameSeq, lastFrameW and lastFrameH record the exact frame bytes
 	// this runtime last painted and the viewport they were painted
 	// against. An identical frame for the same viewport is not written
@@ -96,7 +108,7 @@ type BoardState struct {
 }
 
 func NewBoardState() *BoardState {
-	return &BoardState{Entries: []PickerEntry{}, Failures: []PickerFailure{}, ViewState: SessionViewState{View: sessionViewTable, Sort: sessionSortPane}}
+	return &BoardState{Entries: []PickerEntry{}, Failures: []PickerFailure{}, ViewState: SessionViewState{View: sessionViewTable, Sort: sessionSortPane}, teamViewForm: teamFormTree}
 }
 
 // boardAgents keeps only the panes that have an agent (kind not null), in
@@ -428,10 +440,12 @@ func RenderBoard(state *BoardState, width int) string {
 func (s *BoardState) ApplyKey(key string) string {
 	// The read-only team view overlays the list: while
 	// it is open, Esc and i go back to the list with the same selection,
-	// the arrow and page keys scroll its content, Ctrl-C closes the modal
-	// as before, and the list keys and the search text never reach the
-	// list underneath (the view is read-only and the selection is frozen
-	// for it).
+	// the arrow and page keys scroll its content, v switches its
+	// presentation (tree and table, the scroll resets to the top, the
+	// choice is persisted and remembered for the run), Ctrl-C closes the
+	// modal as before, and the list keys and the search text never reach
+	// the list underneath (the view is read-only and the selection is
+	// frozen for it).
 	if s.TeamView != nil {
 		switch key {
 		case "esc", "i":
@@ -444,6 +458,11 @@ func (s *BoardState) ApplyKey(key string) string {
 			return s.Exit
 		case "up", "down", "page-up", "page-down":
 			teamViewScrollMove(s.TeamView, key)
+			return ""
+		case "v":
+			teamViewToggleForm(s.TeamView)
+			s.teamViewForm = s.TeamView.form
+			s.rememberTeamViewForm()
 			return ""
 		}
 		return ""
@@ -658,6 +677,7 @@ func (s *BoardState) openBoardTeamView() bool {
 	entry := list[idx]
 	s.teamLoadSeq++
 	s.TeamView = openTeamView(s.teamLoadSeq, entry)
+	s.TeamView.form = teamViewFormOf(s.teamViewForm)
 	return !s.TeamView.remote && s.TeamView.targetErr == ""
 }
 

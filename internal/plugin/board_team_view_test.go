@@ -68,7 +68,7 @@ func TestBoardTeamViewIOpensLocalRowWithNowriteReads(t *testing.T) {
 		t.Fatal("the applied load did not mark the view loaded")
 	}
 	frame := renderSessionModal(s, 80, 24, "")
-	for _, want := range []string{"TEAM  soho-ws · local", "ROSTER", "worker-1", "ROLES", "planner grok"} {
+	for _, want := range []string{"TEAM  soho-ws · local", "layout split", "AGENTS (1)", "worker-1", "OUTSIDE LANES", "planner"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("frame missing %q:\n%s", want, frame)
 		}
@@ -76,8 +76,8 @@ func TestBoardTeamViewIOpensLocalRowWithNowriteReads(t *testing.T) {
 	// The two reads, exactly, in order, each a NOWRITE read with the
 	// row's target ids (the shell decoys must not leak in).
 	calls := pickerTeamCalls(t, cli)
-	if len(calls) != 2 || !reflect.DeepEqual(calls[0].Argv, []string{"roster"}) || !reflect.DeepEqual(calls[1].Argv, []string{"roles"}) {
-		t.Fatalf("CLI calls=%#v want exactly roster then roles", calls)
+	if len(calls) != 2 || !reflect.DeepEqual(calls[0].Argv, []string{"roster", "--json"}) || !reflect.DeepEqual(calls[1].Argv, []string{"roles", "--json"}) {
+		t.Fatalf("CLI calls=%#v want exactly roster --json then roles --json", calls)
 	}
 	for i, call := range calls {
 		if call.Env["SOHO_NOWRITE"] != "1" {
@@ -179,15 +179,15 @@ func TestBoardTeamViewEscReturnsToTheSameSelection(t *testing.T) {
 func TestBoardTeamViewStaleResultFromAnotherRowIsDiscarded(t *testing.T) {
 	// The fake answers differently per call (Call counter), so a stale
 	// result is visible in the frame: row A's roster and row B's roster
-	// are distinct lines.
+	// are distinct agents.
 	cwdA, cwdB := t.TempDir(), t.TempDir()
 	env, cli, _ := pickerTeamFixture(t, []fakecli.Rule{
 		// The Call counter is 1-based (the current call is logged before
 		// the match), so the first call is Call:1 and the second Call:2.
-		{Argv: []string{"roster"}, Call: 1, Stdout: "roster-of-row-a\n"},
-		{Argv: []string{"roster"}, Call: 2, Stdout: "roster-of-row-b\n"},
-		{Argv: []string{"roles"}, Call: 1, Stdout: "roles-a\n"},
-		{Argv: []string{"roles"}, Call: 2, Stdout: "roles-b\n"},
+		{Argv: []string{"roster", "--json"}, Call: 1, Stdout: `{"agents":[{"name":"roster-of-row-a","kind":"codex","state":"working"}]}`},
+		{Argv: []string{"roster", "--json"}, Call: 2, Stdout: `{"agents":[{"name":"roster-of-row-b","kind":"codex","state":"working"}]}`},
+		{Argv: []string{"roles", "--json"}, Call: 1, Stdout: `{"roles":[{"role":"roles-a","kind":"claude","mode":"edit"}]}`},
+		{Argv: []string{"roles", "--json"}, Call: 2, Stdout: `{"roles":[{"role":"roles-b","kind":"claude","mode":"edit"}]}`},
 	})
 	entries := pickerTeamEntries(t, cwdA)
 	entries[1] = PickerEntry{
@@ -264,7 +264,7 @@ func TestBoardTeamViewRenderSessionModalDrawsTheTeamTitle(t *testing.T) {
 	}
 	boardTeamLoadAndApply(t, s, env, cli)
 	frame = renderSessionModal(s, 80, 24, "")
-	for _, want := range []string{"TEAM  soho-ws · local", "ROSTER", "worker-1"} {
+	for _, want := range []string{"TEAM  soho-ws · local", "AGENTS (1)", "worker-1"} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("frame missing %q after the load:\n%s", want, frame)
 		}
@@ -287,10 +287,15 @@ func TestBoardTeamViewFooterDisclosesIShortcut(t *testing.T) {
 	if frame := renderSessionModal(legacy, 80, 24, ""); strings.Contains(frame, "i Team") {
 		t.Fatalf("legacy frame discloses the enhanced shortcut:\n%s", frame)
 	}
-	// The view's frame keeps the disclosure (i toggles the view back).
+	// The view's frame discloses the view's own footer (i/Esc goes back
+	// to the list, where the i Team shortcut is back too).
 	s.ApplyKey("i")
+	if frame := renderSessionModal(s, 80, 24, ""); !strings.Contains(frame, "i/Esc Back · Ctrl-C Close") {
+		t.Fatalf("team view frame missing the view's footer segments:\n%s", frame)
+	}
+	s.ApplyKey("esc")
 	if frame := renderSessionModal(s, 80, 24, ""); !strings.Contains(frame, "i Team") {
-		t.Fatalf("team view frame missing the i Team shortcut:\n%s", frame)
+		t.Fatalf("the list back from the view lost the i Team shortcut:\n%s", frame)
 	}
 }
 
@@ -319,8 +324,8 @@ func TestBoardTeamViewLoopOpensLoadsAndReturns(t *testing.T) {
 		t.Fatal(err)
 	}
 	cli, err := fakecli.InstallWithOptions(t, dir, "cli", []fakecli.Rule{
-		{Argv: []string{"roster"}, Stdout: pickerTeamRosterFixture},
-		{Argv: []string{"roles"}, Stdout: pickerTeamRolesFixture},
+		{Argv: []string{"roster", "--json"}, Stdout: pickerTeamRosterFixture},
+		{Argv: []string{"roles", "--json"}, Stdout: pickerTeamRolesFixture},
 	}, fakecli.InstallOptions{
 		CaptureEnv: []string{"HERDR_WORKSPACE_ID", "HERDR_PANE_ID", "HERDR_TAB_ID", "SOHO_NOWRITE"},
 	})
@@ -386,10 +391,10 @@ func TestBoardTeamViewLoopOpensLoadsAndReturns(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitOutput(t, output.Name(), "TEAM  alpha · local")
-	waitOutput(t, output.Name(), "ROSTER")
+	waitOutput(t, output.Name(), "AGENTS (1)")
 	waitOutput(t, output.Name(), "worker-1")
-	waitOutput(t, output.Name(), "ROLES")
-	waitOutput(t, output.Name(), "planner grok")
+	waitOutput(t, output.Name(), "OUTSIDE LANES")
+	waitOutput(t, output.Name(), "planner")
 	dat, _ := os.ReadFile(output.Name())
 	if !strings.Contains(lastFrame(t, dat), "TEAM  alpha · local") {
 		t.Fatalf("the last frame is not the team view:\n%s", lastFrame(t, dat))
@@ -397,14 +402,14 @@ func TestBoardTeamViewLoopOpensLoadsAndReturns(t *testing.T) {
 	if frameBandedLineContains(t, dat, "orchestrator") {
 		t.Fatalf("the team view frame kept the list's banded row:\n%s", lastFrame(t, dat))
 	}
-	if !strings.Contains(lastFrame(t, dat), "i Team") {
-		t.Fatalf("the board frame's footer missing the i Team shortcut:\n%s", lastFrame(t, dat))
+	if !strings.Contains(lastFrame(t, dat), "i/Esc Back · Ctrl-C Close") {
+		t.Fatalf("the team view frame's footer missing the view's segments:\n%s", lastFrame(t, dat))
 	}
 	// The two NOWRITE reads with the row's target ids (the shell decoys
 	// must not leak in).
 	calls := pickerTeamCalls(t, cli)
-	if len(calls) != 2 || !reflect.DeepEqual(calls[0].Argv, []string{"roster"}) || !reflect.DeepEqual(calls[1].Argv, []string{"roles"}) {
-		t.Fatalf("CLI calls=%#v want exactly roster then roles", calls)
+	if len(calls) != 2 || !reflect.DeepEqual(calls[0].Argv, []string{"roster", "--json"}) || !reflect.DeepEqual(calls[1].Argv, []string{"roles", "--json"}) {
+		t.Fatalf("CLI calls=%#v want exactly roster --json then roles --json", calls)
 	}
 	for i, call := range calls {
 		if call.Env["SOHO_NOWRITE"] != "1" {
@@ -505,8 +510,8 @@ func startBoardTeamLoop(t *testing.T) (*os.File, string, chan os.Signal, chan in
 		t.Fatal(err)
 	}
 	cli, err := fakecli.Install(t, dir, "cli", []fakecli.Rule{
-		{Argv: []string{"roster"}, Stdout: pickerTeamRosterFixture},
-		{Argv: []string{"roles"}, Stdout: pickerTeamRolesFixture},
+		{Argv: []string{"roster", "--json"}, Stdout: pickerTeamRosterFixture},
+		{Argv: []string{"roles", "--json"}, Stdout: pickerTeamRolesFixture},
 	})
 	if err != nil {
 		t.Fatal(err)

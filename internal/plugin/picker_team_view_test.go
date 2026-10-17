@@ -48,13 +48,16 @@ func pickerTeamFixture(t *testing.T, rules []fakecli.Rule) (platform.Env, string
 	return env, cli, cwd
 }
 
-const pickerTeamRosterFixture = "NAME  KIND  STATUS  TASK\nworker-1  codex  working  implement\n"
-const pickerTeamRolesFixture = "planner  grok\nimplementer  codex\n"
+// The view's fake reads answer the JSON contract (DJA-375 B): roster
+// --json and roles --json, exactly.
+const pickerTeamRosterFixture = `{"workspace":"w1","scope":"workspace","settings":{"layout":"split","reuse_workers":"on","multi_role":"on","auto_approve":"off"},"agents":[{"name":"worker-1","role":"implementer","previous_role":"","kind":"codex","pane":"w1:p1","tab":"1","state":"working","report":"pending","cwd":"/x/w1","task":"implement"}],"others":[]}`
+
+const pickerTeamRolesFixture = `{"roles":[{"role":"planner","kind":"claude","model":"grok","effort":"","mode":"read-only","lane":"","kind_from":"","model_from":"","effort_from":"","file":"/x/planner.md"},{"role":"implementer","kind":"codex","model":"gpt-6","effort":"low","mode":"edit","lane":"","kind_from":"","model_from":"","effort_from":"","file":"/x/implementer.md"}]}`
 
 func pickerTeamFixtureOK(t *testing.T) (platform.Env, string, string) {
 	return pickerTeamFixture(t, []fakecli.Rule{
-		{Argv: []string{"roster"}, Stdout: pickerTeamRosterFixture},
-		{Argv: []string{"roles"}, Stdout: pickerTeamRolesFixture},
+		{Argv: []string{"roster", "--json"}, Stdout: pickerTeamRosterFixture},
+		{Argv: []string{"roles", "--json"}, Stdout: pickerTeamRolesFixture},
 	})
 }
 
@@ -143,7 +146,7 @@ func TestPickerTeamViewIOpensLocalRowWithNowriteReads(t *testing.T) {
 		t.Fatal("the applied load did not mark the view loaded")
 	}
 	frame := renderSessionPopup(pickerTeamViewOptions(s, ""), 80, 24)
-	for _, want := range []string{"TEAM  soho-ws · local", "ROSTER", "worker-1", "ROLES", "planner grok"} {
+	for _, want := range []string{"TEAM  soho-ws · local", "layout split", "AGENTS (1)", "worker-1", "OUTSIDE LANES", "planner"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("frame missing %q:\n%s", want, frame)
 		}
@@ -151,8 +154,8 @@ func TestPickerTeamViewIOpensLocalRowWithNowriteReads(t *testing.T) {
 	// The two reads, exactly, in order, each a NOWRITE read with the
 	// row's target ids (the shell decoys must not leak in).
 	calls := pickerTeamCalls(t, cli)
-	if len(calls) != 2 || !reflect.DeepEqual(calls[0].Argv, []string{"roster"}) || !reflect.DeepEqual(calls[1].Argv, []string{"roles"}) {
-		t.Fatalf("CLI calls=%#v want exactly roster then roles", calls)
+	if len(calls) != 2 || !reflect.DeepEqual(calls[0].Argv, []string{"roster", "--json"}) || !reflect.DeepEqual(calls[1].Argv, []string{"roles", "--json"}) {
+		t.Fatalf("CLI calls=%#v want exactly roster --json then roles --json", calls)
 	}
 	for i, call := range calls {
 		if call.Env["SOHO_NOWRITE"] != "1" {
@@ -195,8 +198,8 @@ func TestPickerTeamViewISearchTextInSearchFocus(t *testing.T) {
 
 func TestPickerTeamViewRolesFailureKeepsRoster(t *testing.T) {
 	env, cli, cwd := pickerTeamFixture(t, []fakecli.Rule{
-		{Argv: []string{"roster"}, Stdout: pickerTeamRosterFixture},
-		{Argv: []string{"roles"}, Stderr: "roles boom", Code: 1},
+		{Argv: []string{"roster", "--json"}, Stdout: pickerTeamRosterFixture},
+		{Argv: []string{"roles", "--json"}, Stderr: "roles boom", Code: 1},
 	})
 	s := pickerTeamTestState(pickerTeamEntries(t, cwd))
 	s.ApplyKey("i")
@@ -206,33 +209,39 @@ func TestPickerTeamViewRolesFailureKeepsRoster(t *testing.T) {
 		t.Fatalf("failures roster=%q roles=%q want only the roles failure", v.rosterFailure, v.rolesFailure)
 	}
 	frame := renderSessionPopup(pickerTeamViewOptions(s, ""), 80, 24)
-	for _, want := range []string{"ROSTER", "worker-1", "ROLES", "roles: roles failed (exit 1): roles boom"} {
+	for _, want := range []string{"AGENTS (1)", "worker-1", "roles: roles failed (exit 1): roles boom"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("frame missing %q:\n%s", want, frame)
 		}
 	}
-	if strings.Contains(frame, "planner grok") {
-		t.Errorf("the failed roles block kept its lines:\n%s", frame)
+	if strings.Contains(frame, "planner") {
+		t.Errorf("the failed roles block kept its roles:\n%s", frame)
 	}
 }
 
-func TestPickerTeamViewEmptyRoster(t *testing.T) {
+func TestPickerTeamViewEmptyRosterShowsInvalidOutput(t *testing.T) {
+	// An empty roster read is not valid JSON: the view shows the
+	// invalid-output cause in its own block (the settings line is gone
+	// with the roster) and the roles block keeps its content.
 	env, cli, cwd := pickerTeamFixture(t, []fakecli.Rule{
-		{Argv: []string{"roster"}, Stdout: ""},
-		{Argv: []string{"roles"}, Stdout: pickerTeamRolesFixture},
+		{Argv: []string{"roster", "--json"}, Stdout: ""},
+		{Argv: []string{"roles", "--json"}, Stdout: pickerTeamRolesFixture},
 	})
 	s := pickerTeamTestState(pickerTeamEntries(t, cwd))
 	s.ApplyKey("i")
 	pickerTeamLoadAndApply(t, s, env, cli)
 	v := s.TeamView
-	if !v.loaded || v.rosterFailure != "" || len(v.rosterLines) != 0 {
-		t.Fatalf("view=%+v want a loaded empty roster", v)
+	if !v.loaded || v.rosterFailure == "" {
+		t.Fatalf("view loaded=%v rosterFailure=%q want the failure", v.loaded, v.rosterFailure)
 	}
 	frame := renderSessionPopup(pickerTeamViewOptions(s, ""), 80, 24)
-	for _, want := range []string{"ROSTER", "no soho team in this workspace", "ROLES", "planner grok"} {
+	for _, want := range []string{"roster: invalid output", "OUTSIDE LANES", "planner"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("frame missing %q:\n%s", want, frame)
 		}
+	}
+	if strings.Contains(frame, "layout split") {
+		t.Errorf("the failed roster block kept the settings line:\n%s", frame)
 	}
 }
 
@@ -337,15 +346,15 @@ func TestPickerTeamViewEscReturnsToTheSameSelection(t *testing.T) {
 func TestPickerTeamViewStaleResultFromAnotherRowIsDiscarded(t *testing.T) {
 	// The fake answers differently per call (Call counter), so a stale
 	// result is visible in the frame: row A's roster and row B's roster
-	// are distinct lines.
+	// are distinct agents.
 	cwdA, cwdB := t.TempDir(), t.TempDir()
 	env, cli, _ := pickerTeamFixture(t, []fakecli.Rule{
 		// The Call counter is 1-based (the current call is logged before
 		// the match), so the first call is Call:1 and the second Call:2.
-		{Argv: []string{"roster"}, Call: 1, Stdout: "roster-of-row-a\n"},
-		{Argv: []string{"roster"}, Call: 2, Stdout: "roster-of-row-b\n"},
-		{Argv: []string{"roles"}, Call: 1, Stdout: "roles-a\n"},
-		{Argv: []string{"roles"}, Call: 2, Stdout: "roles-b\n"},
+		{Argv: []string{"roster", "--json"}, Call: 1, Stdout: `{"agents":[{"name":"roster-of-row-a","kind":"codex","state":"working"}]}`},
+		{Argv: []string{"roster", "--json"}, Call: 2, Stdout: `{"agents":[{"name":"roster-of-row-b","kind":"codex","state":"working"}]}`},
+		{Argv: []string{"roles", "--json"}, Call: 1, Stdout: `{"roles":[{"role":"roles-a","kind":"claude","mode":"edit"}]}`},
+		{Argv: []string{"roles", "--json"}, Call: 2, Stdout: `{"roles":[{"role":"roles-b","kind":"claude","mode":"edit"}]}`},
 	})
 	entries := pickerTeamEntries(t, cwdA)
 	entries[1] = PickerEntry{
@@ -418,35 +427,40 @@ func TestPickerTeamViewFooterDisclosesTheIShortcut(t *testing.T) {
 }
 
 func TestPickerTeamViewScrollsArrowsAndPages(t *testing.T) {
+	// The roster read carries 15 agents: the view's content is the title
+	// section, the AGENTS (15) section (15 lines) and the roles' OUTSIDE
+	// LANES section.
 	var roster strings.Builder
+	roster.WriteString(`{"agents":[`)
 	for i := 1; i <= 15; i++ {
 		if i > 1 {
-			roster.WriteString("\n")
+			roster.WriteString(",")
 		}
-		roster.WriteString(fmt.Sprintf("r%02d  codex  working  task", i))
+		fmt.Fprintf(&roster, `{"name":"r%02d","role":"tasker","kind":"codex","pane":"w1:p%d","state":"working","task":"task"}`, i, i)
 	}
+	roster.WriteString(`],"others":[]}`)
 	env, cli, cwd := pickerTeamFixture(t, []fakecli.Rule{
-		{Argv: []string{"roster"}, Stdout: roster.String()},
-		{Argv: []string{"roles"}, Stdout: pickerTeamRolesFixture},
+		{Argv: []string{"roster", "--json"}, Stdout: roster.String()},
+		{Argv: []string{"roles", "--json"}, Stdout: pickerTeamRolesFixture},
 	})
 	s := pickerTeamTestState(pickerTeamEntries(t, cwd))
 	s.ApplyKey("i")
 	pickerTeamLoadAndApply(t, s, env, cli)
 	frame := func() string { return renderSessionPopup(pickerTeamViewOptions(s, ""), 80, 24) }
 
-	if got := frame(); !strings.Contains(got, "ROSTER") || !strings.Contains(got, "r01") {
+	if got := frame(); !strings.Contains(got, "AGENTS (15)") || !strings.Contains(got, "r01") {
 		t.Fatalf("fresh view missing its content:\n%s", got)
 	}
 	s.ApplyKey("down") // scroll 1: the title line drops out
-	if got := frame(); !strings.Contains(got, "ROSTER") {
-		t.Fatalf("scroll 1 lost the ROSTER block:\n%s", got)
+	if got := frame(); strings.Contains(got, "TEAM  soho-ws · local") || !strings.Contains(got, "r01") {
+		t.Fatalf("scroll 1 kept the title or lost the first line:\n%s", got)
 	}
-	s.ApplyKey("down") // scroll 2: the ROSTER header drops out
-	if got := frame(); strings.Contains(got, "ROSTER") || !strings.Contains(got, "r01") {
-		t.Fatalf("scroll 2: ROSTER header or first line wrong:\n%s", got)
+	s.ApplyKey("down") // scroll 2: the settings line drops out
+	if got := frame(); strings.Contains(got, "layout split") || !strings.Contains(got, "AGENTS (15)") || !strings.Contains(got, "r01") {
+		t.Fatalf("scroll 2 wrong:\n%s", got)
 	}
-	s.ApplyKey("page-down") // scroll 12: the early lines are out, the ROLES block is in
-	if got := frame(); strings.Contains(got, "r01") || !strings.Contains(got, "r11") || !strings.Contains(got, "ROLES") {
+	s.ApplyKey("page-down") // scroll 12: the early agents are out, the roles section is in
+	if got := frame(); strings.Contains(got, "r01") || !strings.Contains(got, "r13") || !strings.Contains(got, "OUTSIDE LANES") {
 		t.Fatalf("page-down did not jump ten lines:\n%s", got)
 	}
 	s.ApplyKey("page-up") // scroll 2: the first line is back

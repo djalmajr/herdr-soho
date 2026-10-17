@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"os"
+	"strings"
 
 	contextpkg "context"
 
@@ -10,16 +11,17 @@ import (
 )
 
 // pickerTeamView is the session popup's read-only team view: the soho
-// team roster and the effective role
-// configuration of the selected row's workspace, for rows of the local
-// machine. The same type serves the picker's state and the board
-// runtime's state (the runtime the picker command runs on). The two CLI reads (roster and roles, exactly) run off the key
-// path with SOHO_NOWRITE=1 through the shared teamCall, and only
-// their finished result comes back to the list's goroutine, where
-// applyTeamView applies it. A late result of another row or of a
-// superseded open is discarded, and nothing here writes: a failed call
-// shows its cause in its own block and the other block keeps its
-// content.
+// team roster and the effective role configuration of the selected row's
+// workspace, for rows of the local machine, in two presentation forms
+// (the tree by default, the table after the v switch). The same type
+// serves the picker's state and the board runtime's state (the runtime
+// the picker command runs on). The two CLI reads (roster --json and
+// roles --json, exactly) run off the key path with SOHO_NOWRITE=1
+// through the shared teamCall, and only their finished result comes back
+// to the list's goroutine, where applyTeamView applies it. A late result
+// of another row or of a superseded open is discarded, and nothing here
+// writes: a failed or undecodable read shows its cause in its own block
+// and the other block keeps its content.
 type pickerTeamView struct {
 	// target is the soho team target of the selected row (the row's
 	// workspace_id, pane_id and cwd; the reads need no tab id).
@@ -41,27 +43,35 @@ type pickerTeamView struct {
 	// the view shows "loading team…".
 	loaded bool
 	// loadSeq is the open's sequence (the owning state's teamLoadSeq at
-	// the open): a result of another open (stale sequence) is
+	// the open): a result of another open (a stale sequence) is
 	// discarded.
-	loadSeq       int
-	rosterLines   []string
+	loadSeq int
+	// roster and roles are the decoded reads (soho roster --json / soho
+	// roles --json); nil with their failure's cause, whose block shows
+	// "<name>: <cause>" while the other block keeps its content.
+	roster        *teamViewRoster
 	rosterFailure string
-	rolesLines    []string
+	roles         *teamViewRoles
 	rolesFailure  string
+	// form is the open presentation (teamFormTree by default,
+	// teamFormTable after the v switch): the owning state remembers the
+	// choice for the run (the board also persists it).
+	form string
 	// scroll is the view's scroll offset (the arrow and page keys); the
 	// renderer applies it with scrollLines, like the team panel.
 	scroll int
 }
 
 // pickerTeamViewResult is one finished team-view load: the loader builds
-// it off the key path and the list's goroutine applies it, so the live
-// state is only touched by that goroutine, like the team panel's load.
+// it off the key path (the decoded reads, or their causes) and the
+// list's goroutine applies it, so the live state is only touched by
+// that goroutine, like the team panel's load.
 type pickerTeamViewResult struct {
 	seq         int
 	entryRef    string
-	rosterLines []string
+	roster      *teamViewRoster
 	rosterCause string
-	rolesLines  []string
+	roles       *teamViewRoles
 	rolesCause  string
 }
 
@@ -72,7 +82,8 @@ type pickerTeamViewResult struct {
 // directory); a row of another machine opens the view with the
 // remote-machine message and no CLI call at all. seq is the open's sequence (the
 // owning state's teamLoadSeq at the open): a result of another open
-// (a stale sequence) is discarded.
+// (a stale sequence) is discarded. The view opens in the tree form; the
+// owning state then applies the run's remembered form.
 func openTeamView(seq int, entry PickerEntry) *pickerTeamView {
 	machine := sessionMachineOf(entry)
 	v := &pickerTeamView{
@@ -86,6 +97,7 @@ func openTeamView(seq int, entry PickerEntry) *pickerTeamView {
 		workspaceLabel: pickerString(entry["workspace_label"]),
 		remote:         machine != sessionref.LocalMachine,
 		loadSeq:        seq,
+		form:           teamFormTree,
 	}
 	if !v.remote {
 		if cause := pickerTeamCwdCause(v.target.Cwd); cause != "" {
@@ -99,7 +111,8 @@ func openTeamView(seq int, entry PickerEntry) *pickerTeamView {
 
 // openPickerTeamView opens the read-only team view on the selected row.
 // Every open starts a new load sequence, so a late result of the
-// previous open (or of another row) is discarded.
+// previous open (or of another row) is discarded, and the open takes the
+// run's remembered form (in memory, like the list's).
 func (s *PickerState) openPickerTeamView() {
 	list := s.visible()
 	if len(list) == 0 {
@@ -108,6 +121,7 @@ func (s *PickerState) openPickerTeamView() {
 	entry := list[min(s.Selected, len(list)-1)]
 	s.teamLoadSeq++
 	s.TeamView = openTeamView(s.teamLoadSeq, entry)
+	s.TeamView.form = teamViewFormOf(s.teamViewForm)
 }
 
 // pickerTeamCwdCause validates the row's cwd like resolveTeamTarget does:
@@ -127,11 +141,43 @@ func pickerTeamCwdCause(cwd string) string {
 	return ""
 }
 
+// teamViewRosterCall runs the roster read (roster --json, a NOWRITE read
+// through the shared teamCall) and decodes the joined output; an output
+// that does not decode fails with "invalid output", the view's own block
+// shows the cause and the other block keeps its content.
+func teamViewRosterCall(ctx contextpkg.Context, exe string, env platform.Env, platformName string, target teamTarget) (*teamViewRoster, string) {
+	lines, cause := teamCall(ctx, exe, env, platformName, target, []string{"roster", "--json"}, true)
+	if cause != "" {
+		return nil, cause
+	}
+	roster, err := teamViewParseRoster(strings.Join(lines, "\n"))
+	if err != nil {
+		return nil, "invalid output"
+	}
+	return roster, ""
+}
+
+// teamViewRolesCall runs the roles read (roles --json, a NOWRITE read
+// through the shared teamCall) and decodes the joined output; an output
+// that does not decode fails with "invalid output", the view's own block
+// shows the cause and the other block keeps its content.
+func teamViewRolesCall(ctx contextpkg.Context, exe string, env platform.Env, platformName string, target teamTarget) (*teamViewRoles, string) {
+	lines, cause := teamCall(ctx, exe, env, platformName, target, []string{"roles", "--json"}, true)
+	if cause != "" {
+		return nil, cause
+	}
+	roles, err := teamViewParseRoles(strings.Join(lines, "\n"))
+	if err != nil {
+		return nil, "invalid output"
+	}
+	return roles, ""
+}
+
 // runPickerTeamViewLoad runs the open view's two read-only CLI calls
-// (roster and roles, exactly, each a NOWRITE read through the shared
-// teamCall) sequentially with the shared call deadline, off the key
-// path, and publishes the finished result for the loop to apply on its
-// own goroutine - the picker's discovery-load pattern (loadPickerEntries
+// (roster --json and roles --json, exactly, each a NOWRITE read through
+// the shared teamCall) sequentially with the shared call deadline, off
+// the key path, and publishes the finished result for the loop to apply
+// on its own goroutine - the picker's discovery-load pattern (loadPickerEntries
 // and the team panel's loader): the load runs in the loop's worker and
 // only the finished result crosses to the live state. It does not touch
 // the live state itself, it never writes, and a cancelled context
@@ -142,11 +188,11 @@ func runPickerTeamViewLoad(ctx contextpkg.Context, exe string, env platform.Env,
 		return
 	}
 	res := pickerTeamViewResult{seq: v.loadSeq, entryRef: v.entryRef}
-	res.rosterLines, res.rosterCause = teamCall(ctx, exe, env, platformName, v.target, []string{"roster"}, true)
+	res.roster, res.rosterCause = teamViewRosterCall(ctx, exe, env, platformName, v.target)
 	if ctx.Err() != nil {
 		return
 	}
-	res.rolesLines, res.rolesCause = teamCall(ctx, exe, env, platformName, v.target, []string{"roles"}, true)
+	res.roles, res.rolesCause = teamViewRolesCall(ctx, exe, env, platformName, v.target)
 	if ctx.Err() != nil {
 		return
 	}
@@ -166,9 +212,9 @@ func applyTeamView(view *pickerTeamView, res pickerTeamViewResult) bool {
 	if res.seq != view.loadSeq || res.entryRef != view.entryRef {
 		return false
 	}
-	view.rosterLines = res.rosterLines
+	view.roster = res.roster
 	view.rosterFailure = res.rosterCause
-	view.rolesLines = res.rolesLines
+	view.roles = res.roles
 	view.rolesFailure = res.rolesCause
 	view.loaded = true
 	return true
@@ -178,6 +224,21 @@ func applyTeamView(view *pickerTeamView, res pickerTeamViewResult) bool {
 // view, on the picker's goroutine.
 func (s *PickerState) applyPickerTeamView(res pickerTeamViewResult) bool {
 	return applyTeamView(s.TeamView, res)
+}
+
+// teamViewToggleForm switches the open view between the tree and the
+// table and resets its scroll (shared by the picker's and the board's
+// states); anything that is not the table goes to the tree.
+func teamViewToggleForm(view *pickerTeamView) {
+	if view == nil {
+		return
+	}
+	if teamViewFormOf(view.form) == teamFormTree {
+		view.form = teamFormTable
+	} else {
+		view.form = teamFormTree
+	}
+	view.scroll = 0
 }
 
 // teamViewScrollMove moves the open team view one line (up/down) or one

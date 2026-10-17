@@ -58,6 +58,10 @@ type PickerState struct {
 	// teamLoadSeq counts team-view opens: every open (a re-open included)
 	// bumps it, so a late result of a superseded open is discarded.
 	teamLoadSeq int
+	// teamViewForm remembers the team view's presentation for the run
+	// (the v switch is in memory, like the list's: no preference file):
+	// a new open takes it back.
+	teamViewForm string
 }
 
 func NewPickerState() *PickerState {
@@ -263,7 +267,9 @@ func RenderPicker(state *PickerState, width int) string {
 func (s *PickerState) ApplyKey(key string) string {
 	// The read-only team view overlays the list: while
 	// it is open, Esc and i go back to the list with the same selection,
-	// the arrow and page keys scroll its content, Ctrl-C closes the modal
+	// the arrow and page keys scroll its content, v switches its
+	// presentation (tree and table, the scroll resets to the top, the
+	// choice is remembered for the run), Ctrl-C closes the modal
 	// as before, and the list keys and the search text never reach the
 	// list underneath (the view is read-only and the selection is frozen
 	// for it).
@@ -279,6 +285,10 @@ func (s *PickerState) ApplyKey(key string) string {
 			return s.Exit
 		case "up", "down", "page-up", "page-down":
 			s.teamViewScroll(key)
+			return ""
+		case "v":
+			teamViewToggleForm(s.TeamView)
+			s.teamViewForm = s.TeamView.form
 			return ""
 		}
 		return ""

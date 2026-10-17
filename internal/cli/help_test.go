@@ -32,7 +32,7 @@ func TestCommandHelpFirstPositionOnly(t *testing.T) {
 	})
 
 	t.Run("a command cited together with another prints the line it appears on", func(t *testing.T) {
-		const want = "  soho roles | kinds\n"
+		const want = "  soho roles [--json] | kinds\n"
 		for _, command := range []string{"roles", "kinds"} {
 			code, out, errOut := runIn(t, []string{command, "--help"}, env, cwd)
 			if code != 0 || out != want || errOut != "" {

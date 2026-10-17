@@ -1143,66 +1143,41 @@ func pickerTeamTitle(v *pickerTeamView) string {
 }
 
 // pickerTeamContent is the team view's unscrolled content at avail
-// display columns: the title, and - for a valid local target - the ROSTER
-// block and the ROLES block. A failed call shows one "<name>: <cause>"
-// line (the description teamCall returns) in its own block and the other
-// block keeps its content; an empty roster shows "no soho team in this
-// workspace". A remote row shows the remote-machine message and an invalid cwd
-// its cause. Every line is cut to the width with the team panel's text
-// helpers (teamCut/teamWrap).
+// display columns: the title, and - for a valid local target - the
+// loaded data in the open form (the tree by default, the table after
+// the v switch). A failed or undecodable read shows one "<name>: <cause>"
+// line in its own block and the other block keeps its content. A remote
+// row shows the remote-machine message and an invalid cwd its cause.
+// Every line is cut to the width, never wrapped.
 func pickerTeamContent(v *pickerTeamView, avail int) []string {
-	var content []string
-	title := pickerTeamTitle(v)
-	if displayWidth(title) > avail {
-		title = teamCut(title, avail)
+	if v == nil {
+		return nil
 	}
-	content = append(content, sessionStyleBold+title+sessionStyleReset)
+	title := teamViewLine(avail, teamViewSeg{sessionStyleBold, pickerTeamTitle(v)})
 	if v.remote {
-		content = append(content, teamCut("team view: not available yet for remote machines", avail))
-		return content
+		return []string{title, teamCut("team view: not available yet for remote machines", avail)}
 	}
 	if v.targetErr != "" {
-		content = append(content, teamCut(StripPickerControls(v.targetErr), avail))
-		return content
+		return []string{title, teamCut(StripPickerControls(v.targetErr), avail)}
 	}
 	if !v.loaded {
-		content = append(content, teamCut("loading team…", avail))
-		return content
+		return []string{title, teamCut("loading team…", avail)}
 	}
-	content = append(content, "ROSTER")
-	content = append(content, pickerTeamBlock("roster", v.rosterLines, v.rosterFailure, "no soho team in this workspace", avail)...)
-	content = append(content, "")
-	content = append(content, "ROLES")
-	content = append(content, pickerTeamBlock("roles", v.rolesLines, v.rolesFailure, "(sem saída)", avail)...)
-	return content
-}
-
-// pickerTeamBlock is one team block's lines: one "<name>: <cause>" line
-// when the call failed (the other block keeps its content), the empty
-// placeholder when the call returned nothing, and the output lines
-// wrapped to the width otherwise.
-func pickerTeamBlock(name string, lines []string, failure, empty string, avail int) []string {
-	if failure != "" {
-		return []string{teamCut(name+": "+StripPickerControls(failure), avail)}
+	if teamViewFormOf(v.form) == teamFormTable {
+		return teamViewTable(v, avail)
 	}
-	if len(lines) == 0 {
-		return []string{teamCut(empty, avail)}
-	}
-	var out []string
-	for _, line := range lines {
-		out = append(out, teamWrap(StripPickerControls(line), avail)...)
-	}
-	return out
+	return teamViewTree(v, avail)
 }
 
 // renderPickerTeamFrame draws the picker's read-only team view inside
-// the picker's own modal frame: the frame chrome (the
-// meta header, the search row, the footer with the "i Team" shortcut and
-// the fixed status strip) is the picker's, and the row window (the list
-// area) is replaced by the view. The blocks are cut to the width with the
-// team panel's text helpers, the whole content scrolls with scrollLines
-// (the arrow and page keys) and the frame stays exactly height lines,
-// like the popup.
+// the picker's own modal frame: the frame chrome is the picker's - the
+// meta header (the view's, "Team · Tree" or "Team · Table", in dim), the
+// blank search row (the frame's height does not change) and the footer
+// with the view's three segments (the list's line count, the list's cut
+// when the height shrinks) - and the row window (the list area) is
+// replaced by the view. The lines are cut to the width, the whole
+// content scrolls with scrollLines (the arrow and page keys) and the
+// frame stays exactly height lines, like the popup.
 func renderPickerTeamFrame(o *SessionRenderOptions, width, height int) string {
 	if width <= 0 || height <= 0 {
 		return ""
@@ -1235,18 +1210,38 @@ func renderPickerTeamFrame(o *SessionRenderOptions, width, height int) string {
 	blank := strings.Repeat(" ", pad)
 	separator := styled(sessionStyleDim, strings.Repeat("─", avail))
 
-	header := styled(sessionStyleDim, sessionHeaderLine(o))
-	searchVisible, searchPlaceholder := sessionSearchParts(o)
+	headerText := sessionHeaderLine(o)
 	var search string
-	if o.SearchFocused {
-		search = blank + sessionHighlightBand(searchVisible, avail)
-	} else if searchPlaceholder {
-		search = styled(sessionStyleDim, searchVisible)
-	} else {
-		search = lineAt(searchVisible)
+	searchVisible, searchPlaceholder := sessionSearchParts(o)
+	if v != nil {
+		// The view replaces the list chrome: its own header (the open
+		// form, in dim) and the blank search row (the frame's height
+		// does not change).
+		form := teamViewFormOf(v.form)
+		headerText = "Team · Tree"
+		if form == teamFormTable {
+			headerText = "Team · Table"
+		}
+		search = blank
+	}
+	header := styled(sessionStyleDim, headerText)
+	if v == nil {
+		if o.SearchFocused {
+			search = blank + sessionHighlightBand(searchVisible, avail)
+		} else if searchPlaceholder {
+			search = styled(sessionStyleDim, searchVisible)
+		} else {
+			search = lineAt(searchVisible)
+		}
+	}
+	footerSegs := sessionFooterSegments(o, avail)
+	if v != nil {
+		// The view's own control guidance: the list's footer keeps its
+		// line count, and the cut (the last lines win) is the list's.
+		footerSegs = teamViewFooterSegments(teamViewFormOf(v.form))
 	}
 	footerLines := make([]string, 0, 3)
-	for _, seg := range sessionFooterSegments(o, avail) {
+	for _, seg := range footerSegs {
 		footerLines = append(footerLines, lineAt(modalFooterLine(seg, avail)))
 	}
 

@@ -60,20 +60,38 @@ func tabLabelString(label any) string {
 	return cutUTF16(jsonjs.Stringify(label), 16)
 }
 
-func rosterScope(argv []string) (string, bool) {
-	if len(argv) == 0 {
-		return "workspace", true
+// rosterArgs parses the roster arguments: no args, an optional --json and
+// an optional --scope <workspace|server>, each in any order, at most once;
+// every other shape is invalid.
+func rosterArgs(argv []string) (scope string, jsonMode bool, ok bool) {
+	scope = "workspace"
+	sawJSON, sawScope := false, false
+	for i := 0; i < len(argv); i++ {
+		switch argv[i] {
+		case "--json":
+			if sawJSON {
+				return "", false, false
+			}
+			sawJSON = true
+			jsonMode = true
+		case "--scope":
+			if sawScope || i+1 >= len(argv) || (argv[i+1] != "workspace" && argv[i+1] != "server") {
+				return "", false, false
+			}
+			sawScope = true
+			scope = argv[i+1]
+			i++
+		default:
+			return "", false, false
+		}
 	}
-	if len(argv) == 2 && argv[0] == "--scope" && (argv[1] == "workspace" || argv[1] == "server") {
-		return argv[1], true
-	}
-	return "", false
+	return scope, jsonMode, true
 }
 
 func cmdRoster(argv []string, ctx *core.Config, env platform.Env, cwd string) {
-	scope, ok := rosterScope(argv)
+	scope, jsonMode, ok := rosterArgs(argv)
 	if !ok {
-		platform.Die("usage: roster [--scope workspace|server]", 2)
+		platform.Die("usage: roster [--scope workspace|server] [--json]", 2)
 	}
 	sd := core.StateDir(ctx, env, cwd)
 	live := liveAgentsFriction(env)
@@ -89,7 +107,10 @@ func cmdRoster(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 			workspaceOf[valueString(field(p, "pane_id"), "")] = valueString(field(p, "workspace_id"), "unknown")
 		}
 	}
-	tabOf := func(pane string) string {
+	// tabValue resolves the pane's tab label without the 16-cut, shared by
+	// the text and the JSON output; found is false when the pane has no tab
+	// (the text shows "-", the JSON shows "").
+	tabValue := func(pane string) (string, bool) {
 		var tab any
 		for _, p := range panes {
 			if strictEqual(field(p, "pane_id"), pane) {
@@ -98,7 +119,7 @@ func cmdRoster(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 			}
 		}
 		if tab == nil {
-			return "-"
+			return "", false
 		}
 		var label any
 		for _, t := range tabs {
@@ -110,11 +131,102 @@ func cmdRoster(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 		if label == nil || label == false {
 			label = tab
 		}
-		return tabLabelString(label)
+		if text, found := label.(string); found {
+			return text, true
+		}
+		return jsonjs.Stringify(label), true
+	}
+	tabOf := func(pane string) string {
+		if value, found := tabValue(pane); found {
+			return cutUTF16(value, 16)
+		}
+		return "-"
+	}
+	// The four values of the last text line, read once for the text and the
+	// JSON output.
+	layoutValue := core.Cfg(ctx, "layout", "split", env)
+	reuseWorkersValue := core.Cfg(ctx, "reuse_workers", "on", env)
+	multiRoleValue := core.Cfg(ctx, "multi_role", "on", env)
+	autoApproveValue := core.Cfg(ctx, "auto_approve", "off", env)
+	rosterPanes := map[string]bool{}
+	if jsonMode {
+		agents := []any{}
+		for _, line := range core.RosterRows(sd) {
+			f := strings.Split(line, "\t")
+			col := func(i int) string {
+				if i < len(f) {
+					return f[i]
+				}
+				return ""
+			}
+			name, pane, kind, role, cwdCol := col(0), col(1), col(2), col(3), col(6)
+			if pane != "" {
+				rosterPanes[pane] = true
+			}
+			if name == "" {
+				continue
+			}
+			var agent any
+			for _, a := range live {
+				if strictEqual(field(a, "name"), name) && (pane == "" || strictEqual(field(a, "pane_id"), pane)) {
+					agent = a
+					break
+				}
+			}
+			state := valueString(field(agent, "agent_status"), "gone")
+			report := "none"
+			if reportPath := core.LastReport(sd, name); reportPath != "" {
+				if st, err := os.Stat(reportPath); err == nil && st.Size() > 0 {
+					report = "ready"
+				} else {
+					report = "pending"
+				}
+			}
+			previousRole := ""
+			if history := col(10); history != "" && history != role {
+				previousRole = history
+			}
+			task := ""
+			if raw, err := os.ReadFile(filepath.Join(sd, "task-"+name)); err == nil {
+				taskText := herdrtext.ToWellFormedUTF8(string(raw))
+				taskText = strings.TrimRight(taskText, "\n")
+				if taskText != "" {
+					task = taskText
+				}
+			}
+			tab, _ := tabValue(pane)
+			agents = append(agents, jsonjs.O("name", name, "role", role, "previous_role", previousRole, "kind", kind, "pane", pane, "tab", tab, "state", state, "report", report, "cwd", cwdCol, "task", task))
+		}
+		others := []any{}
+		for _, agent := range live {
+			// The membership check and the scope rule use the text's "null"
+			// fallback, so the JSON lists exactly the agents the text lists;
+			// the printed pane falls back to "" like every absent value.
+			p := valueString(field(agent, "pane_id"), "null")
+			if rosterPanes[p] {
+				continue
+			}
+			workspace, found := workspaceOf[p]
+			if scope == "workspace" && (!found || workspace != ws) {
+				continue
+			}
+			if workspace == "" {
+				workspace = "unknown"
+			}
+			tab, _ := tabValue(p)
+			others = append(others, jsonjs.O("name", valueString(field(agent, "name"), ""), "kind", valueString(field(agent, "agent"), ""), "pane", valueString(field(agent, "pane_id"), ""), "tab", tab, "state", valueString(field(agent, "agent_status"), ""), "workspace", workspace))
+		}
+		_, _ = fmt.Fprintln(platform.Stdout, jsonjs.Stringify(jsonjs.O(
+			"workspace", ws,
+			"scope", scope,
+			"settings", jsonjs.O("layout", layoutValue, "reuse_workers", reuseWorkersValue, "multi_role", multiRoleValue, "auto_approve", autoApproveValue),
+			"agents", agents,
+			"others", others,
+		)))
+		return
 	}
 	fmt.Fprintf(platform.Stdout, "%s %s %s %s %s %s %s CWD TASK\n", padRight("NAME", 20), padRight("ROLE", 18), padRight("KIND", 8), padRight("PANE", 8), padRight("TAB", 16), padRight("STATE", 9), padRight("REPORT", 16))
 	rows := core.RosterRows(sd)
-	rosterPanes := map[string]bool{}
 	for _, line := range rows {
 		f := strings.Split(line, "\t")
 		col := func(i int) string {
@@ -199,5 +311,5 @@ func cmdRoster(argv []string, ctx *core.Config, env platform.Env, cwd string) {
 			fmt.Fprintf(platform.Stdout, "%s %s %s %s %s %s\n", padRight(valueString(field(agent, "name"), "-"), 20), padRight("-", 18), padRight(valueString(field(agent, "agent"), "null"), 8), padRight(p, 8), padRight(tabOf(p), 16), padRight(valueString(field(agent, "agent_status"), "null"), 9))
 		}
 	}
-	fmt.Fprintf(platform.Stdout, "\nlayout=%s reuse_workers=%s multi_role=%s auto_approve=%s\n", core.Cfg(ctx, "layout", "split", env), core.Cfg(ctx, "reuse_workers", "on", env), core.Cfg(ctx, "multi_role", "on", env), core.Cfg(ctx, "auto_approve", "off", env))
+	fmt.Fprintf(platform.Stdout, "\nlayout=%s reuse_workers=%s multi_role=%s auto_approve=%s\n", layoutValue, reuseWorkersValue, multiRoleValue, autoApproveValue)
 }
