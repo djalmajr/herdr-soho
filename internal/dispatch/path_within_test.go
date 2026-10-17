@@ -3,6 +3,7 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/djalmajr/soho/internal/core"
@@ -47,6 +48,10 @@ func TestPathWithinTable(t *testing.T) {
 		{"/a/b/c", "/A/b", "darwin", false},
 		// A trailing slash normalizes away.
 		{"/a/b/c", "/a/b/", "linux", true},
+		// A drive root contains every path on that drive.
+		{`C:\work\repo\state`, `c:\`, "win32", true},
+		{`C:\work\repo\state`, `c:/work/REPO/`, "win32", true},
+		{`D:\state`, `c:\`, "win32", false},
 	}
 	for _, tc := range cases {
 		if got := PathWithin(tc.child, tc.parent, tc.goos); got != tc.want {
@@ -76,4 +81,25 @@ func TestPathWithinRelatedReadersScanBothDirs(t *testing.T) {
 			t.Fatalf("ForSpecFamily from the TMPDIR sidecar: got %q, %v; want anthropic", got, err)
 		}
 	})
+}
+
+// The POSIX root contains every absolute path: "/" plus the separator must
+// not become the prefix "//" (DJA-379 review). On a Windows host "/" resolves
+// to the current drive's root, so these POSIX cases run elsewhere only.
+func TestPathWithinPOSIXRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX root semantics")
+	}
+	for _, tc := range []struct {
+		child, parent, goos string
+		want                bool
+	}{
+		{"/a/b", "/", "linux", true},
+		{"/a/b", "/", "darwin", true},
+		{"/", "/", "linux", true},
+	} {
+		if got := PathWithin(tc.child, tc.parent, tc.goos); got != tc.want {
+			t.Fatalf("PathWithin(%q, %q, %q) = %v; want %v", tc.child, tc.parent, tc.goos, got, tc.want)
+		}
+	}
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -204,4 +205,44 @@ func TestDispatchWorktreeReportRoute(t *testing.T) {
 			t.Fatalf("report=%q composed=%q, want report under %s and composed under %s", report, composed, filepath.Join(sd, "reports"), filepath.Join(sd, "briefs"))
 		}
 	})
+}
+
+// DJA-379 review: a worker whose cwd is the filesystem root contains every
+// state dir, so the report and the composed prompt stay in the state dir
+// (the "/" parent must not turn into the prefix "//" and push them to
+// TMPDIR).
+func TestDispatchWorkerAtRootKeepsReportInState(t *testing.T) {
+	f := newDispatchArrivalFixture(t, "idle", 1, 2, "", "0")
+	f.env["SOHO_SKILL_DIR"] = testSkillDir(t)
+	f.env["SOHO_PROMPT_CHECK_SECONDS"] = "0"
+	cwd := filepath.VolumeName(f.root) + string(filepath.Separator)
+	roster := filepath.Join(f.state, "ws", "agents.tsv")
+	data, err := os.ReadFile(roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	cols := strings.Split(lines[1], "\t")
+	cols[6] = cwd
+	lines[1] = strings.Join(cols, "\t")
+	if err := os.WriteFile(roster, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, stderr := runIn(t, []string{"dispatch", "worker", f.brief, "--no-wait"}, f.env, cwd)
+	if code != 0 {
+		t.Fatalf("dispatch code=%d out=%s stderr=%q", code, out, stderr)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(out), &obj); err != nil {
+		t.Fatalf("dispatch output is not a JSON object: %s (%v)", out, err)
+	}
+	report, _ := obj["report"].(string)
+	composed, _ := obj["composed_prompt"].(string)
+	stateReports := filepath.Join(f.state, "ws", "reports")
+	if filepath.Dir(report) != stateReports {
+		t.Fatalf("worker cwd %q contains the state dir, but report=%q left %q", cwd, report, stateReports)
+	}
+	if filepath.Dir(composed) != filepath.Join(f.state, "ws", "briefs") || strings.HasSuffix(composed, ".brief.md") {
+		t.Fatalf("composed prompt %q left the state briefs dir", composed)
+	}
 }

@@ -315,10 +315,17 @@ func PathWithin(child, parent, goos string) bool {
 	if child == parent {
 		return true
 	}
+	sep := string(os.PathSeparator)
 	if goos == "win32" {
-		return strings.HasPrefix(child, parent+"/")
+		sep = "/"
 	}
-	return strings.HasPrefix(child, parent+string(os.PathSeparator))
+	// A root parent ("/") already ends with the separator; add one only
+	// when it is missing, so every absolute child of the root is inside it.
+	prefix := parent
+	if !strings.HasSuffix(prefix, sep) {
+		prefix += sep
+	}
+	return strings.HasPrefix(child, prefix)
 }
 
 // pathWithinClean normalizes one side of a PathWithin comparison exactly the
