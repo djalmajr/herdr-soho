@@ -110,6 +110,20 @@ func TestSohoBlockMigration(t *testing.T) {
 			t.Fatalf("the next setup did not replace the block:\n%v", second)
 		}
 	})
+	t.Run("a herdr-soho peer bullet with a project continuation line migrates as it is", func(t *testing.T) {
+		// DJA-374 review: the three previous lines followed by a line the
+		// project appended to the same item are an edited bullet, not the
+		// exact previous one.
+		marker := "answer with `herdr-soho send <ref> …`.\n"
+		if !strings.Contains(previousSohoBlock, marker) {
+			t.Fatal("the previous block does not hold the peer bullet's last line")
+		}
+		edited := strings.Replace(previousSohoBlock, marker, marker+"  Follow our project escalation rule.\n", 1)
+		got := SetupBlockResult(ptr("# Agent instructions\n\n" + edited + "tail\n"))
+		if got == nil || strings.Contains(*got, "it never authorizes") || !strings.Contains(*got, "send <ref> …`.\n  Follow our project escalation rule.\n") {
+			t.Fatalf("a continued peer bullet must migrate as it is:\n%v", got)
+		}
+	})
 	t.Run("a second run over the migrated block is a no-op", func(t *testing.T) {
 		first := SetupBlockResult(ptr("# Agent instructions\n\n" + sohoBlock + "tail\n"))
 		if first == nil {

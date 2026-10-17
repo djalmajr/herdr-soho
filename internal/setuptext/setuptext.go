@@ -135,10 +135,18 @@ func upgradePeerBullet(content string) string {
 		return content
 	}
 	block := content[start:end]
-	if strings.Contains(block, peerApprovalLines) || !strings.Contains(block, previousPeerBullet) {
+	at := strings.Index(block, "\n"+previousPeerBullet)
+	if strings.Contains(block, peerApprovalLines) || at < 0 {
 		return content
 	}
-	block = strings.Replace(block, previousPeerBullet, previousPeerBullet+peerApprovalLines, 1)
+	at++
+	// The whole item must be the previous bullet: a continuation line the
+	// project added (two-space indent) makes it an edited bullet.
+	after := at + len(previousPeerBullet)
+	if strings.HasPrefix(block[after:], "  ") {
+		return content
+	}
+	block = block[:after] + peerApprovalLines + block[after:]
 	return content[:start] + block + content[end:]
 }
 
