@@ -99,11 +99,53 @@ func waitForFile(path string, timeout time.Duration) error {
 // a lazily prepared Windows binary after the package finishes.
 func RunTests(m *testing.M) {
 	Main()
+	GuardSuiteRun()
 	code := m.Run()
 	if preparedBinary != "" {
 		_ = os.RemoveAll(filepath.Dir(preparedBinary))
 	}
 	os.Exit(code)
+}
+
+// suiteRunRefusal reports whether this process must refuse to start the test
+// suite: it is a fakecli re-execution called without SOHO_FAKECLI_CONFIG.
+// The suite still starts for a normal test invocation, which always carries
+// a -test. flag (go test passes several), and for a hand-run test binary
+// whose name ends in .test (a go test -c binary), in any case and with the
+// .exe suffix stripped.
+func suiteRunRefusal(config string, args []string) (string, bool) {
+	if config != "" {
+		return "", false
+	}
+	if len(args) == 0 {
+		return "", true
+	}
+	for _, arg := range args[1:] {
+		if strings.HasPrefix(arg, "-test.") {
+			return "", false
+		}
+	}
+	name := filepath.Base(args[0])
+	base := strings.TrimSuffix(strings.ToLower(name), ".exe")
+	if strings.HasSuffix(base, ".test") {
+		return "", false
+	}
+	return name, true
+}
+
+// GuardSuiteRun refuses to start the test suite when this process is a
+// re-executed fake called without SOHO_FAKECLI_CONFIG. Without the guard the
+// fake would run the whole package suite, and the suite's own fake calls
+// (through a PATH that still points at the fakes) would re-execute the fake
+// again and again, chaining (a single setup test run chained into 4.565
+// stuck git processes). Call it at the point where the suite would start,
+// after every TestMain helper dispatch, so the helpers keep dispatching
+// before the guard.
+func GuardSuiteRun() {
+	if name, refused := suiteRunRefusal(os.Getenv(configEnv), os.Args); refused {
+		fmt.Fprintf(os.Stderr, "fakecli: %s ran without SOHO_FAKECLI_CONFIG; refusing to run the test suite as a fake command\n", name)
+		os.Exit(126)
+	}
 }
 
 // warmPrepared pays the cold first-execution cost of the prepared Windows
