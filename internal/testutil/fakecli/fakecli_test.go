@@ -15,12 +15,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	Main()
-	code := m.Run()
-	if preparedBinary != "" {
-		_ = os.RemoveAll(filepath.Dir(preparedBinary))
-	}
-	os.Exit(code)
+	RunTests(m)
 }
 
 func TestReexecRecordsExactArgumentsAndDispatchesRule(t *testing.T) {
