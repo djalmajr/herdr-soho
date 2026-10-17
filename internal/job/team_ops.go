@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/djalmajr/soho/internal/core"
 	"github.com/djalmajr/soho/internal/platform"
 )
 
@@ -96,12 +98,45 @@ func (c selfCLI) interruptible(ctx context.Context) teamOps {
 	return c
 }
 
+// spawnTimeout bounds the spawn step. The spawn itself waits up to
+// spawn_timeout for the agent to start, so the default adapter allows that
+// wait on top of its own bound for the rest of the spawn; a slow machine
+// raises spawn_timeout, not a fixed job constant. An explicit Timeout (a
+// bounded adapter, a test) stays the bound, and a configuration that cannot
+// be read keeps the team-ops bound: the supervisor must not die over it.
+func (c selfCLI) spawnTimeout() (bound time.Duration) {
+	if c.Timeout > 0 {
+		return c.Timeout
+	}
+	defer func() {
+		if value := recover(); value != nil {
+			if _, ok := value.(*platform.ExitError); !ok {
+				panic(value)
+			}
+			bound = defaultTeamOpsTimeout
+		}
+	}()
+	cfg := core.LoadConfig(c.Env, c.Dir)
+	ms, ok := core.ParseTimeoutMS(core.Cfg(&cfg, "spawn_timeout", "60000", c.Env))
+	if !ok || ms <= 0 {
+		return defaultTeamOpsTimeout
+	}
+	return defaultTeamOpsTimeout + time.Duration(ms)*time.Millisecond
+}
+
 // step runs one self subprocess and maps any failure to the fixed error of
 // the operation.
 func (c selfCLI) step(op string, args ...string) (string, error) {
-	out, err := runStepInCtx(c.Dir, c.Exe, args, c.timeout(), c.Env, c.Ctx)
+	return c.stepWithin(op, c.timeout(), args...)
+}
+
+// stepWithin is step with its own bound.
+func (c selfCLI) stepWithin(op string, timeout time.Duration, args ...string) (string, error) {
+	out, detail, err := runStepDetailInCtx(c.Dir, c.Exe, args, timeout, c.Env, c.Ctx)
 	if err != nil {
-		return "", teamOpsError(op)
+		e := teamOpsError(op).(*ExitError)
+		e.Detail = detail
+		return "", e
 	}
 	return out, nil
 }
@@ -110,6 +145,14 @@ func (c selfCLI) step(op string, args ...string) (string, error) {
 // subprocess: a cancel of ctx ends only the command the runner opened. A
 // nil ctx runs without one, exactly like runStepIn.
 func runStepInCtx(dir, exe string, args []string, timeout time.Duration, env platform.Env, ctx context.Context) (string, error) {
+	out, _, err := runStepDetailInCtx(dir, exe, args, timeout, env, ctx)
+	return out, err
+}
+
+// runStepDetailInCtx is runStepInCtx plus, on failure, a short diagnostic:
+// how the subprocess ended and the last lines of its stderr, for the job's
+// friction log only.
+func runStepDetailInCtx(dir, exe string, args []string, timeout time.Duration, env platform.Env, ctx context.Context) (string, string, error) {
 	opts := platform.RunOptions{Context: ctx, Env: env, Cwd: dir, TimeoutMs: timeoutMs(timeout)}
 	var result platform.RunResult
 	if filepath.IsAbs(exe) {
@@ -118,9 +161,40 @@ func runStepInCtx(dir, exe string, args []string, timeout time.Duration, env pla
 		result = platform.RunCli(exe, args, opts)
 	}
 	if result.NotFound || result.TimedOut || result.Status == nil || *result.Status != 0 {
-		return "", errSubprocess
+		return "", stepFailureDetail(result), errSubprocess
 	}
-	return result.Stdout, nil
+	return result.Stdout, "", nil
+}
+
+// stepFailureDetail says how a failed step ended and keeps the last three
+// non-empty stderr lines, joined with " | " and cut at 400 bytes.
+func stepFailureDetail(result platform.RunResult) string {
+	how := "no exit status"
+	switch {
+	case result.NotFound:
+		how = "executable not found"
+	case result.TimedOut:
+		how = "timed out"
+	case result.Status != nil:
+		how = fmt.Sprintf("exit %d", *result.Status)
+	}
+	var tail []string
+	for _, line := range strings.Split(strings.ReplaceAll(result.Stderr, "\r\n", "\n"), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			tail = append(tail, line)
+		}
+	}
+	if len(tail) > 3 {
+		tail = tail[len(tail)-3:]
+	}
+	detail := how
+	if len(tail) > 0 {
+		detail += ": " + strings.Join(tail, " | ")
+	}
+	if len(detail) > 400 {
+		detail = detail[:400]
+	}
+	return detail
 }
 
 // teamOpsError is the fixed error of one failed operation; the subprocess
@@ -180,7 +254,7 @@ func parseMaxWorkers(output string) (value int, explicit bool, err error) {
 // prints. The real spawn indents the object over several lines, so the
 // candidate is the last line that opens an object, joined to the end.
 func (c selfCLI) SpawnOrchestrator() (string, error) {
-	out, err := c.step("spawn the job orchestrator", "spawn", "job-orchestrator", "--cwd", c.Dir, "--approvals", "full", "--fresh")
+	out, err := c.stepWithin("spawn the job orchestrator", c.spawnTimeout(), "spawn", "job-orchestrator", "--cwd", c.Dir, "--approvals", "full", "--fresh")
 	if err != nil {
 		return "", err
 	}
