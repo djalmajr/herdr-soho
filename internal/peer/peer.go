@@ -409,12 +409,19 @@ func optionalString(v any) string {
 }
 
 func resolveTarget(target string, env platform.Env) resolvedTarget {
+	return resolveTargetWithin(target, env, HerdrCallTimeoutMS)
+}
+
+// resolveTargetWithin is resolveTarget with the agent get bounded by
+// timeoutMS: the agent_not_ready retries of send pass what is left of the
+// send's --timeout.
+func resolveTargetWithin(target string, env platform.Env, timeoutMS int) resolvedTarget {
 	ref := sessionref.ParseRef(target)
 	machine, paneTarget, shown := sessionref.LocalMachine, target, target
 	if ref != nil {
 		machine, paneTarget, shown = ref.Machine, ref.PaneID, sessionref.FormatRef(*ref)
 	}
-	a := agentGet(machine, paneTarget, env, HerdrCallTimeoutMS)
+	a := agentGet(machine, paneTarget, env, timeoutMS)
 	if a.NotFound {
 		return resolvedTarget{RefShown: shown, Machine: machine, Cause: a.Cause}
 	}
@@ -976,6 +983,45 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 		appendPeerLog(stateDir, from, to, result, utf16Length(body), id, env)
 	}
 	t := resolveTarget(target, env)
+	// agent_not_ready is transient by definition: the pane's `agent start`
+	// is still finishing, and the agent idles about 2 s before the start
+	// returns. Poll the resolution on the send's own arrival poll until the
+	// target resolves or the send's --timeout wins. Every other failure of
+	// the resolution keeps today's immediate exit (agent_not_found with its
+	// hint, herdr down, a timed-out get, a silent remote machine).
+	notReady := false
+	var deadline time.Time
+	if !t.OK && t.Code == "agent_not_ready" {
+		notReady = true
+		deadline = time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
+		for !t.OK && t.Code == "agent_not_ready" {
+			left := int(time.Until(deadline).Milliseconds())
+			if left <= 0 {
+				break
+			}
+			sleepMS(min(arrivalPollMS(env), left))
+			// Every retry gets only what is left of the send's --timeout,
+			// checked again after the sleep.
+			left = int(time.Until(deadline).Milliseconds())
+			if left <= 0 {
+				break
+			}
+			next := resolveTargetWithin(target, env, left)
+			if !next.OK && next.Code != "agent_not_ready" && !time.Now().Before(deadline) {
+				// The retry ran out of the send's budget: the target is
+				// still the agent_not_ready one.
+				break
+			}
+			t = next
+		}
+		if !t.OK && t.Code == "agent_not_ready" {
+			// The deadline passed with the agent still starting: today's
+			// exit 4 and today's cause, with the waited time appended as the
+			// send's --timeout in numberSeconds form.
+			log(SenderRefOf(env), t.RefShown, "error")
+			platform.Die(fmt.Sprintf("send: %s unavailable: %s (still not ready after %ss)", t.RefShown, t.Cause, numberSeconds(timeoutMS)), 4)
+		}
+	}
 	if !t.OK {
 		result := "error"
 		if t.Code == "agent_not_found" {
@@ -1013,7 +1059,15 @@ func CmdSend(argv []string, ctx *core.Config, env platform.Env, cwd string) int 
 	}
 	currentStatus := t.Status
 	if !now && (t.Status == "working" || t.Status == "blocked") {
-		w := waitUntilIdle(t.Machine, t.TargetArg, timeoutMS, env)
+		// The agent_not_ready wait above already spent part of the send's
+		// --timeout: the busy wait gets only what is left before the same
+		// deadline, so the waits never add up. With no not-ready wait the
+		// budget is the full --timeout, exactly as today. No budget left
+		// means the busy wait timed out already: no new wait starts.
+		w := callResult{Code: "timeout"}
+		if busyMS, wait := sendBusyBudgetMS(timeoutMS, notReady, deadline, time.Now()); wait {
+			w = waitUntilIdle(t.Machine, t.TargetArg, busyMS, env)
+		}
 		if w.Code == "settled" {
 			currentStatus = "idle"
 		} else if w.Code == "timeout" {
@@ -1996,4 +2050,15 @@ func contains(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+// sendBusyBudgetMS is the busy wait's budget: the full --timeout without an
+// agent_not_ready wait, else what is left before the shared deadline (never
+// floored up). wait is false when nothing is left.
+func sendBusyBudgetMS(timeoutMS int, notReady bool, deadline, now time.Time) (int, bool) {
+	if !notReady {
+		return timeoutMS, true
+	}
+	left := int(deadline.Sub(now).Milliseconds())
+	return left, left > 0
 }
